@@ -625,11 +625,20 @@ public class CoopTroopSupplier : IMissionTroopSupplier
         // It also carries this supplier, so removals feed back into NumRemovedTroops (the engine's
         // reinforcement quota) — see OnTroopWounded/Killed/Routed above.
         var party = ResolveParty(partyId);
-        var origin = new CoopAgentOrigin(character, party, -1, null, new UniqueTroopDescriptor(entry.Seed), partyId, this);
         if (party == null)
-            Logger.Warning("[TroopSupply] {Side} origin char={Char} (isHero={Hero}) got NULL party — partyId {PartyId} unresolvable → no team / not player-commanded",
+        {
+            // A null BattleCombatant can cross into native formation/team setup and surface as a 0xC0000005
+            // rather than a managed exception. This can happen when an AI party attachment has not finished
+            // registering on a joining client. Consume the unusable reserve entry, but never hand the engine
+            // an origin whose party is null.
+            Logger.Warning("[TroopSupply] {Side} skipped origin char={Char} (isHero={Hero}) because partyId {PartyId} is unresolvable",
                 Side, entry.CharacterId, character.IsHero, partyId);
-        else if (character.IsHero)
+            return null;
+        }
+
+        var origin = new CoopAgentOrigin(character, party, -1, null,
+            new UniqueTroopDescriptor(entry.Seed), partyId, this);
+        if (character.IsHero)
             Logger.Information("[TroopSupply] {Side} HERO origin char={Char} party={Party} isMainParty={Main} underPlayersCmd={Cmd}",
                 Side, entry.CharacterId, party.Name, party == PartyBase.MainParty, origin.IsUnderPlayersCommand);
         return origin;

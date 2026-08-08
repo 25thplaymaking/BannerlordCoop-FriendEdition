@@ -129,6 +129,23 @@ public class BattleAgentRenderCapTests : MissionTestEnvironment
         return supplier;
     }
 
+    [Fact]
+    public void Supplier_UnresolvableParty_DoesNotReturnNullBattleCombatantOrigin()
+    {
+        var client = Clients.First();
+        var characterId = CreateRegisteredObject<CharacterObject>();
+
+        client.Call(() =>
+        {
+            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, reserveCount: 1);
+
+            var origins = supplier.SupplyTroops(1).ToArray();
+
+            Assert.Empty(origins);
+            Assert.Equal(0, supplier.NumTroopsNotSupplied);
+        });
+    }
+
     /// <summary>
     /// A new AI party joins a battle already at (near) the engine limit: the host fields only the troops that
     /// fit under the limit and never spawns past it. RED today: SpawnReinforcementParty loops the full able

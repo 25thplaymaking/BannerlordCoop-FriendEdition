@@ -7,6 +7,7 @@ using GameInterface.Services.ObjectManager;
 using Missions.Agents.Packets;
 using Missions.Data;
 using Missions.Messages;
+using Missions.Services.Network;
 using Serilog;
 using System;
 using System.Collections.Generic;
@@ -62,6 +63,7 @@ public class OwnedAgentReplicator : IOwnedAgentReplicator
     private readonly ICasualtyAttributionMap casualties;
     private readonly IBattleDeploymentCoordinator deployment;
     private readonly IBattleAgentSpawnBatchCodec spawnBatchCodec;
+    private readonly IMissionContext missionContext;
     private readonly List<BattleAgentSpawnData> pendingSpawns = new List<BattleAgentSpawnData>();
 
     // The horse each of our riders SPAWNED with (rider id → mount id), so a record built while the rider is
@@ -81,7 +83,8 @@ public class OwnedAgentReplicator : IOwnedAgentReplicator
         IBattleSession session,
         ICasualtyAttributionMap casualties,
         IBattleDeploymentCoordinator deployment,
-        IBattleAgentSpawnBatchCodec spawnBatchCodec)
+        IBattleAgentSpawnBatchCodec spawnBatchCodec,
+        IMissionContext missionContext)
     {
         this.network = network;
         this.messageBroker = messageBroker;
@@ -91,6 +94,7 @@ public class OwnedAgentReplicator : IOwnedAgentReplicator
         this.casualties = casualties;
         this.deployment = deployment;
         this.spawnBatchCodec = spawnBatchCodec;
+        this.missionContext = missionContext;
         movementScopeId =
             session.OwnControllerId + ":" + Guid.NewGuid().ToString("N");
 
@@ -128,6 +132,15 @@ public class OwnedAgentReplicator : IOwnedAgentReplicator
     {
         if (pendingSpawns.Count == 0) return;
 
+        // There is no value in encoding a transient batch when this client is alone in the mission.
+        // If somebody joins later, ReplicateCurrentAgentsTo builds a complete catch-up snapshot from
+        // the registry, including agents whose initial batch was discarded here.
+        if (missionContext.ControllersInMission.Count == 0)
+        {
+            pendingSpawns.Clear();
+            return;
+        }
+
         IReadOnlyList<NetworkSpawnBattleAgents> batches =
             spawnBatchCodec.Encode(pendingSpawns, SpawnBatchPurpose.Initial);
         int recordCount = pendingSpawns.Count;
@@ -141,11 +154,14 @@ public class OwnedAgentReplicator : IOwnedAgentReplicator
 
     public void BroadcastOwnDeployedTroops()
     {
-        if (Mission.Current == null) return;
-
         // Initial NPC/reinforcement records captured earlier this frame must also be ahead of the deployment
         // marker. All of these sends use ReliableOrdered, so the receiver observes the same barrier.
         FlushPendingSpawns();
+
+        // A solo deployment has no puppet army to reveal. Avoid materializing and compressing the full
+        // owned roster on the Ready click; a future mission member is covered by the normal catch-up path.
+        if (missionContext.ControllersInMission.Count == 0) return;
+        if (Mission.Current == null) return;
 
         var records = BuildOwnedAgentRecords(ownPartyOnly: true);
         if (records.Count == 0) return;

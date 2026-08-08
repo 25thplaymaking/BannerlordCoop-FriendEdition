@@ -288,6 +288,18 @@ public class AgentMovementHandler : IAgentMovementHandler
         if (movementPollElapsed < MovementPollingIntervalSeconds) return;
         movementPollElapsed %= MovementPollingIntervalSeconds;
 
+        // Get the route budget before touching every authoritative agent. A zero budget means either
+        // that this mission currently has no remote members (the common solo-battle case) or that none
+        // of its routes can carry an unreliable packet. In both cases building AgentData, grouping it,
+        // and logging hundreds of deferred snapshots every 25 ms is pure work with no possible receiver.
+        // When a peer appears, spawn catch-up supplies its baseline and this handler's unchanged caches
+        // make the next eligible poll send a fresh movement snapshot.
+        int maxPayloadBytes = client.GetMaxUnreliablePayloadBytes();
+        if (maxPayloadBytes <= 0)
+        {
+            return;
+        }
+
         var movementGroups = new Dictionary<string, MovementBatch<AgentData>>();
         var priorityMovementGroups = new Dictionary<string, MovementBatch<AgentData>>();
         var mountGroups = new Dictionary<string, MovementBatch<AgentMountData>>();
@@ -413,7 +425,6 @@ public class AgentMovementHandler : IAgentMovementHandler
         RemoveStaleLocalState(broadcastAgentIds);
         SendEquipment(equipmentGroups.Values);
         SendEquipment(legacyEquipment);
-        int maxPayloadBytes = client.GetMaxUnreliablePayloadBytes();
         // The local player's current input/position gets first access to each refill. Formation AI then uses
         // the rotating cursor, so responsiveness stays high without letting early registry entries monopolize it.
         MovementSendResult priorityResult = movementBatchSender.Send(

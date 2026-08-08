@@ -107,7 +107,16 @@ public class CoopBattleController : CoopMissionController
         var deployment = new BattleDeploymentCoordinator(network, messageBroker, session);
 
         lifecycle = new BattleInstanceLifecycle(network, relayNetwork, messageBroker, objectManager, coopMissionComponent, session, missionContext);
-        replicator = new OwnedAgentReplicator(network, messageBroker, objectManager, coopMissionComponent, session, casualties, deployment, spawnBatchCodec);
+        replicator = new OwnedAgentReplicator(
+            network,
+            messageBroker,
+            objectManager,
+            coopMissionComponent,
+            session,
+            casualties,
+            deployment,
+            spawnBatchCodec,
+            missionContext);
         deathReporter = new AgentDeathReporter(network, relayNetwork, messageBroker, objectManager, coopMissionComponent, session, casualties);
         routReporter = new AgentRoutReporter(network, messageBroker, coopMissionComponent, session, casualties);
         puppetRoutApplier = new PuppetRoutApplier(messageBroker, coopMissionComponent, casualties);

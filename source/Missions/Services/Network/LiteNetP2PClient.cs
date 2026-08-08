@@ -688,7 +688,13 @@ public class LiteNetP2PClient : INatPunchListener, INetEventListener, IUpdateabl
             maxPayloadBytes = Math.Min(maxPayloadBytes, routePayloadBytes);
         }
 
-        return hasRoute && !hasViableRoute ? 0 : maxPayloadBytes;
+        // No remote mission member means there is nowhere to send movement. Returning the normal
+        // datagram ceiling here made the movement handler build and compress every locally-owned
+        // agent at 40 Hz anyway; SendAll then iterated an empty recipient set. That becomes a large,
+        // entirely local CPU spike as soon as a solo host finishes deployment and releases hundreds
+        // of agents. A later joiner receives the authoritative spawn catch-up and the next movement
+        // poll starts with a fresh snapshot, so there is no state to preserve while the set is empty.
+        return hasRoute && hasViableRoute ? maxPayloadBytes : 0;
     }
 
     private int GetMaxRelayPayloadBytes(string currentInstanceId, string controllerId)

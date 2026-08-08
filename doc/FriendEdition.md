@@ -12,11 +12,17 @@ distribution. That authorization is not treated as permission to publish the for
 
 ## Current candidate
 
-The current local candidate is newer than the live `2026-08-07-bd2` server build. It integrates upstream
+The current local candidate, `2026-08-08-prfix1` at commit `ace3edd4a84951a84e67d566a41868493cec8689`,
+is newer than the live `2026-08-07-bd2` server build. It integrates upstream
 PRs #2751, #2755, #2756, #2757, and #2823 plus the Friend Edition captivity and village-flow fixes below.
 It has been built and tested locally, but has deliberately not been copied to, restarted on, or otherwise
 applied to the live server while players are using it. Client and server assemblies must be upgraded as a
 matched set when a maintenance window is available, and the upgraded server should start on a new save.
+
+The private candidate kit is `BannerlordCoop-FriendEdition-2026-08-08-prfix1-TestKit-v3.0.0.zip`,
+SHA-256 `f9e2c46bc6acdb478914c5d58b37cf835ca1e3b6b50148bc04c71bb94e806e76`. Its bundled Coop archive is
+7,467,619 bytes compressed and 29,411,921 bytes installed. The obsolete Workshop Coop item's reported
+6.08 GB is not required Friend Edition content and is excluded.
 
 ## Request status
 

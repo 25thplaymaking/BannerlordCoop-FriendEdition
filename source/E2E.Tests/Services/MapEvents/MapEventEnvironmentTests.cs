@@ -1,9 +1,11 @@
 ﻿using E2E.Tests.Environment.Instance;
 using Common.Messaging;
+using E2E.Tests.Util;
 using Common.Network;
 using Common.Util;
 using GameInterface.Services.Entity;
 using GameInterface.Services.MapEvents;
+using GameInterface.Services.MapEvents.Handlers;
 using GameInterface.Services.MapEventParties.Messages;
 using GameInterface.Services.MobileParties.Extensions;
 using GameInterface.Services.MobilePartyAIs.Patches;
@@ -15,6 +17,7 @@ using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.Core;
+using TaleWorlds.Library;
 using Xunit.Abstractions;
 
 namespace E2E.Tests.Services.MapEvents;
@@ -433,6 +436,36 @@ public class MapEventEnvironmentTests : MapEventTestBase
 
             Assert.True(captorParty.Morale > 0f);
             Assert.False(Campaign.Current.Models.MobilePartyAIModel.ShouldConsiderAttacking(captorParty, playerParty));
+        });
+    }
+
+    [Fact]
+    public void NearbyReinforcementSelection_HeadlessServerDoesNotRequireMainParty()
+    {
+        var ctx = CreateServerMapEvent();
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MapEvent>(ctx.MapEventId, out var mapEvent));
+            var fixtureMainParty = Campaign.Current.MainParty;
+            var nearbyParty = GameObjectCreator.CreateInitializedObject<MobileParty>();
+            nearbyParty.Position = new CampaignVec2(Vec2.Zero, isOnLand: true);
+            nearbyParty.ShouldJoinPlayerBattles = true;
+
+            try
+            {
+                Campaign.Current.MainParty = null;
+                Assert.Null(MobileParty.MainParty);
+
+                var exception = Record.Exception(() =>
+                    NearbyPartyReinforcementHandler.Reinforce(mapEvent, new[] { nearbyParty }));
+
+                Assert.Null(exception);
+            }
+            finally
+            {
+                Campaign.Current.MainParty = fixtureMainParty;
+            }
         });
     }
 

@@ -26,6 +26,27 @@ public class TemplateRenderTests
         SnapshotAssert.Equals(result);
     }
 
+    [Fact]
+    public void PropertySetPrefix_SkipsNoOpBeforeClientErrorLog()
+    {
+        var result = TemplateParser.Parse("Patches.PropertySetPrefixTemplate",
+            new
+            {
+                MemberDeclaringType = "TestType",
+                MemberName = "TestProperty",
+                MemberType = "int"
+            });
+
+        var noOpGuard = result.IndexOf(
+            "EqualityComparer<int>.Default.Equals(__instance.TestProperty, value)",
+            System.StringComparison.Ordinal);
+        var clientLogBranch = result.IndexOf("if (ModInformation.IsClient)", System.StringComparison.Ordinal);
+
+        Assert.True(noOpGuard >= 0, "The generated prefix must contain its equality guard.");
+        Assert.True(clientLogBranch >= 0, "The generated prefix must contain its client log branch.");
+        Assert.True(noOpGuard < clientLogBranch, "No-op writes must return before the client error log branch.");
+    }
+
 
     [Fact(Skip = "Need regeneration")]
     public void AssemblyInfoTest()

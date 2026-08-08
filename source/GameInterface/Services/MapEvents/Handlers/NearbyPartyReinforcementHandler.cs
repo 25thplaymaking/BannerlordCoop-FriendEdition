@@ -26,9 +26,9 @@ namespace GameInterface.Services.MapEvents.Handlers;
 /// shared MapEventSide locally and desync - so nothing ever pulled nearby parties in and a friendly army
 /// could sit beside your battle doing nothing.
 ///
-/// The selection itself is vanilla's and needs no porting: PlayerEncounter's method is a one-line delegate to
-/// <c>EncounterModel.FindNonAttachedNpcPartiesWhoWillJoinPlayerEncounter(list, list)</c>, which takes only the
-/// two side lists - no MainParty, no encounter state - so the headless host can call it directly.
+/// Vanilla's selection method cannot run on a dedicated server: despite accepting only two lists, it reads
+/// <c>MobileParty.MainParty</c> and several <c>PlayerEncounter</c> statics internally. The selection below mirrors
+/// its map search and faction checks against the authoritative <see cref="MapEvent"/> instead.
 ///
 /// Replication is already in place: <see cref="MapEventPatches"/>' AddInvolvedPartyInternal postfix
 /// broadcasts an AI join while the battle is inside its
@@ -38,8 +38,11 @@ namespace GameInterface.Services.MapEvents.Handlers;
 internal class NearbyPartyReinforcementHandler : IHandler
 {
     private static readonly ILogger Logger = LogManager.GetLogger<NearbyPartyReinforcementHandler>();
+    private static readonly CampaignTime ScanInterval = CampaignTime.Hours(0.25f);
 
     private readonly IMessageBroker messageBroker;
+    private readonly Dictionary<MapEvent, CampaignTime> nextScanAt = new();
+    private readonly HashSet<MapEvent> failedEvents = new();
 
     public NearbyPartyReinforcementHandler(IMessageBroker messageBroker)
     {
@@ -52,6 +55,8 @@ internal class NearbyPartyReinforcementHandler : IHandler
     {
         messageBroker.Unsubscribe<PlayerJoinedBattle>(Handle_PlayerJoinedBattle);
         messageBroker.Unsubscribe<CampaignTick>(Handle_CampaignTick);
+        nextScanAt.Clear();
+        failedEvents.Clear();
     }
 
     /// <summary>
@@ -75,15 +80,8 @@ internal class NearbyPartyReinforcementHandler : IHandler
             return;
         }
 
-        // Never let a reinforcement failure take a battle down with it - the battle is playable without it.
-        try
-        {
-            Reinforce(mapEvent);
-        }
-        catch (System.Exception e)
-        {
-            Logger.Error(e, "Reinforcing player battle {MapEventId} at start failed", mapEvent.StringId ?? "<no id>");
-        }
+        ScheduleNextScan(mapEvent);
+        TryReinforce(mapEvent, "at start");
     }
 
     private void Handle_CampaignTick(MessagePayload<CampaignTick> payload)
@@ -94,20 +92,60 @@ internal class NearbyPartyReinforcementHandler : IHandler
         if (events == null) return;
 
         // ToArray: adding a party mutates the event graph while we walk it.
-        foreach (var mapEvent in events.ToArray())
+        var activeEvents = events.ToArray();
+        PruneFinishedEvents(activeEvents);
+
+        foreach (var mapEvent in activeEvents)
         {
             var skip = WhyNotReinforce(mapEvent);
             if (skip != null)
             {
-                // Only trace player battles - an ordinary AI skirmish skipping this is not interesting.
-                if (mapEvent != null && mapEvent.InvolvedParties.Any(p => p.IsMobile && p.MobileParty?.IsPlayerParty() == true))
-                    Logger.Debug("[Reinforce] skipping player battle {MapEventId}: {Reason}",
-                        mapEvent.StringId ?? "<no id>", skip);
+                nextScanAt.Remove(mapEvent);
                 continue;
             }
 
+            if (failedEvents.Contains(mapEvent) || !ReserveScan(mapEvent))
+                continue;
+
+            TryReinforce(mapEvent, "during campaign tick");
+        }
+    }
+
+    private void TryReinforce(MapEvent mapEvent, string phase)
+    {
+        // A failed battle is disabled after the first exception. Reinforcements are optional; retrying every
+        // campaign frame only turns one bad native state into an unbounded exception and disk-I/O storm.
+        try
+        {
             Reinforce(mapEvent);
         }
+        catch (System.Exception e)
+        {
+            if (failedEvents.Add(mapEvent))
+                Logger.Error(e, "Reinforcing player battle {MapEventId} {Phase} failed; disabling reinforcement scans for this battle",
+                    mapEvent.StringId ?? "<no id>", phase);
+        }
+    }
+
+    private void ScheduleNextScan(MapEvent mapEvent)
+        => nextScanAt[mapEvent] = CampaignTime.Now + ScanInterval;
+
+    private bool ReserveScan(MapEvent mapEvent)
+    {
+        var now = CampaignTime.Now;
+        if (nextScanAt.TryGetValue(mapEvent, out var next) && now < next)
+            return false;
+
+        nextScanAt[mapEvent] = now + ScanInterval;
+        return true;
+    }
+
+    private void PruneFinishedEvents(IEnumerable<MapEvent> activeEvents)
+    {
+        var active = new HashSet<MapEvent>(activeEvents.Where(mapEvent => mapEvent != null && !mapEvent.IsFinalized));
+        foreach (var mapEvent in nextScanAt.Keys.Where(mapEvent => !active.Contains(mapEvent)).ToArray())
+            nextScanAt.Remove(mapEvent);
+        failedEvents.RemoveWhere(mapEvent => !active.Contains(mapEvent));
     }
 
     /// <summary>
@@ -134,7 +172,7 @@ internal class NearbyPartyReinforcementHandler : IHandler
         if (!InteractionPatches.IsWithinAiJoinWindow(mapEvent))
             return "outside the AI join window (none opened, or it expired)";
 
-        if (!mapEvent.InvolvedParties.Any(p => p.IsMobile && p.MobileParty?.IsPlayerParty() == true))
+        if (!mapEvent.InvolvedParties.Any(p => p?.IsMobile == true && p.MobileParty?.IsPlayerParty() == true))
             return "no player party involved";
 
         return null;
@@ -142,26 +180,107 @@ internal class NearbyPartyReinforcementHandler : IHandler
 
     private static void Reinforce(MapEvent mapEvent)
     {
+        Reinforce(mapEvent, FindNearbyParties(mapEvent));
+    }
+
+    /// <summary>
+    /// Selects and adds eligible candidates using only authoritative map-event state. The candidate seam keeps the
+    /// headless rule testable without constructing Bannerlord's spatial index.
+    /// </summary>
+    internal static void Reinforce(MapEvent mapEvent, IEnumerable<MobileParty> nearbyParties)
+    {
+        if (mapEvent == null || nearbyParties == null)
+            return;
+
         var attackers = CollectMobileParties(mapEvent, BattleSideEnum.Attacker);
         var defenders = CollectMobileParties(mapEvent, BattleSideEnum.Defender);
+        var attackerJoiners = new List<MobileParty>();
+        var defenderJoiners = new List<MobileParty>();
 
-        var attackerCount = attackers.Count;
-        var defenderCount = defenders.Count;
+        foreach (var party in nearbyParties)
+        {
+            if (!CanConsider(mapEvent, party))
+                continue;
 
-        var model = Campaign.Current?.Models?.EncounterModel;
-        if (model == null) return;
+            var canJoinAttackers = mapEvent.CanPartyJoinBattle(party.Party, BattleSideEnum.Attacker);
+            var canJoinDefenders = mapEvent.CanPartyJoinBattle(party.Party, BattleSideEnum.Defender);
 
-        // Vanilla appends the parties that would join to each list in place.
-        model.FindNonAttachedNpcPartiesWhoWillJoinPlayerEncounter(attackers, defenders);
+            // A valid faction stance identifies exactly one side. Ambiguous or unresolved state is safer to skip
+            // than to place an AI party on an arbitrary side.
+            if (canJoinAttackers == canJoinDefenders)
+                continue;
 
-        Logger.Debug("[Reinforce] {MapEventId}: model offered {Att} attacker / {Def} defender joiners",
-            mapEvent.StringId ?? "<no id>",
-            attackers.Count - attackerCount,
-            defenders.Count - defenderCount);
+            (canJoinAttackers ? attackerJoiners : defenderJoiners).Add(party);
+        }
 
-        AddJoiners(mapEvent, BattleSideEnum.Attacker, attackers, attackerCount);
-        AddJoiners(mapEvent, BattleSideEnum.Defender, defenders, defenderCount);
+        // Match DefaultEncounterModel: an ignored non-player party on one side prevents nearby parties from
+        // reinforcing the other side.
+        if (HasIgnoredAiParty(defenders) || HasIgnoredAiParty(defenderJoiners))
+            attackerJoiners.Clear();
+        if (HasIgnoredAiParty(attackers) || HasIgnoredAiParty(attackerJoiners))
+            defenderJoiners.Clear();
+
+        Logger.Debug("[Reinforce] {MapEventId}: scan found {Att} attacker / {Def} defender joiners",
+            mapEvent.StringId ?? "<no id>", attackerJoiners.Count, defenderJoiners.Count);
+
+        AddJoiners(mapEvent, BattleSideEnum.Attacker, attackerJoiners);
+        AddJoiners(mapEvent, BattleSideEnum.Defender, defenderJoiners);
     }
+
+    private static List<MobileParty> FindNearbyParties(MapEvent mapEvent)
+    {
+        var result = new List<MobileParty>();
+        var model = Campaign.Current?.Models?.EncounterModel;
+        if (mapEvent == null || model == null)
+            return result;
+
+        var position = mapEvent.Position;
+        var radius = model.GetEncounterJoiningRadius;
+        if (mapEvent.IsBlockade || mapEvent.IsBlockadeSallyOut)
+        {
+            position = mapEvent.MapEventSettlement?.PortPosition ?? position;
+            radius = model.NeededMaximumDistanceForEncounteringBlockade * 3f;
+        }
+
+        var search = MobileParty.StartFindingLocatablesAroundPosition(position.ToVec2(), radius);
+        for (var party = MobileParty.FindNextLocatable(ref search);
+             party != null;
+             party = MobileParty.FindNextLocatable(ref search))
+        {
+            result.Add(party);
+        }
+
+        return result;
+    }
+
+    private static bool CanConsider(MapEvent mapEvent, MobileParty party)
+    {
+        if (party?.IsActive != true ||
+            party.IsPlayerParty() ||
+            party.MapEvent != null ||
+            party.IsInRaftState ||
+            party.SiegeEvent != null ||
+            party.CurrentSettlement != null ||
+            party.AttachedTo != null)
+        {
+            return false;
+        }
+
+        var battleAtSea = mapEvent.IsBlockade ||
+                          mapEvent.IsBlockadeSallyOut ||
+                          mapEvent.InvolvedParties.Any(involved =>
+                              involved?.IsMobile == true && involved.MobileParty?.IsCurrentlyAtSea == true);
+        if (party.IsCurrentlyAtSea != battleAtSea && mapEvent.MapEventSettlement?.IsVillage != true)
+            return false;
+
+        return party.IsLordParty ||
+               party.IsBandit ||
+               party.IsPatrolParty ||
+               party.ShouldJoinPlayerBattles;
+    }
+
+    private static bool HasIgnoredAiParty(IEnumerable<MobileParty> parties)
+        => parties.Any(party => party != null && !party.IsPlayerParty() && party.ShouldBeIgnored);
 
     private static List<MobileParty> CollectMobileParties(MapEvent mapEvent, BattleSideEnum side)
     {
@@ -179,21 +298,14 @@ internal class NearbyPartyReinforcementHandler : IHandler
         return parties;
     }
 
-    /// <summary>Adds only the entries the model appended, leaving the parties already in the battle alone.</summary>
-    private static void AddJoiners(MapEvent mapEvent, BattleSideEnum side, List<MobileParty> parties, int alreadyPresent)
+    private static void AddJoiners(MapEvent mapEvent, BattleSideEnum side, IEnumerable<MobileParty> parties)
     {
-        if (parties.Count <= alreadyPresent) return;
-
         var mapEventSide = mapEvent.GetMapEventSide(side);
         if (mapEventSide == null) return;
 
-        for (var i = alreadyPresent; i < parties.Count; i++)
+        foreach (var party in parties)
         {
-            var party = parties[i];
-            if (party == null) continue;
-
-            // A player party never joins by proximity - it chooses through its own encounter menu.
-            if (party.IsPlayerParty()) continue;
+            if (party?.MapEvent != null) continue;
 
             Logger.Debug("Nearby party {PartyId} joins the player battle on the {Side} side",
                 party.StringId, side);

@@ -2,7 +2,9 @@
 using Common.Messaging;
 using Common.Util;
 using E2E.Tests.Environment;
+using E2E.Tests.Environment.Instance;
 using E2E.Tests.Environment.MockEngine;
+using GameInterface.Services.Heroes.Extensions;
 using GameInterface.Services.MapEvents.TroopSupply;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
@@ -11,6 +13,7 @@ using Missions;
 using Missions.Battles;
 using Missions.Messages;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 using Xunit;
@@ -80,6 +83,60 @@ public class BattleHeroDamageSyncTests : MissionTestEnvironment
         AssertAgentRemovalHealth("owner", "observer", 25f, 100);
     }
 
+    [Fact]
+    public void OwnedPartyCompanionRemoval_UpdatesHealthOnServerAndEveryClient()
+    {
+        var (companionId, partyId) = SetupCompanionInPlayerParty("owner");
+        var owner = Clients.First();
+        SetControllerId(owner, "owner");
+
+        owner.Call(() =>
+        {
+            Assert.True(owner.ObjectManager.TryGetObject<Hero>(companionId, out var companion));
+            Assert.True(owner.ObjectManager.TryGetObject<MobileParty>(partyId, out var party));
+
+            Assert.True(companion.IsHealthControlledByThisInstance());
+            var origin = new CoopAgentOrigin(
+                companion.CharacterObject,
+                party.Party,
+                -1,
+                null,
+                new UniqueTroopDescriptor(2));
+            origin.OnAgentRemoved(37.6f);
+        });
+
+        AssertHeroHitPoints(Server, companionId, 38);
+        foreach (var client in Clients)
+            AssertHeroHitPoints(client, companionId, 38);
+    }
+
+    [Fact]
+    public void OtherPlayerHeroInOwnedParty_IsNotTreatedAsCompanion()
+    {
+        var (otherHeroId, partyId) = SetupCompanionInPlayerParty("owner");
+        RegisterAsPlayerParty("other-player", otherHeroId, string.Empty);
+        var owner = Clients.First();
+        SetControllerId(owner, "owner");
+
+        owner.Call(() =>
+        {
+            Assert.True(owner.ObjectManager.TryGetObject<Hero>(otherHeroId, out var otherHero));
+            Assert.True(owner.ObjectManager.TryGetObject<MobileParty>(partyId, out var party));
+
+            var origin = new CoopAgentOrigin(
+                otherHero.CharacterObject,
+                party.Party,
+                -1,
+                null,
+                new UniqueTroopDescriptor(3));
+            origin.OnAgentRemoved(12f);
+        });
+
+        AssertHeroHitPoints(Server, otherHeroId, 100);
+        foreach (var client in Clients)
+            AssertHeroHitPoints(client, otherHeroId, 100);
+    }
+
     private void AssertAgentRemovalHealth(string ownerControllerId, string localControllerId, float agentHealth, int expectedHitPoints)
     {
         var client = Clients.First();
@@ -107,6 +164,43 @@ public class BattleHeroDamageSyncTests : MissionTestEnvironment
             }
 
             Assert.Equal(expectedHitPoints, hero.HitPoints);
+        });
+    }
+
+    private (string CompanionId, string PartyId) SetupCompanionInPlayerParty(string ownerControllerId)
+    {
+        var ownerHeroId = CreateRegisteredObject<Hero>();
+        var companionId = CreateRegisteredObject<Hero>();
+        var partyId = CreateRegisteredObject<MobileParty>();
+        RegisterAsPlayerParty(ownerControllerId, ownerHeroId, partyId);
+
+        Server.Call(() => ConfigureCompanion(Server));
+        foreach (var client in Clients)
+            client.Call(() => ConfigureCompanion(client));
+
+        return (companionId, partyId);
+
+        void ConfigureCompanion(EnvironmentInstance instance)
+        {
+            Assert.True(instance.ObjectManager.TryGetObject<Hero>(companionId, out var companion));
+            Assert.True(instance.ObjectManager.TryGetObject<MobileParty>(partyId, out var party));
+            using (new AllowedThread())
+            {
+                companion.PartyBelongedTo = party;
+                companion.HitPoints = 100;
+            }
+        }
+    }
+
+    private static void AssertHeroHitPoints(
+        EnvironmentInstance instance,
+        string heroId,
+        int expected)
+    {
+        instance.Call(() =>
+        {
+            Assert.True(instance.ObjectManager.TryGetObject<Hero>(heroId, out var hero));
+            Assert.Equal(expected, hero.HitPoints);
         });
     }
 }

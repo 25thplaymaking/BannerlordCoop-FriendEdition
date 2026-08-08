@@ -28,8 +28,8 @@ internal class HeroHitPointsRequestPatch
         // Skip server-approved applies (the property-sync receive path runs under the original-call policy).
         if (CallOriginalPolicy.IsOriginalAllowed()) return;
 
-        // Only forward changes for the hero this client actually controls (its own mission casualties).
-        if (!__instance.IsControlledByThisInstance()) return;
+        // Forward the local player's health and companion/family health owned through their party.
+        if (!__instance.IsHealthControlledByThisInstance()) return;
 
         // Nothing to request if the value is unchanged.
         if (__instance.HitPoints == value) return;

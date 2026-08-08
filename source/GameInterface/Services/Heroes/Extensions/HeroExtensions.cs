@@ -1,5 +1,6 @@
 ﻿using Common;
 using Common.Logging;
+using GameInterface.Services.MobileParties.Extensions;
 using GameInterface.Services.Players;
 using Serilog;
 using TaleWorlds.CampaignSystem;
@@ -50,5 +51,24 @@ public static class HeroExtensions
             return false;
 
         return controlledObjectInfo.IsControlled;
+    }
+
+    /// <summary>
+    /// Returns whether this instance owns campaign-health changes for the hero. A player owns their own
+    /// hero and non-player heroes travelling in their controlled party; another player's hero is never
+    /// treated as a companion, even when both heroes are temporarily present in the same party.
+    /// </summary>
+    public static bool IsHealthControlledByThisInstance(this Hero hero)
+    {
+        if (hero is null)
+        {
+            Logger.Error("{parameterName} was null", nameof(hero));
+            return false;
+        }
+
+        if (hero.IsControlledByThisInstance()) return true;
+        if (hero.IsPlayerHero()) return false;
+
+        return hero.PartyBelongedTo?.IsControlledByThisInstance() == true;
     }
 }

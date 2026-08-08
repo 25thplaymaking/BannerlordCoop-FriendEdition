@@ -6,7 +6,6 @@ using GameInterface.Policies;
 using GameInterface.Services.Settlements.Messages;
 using HarmonyLib;
 using Serilog;
-using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Settlements;
 
 namespace GameInterface.Services.Settlements.Patches;
@@ -28,7 +27,7 @@ public class GarrisonWagePaymentLimitSettlementPatch
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(Army));
+            Logger.Error("Client changed managed {name}.GarrisonWagePaymentLimit", typeof(Settlement));
             return true;
         }
 

@@ -92,6 +92,20 @@ public class ArmyPatches
         return true;
     }
 
+    /// <summary>
+    /// Army campaign-map decisions are owned by the server. Replaying a settlement ownership event
+    /// on a client must still reach UI listeners, but it must not ask a partially replicated army to
+    /// choose a new gathering settlement. Bannerlord assumes <see cref="Army.Kingdom"/> is present in
+    /// that listener and crashes while reading Kingdom.Settlements when an army snapshot is still
+    /// being assembled.
+    /// </summary>
+    [HarmonyPatch(typeof(Army), "OnSettlementOwnerChanged")]
+    [HarmonyPrefix]
+    internal static bool OnSettlementOwnerChangedPrefix()
+    {
+        return !ModInformation.IsClient;
+    }
+
     [HarmonyPatch(typeof(Army), nameof(Army.Gather))]
     [HarmonyPrefix]
     public static bool GatherPrefix(Army __instance, Settlement initialHostileSettlement, MBReadOnlyList<MobileParty> partiesToCallToArmy = null)

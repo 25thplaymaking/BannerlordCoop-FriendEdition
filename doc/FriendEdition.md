@@ -10,23 +10,24 @@ modifying, and distribution without prior written permission. On 2026-08-07 the 
 reported that the maintainers granted permission for this derivative and its three-member private test
 distribution. That authorization is not treated as permission to publish the fork or binaries publicly.
 
-## Current candidate
+## Current deployed build
 
-The current local candidate, `2026-08-08-prfix1` at commit `ace3edd4a84951a84e67d566a41868493cec8689`,
-is newer than the live `2026-08-07-bd2` server build. It integrates upstream
-PRs #2751, #2755, #2756, #2757, and #2823 plus the Friend Edition captivity and village-flow fixes below.
-It has been built and tested locally, but has deliberately not been copied to, restarted on, or otherwise
-applied to the live server while players are using it. Client and server assemblies must be upgraded as a
-matched set when a maintenance window is available, and the upgraded server should start on a new save.
+Friend Edition `2026-08-08-prfix1`, built from source commit
+`ace3edd4a84951a84e67d566a41868493cec8689`, was deployed to the private server at
+`205.209.116.114:4200` on 2026-08-08. It integrates upstream PRs #2751, #2755, #2756, #2757, and #2823
+plus the Friend Edition captivity and village-flow fixes below. The server started on the new
+`friendeditionprfix1` save, created from `default_new_game.sav`, with `birthAndDeath=true` and a 24-hour
+player battle-AI join window.
 
-The private candidate kit is `BannerlordCoop-FriendEdition-2026-08-08-prfix1-TestKit-v3.0.0.zip`,
-SHA-256 `f9e2c46bc6acdb478914c5d58b37cf835ca1e3b6b50148bc04c71bb94e806e76`. Its bundled Coop archive is
+The matched three-player test kit is
+`BannerlordCoop-FriendEdition-2026-08-08-prfix1-TestKit-v3.0.1.zip`, 7,489,848 bytes, SHA-256
+`a8f7dc590de27dd1599bf52a5cb956a42b563596115f6950c310462f2f15351b`. Its bundled Coop archive is
 7,467,619 bytes compressed and 29,411,921 bytes installed. The obsolete Workshop Coop item's reported
 6.08 GB is not required Friend Edition content and is excluded.
 
 ## Request status
 
-| Request | Candidate resolution | Remaining live validation |
+| Request | Deployed resolution | Remaining live validation |
 | --- | --- | --- |
 | Players travel as one party | A consensual player-to-player proposal creates a synchronized, kingdom-free army attachment led by the proposer. It has no cohesion decay and is rediscovered after save/load. PR #2755's gathering-army join replication is also included. | Two-player movement, leave, reconnect, and save/restart. |
 | Surrender/captivity loop | PR #2756 keeps Surrender retryable until a map event exists. PR #2755 releases the conversation hold when capture begins. The server now resolves the correct captor, starts captivity, validates and charges ransom only after a successful release, and persists a 48-hour party-scoped safe-conduct period in both directions. Safe conduct prevents an immediate recapture loop without declaring global kingdom peace. | Lose and surrender in a live field battle, verify the captivity screen, pay ransom, and verify the captor cannot immediately re-engage either party for 48 in-game hours. |
@@ -50,7 +51,7 @@ SHA-256 `f9e2c46bc6acdb478914c5d58b37cf835ca1e3b6b50148bc04c71bb94e806e76`. Its 
 Merge-only synchronization commits at the tips of #2751, #2755, #2756, and #2757 were not required because
 this branch already starts from the newer `60bf5cd` development baseline.
 
-## Automated verification of the current candidate
+## Automated verification of the deployed build
 
 - Full Release solution build: 0 errors. The 1,055 warnings are existing analyzer/compiler warnings.
 - Full `GameInterface.Tests`: 816 passed, 11 intentional “Need regeneration” skips, 0 failed.
@@ -60,24 +61,29 @@ this branch already starts from the newer `60bf5cd` development baseline.
 - Focused Birth & Death and army-registry tests: 9 passed, 0 failed.
 - Diff whitespace validation: passed.
 
-The complete E2E corpus was not run for this candidate. The relevant feature classes and their broader
+The complete E2E corpus was not run for this build. The relevant feature classes and their broader
 village/captivity dependencies were run using the standalone in-process xUnit runner because this Windows
 machine's testhost loopback connection is broken. Docker was unavailable because WSL2 virtualization is
 disabled. The preceding `bd2` build previously passed the full deterministic sharded E2E run and isolated
 fresh-save/restart canaries; those historical results are not being presented as results for this newer
-candidate.
+build.
 
 ## Live server state
 
-The community server remains on Friend Edition build `2026-08-07-bd2`, based on
-`60bf5cd2e0b6557112713eb78398650db79634f8` plus the earlier Friend Edition working tree. It is serving the
-fresh save `friendeditionbd1` with `difficulty.birthAndDeath=true`. Nothing in the current candidate work
-stopped or restarted that server.
+The community server is running Friend Edition build `2026-08-08-prfix1` on save
+`friendeditionprfix1`. Post-deployment checks found `bannerlord-coop-seven.service` active with zero
+restarts, exactly one server process tree, UDP 4200 bound on IPv4 and IPv6, repeated server pulses, and no
+fatal startup errors. Effective configuration logs report Birth & Death on and the 24-hour battle-AI join
+window. The TaleWorlds `BirthAndDeath` module itself remains disabled as intended; the authoritative Coop
+campaign behaviors provide this feature on the headless server.
 
-The immediately pre-`bd2` rollback snapshot is
-`/home/bishop/bannerlord-coop/backups/pre-friend-bd2-20260807T225821Z`. The paired historical client archive
-is `BannerlordCoop-FriendEdition-2026-08-07-bd2.7z`, SHA-256
-`92b4dc0df70b6ed85202cc235fa800e2188f534ddea720839df1d6d948a0f719`.
+The complete pre-deployment rollback snapshot is
+`/home/bishop/bannerlord-coop/backups/pre-prfix1-20260808T054944Z`; its `SHA256SUMS.txt` was verified. The
+superseded `bd2` live module and active client distribution were removed after the new deployment passed
+health checks, while their recoverable copies and the prior `friendeditionbd1` save remain in that rollback
+snapshot. Private-fork module-hash warnings remain expected because both server core copies carry the
+authorized compatibility patch. The immutable deployment checksum manifest passes; the live save's
+deployment-time hash is retained separately because normal autosaves immediately make that file mutable.
 
 ## Player travel-group specification
 
@@ -91,24 +97,21 @@ kingdom, assigns the proposer as leader, adds the responder as an attached party
 network messages to replicate the graph. Declining changes no campaign state, and existing army membership
 is never replaced implicitly.
 
-## Candidate live-session checklist
+## Live-session acceptance checklist
 
-1. Schedule a maintenance window, take checksummed module/save backups, and confirm exactly one Bannerlord
-   server process owns the save and UDP port.
-2. Install the matched candidate assemblies on server and clients and start a new save. Do not reuse the
-   `bd2` save as the candidate acceptance save.
-3. Verify all three clients report identical candidate DLL hashes and load order before connecting.
-4. Surrender a battle, confirm captivity starts, pay ransom, and verify party-scoped safe conduct prevents
+1. All three players install the v3.0.1 test kit with `Run-Setup.cmd`, run `Run-Verify.cmd`, and confirm the
+   expected DLL hashes and load order before connecting to `friendeditionprfix1`.
+2. Surrender a battle, confirm captivity starts, pay ransom, and verify party-scoped safe conduct prevents
    immediate recapture without changing kingdom diplomacy.
-5. Win village resistance and confirm the same action advances directly into raiding. Complete demand-goods
+3. Win village resistance and confirm the same action advances directly into raiding. Complete demand-goods
    and force-recruit flows without a stuck Continue button.
-6. Join an ongoing battle from each side. Repeat with a nearby eligible AI party and while another player is
+4. Join an ongoing battle from each side. Repeat with a nearby eligible AI party and while another player is
    in a menu/conversation; verify reinforcement membership is consistent on all peers.
-7. Enter field and siege battles as independent parties and as a travel group. Confirm all player agents and
+5. Enter field and siege battles as independent parties and as a travel group. Confirm all player agents and
    rosters survive deployment, and test leader/member retreat.
-8. Save, restart, and reconnect all players. Confirm travel-group state, captivity safe conduct, family data,
+6. Save, restart, and reconnect all players. Confirm travel-group state, captivity safe conduct, family data,
    and ongoing campaign state persist.
-9. Run a longer Birth & Death soak and observe hideout/bandit-party behavior for several in-game days.
+7. Run a longer Birth & Death soak and observe hideout/bandit-party behavior for several in-game days.
 
 ## Dedicated-server deployment constraints
 
@@ -117,7 +120,7 @@ source-only compatibility tool in `tools/DedicatedServerCompatibilityPatcher` ma
 server-side compatibility change reproducible. Never commit or redistribute a patched
 `DedicatedServer.Core.dll`.
 
-For the later maintenance-window deployment:
+The prfix1 deployment followed these constraints:
 
 - overlay module assemblies into both client and server module-bin directories without deleting server-only
   files;

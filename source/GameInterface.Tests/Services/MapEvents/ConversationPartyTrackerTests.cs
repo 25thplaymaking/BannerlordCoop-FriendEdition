@@ -62,6 +62,26 @@ public class ConversationPartyTrackerTests
         tracker.Dispose();
     }
 
+    [Fact]
+    public void TryGetEngagementByEngagerParty_FindsOnlyThatPlayersHold()
+    {
+        var tracker = new ConversationPartyTracker(new Mock<IObjectManager>().Object);
+        var firstPlayer = new object();
+        var secondPlayer = new object();
+
+        Assert.True(tracker.TryBeginEngagement(firstPlayer, "player-1", "lord-1", wasAiDisabled: false));
+        Assert.True(tracker.TryBeginEngagement(secondPlayer, "player-2", "lord-2", wasAiDisabled: false));
+
+        Assert.True(tracker.TryGetEngagementByEngagerParty("player-2", out var engagement));
+        Assert.Same(secondPlayer, engagement.EngagerKey);
+        Assert.Equal("lord-2", engagement.PartyId);
+        Assert.False(tracker.TryGetEngagementByEngagerParty("missing-player", out _));
+
+        Assert.True(tracker.TryEndEngagement(firstPlayer, out _, out _, out _));
+        Assert.True(tracker.TryEndEngagement(secondPlayer, out _, out _, out _));
+        tracker.Dispose();
+    }
+
     // A held party belongs to exactly one player. Server-side conversation outcomes are authorised
     // only as "this peer holds an engagement with this party", so a shared hold let two players each
     // apply the same one-shot result - two recruiters persuading one lord, both paying, the lord

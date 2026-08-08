@@ -1,5 +1,7 @@
 using GameInterface.Services.MobileParties.Extensions;
+using System.Linq;
 using TaleWorlds.CampaignSystem.MapEvents;
+using TaleWorlds.CampaignSystem.Roster;
 
 namespace GameInterface.Services.MapEvents;
 
@@ -57,7 +59,11 @@ public static class RaidMapEventExtensions
 
     private static bool HasDefenderTroops(MapEvent mapEvent)
     {
-        return mapEvent.DefenderSide?.TroopCount > 0;
+        // TroopCount includes wounded defenders, while Party.NumberOfHealthyMembers can briefly differ
+        // between server and client as party-roster messages arrive. The MapEventParty roster is the
+        // authoritative battle snapshot synchronized with the event, so use its per-troop state.
+        return mapEvent.DefenderSide?.Parties?.Any(
+            party => party?.Troops?.Any(troop => troop.State == RosterTroopState.Active) == true) == true;
     }
 
     public static bool IsRaidAiInterventionSuppressed(this MapEvent mapEvent)

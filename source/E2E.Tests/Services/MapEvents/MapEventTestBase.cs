@@ -26,6 +26,7 @@ using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.Core;
+using TaleWorlds.Library;
 using Xunit.Abstractions;
 
 namespace E2E.Tests.Services.MapEvents;
@@ -77,6 +78,11 @@ public abstract class MapEventTestBase : IDisposable
             var mapEvent = GameObjectCreator.CreateInitializedObject<MapEvent>();
             var attackerParty = GameObjectCreator.CreateInitializedObject<MobileParty>();
             var defenderParty = GameObjectCreator.CreateInitializedObject<MobileParty>();
+
+            // A synthetic FieldBattle must have a deterministic land position. Constructor-skipped
+            // parties otherwise retain CampaignVec2.Invalid, which vanilla can classify as naval.
+            attackerParty.Position = new CampaignVec2(Vec2.Zero, isOnLand: true);
+            defenderParty.Position = new CampaignVec2(Vec2.Zero, isOnLand: true);
 
             // The visual must exist before Initialize is called; skip its constructor so
             // we do not need a render context.

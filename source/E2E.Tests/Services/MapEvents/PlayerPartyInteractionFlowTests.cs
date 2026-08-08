@@ -311,6 +311,75 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
     }
 
     [Fact]
+    public void TravelTogether_AcceptedByResponder_CreatesSynchronizedPlayerTravelGroup()
+    {
+        var (client1, client2, initiatorPartyId, responderPartyId) = CreateTwoPlayerParties();
+        RequestInteraction(client1, initiatorPartyId, responderPartyId);
+        var sessionId = Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionStarted>().Single().SessionId;
+        var initialState = Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionState>().Single(s =>
+            s.SessionId == sessionId &&
+            s.PartyId == initiatorPartyId &&
+            s.Phase == PlayerPartyInteractionPhase.InitialOptions);
+
+        Assert.Contains(PlayerPartyInteractionOption.TravelTogether, initialState.Options);
+        Assert.Contains(PlayerPartyInteractionOption.TravelTogether, initialState.EnabledOptions);
+
+        Server.NetworkSentMessages.Clear();
+        SubmitDialogOption(client1, initialState, PlayerPartyInteractionOption.TravelTogether);
+
+        var proposalStates = Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionState>().ToArray();
+        Assert.Contains(proposalStates, s =>
+            s.PartyId == initiatorPartyId &&
+            s.Phase == PlayerPartyInteractionPhase.WaitingForResponse &&
+            s.Proposal == PlayerPartyInteractionProposal.TravelTogether);
+        Assert.Contains(proposalStates, s =>
+            s.PartyId == responderPartyId &&
+            s.Phase == PlayerPartyInteractionPhase.ProposalPending &&
+            s.Proposal == PlayerPartyInteractionProposal.TravelTogether &&
+            s.Options.Contains(PlayerPartyInteractionOption.AcceptProposal));
+
+        client2.Call(() =>
+        {
+            Assert.Equal(PlayerPartyInteractionProposal.TravelTogether, PlayerPartyInteractionDialogState.Proposal);
+            Assert.Equal("Let us combine our parties and travel together.", PlayerPartyInteractionDialogState.GetDialogText());
+        });
+
+        Server.NetworkSentMessages.Clear();
+        SubmitOption(client2, sessionId, responderPartyId, PlayerPartyInteractionOption.AcceptProposal);
+
+        var ended = Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionEnded>().Single();
+        Assert.Equal(PlayerPartyInteractionOutcomeType.TravelTogetherAccepted, ended.OutcomeType);
+
+        AssertTravelGroup(Server, initiatorPartyId, responderPartyId, expectZeroCohesionChange: true);
+        foreach (var client in Clients)
+            AssertTravelGroup(client, initiatorPartyId, responderPartyId, expectZeroCohesionChange: false);
+    }
+
+    [Fact]
+    public void TravelTogether_DeclinedByResponder_LeavesPartiesIndependent()
+    {
+        var (client1, client2, initiatorPartyId, responderPartyId) = CreateTwoPlayerParties();
+        RequestInteraction(client1, initiatorPartyId, responderPartyId);
+        var sessionId = Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionStarted>().Single().SessionId;
+
+        SubmitOption(client1, sessionId, initiatorPartyId, PlayerPartyInteractionOption.TravelTogether);
+        Server.NetworkSentMessages.Clear();
+        SubmitOption(client2, sessionId, responderPartyId, PlayerPartyInteractionOption.DeclineProposal);
+
+        var ended = Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionEnded>().Single();
+        Assert.Equal(PlayerPartyInteractionOutcomeType.TravelTogetherDeclined, ended.OutcomeType);
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<PartyBase>(initiatorPartyId, out var initiatorParty));
+            Assert.True(Server.ObjectManager.TryGetObject<PartyBase>(responderPartyId, out var responderParty));
+            Assert.Null(initiatorParty.MobileParty.Army);
+            Assert.Null(responderParty.MobileParty.Army);
+            Assert.Null(responderParty.MobileParty.AttachedTo);
+        });
+    }
+
+    [Fact]
     public void OptionSubmit_SpoofedResponderPartyId_DoesNotActAsResponder()
     {
         var (client1, _, initiatorPartyId, responderPartyId) = CreateTwoPlayerParties();
@@ -1438,6 +1507,8 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
         Assert.Contains(PlayerPartyInteractionOption.TradeProposal, initialState.EnabledOptions);
         Assert.Contains(PlayerPartyInteractionOption.OfferServices, initialState.Options);
         Assert.DoesNotContain(PlayerPartyInteractionOption.OfferServices, initialState.EnabledOptions);
+        Assert.Contains(PlayerPartyInteractionOption.TravelTogether, initialState.Options);
+        Assert.DoesNotContain(PlayerPartyInteractionOption.TravelTogether, initialState.EnabledOptions);
         Assert.Contains(PlayerPartyInteractionOption.HostileDemand, initialState.Options);
         Assert.Contains(PlayerPartyInteractionOption.HostileDemand, initialState.EnabledOptions);
 
@@ -1445,6 +1516,8 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
         {
             PlayerPartyInteractionDialogState.Apply(initialState);
             Assert.False(PlayerPartyInteractionDialogState.IsOptionEnabled(PlayerPartyInteractionOption.OfferServices, out var explanation));
+            Assert.Equal("Not available while hostile", explanation.ToString());
+            Assert.False(PlayerPartyInteractionDialogState.IsOptionEnabled(PlayerPartyInteractionOption.TravelTogether, out explanation));
             Assert.Equal("Not available while hostile", explanation.ToString());
             Assert.True(PlayerPartyInteractionDialogState.IsOptionEnabled(PlayerPartyInteractionOption.TradeProposal));
             Assert.True(PlayerPartyInteractionDialogState.IsOptionEnabled(PlayerPartyInteractionOption.HostileDemand));
@@ -3396,6 +3469,36 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
             Assert.NotNull(party.MobileParty);
             Campaign.Current.MainParty = party.MobileParty;
         }, MapEventDisabledMethods);
+    }
+
+    private static void AssertTravelGroup(
+        EnvironmentInstance instance,
+        string leaderPartyId,
+        string followerPartyId,
+        bool expectZeroCohesionChange)
+    {
+        instance.Call(() =>
+        {
+            Assert.True(instance.ObjectManager.TryGetObject<PartyBase>(leaderPartyId, out var leaderParty));
+            Assert.True(instance.ObjectManager.TryGetObject<PartyBase>(followerPartyId, out var followerParty));
+
+            var army = leaderParty.MobileParty.Army;
+            Assert.NotNull(army);
+            Assert.Same(army, followerParty.MobileParty.Army);
+            Assert.Same(leaderParty.MobileParty, army.LeaderParty);
+            Assert.Same(leaderParty.MobileParty, followerParty.MobileParty.AttachedTo);
+            Assert.Null(army.Kingdom);
+
+            Assert.False(PlayerPartyTravelGroupDispersionPatches.CheckArmyDispersionPrefix(army));
+
+            if (expectZeroCohesionChange)
+            {
+                var cohesionChange = Campaign.Current.Models.ArmyManagementCalculationModel
+                    .CalculateDailyCohesionChange(army)
+                    .ResultNumber;
+                Assert.Equal(0f, cohesionChange);
+            }
+        });
     }
 
     private (string SiegeEventId, string SettlementId, string LeaderPartyId) CreateSyncedSiege()

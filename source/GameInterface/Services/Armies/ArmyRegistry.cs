@@ -37,15 +37,37 @@ internal class ArmyRegistry : AutoRegistryBase<Army>
     public override void RegisterAllObjects()
     {
         IEnumerable<Kingdom> kingdoms = Campaign.Current?.Kingdoms ?? Enumerable.Empty<Kingdom>();
+        var registeredArmies = new HashSet<Army>();
 
         foreach (var kingdom in kingdoms)
         {
             foreach (var army in kingdom.Armies)
             {
                 RegisterExistingObject(kingdom.StringId, army);
+                registeredArmies.Add(army);
             }
         }
+
+        // Voluntary player travel groups deliberately have no kingdom. They are still referenced by
+        // their member parties in a save, so discover and register them by their stable leader-party id.
+        foreach (var party in (IEnumerable<MobileParty>)MobileParty.All ?? Enumerable.Empty<MobileParty>())
+        {
+            var army = party?.Army;
+            if (!TryTrackKingdomFreeArmy(army, registeredArmies)) continue;
+
+            var leaderPartyId = army.LeaderParty?.StringId;
+            if (string.IsNullOrEmpty(leaderPartyId))
+            {
+                Logger.Warning("Unable to register kingdom-free army because its leader party has no StringId");
+                continue;
+            }
+
+            RegisterExistingObject($"travel_{leaderPartyId}", army);
+        }
     }
+
+    internal static bool TryTrackKingdomFreeArmy(Army army, ISet<Army> registeredArmies)
+        => army != null && army.Kingdom == null && registeredArmies.Add(army);
 
     public override void OnClientCreated(Army obj, string id)
     {

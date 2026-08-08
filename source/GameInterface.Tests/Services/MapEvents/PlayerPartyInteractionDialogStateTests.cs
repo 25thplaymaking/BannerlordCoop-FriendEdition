@@ -54,6 +54,33 @@ public class PlayerPartyInteractionDialogStateTests
     }
 
     [Fact]
+    public void TravelTogetherProposal_UsesStableText()
+    {
+        try
+        {
+            PlayerPartyInteractionDialogState.Apply(new NetworkPlayerPartyInteractionState(
+                "session-1",
+                "party-1",
+                "party-2",
+                "RandomPlayer",
+                PlayerPartyInteractionPhase.ProposalPending,
+                PlayerPartyInteractionProposal.TravelTogether,
+                new[]
+                {
+                    PlayerPartyInteractionOption.AcceptProposal,
+                    PlayerPartyInteractionOption.DeclineProposal
+                },
+                isInitiator: false));
+
+            Assert.Equal("Let us combine our parties and travel together.", PlayerPartyInteractionDialogState.GetDialogText());
+        }
+        finally
+        {
+            PlayerPartyInteractionDialogState.Clear("session-1");
+        }
+    }
+
+    [Fact]
     public void HostileInitialOptions_DisabledOfferServicesUsesHostileReason()
     {
         try

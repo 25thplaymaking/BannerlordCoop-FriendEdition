@@ -214,5 +214,24 @@ namespace E2E.Tests.Services.Heroes
                 Assert.Equal(0, hero.GetSkillValue(skill));
             }
         }
+
+        [Fact]
+        public void Server_MakePregnantAction_PropagatesPregnancyToClients()
+        {
+            Server.Call(() =>
+            {
+                Assert.True(Server.ObjectManager.TryGetObject(HeroId, out Hero hero));
+
+                MakePregnantAction.Apply(hero);
+
+                Assert.True(hero.IsPregnant);
+            });
+
+            foreach (var client in Clients)
+            {
+                Assert.True(client.ObjectManager.TryGetObject(HeroId, out Hero hero));
+                Assert.True(hero.IsPregnant);
+            }
+        }
     }
 }

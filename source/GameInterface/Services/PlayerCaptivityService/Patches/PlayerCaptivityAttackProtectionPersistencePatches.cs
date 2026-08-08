@@ -52,6 +52,11 @@ internal class PlayerCaptivityAttackProtectionPersistencePatches
                             protection.AttackerParty,
                             protection.TargetFaction,
                             protection.DisabledUntil)))
+                    .Concat(DefaultMobilePartyAIModelPatches.GetPersistedAttackerFactionAgainstPartyProtections()
+                        .Select(protection => new PlayerCaptivityAttackProtectionSaveData(
+                            protection.AttackerFaction,
+                            protection.TargetParty,
+                            protection.DisabledUntil)))
                     .ToList();
         }
 
@@ -64,21 +69,27 @@ internal class PlayerCaptivityAttackProtectionPersistencePatches
         var now = currentTime ?? CampaignTime.Now;
         foreach (var protection in saveData)
         {
-            if (protection?.AttackerParty == null
-                || protection.AttackerParty.IsActive != true
-                || now > protection.DisabledUntil)
+            if (protection == null || now > protection.DisabledUntil)
             {
                 continue;
             }
 
-            if (protection.TargetFaction != null)
+            if (protection.AttackerFaction != null && protection.TargetParty?.IsActive == true)
+            {
+                DefaultMobilePartyAIModelPatches.PreventAttackerFactionAttacksAgainstPartyUntil(
+                    protection.AttackerFaction,
+                    protection.TargetParty,
+                    protection.DisabledUntil);
+            }
+            else if (protection.AttackerParty?.IsActive == true && protection.TargetFaction != null)
             {
                 DefaultMobilePartyAIModelPatches.PreventFactionAttacksUntil(
                     protection.AttackerParty,
                     protection.TargetFaction,
                     protection.DisabledUntil);
             }
-            else if (protection.AttackerParty.Ai != null &&
+            else if (protection.AttackerParty?.IsActive == true &&
+                     protection.AttackerParty.Ai != null &&
                      protection.TargetParty?.IsActive == true)
             {
                 DefaultMobilePartyAIModelPatches.PreventAttacksUntil(

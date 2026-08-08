@@ -775,6 +775,10 @@ internal class PlayerPartyInteractionHandler : IHandler
     private void AddInitialOptions(PlayerPartyInteractionSession session, PartyBase initiatorParty, PartyBase responderParty)
     {
         AddInitiatorOption(session, PlayerPartyInteractionOption.TradeProposal, enabled: true);
+        AddInitiatorOption(
+            session,
+            PlayerPartyInteractionOption.TravelTogether,
+            PlayerPartyTravelGroup.CanCreate(initiatorParty, responderParty));
         AddInitiatorOption(session, PlayerPartyInteractionOption.OfferServices, enabled: !session.IsHostile);
         AddInitiatorOption(session, PlayerPartyInteractionOption.HostileDemand, hostileEncounterService.CanStartHostileEncounter(initiatorParty, responderParty));
         AddInitiatorOption(session, PlayerPartyInteractionOption.JoinClan, enabled: false);
@@ -843,6 +847,8 @@ internal class PlayerPartyInteractionHandler : IHandler
                 return PlayerPartyInteractionProposal.Vassal;
             case PlayerPartyInteractionOption.HostileDemand:
                 return PlayerPartyInteractionProposal.HostileDemand;
+            case PlayerPartyInteractionOption.TravelTogether:
+                return PlayerPartyInteractionProposal.TravelTogether;
             default:
                 return PlayerPartyInteractionProposal.None;
         }
@@ -856,6 +862,8 @@ internal class PlayerPartyInteractionHandler : IHandler
                 return PlayerPartyInteractionOutcomeType.ClanJoinAccepted;
             case PlayerPartyInteractionProposal.Vassal:
                 return PlayerPartyInteractionOutcomeType.VassalAccepted;
+            case PlayerPartyInteractionProposal.TravelTogether:
+                return PlayerPartyInteractionOutcomeType.TravelTogetherAccepted;
             default:
                 return PlayerPartyInteractionOutcomeType.None;
         }
@@ -871,6 +879,8 @@ internal class PlayerPartyInteractionHandler : IHandler
                 return PlayerPartyInteractionOutcomeType.ClanJoinDeclined;
             case PlayerPartyInteractionProposal.Vassal:
                 return PlayerPartyInteractionOutcomeType.VassalDeclined;
+            case PlayerPartyInteractionProposal.TravelTogether:
+                return PlayerPartyInteractionOutcomeType.TravelTogetherDeclined;
             default:
                 return PlayerPartyInteractionOutcomeType.None;
         }

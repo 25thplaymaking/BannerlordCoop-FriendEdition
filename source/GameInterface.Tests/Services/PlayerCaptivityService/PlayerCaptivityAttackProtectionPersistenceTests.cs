@@ -86,6 +86,32 @@ public sealed class PlayerCaptivityAttackProtectionPersistenceTests : IDisposabl
     }
 
     [Fact]
+    public void SyncData_RoundTripsAttackerFactionAgainstReleasedPartyProtection()
+    {
+        var attackerFaction = (Kingdom)FormatterServices.GetUninitializedObject(typeof(Kingdom));
+        var releasedParty = CreateMobileParty();
+        var disabledUntil = new CampaignTime(1200);
+        var currentTime = new CampaignTime(1000);
+        var records = new Dictionary<string, object>();
+        DefaultMobilePartyAIModelPatches.PreventAttackerFactionAttacksAgainstPartyUntil(
+            attackerFaction,
+            releasedParty,
+            disabledUntil);
+
+        PlayerCaptivityAttackProtectionPersistencePatches.SyncAttackProtections(
+            new TestDataStore(isSaving: true, records), isClient: false, currentTime);
+        DefaultMobilePartyAIModelPatches.ResetPersistedAttackProtections();
+        PlayerCaptivityAttackProtectionPersistencePatches.SyncAttackProtections(
+            new TestDataStore(isSaving: false, records), isClient: false, currentTime);
+
+        var restored = Assert.Single(
+            DefaultMobilePartyAIModelPatches.GetPersistedAttackerFactionAgainstPartyProtections());
+        Assert.Same(attackerFaction, restored.AttackerFaction);
+        Assert.Same(releasedParty, restored.TargetParty);
+        Assert.Equal(disabledUntil, restored.DisabledUntil);
+    }
+
+    [Fact]
     public void SyncData_PrunesExpiredProtectionBeforeSave()
     {
         var records = new Dictionary<string, object>();
@@ -112,6 +138,9 @@ public sealed class PlayerCaptivityAttackProtectionPersistenceTests : IDisposabl
             destroyedParty, otherTarget, new CampaignTime(1200));
         DefaultMobilePartyAIModelPatches.PreventAttacksUntil(
             otherAttacker, destroyedParty, new CampaignTime(1200));
+        var attackerFaction = (Kingdom)FormatterServices.GetUninitializedObject(typeof(Kingdom));
+        DefaultMobilePartyAIModelPatches.PreventAttackerFactionAttacksAgainstPartyUntil(
+            attackerFaction, destroyedParty, new CampaignTime(1200));
 
         DefaultMobilePartyAIModelPatches.RemoveAttackProtectionsForParty(destroyedParty);
 
@@ -120,6 +149,7 @@ public sealed class PlayerCaptivityAttackProtectionPersistenceTests : IDisposabl
             destroyedParty.Ai, out _));
         Assert.False(DefaultMobilePartyAIModelPatches.DisablePlayerAttackTimes.TryGetValue(
             otherAttacker.Ai, out _));
+        Assert.Empty(DefaultMobilePartyAIModelPatches.GetPersistedAttackerFactionAgainstPartyProtections());
     }
 
     private static MobileParty CreateMobileParty()

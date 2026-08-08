@@ -92,7 +92,7 @@ public class NetworkPlayerPartyInteractionSerializationTest
     {
         var original = new NetworkSubmitPlayerPartyInteractionOption(
             "session-1",
-            PlayerPartyInteractionOption.TradeProposal,
+            PlayerPartyInteractionOption.TravelTogether,
             "party-1");
 
         var result = RoundTrip(original);
@@ -109,7 +109,7 @@ public class NetworkPlayerPartyInteractionSerializationTest
             "session-1",
             "initiator-party",
             "responder-party",
-            PlayerPartyInteractionOutcomeType.TradeAccepted);
+            PlayerPartyInteractionOutcomeType.TravelTogetherAccepted);
 
         var result = RoundTrip(original);
 
@@ -117,6 +117,15 @@ public class NetworkPlayerPartyInteractionSerializationTest
         Assert.Equal(original.InitiatorPartyId, result.InitiatorPartyId);
         Assert.Equal(original.ResponderPartyId, result.ResponderPartyId);
         Assert.Equal(original.OutcomeType, result.OutcomeType);
+    }
+
+    [Fact]
+    public void TravelTogetherEnums_AreAppendOnlyForWireCompatibility()
+    {
+        Assert.Equal(13, (int)PlayerPartyInteractionOption.TravelTogether);
+        Assert.Equal(5, (int)PlayerPartyInteractionProposal.TravelTogether);
+        Assert.Equal(12, (int)PlayerPartyInteractionOutcomeType.TravelTogetherAccepted);
+        Assert.Equal(13, (int)PlayerPartyInteractionOutcomeType.TravelTogetherDeclined);
     }
 
     [Fact]

@@ -31,12 +31,14 @@ public class SettlementHitPointsTest
 
         // Assert
         // Verify the server sends a single message to it's game interface
-        Assert.Equal(1, server.NetworkSentMessages.GetMessageCount<NetworkChangeSettlementHitPoints>());
+        var sent = Assert.Single(server.NetworkSentMessages.GetMessages<NetworkChangeSettlementHitPoints>());
+        Assert.Equal(100f, sent.SettlementHitPoints);
 
         // Verify the all clients send a single message to their game interfaces
         foreach (EnvironmentInstance client in TestEnvironment.Clients)
         {
-            Assert.Equal(1, client.InternalMessages.GetMessageCount<ChangeSettlementHitPoints>());
+            var received = Assert.Single(client.InternalMessages.GetMessages<ChangeSettlementHitPoints>());
+            Assert.Equal(100f, received.SettlementHitPoints);
         }
     }
 }

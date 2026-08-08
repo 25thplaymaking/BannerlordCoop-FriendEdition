@@ -1,4 +1,4 @@
-using Common.Messaging;
+﻿using Common.Messaging;
 using GameInterface.Services.MapEvents.TroopSupply;
 using ProtoBuf;
 using System;
@@ -35,11 +35,42 @@ public class NetworkBattleTroopReserve : IEvent
     [ProtoMember(4)]
     public readonly bool FlushRequested;
 
-    public NetworkBattleTroopReserve(string mapEventId, int side, PartyReserve[] parties, bool flushRequested = false)
+    /// <summary>
+    /// Every troop on this side across ALL owners, not just the ones in <see cref="Parties"/>.
+    /// <para>
+    /// The spawn logic splits a fixed battle size between the two sides in proportion to the totals it is
+    /// given, so a client that sizes from what it happens to OWN computes a different split from its peers:
+    /// a side divided between two players is measured at a fraction of its real strength, its opponent gets
+    /// capped against that fraction, and the divided side ends up fielding more men than the larger one.
+    /// Feeding every client the same side totals makes the split identical everywhere; each supplier then
+    /// contributes only its own share of that allocation.
+    /// </para>
+    /// Additive and default 0, which reads as "unknown" and falls back to sizing from owned totals.
+    /// </summary>
+    [ProtoMember(5)]
+    public readonly int SideTotalTroops;
+
+    /// <summary>
+    /// How many parties on this side belong to a player, across ALL owners. One troop of each wave is set
+    /// aside per player-owned party before the proportional split, so no player can be rounded down to
+    /// nothing while the owners' slices still sum to exactly the allocation - see
+    /// <see cref="PartyReserve.PlayerOwnedRank"/>.
+    /// <para>
+    /// Additive and default 0, which reads as "not sent" and falls back to the older apportionment with its
+    /// inexact per-owner top-up.
+    /// </para>
+    /// </summary>
+    [ProtoMember(6)]
+    public readonly int PlayerOwnedPartyCount;
+
+    public NetworkBattleTroopReserve(string mapEventId, int side, PartyReserve[] parties, bool flushRequested = false,
+        int sideTotalTroops = 0, int playerOwnedPartyCount = 0)
     {
         MapEventId = mapEventId;
         Side = side;
         Parties = parties;
         FlushRequested = flushRequested;
+        SideTotalTroops = sideTotalTroops;
+        PlayerOwnedPartyCount = playerOwnedPartyCount;
     }
 }

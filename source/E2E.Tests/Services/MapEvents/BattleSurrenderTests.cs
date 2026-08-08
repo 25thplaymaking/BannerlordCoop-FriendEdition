@@ -79,6 +79,42 @@ public class BattleSurrenderTests : MapEventTestBase
         Assert.Empty(Clients.First().NetworkSentMessages.GetMessages<NetworkPlayerSurrendered>());
     }
 
+    [Fact]
+    [Trait("Requirement", "BR-060")]
+    public void SurrenderBeforeMapEventIsAvailable_RemainsRetryableAndSendsAfterAttachment()
+    {
+        var setup = SetupTwoOpposingPlayersInBattle();
+        var recipientClient = Clients.Last();
+
+        SetMockPlayerEncounter(recipientClient);
+        recipientClient.NetworkSentMessages.Clear();
+
+        recipientClient.Call(() =>
+        {
+            var encounter = PlayerEncounter.Current;
+            var party = MobileParty.MainParty.Party;
+            var attachedSide = party._mapEventSide;
+            Assert.NotNull(encounter);
+            Assert.NotNull(attachedSide);
+
+            // Reproduce the pre-battle menu window: neither the encounter nor MainParty can resolve a MapEvent yet.
+            party._mapEventSide = null;
+            InvokePatchedSurrender(encounter);
+
+            Assert.False(encounter._playerSurrender);
+            Assert.Empty(recipientClient.NetworkSentMessages.GetMessages<NetworkPlayerSurrendered>());
+
+            // Once the authoritative event arrives, the same encounter/menu action must remain usable.
+            party._mapEventSide = attachedSide;
+            InvokePatchedSurrender(encounter);
+            Assert.True(encounter._playerSurrender);
+        }, BattleMenuSurrenderDisabledMethods());
+
+        var request = Assert.Single(recipientClient.NetworkSentMessages.GetMessages<NetworkPlayerSurrendered>());
+        Assert.Equal(setup.recipientPartyId, request.PlayerParty);
+        Assert.Equal(setup.ctx.MapEventId, request.MapEventId);
+    }
+
     /// <summary>
     /// BR-061: the final battle result records the surrendered hero as a prisoner of the captor. Driven from
     /// the real surrender action, the surrendered hero is captive of the captor party on the server and every

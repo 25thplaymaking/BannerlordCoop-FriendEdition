@@ -97,6 +97,17 @@ public class PlayerPartyInteractionCampaignBehavior : CampaignBehaviorBase
             null);
 
         starter.AddPlayerLine(
+            "coop_player_party_interaction_travel_together",
+            InitialToken,
+            InitiatorWaitToken,
+            "Let us travel together. Follow my banner.",
+            () => PlayerPartyInteractionDialogState.HasOption(PlayerPartyInteractionOption.TravelTogether),
+            () => PlayerPartyInteractionDialogState.Submit(PlayerPartyInteractionOption.TravelTogether),
+            PlayerPartyDialogPriority,
+            IsTravelTogetherEnabled,
+            null);
+
+        starter.AddPlayerLine(
             "coop_player_party_interaction_services",
             InitialToken,
             ServiceToken,
@@ -242,6 +253,9 @@ public class PlayerPartyInteractionCampaignBehavior : CampaignBehaviorBase
 
     private static bool IsTradeProposalEnabled(out TextObject explanation)
         => PlayerPartyInteractionDialogState.IsOptionEnabled(PlayerPartyInteractionOption.TradeProposal, out explanation);
+
+    private static bool IsTravelTogetherEnabled(out TextObject explanation)
+        => PlayerPartyInteractionDialogState.IsOptionEnabled(PlayerPartyInteractionOption.TravelTogether, out explanation);
 
     private static bool IsOfferServicesEnabled(out TextObject explanation)
         => PlayerPartyInteractionDialogState.IsOptionEnabled(PlayerPartyInteractionOption.OfferServices, out explanation);

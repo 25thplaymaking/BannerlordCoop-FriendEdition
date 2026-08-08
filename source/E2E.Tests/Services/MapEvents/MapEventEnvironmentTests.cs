@@ -1,11 +1,16 @@
 ﻿using E2E.Tests.Environment.Instance;
 using Common.Messaging;
+using Common.Network;
 using Common.Util;
 using GameInterface.Services.Entity;
+using GameInterface.Services.MapEvents;
 using GameInterface.Services.MapEventParties.Messages;
 using GameInterface.Services.MobileParties.Extensions;
 using GameInterface.Services.MobilePartyAIs.Patches;
+using GameInterface.Services.PlayerCaptivityService.Messages;
+using HarmonyLib;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Party;
@@ -428,6 +433,116 @@ public class MapEventEnvironmentTests : MapEventTestBase
 
             Assert.True(captorParty.Morale > 0f);
             Assert.False(Campaign.Current.Models.MobilePartyAIModel.ShouldConsiderAttacking(captorParty, playerParty));
+        });
+    }
+
+    [Fact]
+    public void CaptureAfterConversation_ReleasesCaptorsPermanentAiHold()
+    {
+        var client = Clients.First();
+        var (heroId, partyId) = CreatePlayerHeroParty("MyControllerId");
+        var captorPartyId = TestEnvironment.CreateRegisteredObject<MobileParty>();
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(partyId, out var playerParty));
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(captorPartyId, out var captorParty));
+            Assert.True(Server.ObjectManager.TryGetId(playerParty.Party, out var playerPartyBaseId));
+            Assert.True(Server.ObjectManager.TryGetId(captorParty.Party, out var captorPartyBaseId));
+
+            var tracker = Server.Resolve<ConversationPartyTracker>();
+            Assert.True(ConversationPartyHold.TryEngage(
+                tracker,
+                client.NetPeer,
+                playerPartyBaseId,
+                captorParty,
+                captorPartyBaseId,
+                engagerIsDefender: true));
+            Assert.True(captorParty.Ai.IsDisabled);
+        });
+
+        DefeatPlayerPartyInBattle(heroId, partyId, captorPartyId);
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(captorPartyId, out var captorParty));
+            var tracker = Server.Resolve<ConversationPartyTracker>();
+
+            Assert.False(captorParty.Ai.IsDisabled);
+            Assert.False(captorParty.Ai.DoNotMakeNewDecisions);
+            Assert.False(tracker.TryGetEngagement(client.NetPeer, out _));
+        });
+    }
+
+    [Fact]
+    public void PaidRansom_GrantsMutualFactionSafeConductForFortyEightHours()
+    {
+        var client = Clients.First();
+        var (heroId, partyId) = CreatePlayerHeroParty("MyControllerId");
+        var captorPartyId = TestEnvironment.CreateRegisteredObject<MobileParty>();
+        var captorClanId = TestEnvironment.CreateRegisteredObject<Clan>();
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<Hero>(heroId, out var playerHero));
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(captorPartyId, out var captorParty));
+            Assert.True(Server.ObjectManager.TryGetObject<Clan>(captorClanId, out var captorClan));
+            using (new AllowedThread())
+            {
+                playerHero.Gold = 1000;
+                captorParty.ActualClan = captorClan;
+            }
+            Assert.Same(captorClan, captorParty.MapFaction);
+        });
+
+        DefeatPlayerPartyInBattle(heroId, partyId, captorPartyId);
+
+        var disabledMethods = MapEventDisabledMethods
+            .Append(AccessTools.Method(typeof(MobileParty), nameof(MobileParty.TeleportPartyToOutSideOfEncounterRadius)))
+            .ToList();
+        client.Call(() =>
+        {
+            Assert.True(client.ObjectManager.TryGetObject<MobileParty>(partyId, out var playerParty));
+            client.Resolve<INetwork>().SendAll(new NetworkEndPlayerCaptivityAttempted(
+                heroId,
+                partyId,
+                playerParty.Position,
+                EndCaptivityDetail.Ransom,
+                facilitatorId: null,
+                ransomAmount: 250));
+        }, disabledMethods);
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<Hero>(heroId, out var playerHero));
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(partyId, out var playerParty));
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(captorPartyId, out var captorParty));
+            Assert.True(Server.ObjectManager.TryGetObject<Clan>(captorClanId, out var captorClan));
+
+            Assert.Equal(750, playerHero.Gold);
+            Assert.Null(playerHero.PartyBelongedToAsPrisoner);
+
+            var outgoing = Assert.Single(
+                DefaultMobilePartyAIModelPatches.GetPersistedFactionAttackProtections()
+                    .Where(protection => ReferenceEquals(protection.AttackerParty, playerParty)));
+            Assert.Same(playerParty, outgoing.AttackerParty);
+            Assert.Same(captorClan, outgoing.TargetFaction);
+
+            var incoming = Assert.Single(
+                DefaultMobilePartyAIModelPatches.GetPersistedAttackerFactionAgainstPartyProtections()
+                    .Where(protection => ReferenceEquals(protection.TargetParty, playerParty)));
+            Assert.Same(captorClan, incoming.AttackerFaction);
+            Assert.Same(playerParty, incoming.TargetParty);
+
+            // The E2E clock stubs HoursFromNow to zero. Replace the deadlines with real future times before
+            // exercising the encounter guard itself.
+            var disabledUntil = Campaign.Current.MapTimeTracker.Now + CampaignTime.Hours(48);
+            DefaultMobilePartyAIModelPatches.PreventFactionAttacksUntil(playerParty, captorClan, disabledUntil);
+            DefaultMobilePartyAIModelPatches.PreventAttackerFactionAttacksAgainstPartyUntil(
+                captorClan, playerParty, disabledUntil);
+
+            Assert.True(DefaultMobilePartyAIModelPatches.IsAttackPrevented(playerParty, captorParty));
+            Assert.True(DefaultMobilePartyAIModelPatches.IsAttackPrevented(captorParty, playerParty));
         });
     }
 

@@ -22,6 +22,8 @@ internal readonly struct NetworkRaidProductionRewardsUpdated : ICommand
     public readonly float SettlementHitPoints;
     [ProtoMember(8)]
     public readonly float VillageHearth;
+    [ProtoMember(9)]
+    public readonly string SettlementId;
 
     public NetworkRaidProductionRewardsUpdated(
         string componentId,
@@ -31,7 +33,8 @@ internal readonly struct NetworkRaidProductionRewardsUpdated : ICommand
         float raidDamage,
         bool hasSettlementState,
         float settlementHitPoints,
-        float villageHearth)
+        float villageHearth,
+        string settlementId)
     {
         ComponentId = componentId;
         ItemIds = itemIds;
@@ -41,5 +44,6 @@ internal readonly struct NetworkRaidProductionRewardsUpdated : ICommand
         HasSettlementState = hasSettlementState;
         SettlementHitPoints = settlementHitPoints;
         VillageHearth = villageHearth;
+        SettlementId = settlementId;
     }
 }

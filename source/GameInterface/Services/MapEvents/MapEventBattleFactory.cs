@@ -101,7 +101,7 @@ internal sealed class MapEventBattleFactory
         mapEvent = null;
         if (flags.ForceRaid)
         {
-            mapEvent = RaidEventComponent.CreateRaidEvent(attacker, defender).MapEvent;
+            mapEvent = CreateRaidEvent(attacker, defender, mapEventManager);
             return true;
         }
 
@@ -136,7 +136,7 @@ internal sealed class MapEventBattleFactory
             return mapEventManager.StartSiegeMapEvent(attacker, defender);
 
         if (defender.Settlement.IsVillage)
-            return RaidEventComponent.CreateRaidEvent(attacker, defender).MapEvent;
+            return CreateRaidEvent(attacker, defender, mapEventManager);
 
         if (defender.Settlement.IsHideout)
             return HideoutEventComponent.CreateHideoutEvent(attacker, defender, flags.ForceHideoutSendTroops).MapEvent;
@@ -206,9 +206,7 @@ internal sealed class MapEventBattleFactory
 
     private static MapEvent CreateFieldBattleEvent(PartyBase attacker, PartyBase defender, MapEventManager mapEventManager)
     {
-        var mapEvent = new MapEvent();
-        if (Campaign.Current?.VisualCreator?.MapEventVisualCreator == null)
-            mapEvent.MapEventVisual = HeadlessMapEventVisual.Instance;
+        var mapEvent = CreateUninitializedMapEvent();
 
         mapEvent.Initialize(
             attacker,
@@ -218,6 +216,37 @@ internal sealed class MapEventBattleFactory
 
         if (!mapEventManager.MapEvents.Contains(mapEvent))
             mapEventManager.OnMapEventCreated(mapEvent);
+
+        return mapEvent;
+    }
+
+    private static MapEvent CreateRaidEvent(PartyBase attacker, PartyBase defender, MapEventManager mapEventManager)
+    {
+        // RaidEventComponent.CreateRaidEvent constructs and initializes in one call. On a dedicated/headless
+        // server its MapEvent constructor receives no visual, so Initialize would dereference null before the
+        // authoritative raid could be registered. Keep vanilla's sequence while supplying the same no-op visual
+        // already used for server-created field battles.
+        var mapEvent = CreateUninitializedMapEvent();
+        mapEvent.Initialize(
+            attacker,
+            defender,
+            new RaidEventComponent(mapEvent),
+            MapEvent.BattleTypes.Raid);
+
+        if (defender.Settlement?.MilitiaPartyComponent != null)
+            defender.Settlement.MilitiaPartyComponent.MobileParty.MapEventSide = mapEvent.DefenderSide;
+
+        if (!mapEventManager.MapEvents.Contains(mapEvent))
+            mapEventManager.OnMapEventCreated(mapEvent);
+
+        return mapEvent;
+    }
+
+    private static MapEvent CreateUninitializedMapEvent()
+    {
+        var mapEvent = new MapEvent();
+        if (Campaign.Current?.VisualCreator?.MapEventVisualCreator == null)
+            mapEvent.MapEventVisual = HeadlessMapEventVisual.Instance;
 
         return mapEvent;
     }

@@ -462,6 +462,79 @@ public class VillageHostileActionTests : MapEventTestBase
         }
     }
 
+    [Theory]
+    [InlineData(VillageHostileAction.ForceVolunteers)]
+    [InlineData(VillageHostileAction.ForceSupplies)]
+    public void ForceActionSuccessContinue_ClearsPresentationAndRequestsFinalize(VillageHostileAction action)
+    {
+        var client = Clients.First();
+        var (heroId, mobilePartyId) = CreatePlayerHeroParty("PlayerOne");
+        var target = CreateVillageTarget();
+        string? mapEventId = null;
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(mobilePartyId, out var mobileParty));
+            Assert.True(Server.ObjectManager.TryGetObject<Settlement>(target.SettlementId, out var settlement));
+
+            var mapEvent = CreateHostileActionMapEvent(mobileParty.Party, settlement.Party, action);
+            mapEvent._battleState = BattleState.AttackerVictory;
+            Assert.True(Server.ObjectManager.TryGetId(mapEvent, out mapEventId));
+        }, MapEventDisabledMethods);
+
+        Assert.NotNull(mapEventId);
+        client.NetworkSentMessages.Clear();
+        using var menuSwitchRecorder = new GameMenuSwitchRecorder();
+
+        var disabledMethods = MapEventDisabledMethods
+            // Keep the finalize request recorded on the client without synchronously destroying the
+            // event while the patched consequence is still unwinding.
+            .Append(AccessTools.Method(
+                typeof(E2E.Tests.Environment.TestNetworkRouter),
+                nameof(E2E.Tests.Environment.TestNetworkRouter.SendAll),
+                new[] { typeof(LiteNetLib.NetPeer), typeof(IMessage) }))
+            .ToList();
+
+        client.Call(() =>
+        {
+            Assert.True(client.ObjectManager.TryGetObject<Hero>(heroId, out var hero));
+            Assert.True(client.ObjectManager.TryGetObject<MobileParty>(mobilePartyId, out var mobileParty));
+            Assert.True(client.ObjectManager.TryGetObject<Settlement>(target.SettlementId, out var settlement));
+            Assert.True(client.ObjectManager.TryGetObject<MapEvent>(mapEventId!, out var mapEvent));
+
+            using (new AllowedThread())
+            {
+                Campaign.Current.MainParty = mobileParty;
+                hero.PartyBelongedTo = mobileParty;
+                mobileParty.CurrentSettlement = settlement;
+            }
+            mapEvent._battleState = BattleState.AttackerVictory;
+
+            var encounter = ObjectHelper.SkipConstructor<PlayerEncounter>();
+            encounter._mapEvent = mapEvent;
+            encounter.ForceVolunteers = action == VillageHostileAction.ForceVolunteers;
+            encounter.ForceSupplies = action == VillageHostileAction.ForceSupplies;
+            Campaign.Current.PlayerEncounter = encounter;
+
+            var consequenceName = action == VillageHostileAction.ForceVolunteers
+                ? "village_force_volunteers_ended_successfully_on_consequence"
+                : "village_force_supplies_ended_successfully_on_consequence";
+            var consequence = AccessTools.Method(typeof(VillageHostileActionCampaignBehavior), consequenceName);
+            var behavior = ObjectHelper.SkipConstructor<VillageHostileActionCampaignBehavior>();
+            var args = new MenuCallbackArgs((MenuContext)null, null);
+
+            consequence.Invoke(behavior, new object[] { args });
+
+            Assert.Equal(GameMenuOption.LeaveType.Leave, args.optionLeaveType);
+            Assert.False(encounter.ForceVolunteers);
+            Assert.False(encounter.ForceSupplies);
+        }, disabledMethods);
+
+        Assert.Equal(new[] { "village" }, menuSwitchRecorder.SwitchesFor(client));
+        var finalize = client.NetworkSentMessages.GetMessages<NetworkMapEventFinalizeAttempted>().Single();
+        Assert.Equal(mapEventId, finalize.MapEventId);
+    }
+
     [Fact]
     public void ClientRequestRaid_WithForgedRequesterParty_IsRejected()
     {
@@ -789,7 +862,9 @@ public class VillageHostileActionTests : MapEventTestBase
 
             Assert.True(mapEvent.WasEverInLootingPhase);
             Assert.True(component.RaidDamage > 0);
-            Assert.True(settlement.SettlementHitPoints < 1f);
+            Assert.True(
+                settlement.SettlementHitPoints < 1f,
+                $"settlement hit points should replicate raid damage; actual={settlement.SettlementHitPoints:R}");
             Assert.True(settlement.Village.Hearth < 100f);
             Assert.True(GetItemAmount(component._raidProductionRewards, item) > 0);
         }, MapEventDisabledMethods);
@@ -892,7 +967,7 @@ public class VillageHostileActionTests : MapEventTestBase
     }
 
     [Fact]
-    public void RaidDefenderVictoryFinalizeRequest_ResetsPlayersToVillage()
+    public void RaidResistanceVictory_FinalizesBattleAndAutomaticallyContinuesRaid()
     {
         var client = Clients.First();
         var (heroId, mobilePartyId) = CreatePlayerHeroParty("PlayerOne");
@@ -917,10 +992,13 @@ public class VillageHostileActionTests : MapEventTestBase
             }
 
             var mapEvent = CreateHostileActionMapEvent(mobileParty.Party, settlement.Party, VillageHostileAction.Raid);
+            var defenderMapEventParty = mapEvent.DefenderSide.Parties.Single(x => x.Party == settlement.Party);
+            var defenderDescriptor = defenderMapEventParty.Troops.Single(x => x.Troop == defenderTroop).Descriptor;
+            defenderMapEventParty.OnTroopWounded(defenderDescriptor);
             mapEvent._battleState = BattleState.AttackerVictory;
 
             Assert.True(mapEvent.HasWinner);
-            Assert.True(mapEvent.DefenderSide.TroopCount > 0);
+            Assert.Equal(0, settlement.Party.NumberOfHealthyMembers);
             Assert.True(Server.ObjectManager.TryGetId(mapEvent, out mapEventId));
         }, MapEventDisabledMethods);
 
@@ -929,24 +1007,46 @@ public class VillageHostileActionTests : MapEventTestBase
 
         client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkMapEventFinalizeAttempted(mapEventId!)), MapEventDisabledMethods);
 
-        var reset = Server.NetworkSentMessages.GetMessages<NetworkRaidBattleResetToVillage>().Single();
-        Assert.Equal(target.SettlementId, reset.SettlementId);
-        Assert.Contains(attackerPartyId, reset.PartyIds);
+        var transition = Server.NetworkSentMessages.GetMessages<NetworkRaidBattleTransition>().Single();
+        Assert.Equal(target.SettlementId, transition.SettlementId);
+        Assert.Contains(attackerPartyId, transition.PartyIds);
+        Assert.False(string.IsNullOrWhiteSpace(transition.MapEventId));
+        Assert.NotEqual(mapEventId, transition.MapEventId);
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkMapEventFinalized>());
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkChangeBattleState>());
+        Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionStarted>());
 
         Server.Call(() =>
         {
             Assert.False(Server.ObjectManager.TryGetObject<MapEvent>(mapEventId!, out var _));
+            Assert.True(Server.ObjectManager.TryGetObject<MapEvent>(transition.MapEventId, out var continuedRaid));
             Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(mobilePartyId, out var mobileParty));
             Assert.True(Server.ObjectManager.TryGetObject<Settlement>(target.SettlementId, out var settlement));
             Assert.True(Server.ObjectManager.TryGetObject<Village>(target.VillageId, out var village));
 
-            Assert.Null(mobileParty.Party.MapEventSide);
+            Assert.Same(continuedRaid, mobileParty.MapEvent);
             Assert.Same(settlement, mobileParty.CurrentSettlement);
-            Assert.Equal(Village.VillageStates.Normal, village.VillageState);
-            Assert.Equal(1f, settlement.SettlementHitPoints, 3);
+            Assert.Equal(Village.VillageStates.BeingRaided, village.VillageState);
+            Assert.Equal(0.5f, settlement.SettlementHitPoints, 3);
+            Assert.True(
+                continuedRaid.IsActiveSlowVillageRaid(),
+                $"Component={continuedRaid.Component?.GetType().Name}, HasWinner={continuedRaid.HasWinner}, " +
+                $"HealthyDefenders={continuedRaid.DefenderSide?.GetTotalHealthyTroopCountOfSide()}, " +
+                $"TotalDefenders={continuedRaid.DefenderSide?.TroopCount}, " +
+                $"ContainsPlayer={continuedRaid.ContainsPlayerParty()}, " +
+                $"AiInterventionSuppressed={continuedRaid.IsRaidAiInterventionSuppressed()}");
         }, MapEventDisabledMethods);
+
+        foreach (var syncedClient in Clients)
+        {
+            syncedClient.Call(() =>
+            {
+                Assert.False(syncedClient.ObjectManager.TryGetObject<MapEvent>(mapEventId!, out var _));
+                Assert.True(syncedClient.ObjectManager.TryGetObject<MapEvent>(transition.MapEventId, out var continuedRaid));
+                Assert.True(syncedClient.ObjectManager.TryGetObject<MobileParty>(mobilePartyId, out var mobileParty));
+                Assert.Same(continuedRaid, mobileParty.MapEvent);
+            });
+        }
     }
 
     [Fact]
@@ -1146,7 +1246,7 @@ public class VillageHostileActionTests : MapEventTestBase
     {
         var client = Clients.First();
         var (playerHeroId, playerMobilePartyId) = CreatePlayerHeroParty("PlayerOne");
-        RegisterPeer(client, "PlayerOne");
+        TestEnvironment.ConnectRegisteredPlayer(client, "PlayerOne");
         var aiRaiderMobilePartyId = TestEnvironment.CreateRegisteredObject<MobileParty>();
         var aiRaiderTroopId = TestEnvironment.CreateRegisteredObject<CharacterObject>();
         var target = CreateVillageTarget();
@@ -1743,6 +1843,9 @@ public class VillageHostileActionTests : MapEventTestBase
             Assert.Same(joinerParty, MobileParty.MainParty);
             Assert.Same(mapEvent, PlayerEncounter.EncounteredBattle);
             Assert.True(mapEvent.IsRaidHostileAction());
+            Assert.False(
+                mapEvent.IsActiveSlowVillageRaid(),
+                $"HealthyDefenders={mapEvent.DefenderSide.GetTotalHealthyTroopCountOfSide()}, TotalDefenders={mapEvent.DefenderSide.TroopCount}");
 
             var runOriginal = InvokeRaidJoinEncounterConsequencePrefix("game_menu_join_encounter_help_attackers_on_consequence");
 
@@ -1770,20 +1873,28 @@ public class VillageHostileActionTests : MapEventTestBase
         {
             var gameStateManager = Game.Current.GameStateManager;
             var mapState = gameStateManager.CreateState<MapState>();
-            mapState._menuContext = ObjectHelper.SkipConstructor<MenuContext>();
+            var menuContext = ObjectHelper.SkipConstructor<MenuContext>();
+            menuContext.GameMenu = new GameMenu("encounter");
+            mapState._menuContext = menuContext;
             gameStateManager._gameStates.Add(mapState);
+            Assert.Same(menuContext, Campaign.Current.CurrentMenuContext);
         });
 
         using var menuSwitchRecorder = new GameMenuSwitchRecorder();
+
+        client.Call(() =>
+        {
+            Assert.True(client.ObjectManager.TryGetObject<PartyBase>(request.PartyId, out var requestedParty));
+            Assert.Same(PartyBase.MainParty, requestedParty);
+            Assert.True(PlayerEncounter.Current.IsJoinedBattle);
+            Assert.Same(PlayerEncounter.Current._mapEvent, PlayerEncounter.Battle);
+        });
 
         client.SimulateMessage(Server.NetPeer, new NetworkJoinBattleReply(
             request.RequestId,
             request.MapEventId,
             request.PartyId,
             accepted: false));
-
-        Assert.Equal(new[] { "join_encounter" }, menuSwitchRecorder.SwitchesFor(client));
-        menuSwitchRecorder.Clear();
 
         client.Call(() =>
         {
@@ -1796,6 +1907,7 @@ public class VillageHostileActionTests : MapEventTestBase
             Assert.Same(mapEvent, PlayerEncounter.EncounteredBattle);
             Assert.Null(joinerParty.MapEvent);
             Assert.Null(joinerParty.Party.MapEventSide);
+            Assert.NotNull(Campaign.Current.CurrentMenuContext);
 
             var runOriginal = InvokeRaidJoinEncounterConsequencePrefix("game_menu_join_encounter_help_attackers_on_consequence");
             Assert.False(runOriginal);
@@ -1805,7 +1917,7 @@ public class VillageHostileActionTests : MapEventTestBase
             Assert.Null(joinerParty.Party.MapEventSide);
         }, disabledMethods);
 
-        Assert.Equal(new[] { "encounter" }, menuSwitchRecorder.SwitchesFor(client));
+        Assert.Equal(new[] { "join_encounter", "encounter" }, menuSwitchRecorder.SwitchesFor(client));
         menuSwitchRecorder.Clear();
 
         var requests = client.NetworkSentMessages.GetMessages<NetworkRequestJoinBattle>().ToArray();
@@ -1820,7 +1932,10 @@ public class VillageHostileActionTests : MapEventTestBase
 
             using (new AllowedThread())
             {
-                joinerParty.Party.MapEventSide = mapEvent.AttackerSide;
+                // Reproduce the already-applied authoritative add without driving the constructor-skipped
+                // client's AttachedParties collection through PartyBase.MapEventSide's vanilla setter.
+                joinerParty.Party._mapEventSide = mapEvent.AttackerSide;
+                mapEvent.AttackerSide._battleParties.Add(new MapEventParty(joinerParty.Party));
             }
 
             Assert.Same(mapEvent, joinerParty.MapEvent);
@@ -2599,7 +2714,9 @@ public class VillageHostileActionTests : MapEventTestBase
             Assert.Same(component, mapEvent.Component);
             Assert.True(mapEvent.WasEverInLootingPhase);
             Assert.True(raidComponent.RaidDamage > 0);
-            Assert.True(settlement.SettlementHitPoints < 1f);
+            Assert.True(
+                settlement.SettlementHitPoints < 1f,
+                $"settlement hit points should replicate raid damage; actual={settlement.SettlementHitPoints:R}");
             Assert.True(village.Hearth < 100f);
             Assert.NotNull(raidComponent._raidProductionRewards);
             Assert.True(GetItemAmount(raidComponent._raidProductionRewards, item) > 0);
@@ -2928,9 +3045,12 @@ public class VillageHostileActionTests : MapEventTestBase
                 boundOwnerKingdom.RulingClan = boundOwnerClan;
                 boundTown.OwnerClan = boundOwnerClan;
                 boundTown.IsOwnerUnassigned = false;
-                settlement.Village = village;
-                settlement.SetSettlementComponent(village);
                 settlement.Party = new PartyBase(settlement);
+                settlement.Village = village;
+                // SettlementComponent.SetOwner reads Settlement.Party. Build the party first so
+                // vanilla RaidEventComponent.CreateRaidEvent can resolve village.Settlement.
+                settlement.SetSettlementComponent(village);
+                village.Owner = settlement.Party;
                 village.Bound = boundSettlement;
                 village.VillageState = Village.VillageStates.Normal;
                 village.Hearth = 100f;
@@ -2948,6 +3068,7 @@ public class VillageHostileActionTests : MapEventTestBase
             client.Call(() =>
             {
                 Assert.True(client.ObjectManager.TryGetObject<Settlement>(settlementId, out var settlement));
+                Assert.True(client.ObjectManager.TryGetObject<Village>(villageId, out var village));
                 Assert.True(client.ObjectManager.TryGetObject<Clan>(boundOwnerClanId, out var boundOwnerClan));
                 Assert.True(client.ObjectManager.TryGetObject<Hero>(boundOwnerHeroId, out var boundOwnerHero));
 
@@ -2962,16 +3083,17 @@ public class VillageHostileActionTests : MapEventTestBase
                     using (new AllowedThread())
                     {
                         settlementParty = new PartyBase(settlement);
-                        settlement.Party = settlementParty;
                     }
 
                     Assert.True(client.ObjectManager.AddExisting(settlementPartyId!, settlementParty));
-                    return;
                 }
 
                 using (new AllowedThread())
                 {
                     settlement.Party = settlementParty;
+                    settlement.Village = village;
+                    settlement.SetSettlementComponent(village);
+                    village.Owner = settlementParty;
                 }
             });
         }

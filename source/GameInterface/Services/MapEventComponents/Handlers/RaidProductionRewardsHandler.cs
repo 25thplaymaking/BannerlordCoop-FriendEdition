@@ -13,6 +13,7 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Roster;
+using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using TaleWorlds.ObjectSystem;
 
@@ -75,6 +76,10 @@ internal class RaidProductionRewardsHandler : IHandler
         }
 
         var settlement = component.MapEvent?.MapEventSettlement;
+        string settlementId = null;
+        if (settlement != null)
+            objectManager.TryGetId(settlement, out settlementId);
+
         network.SendAll(new NetworkRaidProductionRewardsUpdated(
             componentId,
             itemIds.ToArray(),
@@ -83,7 +88,8 @@ internal class RaidProductionRewardsHandler : IHandler
             component.RaidDamage,
             settlement != null,
             settlement?.SettlementHitPoints ?? 0f,
-            settlement?.Village?.Hearth ?? 0f));
+            settlement?.Village?.Hearth ?? 0f,
+            settlementId));
     }
 
     private void Handle_RaidLootedItemsUpdated(MessagePayload<RaidLootedItemsUpdated> payload)
@@ -160,9 +166,12 @@ internal class RaidProductionRewardsHandler : IHandler
             {
                 component._raidProductionRewards = rewards;
                 component.RaidDamage = data.RaidDamage;
-                if (data.HasSettlementState && component.MapEvent?.MapEventSettlement != null)
+                Settlement settlement = component.MapEvent?.MapEventSettlement;
+                if (settlement == null && !string.IsNullOrEmpty(data.SettlementId))
+                    objectManager.TryGetObject(data.SettlementId, out settlement);
+
+                if (data.HasSettlementState && settlement != null)
                 {
-                    var settlement = component.MapEvent.MapEventSettlement;
                     settlement.SettlementHitPoints = data.SettlementHitPoints;
                     if (settlement.Village != null)
                         settlement.Village.Hearth = data.VillageHearth;

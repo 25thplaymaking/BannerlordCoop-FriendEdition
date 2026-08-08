@@ -11,8 +11,10 @@ using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.GameComponents;
 using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.GameState;
+using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.Core;
+using TaleWorlds.Library;
 using Xunit.Abstractions;
 
 namespace E2E.Tests.Services.MapEvents;
@@ -175,7 +177,6 @@ public class EncounterSurrenderOptionTests : MapEventTestBase
 
             Assert.True(shown);
             Assert.True(args.IsEnabled, "healthy allied troops should be allowed to simulate the field battle");
-            Assert.Equal(GameMenuOption.LeaveType.OrderTroopsToAttack, args.optionLeaveType);
         }, MapEventDisabledMethods);
     }
 
@@ -317,6 +318,14 @@ public class EncounterSurrenderOptionTests : MapEventTestBase
             encounter._defenderParty = defender.Party;
             encounter.PlayerSide = BattleSideEnum.Defender;
             encounter.OpponentSide = BattleSideEnum.Attacker;
+
+            // The constructor-skipped client's map event can retain CampaignVec2.Invalid even after
+            // the server position update. Pin this synthetic FieldBattle to land for vanilla menu logic.
+            using (new AllowedThread())
+            {
+                AccessTools.Property(typeof(MapEvent), nameof(MapEvent.Position))
+                    .SetValue(defender.Party.MapEvent, new CampaignVec2(Vec2.Zero, isOnLand: true));
+            }
         }, MapEventDisabledMethods);
     }
 

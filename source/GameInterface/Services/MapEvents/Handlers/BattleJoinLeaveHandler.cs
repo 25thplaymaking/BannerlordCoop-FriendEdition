@@ -186,8 +186,12 @@ internal class BattleJoinLeaveHandler : IHandler
                 return;
             }
 
+            // Capture this before LeaveBattle tears down the provisional join state. During a real map-menu
+            // transition the engine can clear CurrentMenuContext as part of that teardown, but the rejected
+            // player still needs to return to join_encounter so the same action is retryable.
+            var shouldRestoreJoinMenu = Campaign.Current.CurrentMenuContext != null;
             PlayerEncounter.LeaveBattle();
-            if (Campaign.Current.CurrentMenuContext != null)
+            if (shouldRestoreJoinMenu || Campaign.Current.CurrentMenuContext != null)
                 GameMenu.SwitchToMenu("join_encounter");
         }, context: nameof(Handle_NetworkJoinBattleReply));
     }

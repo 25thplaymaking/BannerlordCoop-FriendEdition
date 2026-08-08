@@ -4,6 +4,8 @@ using Common.Messaging;
 using Common.Network;
 using Common.Util;
 using GameInterface.Services.MapEventParties.Messages;
+using GameInterface.Services.MobileParties.Data;
+using GameInterface.Services.MobileParties.Messages.Behavior;
 using GameInterface.Services.MapEvents;
 using GameInterface.Services.MapEvents.Messages;
 using GameInterface.Services.MapEvents.Messages.Leave;
@@ -60,17 +62,20 @@ internal class PlayerCaptivityServerHandler : IHandler
     private readonly INetwork network;
     private readonly IMessageBroker messageBroker;
     private readonly IPlayerManager playerManager;
+    private readonly ConversationPartyTracker conversationPartyTracker;
 
     public PlayerCaptivityServerHandler(
         IObjectManager objectManager,
         INetwork network,
         IMessageBroker messageBroker,
-        IPlayerManager playerManager)
+        IPlayerManager playerManager,
+        ConversationPartyTracker conversationPartyTracker)
     {
         this.objectManager = objectManager;
         this.network = network;
         this.messageBroker = messageBroker;
         this.playerManager = playerManager;
+        this.conversationPartyTracker = conversationPartyTracker;
 
         // ModInformation is evaluated per call (tests flip it per instance), so each handler
         // guards itself instead of gating the subscriptions here.
@@ -138,6 +143,28 @@ internal class PlayerCaptivityServerHandler : IHandler
         // no native side effects, so parking before the roster work only changes coop-internal ordering;
         // the captivity-end flow reactivates the party.
         playerParty.IsActive = false;
+
+        // Vanilla ends captivity setup with the army block at the tail of
+        // PlayerCaptivity.StartCaptivityInternal (IL_0089-IL_00C5): if the captured player's party is in an
+        // army, disband it when the player LED it, then drop the membership. That block is unreachable in
+        // coop - native TakePrisonerAction.ApplyInternal gates its whole captivity branch on
+        // `prisonerCharacter == Hero.MainHero` (IL_0062) and a captured CLIENT hero never is, while
+        // MobileParty.Army is excluded from AutoSync (MobilePartySync.cs:37). Run it here, AFTER the park:
+        // Army.DisperseInternal skips repositioning parties with IsActive == false, which is exactly why
+        // vanilla deactivates the party first (StartCaptivityInternal IL_0039).
+        // The captured player can no longer finish its own PlayerEncounter, and that Finish is the ONLY
+        // production trigger that releases a ConversationPartyHold. TryEngage disabled the captor's AI with
+        // DisableAi(), which sets _enableAgainAtHour = CampaignTime.Never - so without this the captor sits
+        // frozen ("Holding.", never walking the prisoner to a dungeon) for the entire captivity, and resumes
+        // only when captivity ends and the client finally calls Finish. Release it here instead.
+        ReleaseConversationHoldHeldBy(playerParty);
+        // MobileParty.Position is not AutoSynced, so the owning client keeps its stale pre-battle position
+        // while the server and every OTHER client have the authoritative one - measured live as the captured
+        // party sitting in the wrong place on its own screen. Push the snapshot so all three converge.
+        PublishCapturedPartyPosition(playerParty);
+
+
+        DisbandArmyOfCapturedPlayer(playerParty, hero);
 
         // BR-061: surviving companion heroes riding in the surrendered party become prisoners of the
         // captor through the same TakePrisonerAction that captured the leader, BEFORE the rosters are
@@ -214,6 +241,74 @@ internal class PlayerCaptivityServerHandler : IHandler
                 companion.StringId, captor.MobileParty?.StringId);
             TakePrisonerAction.Apply(captor, companion);
         }
+    }
+
+
+
+    /// <summary>
+    /// Replicates a captured party's authoritative position to every client, including its owner.
+    /// </summary>
+    private void PublishCapturedPartyPosition(MobileParty playerParty)
+    {
+        if (playerParty == null) return;
+        if (!ContainerProvider.TryResolve<IMobilePartyBehaviorSnapshot>(out var snapshot)) return;
+        if (!snapshot.TryCreate(playerParty, out PartyBehaviorUpdateData data)) return;
+
+        data.ForcePosition = true;
+        data.ResetMovementToHold = true;
+        messageBroker.Publish(this, new PartyBehaviorUpdated(ref data));
+    }
+
+    /// <summary>
+    /// Releases any AI party this captured player was holding through a conversation engagement.
+    /// </summary>
+    /// <remarks>
+    /// Acts on the specific captured party's own engagement, never on "the" player, so one capture cannot
+    /// free a lord another player is still talking to.
+    /// </remarks>
+    private void ReleaseConversationHoldHeldBy(MobileParty playerParty)
+    {
+        if (conversationPartyTracker == null || playerParty?.Party == null) return;
+        if (!objectManager.TryGetId(playerParty.Party, out var engagerPartyId)) return;
+
+        ConversationPartyHold.EndEngagementForEngagerParty(conversationPartyTracker, engagerPartyId);
+    }
+
+    /// <summary>
+    /// Server-side stand-in for the army half of native <c>PlayerCaptivity.StartCaptivityInternal</c>
+    /// (IL_0089-IL_00C5). Native gates that block on the captured hero being <see cref="Hero.MainHero"/>; the
+    /// coop equivalent is "the hero registered to the player that owns this party", so a companion captured
+    /// alongside its leader - which re-enters <see cref="Handle_PrisonerTaken"/> through the TakePrisonerAction
+    /// postfix - cannot disband the army a second time.
+    /// </summary>
+    /// <remarks>
+    /// The disband must PRECEDE the membership drop. <c>MobileParty.set_Army</c> calls
+    /// <c>Army.OnRemovePartyInternal</c>, which disbands a leaderless army itself through
+    /// <c>DisbandArmyAction.ApplyByLeaderPartyRemoved</c> - the wrong dispersion reason. Vanilla's order keeps
+    /// the reason PlayerTakenPrisoner.
+    ///
+    /// Both writes run with patches live, so each party removal replicates on its own: ArmyPatches publishes
+    /// MobilePartyInArmyRemoved and lets native run, ArmyHandler broadcasts NetworkRemovePartyInArmy, and the
+    /// clients apply it.
+    /// </remarks>
+    private void DisbandArmyOfCapturedPlayer(MobileParty playerParty, Hero capturedHero)
+    {
+        var army = playerParty?.Army;
+        if (army == null) return;
+
+        if (!TryGetPlayerHeroOfParty(playerParty, out var owningPlayerHero) || owningPlayerHero != capturedHero)
+            return;
+
+        PlayerCaptivityLogger.Debug(
+            "DisbandArmyOfCapturedPlayer: party={PartyId} army={ArmyName} playerLedIt={PlayerLedIt}",
+            playerParty.StringId, army.Name?.ToString(), army.LeaderParty == playerParty);
+
+        if (army.LeaderParty == playerParty)
+        {
+            DisbandArmyAction.ApplyByPlayerTakenPrisoner(army);
+        }
+
+        playerParty.Army = null;
     }
 
     /// <summary>
@@ -475,11 +570,25 @@ internal class PlayerCaptivityServerHandler : IHandler
                 PlayerCaptivityLogger.Debug("Handle_NetworkEndPlayerCaptivityAttempted (server): hero={HeroId} party={PartyId} detail={Detail} facilitator={FacilitatorId}",
                     playerHero.StringId, playerParty.StringId, detail, facilitator?.StringId);
 
-                ReleasePlayerFromCaptivity(playerHero, playerParty, detail, facilitator, releasePosition);
+                var isPaidRansom = detail == EndCaptivityDetail.Ransom;
+                if (isPaidRansom && (ransomAmount <= 0 || playerHero.Gold < ransomAmount))
+                {
+                    Logger.Warning(
+                        "Refused invalid ransom release for {HeroId}: amount={Amount}, available={Gold}",
+                        playerHero.StringId,
+                        ransomAmount,
+                        playerHero.Gold);
+                    return;
+                }
 
-                if (detail == EndCaptivityDetail.Ransom && ransomAmount != 0)
+                var capturerFaction = playerHero.PartyBelongedToAsPrisoner?.MapFaction;
+                if (!ReleasePlayerFromCaptivity(playerHero, playerParty, detail, facilitator, releasePosition))
+                    return;
+
+                if (isPaidRansom)
                 {
                     GiveGoldAction.ApplyBetweenCharacters(playerHero, null, ransomAmount, false);
+                    GrantRansomSafeConduct(playerParty, capturerFaction);
                 }
 
                 network.Send(peer, new NetworkPlayerCaptivityEnded());
@@ -520,7 +629,12 @@ internal class PlayerCaptivityServerHandler : IHandler
             ? payload.What.ReleasePosition
             : GetReleasePosition(captorParty, playerParty.Position);
 
-        ReleasePlayerFromCaptivity(playerHero, playerParty, payload.What.Detail, payload.What.Facilitator, releasePosition);
+        var capturerFaction = captorParty?.MapFaction;
+        if (ReleasePlayerFromCaptivity(playerHero, playerParty, payload.What.Detail, payload.What.Facilitator, releasePosition) &&
+            payload.What.Detail == EndCaptivityDetail.Ransom)
+        {
+            GrantRansomSafeConduct(playerParty, capturerFaction);
+        }
     }
 
     /// <summary>
@@ -531,7 +645,7 @@ internal class PlayerCaptivityServerHandler : IHandler
     /// instance's main hero; the menu/encounter cleanup the native version does happens on the owning client
     /// instead (<see cref="PlayerCaptivityClientHandler"/>).
     /// </summary>
-    private void ReleasePlayerFromCaptivity(Hero playerHero, MobileParty playerParty, EndCaptivityDetail detail, Hero facilitator, CampaignVec2 releasePosition)
+    private bool ReleasePlayerFromCaptivity(Hero playerHero, MobileParty playerParty, EndCaptivityDetail detail, Hero facilitator, CampaignVec2 releasePosition)
     {
         // Guard against re-processing an already-ended captivity: a client release request can race a
         // server-initiated release, and a second pass would re-add the hero to the member roster,
@@ -541,7 +655,7 @@ internal class PlayerCaptivityServerHandler : IHandler
         if (playerHero.PartyBelongedToAsPrisoner == null)
         {
             PlayerCaptivityLogger.Debug("ReleasePlayerFromCaptivity: skipping, hero {HeroId} is no longer captive", playerHero.StringId);
-            return;
+            return false;
         }
 
         // Snapshot the captor before the release: clearing the captivity below nulls
@@ -670,6 +784,28 @@ internal class PlayerCaptivityServerHandler : IHandler
             playerParty.Party.SetVisualAsDirty();
             RecreateVisual(playerParty);
         }
+
+        return true;
+    }
+
+    private static void GrantRansomSafeConduct(MobileParty playerParty, IFaction capturerFaction)
+    {
+        if (playerParty?.IsActive != true || capturerFaction == null) return;
+
+        var disabledUntil = CampaignTime.HoursFromNow(48);
+
+        // Mutual at the encounter layer: the released party cannot immediately attack the captor's
+        // faction, and any AI party in that faction is barred from immediately recapturing the player.
+        // This is intentionally scoped to the released party instead of making two whole kingdoms
+        // globally peaceful on behalf of one co-op player.
+        DefaultMobilePartyAIModelPatches.PreventFactionAttacksUntil(
+            playerParty,
+            capturerFaction,
+            disabledUntil);
+        DefaultMobilePartyAIModelPatches.PreventAttackerFactionAttacksAgainstPartyUntil(
+            capturerFaction,
+            playerParty,
+            disabledUntil);
     }
 
     private CampaignVec2 GetReleasePosition(PartyBase captorParty, CampaignVec2 fallbackPosition)

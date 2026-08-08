@@ -84,6 +84,9 @@ internal class PlayerPartyInteractionOutcomeHandler
             case PlayerPartyInteractionOutcomeType.VassalAccepted:
                 HandleVassalAccepted(outcome);
                 break;
+            case PlayerPartyInteractionOutcomeType.TravelTogetherAccepted:
+                HandleTravelTogetherAccepted(outcome);
+                break;
             case PlayerPartyInteractionOutcomeType.ClanJoinDeclined:
             case PlayerPartyInteractionOutcomeType.TradeDeclined:
             case PlayerPartyInteractionOutcomeType.VassalDeclined:
@@ -92,10 +95,58 @@ internal class PlayerPartyInteractionOutcomeHandler
             case PlayerPartyInteractionOutcomeType.Disconnected:
             case PlayerPartyInteractionOutcomeType.HostileDemandAccepted:
             case PlayerPartyInteractionOutcomeType.HostileDemandYielded:
+            case PlayerPartyInteractionOutcomeType.TravelTogetherDeclined:
                 // All the above lead to ending the interaction, however we may intend to have them lead to different
                 // logic in the future.
                 break;
         }
+    }
+
+    private void HandleTravelTogetherAccepted(PlayerPartyInteractionOutcome outcome)
+    {
+        try
+        {
+            RunOnGameThread(() => ApplyTravelTogether(outcome), "Create player travel group");
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e,
+                "Failed to create player travel group. SessionId={SessionId}, InitiatorPartyId={InitiatorPartyId}, ResponderPartyId={ResponderPartyId}",
+                outcome.SessionId,
+                outcome.InitiatorPartyId,
+                outcome.ResponderPartyId);
+        }
+    }
+
+    private void ApplyTravelTogether(PlayerPartyInteractionOutcome outcome)
+    {
+        if (!objectManager.TryGetObject(outcome.InitiatorPartyId, out PartyBase initiatorParty))
+        {
+            Logger.Warning("Unable to create player travel group: initiator party not found. PartyId={PartyId}", outcome.InitiatorPartyId);
+            return;
+        }
+
+        if (!objectManager.TryGetObject(outcome.ResponderPartyId, out PartyBase responderParty))
+        {
+            Logger.Warning("Unable to create player travel group: responder party not found. PartyId={PartyId}", outcome.ResponderPartyId);
+            return;
+        }
+
+        if (!PlayerPartyTravelGroup.TryCreate(initiatorParty, responderParty, out var army))
+        {
+            Logger.Warning(
+                "Unable to create player travel group: eligibility changed before acceptance. InitiatorPartyId={InitiatorPartyId}, ResponderPartyId={ResponderPartyId}",
+                outcome.InitiatorPartyId,
+                outcome.ResponderPartyId);
+            return;
+        }
+
+        Logger.Information(
+            "Created player travel group. SessionId={SessionId}, LeaderPartyId={LeaderPartyId}, FollowerPartyId={FollowerPartyId}, Army={Army}",
+            outcome.SessionId,
+            outcome.InitiatorPartyId,
+            outcome.ResponderPartyId,
+            army.Name);
     }
 
     private void HandleVassalAccepted(PlayerPartyInteractionOutcome outcome)

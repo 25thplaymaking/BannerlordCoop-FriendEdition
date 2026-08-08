@@ -27,7 +27,8 @@ public enum PlayerPartyInteractionOption
     ConfirmHostileDemand,
     CancelHostileDemand,
     RefuseHostileDemand,
-    YieldHostileDemand
+    YieldHostileDemand,
+    TravelTogether
 }
 
 public enum PlayerPartyInteractionVassalUnavailableReason
@@ -45,7 +46,8 @@ public enum PlayerPartyInteractionProposal
     Trade,
     JoinClan,
     Vassal,
-    HostileDemand
+    HostileDemand,
+    TravelTogether
 }
 
 public enum PlayerPartyInteractionOutcomeType
@@ -61,7 +63,9 @@ public enum PlayerPartyInteractionOutcomeType
     Rejected,
     Disconnected,
     HostileDemandAccepted,
-    HostileDemandYielded
+    HostileDemandYielded,
+    TravelTogetherAccepted,
+    TravelTogetherDeclined
 }
 
 public enum PlayerPartyInteractionDeniedReason

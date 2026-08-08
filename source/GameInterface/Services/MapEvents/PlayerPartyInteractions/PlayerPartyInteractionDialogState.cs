@@ -67,7 +67,8 @@ public static class PlayerPartyInteractionDialogState
             return true;
         }
 
-        if (option == PlayerPartyInteractionOption.OfferServices && IsHostile)
+        if ((option == PlayerPartyInteractionOption.OfferServices ||
+             option == PlayerPartyInteractionOption.TravelTogether) && IsHostile)
         {
             explanation = new TextObject("{=coop_player_party_interaction_hostile_disabled}Not available while hostile");
             return false;
@@ -196,6 +197,8 @@ public static class PlayerPartyInteractionDialogState
                 return "I wish to swear my allegiance to your majesty.";
             case PlayerPartyInteractionProposal.HostileDemand:
                 return "I offer you one chance to surrender or die";
+            case PlayerPartyInteractionProposal.TravelTogether:
+                return "Let us combine our parties and travel together.";
             default:
                 return $"{OtherPlayerName} has made a proposal.";
         }

@@ -860,6 +860,7 @@ public class AgentMovementHandler : IAgentMovementHandler
         AgentControllerType originalController = mount.Controller;
         if (originalController != AgentControllerType.None)
             mount.Controller = AgentControllerType.None;
+        puppetMountStateRepairer.PreserveRiderlessPuppet(mount);
         _syntheticMountTurns[mount] =
             new SyntheticMountTurnState(
                 turnDirection,
@@ -893,6 +894,7 @@ public class AgentMovementHandler : IAgentMovementHandler
                 : ReferenceEquals(mount.RiderAgent, syntheticTurn.Rider)
                     && agentRegistry.IsLocallyControlled(syntheticTurn.Rider)))
         {
+            puppetMountStateRepairer.PrepareForAiControl(mount);
             mount.Controller = syntheticTurn.OriginalController;
         }
     }
@@ -1126,6 +1128,7 @@ public class AgentMovementHandler : IAgentMovementHandler
             _dismountedHorses[agent] = horse;
             _interpolator.Forget(horse);
             agent.MountAgent = null;
+            puppetMountStateRepairer.PreserveRiderlessPuppet(horse);
             RestoreLocallyControlledMount(horse);
         }
         else if (ownerMounted && !agent.HasMount)
@@ -1155,6 +1158,7 @@ public class AgentMovementHandler : IAgentMovementHandler
                     _interpolator.Forget(previous);
                 }
                 agent.MountAgent = reported;
+                puppetMountStateRepairer.PreserveRiderlessPuppet(previous);
                 RestoreLocallyControlledMount(previous);
             }
         }

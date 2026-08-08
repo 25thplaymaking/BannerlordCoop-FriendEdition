@@ -5,6 +5,8 @@ using Common.PacketHandlers;
 using Common.Serialization;
 using E2E.Tests.Environment.Mock;
 using E2E.Tests.Environment.MockEngine;
+using GameInterface;
+using HarmonyLib;
 using Missions;
 using Missions.Agents;
 using Missions.Agents.Packets;
@@ -20,6 +22,52 @@ namespace E2E.Tests.Services.Missions;
 public class MountedPuppetMovementTests : MissionTestEnvironment
 {
     public MountedPuppetMovementTests(ITestOutputHelper output) : base(output) { }
+
+    [Fact]
+    public void MissionModule_RegistersTheMountAiSafetyPatch()
+    {
+        HarmonyPatchCategoryRegistration registration = Assert.Single(
+            MissionModule.CreatePatchCategoryRegistrations(),
+            candidate => candidate.Category == MissionModule.MountAiSafetyPatchCategory);
+        var harmony = new Harmony(
+            $"{nameof(MissionModule_RegistersTheMountAiSafetyPatch)}.{Guid.NewGuid()}");
+        MethodInfo target = AccessTools.Method(
+            typeof(HumanAIComponent),
+            "FindClosestMountAvailable");
+
+        try
+        {
+            registration.Apply(harmony);
+
+            Patches patches = Harmony.GetPatchInfo(target);
+            Assert.Contains(
+                patches.Prefixes,
+                patch => patch.owner == harmony.Id);
+        }
+        finally
+        {
+            harmony.Unpatch(target, HarmonyPatchType.All, harmony.Id);
+        }
+    }
+
+    [Fact]
+    public void MountSearchInvariant_AddsExactlyOneCommonAiComponent()
+    {
+        using var fixture = new MissionEngineFixture();
+        var peer = Clients.First();
+
+        peer.Call(() =>
+        {
+            var mock = fixture.CreateMission(peer);
+            Agent horse = mock.SpawnMount();
+            Assert.True(AgentMirror.TryGet(horse, out var horseMirror));
+
+            Assert.True(PuppetMountStateRepairer.EnsureMountSearchInvariant(horse));
+            Assert.False(PuppetMountStateRepairer.EnsureMountSearchInvariant(horse));
+            Assert.NotNull(horse.CommonAIComponent);
+            Assert.Single(horseMirror.Components.OfType<CommonAIComponent>());
+        });
+    }
 
     [Fact]
     public void MovementPacket_DisablesPuppetHorseAi_AndRestoresTheOwnerDirectionsAfterTeleport()
@@ -624,6 +672,8 @@ public class MountedPuppetMovementTests : MissionTestEnvironment
                 Agent.MovementControlFlag.None,
                 sourceHorseMirror.MovementFlags);
             Assert.Equal(AgentControllerType.None, sourceHorseMirror.Controller);
+            Assert.NotNull(sourceHorse.CommonAIComponent);
+            Assert.Single(sourceHorseMirror.Components.OfType<CommonAIComponent>());
 
             AgentMountData sentMount = Assert.Single(
                 Assert.Single(network.NetworkSentPackets.GetPackets<MountMovementPacket>())
@@ -772,6 +822,8 @@ public class MountedPuppetMovementTests : MissionTestEnvironment
                 Agent.MovementControlFlag.None,
                 sourceHorseMirror.MovementFlags);
             Assert.Equal(AgentControllerType.AI, sourceHorseMirror.Controller);
+            Assert.NotNull(sourceHorse.CommonAIComponent);
+            Assert.Single(sourceHorseMirror.Components.OfType<CommonAIComponent>());
             AgentMountData finalMount = network.NetworkSentPackets
                 .GetPackets<MountMovementPacket>()
                 .Last()
@@ -1865,6 +1917,45 @@ public class MountedPuppetMovementTests : MissionTestEnvironment
     }
 
     [Fact]
+    public void RemoteDismount_PreservesCommonAiOnARemotelyAuthoritativeHorse()
+    {
+        using var fixture = new MissionEngineFixture();
+        var peer = Clients.First();
+        SetControllerId(peer, "peer");
+
+        peer.Call(() =>
+        {
+            var mock = fixture.CreateMission(peer);
+            var registry = peer.Resolve<INetworkAgentRegistry>();
+            var component = peer.Resolve<ICoopMissionComponent>();
+            var riderId = Guid.NewGuid();
+            var horseId = Guid.NewGuid();
+
+            Agent rider = SpawnRider(mock);
+            Agent horse = mock.SpawnMount(rider);
+            Assert.True(AgentMirror.TryGet(horse, out var horseMirror));
+            horseMirror.Controller = AgentControllerType.None;
+            Assert.True(registry.TryRegisterAgent("owner", riderId, rider));
+            Assert.True(registry.TryRegisterAgent("owner", horseId, horse));
+
+            AgentData data = CreateAgentData(
+                riderPosition: Vec3.Zero,
+                riderDirection: Vec2.Forward,
+                ownerSpeed: 0f,
+                mountData: null);
+            component.AgentMovementHandler.HandlePacket(
+                null,
+                new MovementPacket(new[] { riderId }, new[] { data }));
+
+            Assert.Null(rider.MountAgent);
+            Assert.Null(horse.RiderAgent);
+            Assert.Equal(AgentControllerType.None, horseMirror.Controller);
+            Assert.NotNull(horse.CommonAIComponent);
+            Assert.Single(horseMirror.Components.OfType<CommonAIComponent>());
+        });
+    }
+
+    [Fact]
     public void RemoteHorseSwitch_RestoresTheOldLocalHorse_AndPuppetsTheNewHorse()
     {
         using var fixture = new MissionEngineFixture();
@@ -1907,6 +1998,48 @@ public class MountedPuppetMovementTests : MissionTestEnvironment
             Assert.Equal(-1f, oldHorseMirror.MaximumSpeedLimit);
             Assert.Equal(1, oldHorseMirror.SetMaximumSpeedLimitCalls);
             Assert.Equal(AgentControllerType.None, newHorseMirror.Controller);
+        });
+    }
+
+    [Fact]
+    public void RemoteHorseSwitch_PreservesCommonAiOnTheOldRemoteHorse()
+    {
+        using var fixture = new MissionEngineFixture();
+        var peer = Clients.First();
+        SetControllerId(peer, "peer");
+
+        peer.Call(() =>
+        {
+            var mock = fixture.CreateMission(peer);
+            var registry = peer.Resolve<INetworkAgentRegistry>();
+            var component = peer.Resolve<ICoopMissionComponent>();
+            var riderId = Guid.NewGuid();
+            var oldHorseId = Guid.NewGuid();
+            var newHorseId = Guid.NewGuid();
+
+            Agent rider = SpawnRider(mock);
+            Agent oldHorse = mock.SpawnMount(rider);
+            Agent newHorse = mock.SpawnMount();
+            Assert.True(AgentMirror.TryGet(oldHorse, out var oldHorseMirror));
+            oldHorseMirror.Controller = AgentControllerType.None;
+            Assert.True(registry.TryRegisterAgent("owner", riderId, rider));
+            Assert.True(registry.TryRegisterAgent("owner", oldHorseId, oldHorse));
+            Assert.True(registry.TryRegisterAgent("owner", newHorseId, newHorse));
+
+            AgentData data = CreateAgentData(
+                riderPosition: Vec3.Zero,
+                riderDirection: Vec2.Forward,
+                ownerSpeed: 0f,
+                mountData: new AgentMountData(newHorse, newHorseId));
+            component.AgentMovementHandler.HandlePacket(
+                null,
+                new MovementPacket(new[] { riderId }, new[] { data }));
+
+            Assert.Same(newHorse, rider.MountAgent);
+            Assert.Null(oldHorse.RiderAgent);
+            Assert.Equal(AgentControllerType.None, oldHorseMirror.Controller);
+            Assert.NotNull(oldHorse.CommonAIComponent);
+            Assert.Single(oldHorseMirror.Components.OfType<CommonAIComponent>());
         });
     }
 

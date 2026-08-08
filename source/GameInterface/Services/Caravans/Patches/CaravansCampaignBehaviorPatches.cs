@@ -88,11 +88,14 @@ internal class CaravansCampaignBehaviorPatches
     public static bool OnSettlementLeftPrefix(ref CaravansCampaignBehavior __instance, MobileParty mobileParty, Settlement settlement)
     {
         // Replace Static Mobile.MainParty check with IsPlayerParty()
-        if (mobileParty != null && !mobileParty.IsPlayerParty() && (mobileParty.IsCaravan || mobileParty.IsLordParty))
+        if (mobileParty != null && settlement != null && !mobileParty.IsPlayerParty() &&
+            (mobileParty.IsCaravan || mobileParty.IsLordParty))
         {
             int inventoryCapacity = mobileParty.InventoryCapacity;
             float totalWeightCarried = mobileParty.TotalWeightCarried;
-            Town town = settlement.IsTown ? settlement.Town : (settlement.IsVillage ? settlement.Village.Bound.Town : null);
+            Town town = settlement.IsTown
+                ? settlement.Town
+                : (settlement.IsVillage ? settlement.Village?.Bound?.Town : null);
             if (town != null)
             {
                 float num = 1.1f;
@@ -124,8 +127,15 @@ internal class CaravansCampaignBehaviorPatches
     [HarmonyPrefix]
     public static bool CanTradeWithPrefix(ref CaravansCampaignBehavior __instance, ref bool __result, IFaction caravanFaction, IFaction targetFaction)
     {
-        if (ContainerProvider.TryGetContainer(out var container) == false) return false;
-        var sessionCaravansPlayerDataInterface = container.Resolve<ISessionCaravansPlayerDataInterface>();
+        // During campaign startup/teardown the service container can briefly be unavailable. In that case
+        // let vanilla answer rather than suppressing the original with the default false result, which makes
+        // every caravan appear unable to trade for the remainder of the call.
+        if (CaravansContext.CurrentParty == null ||
+            ContainerProvider.TryGetContainer(out var container) == false ||
+            container.TryResolve<ISessionCaravansPlayerDataInterface>(out var sessionCaravansPlayerDataInterface) == false)
+        {
+            return true;
+        }
 
         // Handle check in sessionCaravansPlayerDataInterface to correctly handle prohibiting caravan trading with player blocked kingdoms
         __result = sessionCaravansPlayerDataInterface.CanTradeWith(caravanFaction, targetFaction, CaravansContext.CurrentParty);
@@ -140,30 +150,32 @@ internal class CaravansCampaignBehaviorPatches
     /// </summary>
     [HarmonyPatch(nameof(CaravansCampaignBehavior.HourlyTickParty))]
     [HarmonyPrefix]
-    public static void HourlyTickPartyPrefix(MobileParty mobileParty)
+    public static void HourlyTickPartyPrefix(MobileParty mobileParty, out MobileParty __state)
     {
-        CaravansContext.CurrentParty = mobileParty;
+        __state = CaravansContext.Push(mobileParty);
     }
 
     [HarmonyPatch(nameof(CaravansCampaignBehavior.HourlyTickParty))]
-    [HarmonyPostfix]
-    public static void HourlyTickPartyPostfix()
+    [HarmonyFinalizer]
+    public static Exception HourlyTickPartyFinalizer(MobileParty __state, Exception __exception)
     {
-        CaravansContext.CurrentParty = null;
+        CaravansContext.Restore(__state);
+        return __exception;
     }
 
     [HarmonyPatch(nameof(CaravansCampaignBehavior.FindNextDestinationForCaravan))]
     [HarmonyPrefix]
-    public static void FindNextDestinationForCaravanPrefix(MobileParty caravanParty)
+    public static void FindNextDestinationForCaravanPrefix(MobileParty caravanParty, out MobileParty __state)
     {
-        CaravansContext.CurrentParty = caravanParty;
+        __state = CaravansContext.Push(caravanParty);
     }
 
     [HarmonyPatch(nameof(CaravansCampaignBehavior.FindNextDestinationForCaravan))]
-    [HarmonyPostfix]
-    public static void FindNextDestinationForCaravanPostfix()
+    [HarmonyFinalizer]
+    public static Exception FindNextDestinationForCaravanFinalizer(MobileParty __state, Exception __exception)
     {
-        CaravansContext.CurrentParty = null;
+        CaravansContext.Restore(__state);
+        return __exception;
     }
 }
 
@@ -175,4 +187,16 @@ public static class CaravansContext
 {
     [ThreadStatic]
     public static MobileParty CurrentParty;
+
+    internal static MobileParty Push(MobileParty party)
+    {
+        var previous = CurrentParty;
+        CurrentParty = party;
+        return previous;
+    }
+
+    internal static void Restore(MobileParty previous)
+    {
+        CurrentParty = previous;
+    }
 }

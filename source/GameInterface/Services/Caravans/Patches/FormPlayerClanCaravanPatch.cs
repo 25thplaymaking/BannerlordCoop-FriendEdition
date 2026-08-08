@@ -19,6 +19,12 @@ internal class FormPlayerClanCaravanPatch
     public static bool ConversationMagistrateFormACaravanAcceptOnConsequence(ref CaravanConversationsCampaignBehavior __instance)
     {
         CharacterObject characterObject = ConversationSentence.SelectedRepeatObject as CharacterObject;
+        if (characterObject?.HeroObject == null || Hero.MainHero == null || Settlement.CurrentSettlement == null)
+        {
+            InformationManager.DisplayMessage(new InformationMessage(
+                "Caravan creation cancelled because its leader, owner, or settlement is no longer available."));
+            return false;
+        }
 
         bool isElite = __instance._selectedCaravanType == 1;
         bool shouldCreateConvoy = __instance.ShouldCreateConvoy(); // Used by warsails

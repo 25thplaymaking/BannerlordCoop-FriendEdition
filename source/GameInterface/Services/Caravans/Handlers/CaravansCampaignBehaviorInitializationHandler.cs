@@ -55,7 +55,13 @@ internal class CaravansCampaignBehaviorInitializationHandler : IHandler
     {
         if (!objectManager.TryGetIdWithLogging(obj.What.NewHero, out string playerHeroId)) return;
 
-        CaravansCampaignBehavior caravansCampaignBehavior = Campaign.Current.GetCampaignBehavior<CaravansCampaignBehavior>();
+        CaravansCampaignBehavior caravansCampaignBehavior =
+            Campaign.Current?.GetCampaignBehavior<CaravansCampaignBehavior>();
+        if (caravansCampaignBehavior == null)
+        {
+            Logger.Debug("Skipping caravan player-data initialization because the campaign behavior is unavailable");
+            return;
+        }
 
         caravansCampaignBehavior._prohibitedKingdomsForPlayerCaravans = GetProhibitedKingdoms(playerHeroId);
         caravansCampaignBehavior._tradeRumorTakenCaravans = GetTradeRumorTakenCaravans(playerHeroId);

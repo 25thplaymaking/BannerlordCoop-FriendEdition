@@ -44,7 +44,9 @@ public class SessionCaravansPlayerDataInterface : ISessionCaravansPlayerDataInte
         {
             if (!IsPlayerHeroIdValid(playerHeroId)) return;
 
-            CaravansPlayerData.PlayerProhibitedKingdomsForPlayerCaravans[playerHeroId].Add(kingdomId);
+            var prohibitedKingdoms = CaravansPlayerData.PlayerProhibitedKingdomsForPlayerCaravans[playerHeroId];
+            if (!prohibitedKingdoms.Contains(kingdomId))
+                prohibitedKingdoms.Add(kingdomId);
         });
     }
 
@@ -74,6 +76,8 @@ public class SessionCaravansPlayerDataInterface : ISessionCaravansPlayerDataInte
 
     public void UpdateTradeRumorTakenCaravansForPlayer(string playerHeroId, Dictionary<string, long> tradeRumorTakenCaravansIds)
     {
+        if (tradeRumorTakenCaravansIds == null) return;
+
         GameThread.RunSafe(() =>
         {
             if (!IsPlayerHeroIdValid(playerHeroId)) return;
@@ -109,7 +113,8 @@ public class SessionCaravansPlayerDataInterface : ISessionCaravansPlayerDataInte
 
     public bool CanTradeWith(IFaction caravanFaction, IFaction targetFaction, MobileParty mobileParty)
     {
-        if (mobileParty == null || caravanFaction.IsAtWarWith(targetFaction))
+        if (mobileParty == null || caravanFaction == null || targetFaction == null ||
+            caravanFaction.IsAtWarWith(targetFaction))
             return false;
 
         // Allow AI caravans to trade as long as they are not at war with the target faction

@@ -107,7 +107,7 @@ internal class CaravansCampaignBehaviorHandler : IHandler
     private void Handle_MobilePartyDestroyed(MessagePayload<MobilePartyDestroyed> obj)
     {
         // Don't process anything for destroyed mobile parties that aren't caravans
-        if (!obj.What.MobileParty.IsCaravan) return;
+        if (obj.What.MobileParty?.IsCaravan != true) return;
 
         if (!objectManager.TryGetIdWithLogging(obj.What.MobileParty, out var mobilePartyId)) return;
 
@@ -147,22 +147,22 @@ internal class CaravansCampaignBehaviorHandler : IHandler
 
     private void Handle_NetworkDeleteExpiredTradeRumorTakenCaravans(MessagePayload<NetworkDeleteExpiredTradeRumorTakenCaravans> obj)
     {
+        // protobuf-net omits an empty map on the wire. Because this message skips its constructor,
+        // an empty server snapshot therefore arrives as null rather than an empty dictionary.
+        var removalLists = obj.What.PlayerExpiredCaravansRemovalLists;
+        if (removalLists == null || removalLists.Count == 0) return;
+
         GameThread.RunSafe(() =>
         {
             if (!TryGetCaravansBehavior(out var caravansBehavior)) return;
             if (!objectManager.TryGetIdWithLogging(Hero.MainHero, out var mainHeroId)) return;
+            if (!removalLists.TryGetValue(mainHeroId, out var removedCaravanIds) || removedCaravanIds == null) return;
 
-            foreach (var playerList in obj.What.PlayerExpiredCaravansRemovalLists)
+            foreach (var removedCaravanId in removedCaravanIds)
             {
-                // Only use data associated with this playerHero to update _tradeRumorTakenCaravans
-                if (playerList.Key != mainHeroId) continue;
-
-                foreach (var removedCaravanId in playerList.Value)
-                {
-                    if (!objectManager.TryGetObjectWithLogging<MobileParty>(removedCaravanId, out var removedCaravan)) continue;
-                    caravansBehavior._tradeRumorTakenCaravans.Remove(removedCaravan);
-                }
-                break;
+                if (string.IsNullOrEmpty(removedCaravanId)) continue;
+                if (!objectManager.TryGetObjectWithLogging<MobileParty>(removedCaravanId, out var removedCaravan)) continue;
+                caravansBehavior._tradeRumorTakenCaravans?.Remove(removedCaravan);
             }
         });
     }
@@ -220,6 +220,7 @@ internal class CaravansCampaignBehaviorHandler : IHandler
 
     private void Handle_UpdateTradeActionLogsForParty(MessagePayload<UpdateTradeActionLogsForParty> obj)
     {
+        if (obj.What.MobileParty == null || obj.What.TradeActionLogs == null) return;
         if (!objectManager.TryGetIdWithLogging(obj.What.MobileParty, out var mobilePartyId)) return;
         mobilePartyId = Compact(mobilePartyId, typeof(MobileParty));
 
@@ -262,7 +263,9 @@ internal class CaravansCampaignBehaviorHandler : IHandler
             if (!TryGetCaravansBehavior(out var caravansBehavior)) return;
             if (!objectManager.TryGetObjectWithLogging<MobileParty>(obj.What.CaravanPartyId, out var caravanParty)) return;
 
-            caravansBehavior._lootedCaravans.Add(caravanParty, obj.What.CampaignTime);
+            // Network state is a snapshot, not an instruction that must fail when repeated. A reconnect,
+            // resend, or a near-simultaneous caravan interaction should converge on the latest timestamp.
+            caravansBehavior._lootedCaravans[caravanParty] = obj.What.CampaignTime;
         });
     }
 

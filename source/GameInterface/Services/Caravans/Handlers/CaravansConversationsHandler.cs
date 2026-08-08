@@ -110,13 +110,19 @@ internal class CaravansConversationsHandler : IHandler
 
     private void Handle_NetworkChangeCaravanHomeSettlement(MessagePayload<NetworkChangeCaravanHomeSettlement> obj)
     {
-        GameThread.Run(() =>
+        GameThread.RunSafe(() =>
         {
             if (!objectManager.TryGetObjectWithLogging<MobileParty>(obj.What.ConversationPartyId, out var conversationParty)) return;
             if (!objectManager.TryGetObjectWithLogging<Settlement>(obj.What.SettlementId, out var settlement)) return;
+            if (conversationParty.CaravanPartyComponent == null)
+            {
+                Logger.Warning("Skipping caravan home-settlement update because {PartyId} is no longer a caravan",
+                    obj.What.ConversationPartyId);
+                return;
+            }
 
             conversationParty.CaravanPartyComponent.ChangeHomeSettlement(settlement);
-        });
+        }, context: nameof(Handle_NetworkChangeCaravanHomeSettlement));
     }
 
     private void Handle_ToggleProhibitedKingdom(MessagePayload<ToggleProhibitedKingdom> obj)
@@ -156,14 +162,18 @@ internal class CaravansConversationsHandler : IHandler
 
     private void Handle_NetworkApplyHostileCaravanInteraction(MessagePayload<NetworkApplyHostileCaravanInteraction> obj)
     {
-        sessionInteractionsPlayerDataInterface.SetPlayerCaravanInteraction(obj.What.MainHeroId, obj.What.ConversationPartyId, CaravansCampaignBehavior.PlayerInteraction.Hostile);
         GameThread.RunSafe(() =>
         {
             if (!objectManager.TryGetObjectWithLogging<Hero>(obj.What.MainHeroId, out var mainHero)) return;
             if (!objectManager.TryGetObjectWithLogging<MobileParty>(obj.What.MainPartyId, out var mainParty)) return;
             if (!objectManager.TryGetObjectWithLogging<MobileParty>(obj.What.ConversationPartyId, out var conversationParty)) return;
+            if (!IsValidCaravanInteraction(mainHero, mainParty, conversationParty)) return;
 
             BeHostileAction.ApplyEncounterHostileAction(mainParty.Party, conversationParty.Party);
+            sessionInteractionsPlayerDataInterface.SetPlayerCaravanInteraction(
+                obj.What.MainHeroId,
+                obj.What.ConversationPartyId,
+                CaravansCampaignBehavior.PlayerInteraction.Hostile);
         });
     }
 
@@ -179,14 +189,16 @@ internal class CaravansConversationsHandler : IHandler
     private void Handle_NetworkSetPlayerCaravanInteraction(MessagePayload<NetworkSetPlayerCaravanInteraction> obj)
     {
         // Guard against saving ids that can't be resolved on the server
-        if (!objectManager.TryGetObjectWithLogging<Hero>(obj.What.MainHeroId, out var _)) return;
-        if (!objectManager.TryGetObjectWithLogging<MobileParty>(obj.What.ConversationPartyId, out var _)) return;
+        if (!objectManager.TryGetObjectWithLogging<Hero>(obj.What.MainHeroId, out var mainHero)) return;
+        if (!objectManager.TryGetObjectWithLogging<MobileParty>(obj.What.ConversationPartyId, out var conversationParty)) return;
+        if (mainHero == null || conversationParty?.Party == null || !conversationParty.IsCaravan) return;
 
         sessionInteractionsPlayerDataInterface.SetPlayerCaravanInteraction(obj.What.MainHeroId, obj.What.ConversationPartyId, obj.What.Interaction);
     }
 
     private void Handle_UpdateTradeRumorTakenCaravans(MessagePayload<UpdateTradeRumorTakenCaravans> obj)
     {
+        if (obj.What.TradeRumorTakenCaravans == null) return;
         if (!objectManager.TryGetIdWithLogging(obj.What.MainHero, out var mainHeroId)) return;
 
         var tradeRumorTakenCaravansIds = new Dictionary<string, long>();
@@ -203,6 +215,7 @@ internal class CaravansConversationsHandler : IHandler
 
     private void Handle_NetworkUpdateTradeRumorTakenCaravans(MessagePayload<NetworkUpdateTradeRumorTakenCaravans> obj)
     {
+        if (obj.What.TradeRumorTakenCaravansIds == null) return;
         if (!objectManager.TryGetObjectWithLogging<Hero>(obj.What.MainHeroId, out var _)) return;
 
         sessionCaravansPlayerDataInterface.UpdateTradeRumorTakenCaravansForPlayer(obj.What.MainHeroId, obj.What.TradeRumorTakenCaravansIds);
@@ -225,6 +238,8 @@ internal class CaravansConversationsHandler : IHandler
             if (!objectManager.TryGetObjectWithLogging<Hero>(obj.What.MainHeroId, out var mainHero)) return;
             if (!objectManager.TryGetObjectWithLogging<MobileParty>(obj.What.MainPartyId, out var mainParty)) return;
             if (!objectManager.TryGetObjectWithLogging<MobileParty>(obj.What.ConversationPartyId, out var conversationParty)) return;
+            if (!IsValidCaravanInteraction(mainHero, mainParty, conversationParty)) return;
+            if (!TryBeginLoot(conversationParty, obj.What.ConversationPartyId, out var lootedAt)) return;
 
             var itemRoster = itemRosterInterface.GetItemRosterFromData(obj.What.ItemRosterData);
 
@@ -238,13 +253,15 @@ internal class CaravansConversationsHandler : IHandler
                 }
             }
             BeHostileAction.ApplyMinorCoercionHostileAction(mainParty.Party, conversationParty.Party);
-            GetCaravansBehavior()._lootedCaravans.Add(conversationParty, CampaignTime.Now);
             SkillLevelingManager.OnLoot(mainParty, conversationParty, itemRoster, false);
 
             // Update _lootedCaravans on all clients
-            network.SendAll(new NetworkAddToLootedCaravans(obj.What.ConversationPartyId, CampaignTime.Now));
+            network.SendAll(new NetworkAddToLootedCaravans(obj.What.ConversationPartyId, lootedAt));
+            sessionInteractionsPlayerDataInterface.SetPlayerCaravanInteraction(
+                obj.What.MainHeroId,
+                obj.What.ConversationPartyId,
+                CaravansCampaignBehavior.PlayerInteraction.Hostile);
         });
-        sessionInteractionsPlayerDataInterface.SetPlayerCaravanInteraction(obj.What.MainHeroId, obj.What.ConversationPartyId, CaravansCampaignBehavior.PlayerInteraction.Hostile);
     }
 
     private void Handle_CaravanSurrenderLeaveOnConsequence(MessagePayload<CaravanSurrenderLeaveOnConsequence> obj)
@@ -264,6 +281,8 @@ internal class CaravansConversationsHandler : IHandler
             if (!objectManager.TryGetObjectWithLogging<Hero>(obj.What.MainHeroId, out var mainHero)) return;
             if (!objectManager.TryGetObjectWithLogging<MobileParty>(obj.What.MainPartyId, out var mainParty)) return;
             if (!objectManager.TryGetObjectWithLogging<MobileParty>(obj.What.ConversationPartyId, out var conversationParty)) return;
+            if (!IsValidCaravanInteraction(mainHero, mainParty, conversationParty)) return;
+            if (!TryBeginLoot(conversationParty, obj.What.ConversationPartyId, out var lootedAt)) return;
 
             var itemRoster = itemRosterInterface.GetItemRosterFromData(obj.What.ItemRosterElements);
 
@@ -277,13 +296,15 @@ internal class CaravansConversationsHandler : IHandler
                 GiveGoldAction.ApplyForPartyToCharacter(conversationParty.Party, mainHero, num, false);
             }
             BeHostileAction.ApplyMajorCoercionHostileAction(mainParty.Party, conversationParty.Party);
-            GetCaravansBehavior()._lootedCaravans.Add(conversationParty, CampaignTime.Now);
             SkillLevelingManager.OnLoot(mainParty, conversationParty, itemRoster, false);
 
             // Update _lootedCaravans on all clients
-            network.SendAll(new NetworkAddToLootedCaravans(obj.What.ConversationPartyId, CampaignTime.Now));
+            network.SendAll(new NetworkAddToLootedCaravans(obj.What.ConversationPartyId, lootedAt));
+            sessionInteractionsPlayerDataInterface.SetPlayerCaravanInteraction(
+                obj.What.MainHeroId,
+                obj.What.ConversationPartyId,
+                CaravansCampaignBehavior.PlayerInteraction.Hostile);
         });
-        sessionInteractionsPlayerDataInterface.SetPlayerCaravanInteraction(obj.What.MainHeroId, obj.What.ConversationPartyId, CaravansCampaignBehavior.PlayerInteraction.Hostile);
     }
 
     private void Handle_CaravanTookPrisonerOnConsequence(MessagePayload<CaravanTookPrisonerOnConsequence> obj)
@@ -303,6 +324,7 @@ internal class CaravansConversationsHandler : IHandler
             if (!objectManager.TryGetObjectWithLogging<Hero>(obj.What.MainHeroId, out var mainHero)) return;
             if (!objectManager.TryGetObjectWithLogging<MobileParty>(obj.What.MainPartyId, out var mainParty)) return;
             if (!objectManager.TryGetObjectWithLogging<MobileParty>(obj.What.ConversationPartyId, out var conversationParty)) return;
+            if (!IsValidCaravanInteraction(mainHero, mainParty, conversationParty)) return;
 
             var itemRoster = itemRosterInterface.GetItemRosterFromData(obj.What.ItemRosterElements);
 
@@ -319,11 +341,47 @@ internal class CaravansConversationsHandler : IHandler
             SkillLevelingManager.OnLoot(mainParty, conversationParty, itemRoster, false);
             DestroyPartyAction.Apply(mainParty.Party, conversationParty);
         });
-        sessionInteractionsPlayerDataInterface.SetPlayerCaravanInteraction(obj.What.MainHeroId, obj.What.ConversationPartyId, CaravansCampaignBehavior.PlayerInteraction.Hostile);
     }
 
-    private CaravansCampaignBehavior GetCaravansBehavior()
+    private bool TryBeginLoot(
+        MobileParty conversationParty,
+        string conversationPartyId,
+        out CampaignTime lootedAt)
     {
-        return Campaign.Current.GetCampaignBehavior<CaravansCampaignBehavior>();
+        lootedAt = default;
+        if (!TryGetCaravansBehavior(out var caravansBehavior)) return false;
+        if (caravansBehavior._lootedCaravans.ContainsKey(conversationParty))
+        {
+            Logger.Warning("Ignoring duplicate caravan-loot request for {PartyId}", conversationPartyId);
+            return false;
+        }
+
+        // Reserve the operation before applying rewards. A repeated request cannot transfer the same caravan
+        // inventory or gold twice while the first request is still being processed.
+        lootedAt = CampaignTime.Now;
+        caravansBehavior._lootedCaravans[conversationParty] = lootedAt;
+        return true;
+    }
+
+    private bool TryGetCaravansBehavior(out CaravansCampaignBehavior caravansBehavior)
+    {
+        caravansBehavior = Campaign.Current?.GetCampaignBehavior<CaravansCampaignBehavior>();
+        if (caravansBehavior != null) return true;
+
+        Logger.Debug("Skipping caravan interaction because the campaign behavior is unavailable");
+        return false;
+    }
+
+    private bool IsValidCaravanInteraction(Hero mainHero, MobileParty mainParty, MobileParty conversationParty)
+    {
+        if (mainHero != null && mainParty?.Party != null && conversationParty?.Party != null &&
+            conversationParty.IsCaravan)
+        {
+            return true;
+        }
+
+        Logger.Warning("Skipping invalid caravan interaction: hero={Hero}, mainParty={MainParty}, caravan={Caravan}",
+            mainHero?.StringId, mainParty?.StringId, conversationParty?.StringId);
+        return false;
     }
 }

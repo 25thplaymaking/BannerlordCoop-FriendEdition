@@ -56,14 +56,21 @@ internal class FormPlayerClanCaravanHandler : IHandler
 
     private void Handle_NetworkFormPlayerClanCaravan(MessagePayload<NetworkFormPlayerClanCaravan> obj)
     {
-        GameThread.Run(() =>
+        GameThread.RunSafe(() =>
         {
             if (!objectManager.TryGetObjectWithLogging<Hero>(obj.What.MainHeroId, out var mainHero)) return;
             if (!objectManager.TryGetObjectWithLogging<Hero>(obj.What.CaravanLeaderId, out var caravanLeader)) return;
             if (!objectManager.TryGetObjectWithLogging<Settlement>(obj.What.CurrentSettlementId, out var currentSettlement)) return;
 
-            LeaveSettlementAction.ApplyForCharacterOnly(caravanLeader);
             PartyTemplateObject randomCaravanTemplate = CaravanHelper.GetRandomCaravanTemplate(currentSettlement.Culture, obj.What.IsElite, !obj.What.ShouldCreateConvoy);
+            if (randomCaravanTemplate == null)
+            {
+                Logger.Warning("Skipping caravan creation because settlement {SettlementId} has no suitable caravan template",
+                    obj.What.CurrentSettlementId);
+                return;
+            }
+
+            LeaveSettlementAction.ApplyForCharacterOnly(caravanLeader);
             CaravanPartyComponent.CreateCaravanParty(mainHero, currentSettlement, randomCaravanTemplate, false, caravanLeader, null, obj.What.IsElite);
             GiveGoldAction.ApplyForCharacterToSettlement(mainHero, currentSettlement, obj.What.GoldCost, false);
 
@@ -79,7 +86,8 @@ internal class FormPlayerClanCaravanHandler : IHandler
             if (!objectManager.TryGetObjectWithLogging<Hero>(obj.What.CaravanLeaderId, out var caravanLeader)) return;
 
             // No need to check current mission and if character in mission, vanilla already implements these checks
-            Campaign.Current.GetCampaignBehavior<CaravanConversationsCampaignBehavior>().FadeOutSelectedCaravanCompanionInMission(caravanLeader.CharacterObject);
+            Campaign.Current?.GetCampaignBehavior<CaravanConversationsCampaignBehavior>()?
+                .FadeOutSelectedCaravanCompanionInMission(caravanLeader.CharacterObject);
         });
     }
 }

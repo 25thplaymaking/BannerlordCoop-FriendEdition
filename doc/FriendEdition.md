@@ -12,17 +12,18 @@ distribution. That authorization is not treated as permission to publish the for
 
 ## Current deployed build
 
-Friend Edition `2026-08-08-prfix1`, built from source commit
-`ace3edd4a84951a84e67d566a41868493cec8689`, was deployed to the private server at
-`205.209.116.114:4200` on 2026-08-08. It integrates upstream PRs #2751, #2755, #2756, #2757, and #2823
-plus the Friend Edition captivity and village-flow fixes below. The server started on the new
-`friendeditionprfix1` save, created from `default_new_game.sav`, with `birthAndDeath=true` and a 24-hour
-player battle-AI join window.
+Friend Edition `2026-08-08-crashfix1`, built from source commit
+`1501a1b29cce377e148ecb7bc301cc27cc2825d7`, was deployed to the private server at
+`205.209.116.114:4200` on 2026-08-08. It advances the fork to official nightly commit
+`91af3abe21bc5ffd66662a97e12e56676ff1ff4c`, retains the previously integrated gameplay PRs and Friend
+Edition fixes, and adds the narrowly validated crash-path changes from PRs #2758 and #2846 described
+below. The server loaded and continues to autosave the existing `friendeditionprfix1` campaign; no new
+world was created. `birthAndDeath=true` and the 24-hour player battle-AI join window remain effective.
 
 The matched three-player test kit is
-`BannerlordCoop-FriendEdition-2026-08-08-prfix1-TestKit-v3.0.1.zip`, 7,489,848 bytes, SHA-256
-`a8f7dc590de27dd1599bf52a5cb956a42b563596115f6950c310462f2f15351b`. Its bundled Coop archive is
-7,467,619 bytes compressed and 29,411,921 bytes installed. The obsolete Workshop Coop item's reported
+`BannerlordCoop-FriendEdition-2026-08-08-crashfix1-TestKit-v3.1.0.zip`, 7,309,127 bytes, SHA-256
+`054e659cde22cfe51eb8c3ffacb7b545be9b5c4af18696fa8ae6bfd8f5c48ab3`. Its bundled Coop archive is
+7,289,579 bytes compressed and 29,422,673 bytes installed. The obsolete Workshop Coop item's reported
 6.08 GB is not required Friend Edition content and is excluded.
 
 ## Request status
@@ -31,13 +32,14 @@ The matched three-player test kit is
 | --- | --- | --- |
 | Players travel as one party | A consensual player-to-player proposal creates a synchronized, kingdom-free army attachment led by the proposer. It has no cohesion decay and is rediscovered after save/load. PR #2755's gathering-army join replication is also included. | Two-player movement, leave, reconnect, and save/restart. |
 | Surrender/captivity loop | PR #2756 keeps Surrender retryable until a map event exists. PR #2755 releases the conversation hold when capture begins. The server now resolves the correct captor, starts captivity, validates and charges ransom only after a successful release, and persists a 48-hour party-scoped safe-conduct period in both directions. Safe conduct prevents an immediate recapture loop without declaring global kingdom peace. | Lose and surrender in a live field battle, verify the captivity screen, pay ransom, and verify the captor cannot immediately re-engage either party for 48 in-game hours. |
-| Join an ongoing conflict / nearby reinforcements | PR #2756 opens the server-authoritative AI join window before announcing a battle and adds eligible nearby AI parties to the map event. A rejected raid join now restores the encounter menu and remains retryable. | Join both sides of an existing field battle and repeat while another player is in a menu or conversation. Confirm only eligible nearby parties join during the configured window. |
+| Join an ongoing conflict / nearby reinforcements | PR #2756 opens the server-authoritative AI join window before announcing a battle. Crashfix1 replaces its dedicated-server-invalid vanilla selector, which dereferenced `MobileParty.MainParty`/`PlayerEncounter`, with authoritative map-event selection. Scans are rate-limited and one malformed battle can no longer generate an exception every campaign tick. A rejected raid join restores the encounter menu and remains retryable. | Join both sides of an existing field battle and repeat while another player is in a menu or conversation. Confirm only eligible nearby parties join during the configured window. |
+| Client crashes after replication/log storm | The isolated first commit from PR #2758 now discards unchanged synchronized writes before entering the client error/log path. This directly addresses the observed `Settlement.IsVisible` flood that preceded both native access violations. A server-only encounter-close guard was also taken from draft PR #2846 without its test deletions. | Run a multi-client campaign/battle session and confirm client logs do not accumulate repeated unchanged-property errors. A native dump is still required if an access violation recurs because the exact native fault instruction was not captured last session. |
 | Comrade army or roster missing after deployment | PR #2757 is included: battle sizing uses whole replicated sides, allocations add up across owners, each player receives a troop reservation, empty-team deployment can finish, joining clients do not simulate the server-owned battle locally, and the deployment recovery restores mission flags and agent wake-up. | Enter field and siege battles with two independent parties and with a travel group; verify both players and both rosters appear. |
 | Retreat from battle | PR #2751 is included. Retreat is server-authoritative, removes the retreating party and attached parties from the event, replicates the removals, and tears down each affected player's menu state. | Retreat as an independent party and as a travel-group leader/member. |
 | Village raid attacks first and then requires a second raid command | Resistance victory now finalizes the combat event, preserves partial village damage, creates a new authoritative raid event, rejoins the attackers, and moves clients directly into the raid flow. The headless server no longer depends on a campaign visual when creating that raid. | Win village resistance with all three clients and confirm raiding continues automatically without a second combat. |
 | Demand goods / force recruits stops at Continue | The client now runs the vanilla UI/finalization tail while the authoritative server suppresses duplicate reward application. | Exercise both successful paths with Coop-only, then with RBM, Improved Garrisons, and Diplomacy enabled. |
 | Duplicate bandit spawns | The earlier deployment had two Bannerlord processes loading and autosaving one world. The obsolete service was disabled, leaving one server process. Upstream PR #2787 in the baseline also makes delayed bandit attack references safe. | Observe party counts for several in-game days and record party IDs/timestamps if duplication recurs. |
-| Missing hideouts | Upstream PR #2657 is present in the baseline. | Confirm visibility and interaction on the new save; upstream issue #2576 still tracks incomplete hideout interactions. |
+| Missing hideouts | Upstream PR #2657 is present in the baseline. | Confirm visibility and interaction on the preserved campaign; upstream issue #2576 still tracks incomplete hideout interactions. |
 | Birth & Death | Aging and pregnancy campaign behaviors register only on the authoritative server, while existing hero/family synchronization carries their results to clients. Player-controlled heroes are protected from natural old-age death because vanilla heir selection assumes a single local `Hero.MainHero`. The optional TaleWorlds `BirthAndDeath` module stays disabled because it provides UI/options and is not dedicated-server compatible. | A long campaign-time soak for NPC aging/death and a three-client conception, birth, reconnect, and restart observation. Player education and heir succession remain intentionally unsupported. |
 
 ## Upstream code integrated
@@ -47,43 +49,57 @@ The matched three-player test kit is
 - PR #2756: surrender retry `f26f43dac` and reinforcement commits `e47dde772`, `cdb9c2d43`.
 - PR #2757: all twelve deployment/troop-supply commits from `14849395c` through `106c4a5c5`.
 - PR #2823: exact test-only flake fix `86f5aa2b6`; it relaxes an over-specific surrender assertion and connects the slow-raid test peer through the normal test environment.
+- Official 2026-08-08 nightly `91af3abe2`, containing merged PRs #2823, #2824, and #2674.
+- PR #2758: only its first runtime commit `7c48695b` was taken. It moves the generated equality/no-op guard
+  ahead of the client error log. The rest of the open PR was excluded because its validation is not clean.
+- Draft PR #2846: only the dedicated-server guard in `Handle_NetworkClosePvpEncounter` was reproduced. Its
+  unrelated deletion of 58 tests was not taken.
 
-Merge-only synchronization commits at the tips of #2751, #2755, #2756, and #2757 were not required because
-this branch already starts from the newer `60bf5cd` development baseline.
+Merge-only synchronization commits at the tips of #2751, #2755, #2756, and #2757 were originally omitted
+because the branch already contained their changes through the newer `60bf5cd` development baseline. The
+branch now also includes the official 2026-08-08 nightly baseline listed above.
 
 ## Automated verification of the deployed build
 
-- Full Release solution build: 0 errors. The 1,055 warnings are existing analyzer/compiler warnings.
-- Full `GameInterface.Tests`: 816 passed, 11 intentional “Need regeneration” skips, 0 failed.
-- Broad village and captivity E2E sweep: 96 passed, 0 failed.
-- PR-focused retreat, surrender, deployment, and troop-supply E2E sweep: 67 passed, 0 failed.
-- Complete surrender E2E class after adding the missing-map-event retry: 11 passed, 0 failed.
-- Focused Birth & Death and army-registry tests: 9 passed, 0 failed.
+- Full Release solution build from commit `1501a1b29`: 0 errors. The 1,152 output warnings are the
+  repository's existing compiler/analyzer and target-framework warnings.
+- `GameInterface.Tests`: all 818 runnable tests accounted for as passing, with 11 intentional “Need
+  regeneration” skips. Two repository-file path tests were rerun from the repository context because the
+  standalone runner's game-DLL context and those two tests require different base directories.
+- Complete `MapEventEnvironmentTests`: 28 passed, 0 failed, including captivity and a regression that
+  explicitly clears `MobileParty.MainParty` before evaluating a real nearby AI candidate.
+- Complete `CoopBattleFinalizeTests`: 11 passed, 0 failed, covering PvP close and surrender/finalization.
+- Focused generated-property no-op/log-order regression: 1 passed, 0 failed.
+- Client archive, outer ZIP, extracted checksum manifest, JSON manifest, and PowerShell syntax checks: passed.
+- Live canary: the preserved campaign loaded with the same date and object counts, then completed its first
+  post-upgrade autosave successfully.
 - Diff whitespace validation: passed.
 
-The complete E2E corpus was not run for this build. The relevant feature classes and their broader
-village/captivity dependencies were run using the standalone in-process xUnit runner because this Windows
-machine's testhost loopback connection is broken. Docker was unavailable because WSL2 virtualization is
-disabled. The preceding `bd2` build previously passed the full deterministic sharded E2E run and isolated
-fresh-save/restart canaries; those historical results are not being presented as results for this newer
-build.
+The complete E2E corpus was not run for this build. The crash-relevant map-event, captivity, surrender, and
+battle-finalization classes were run using the standalone in-process xUnit runner because this Windows
+machine's testhost loopback connection is broken. The earlier broader prfix1 sweeps remain useful history,
+but are not presented as results for crashfix1.
 
 ## Live server state
 
-The community server is running Friend Edition build `2026-08-08-prfix1` on save
-`friendeditionprfix1`. Post-deployment checks found `bannerlord-coop-seven.service` active with zero
-restarts, exactly one server process tree, UDP 4200 bound on IPv4 and IPv6, repeated server pulses, and no
-fatal startup errors. Effective configuration logs report Birth & Death on and the 24-hour battle-AI join
-window. The TaleWorlds `BirthAndDeath` module itself remains disabled as intended; the authoritative Coop
-campaign behaviors provide this feature on the headless server.
+The community server is running Friend Edition build `2026-08-08-crashfix1` on the preserved save
+`friendeditionprfix1`. It loaded the same Autumn 13, 1085 campaign state with 1,504 parties and 12 active
+map events, then successfully wrote its first post-upgrade autosave. Post-deployment checks found
+`bannerlord-coop-seven.service` active with zero restarts, exactly one server process tree, UDP 4200 bound
+on IPv4 and IPv6, repeated server pulses, and no reinforcement-selector exceptions or fatal startup errors.
+Effective configuration logs report Birth & Death on and the 24-hour battle-AI join window. The TaleWorlds
+`BirthAndDeath` module itself remains disabled as intended; live births/deaths were not observed during the
+previous play session and remain a next-session soak item.
 
 The complete pre-deployment rollback snapshot is
-`/home/bishop/bannerlord-coop/backups/pre-prfix1-20260808T054944Z`; its `SHA256SUMS.txt` was verified. The
-superseded `bd2` live module and active client distribution were removed after the new deployment passed
-health checks, while their recoverable copies and the prior `friendeditionbd1` save remain in that rollback
-snapshot. Private-fork module-hash warnings remain expected because both server core copies carry the
-authorized compatibility patch. The immutable deployment checksum manifest passes; the live save's
-deployment-time hash is retained separately because normal autosaves immediately make that file mutable.
+`/home/bishop/bannerlord-coop/backups/pre-crashfix1-20260808T181849Z`; all 990 entries in its
+`SHA256SUMS.txt` were verified. It contains the exact pre-upgrade `friendeditionprfix1` save and sidecar,
+module, configs, service unit, both server-core binaries, previous release metadata, and previous client
+distribution. The superseded prfix1 build was removed from active release/distribution locations only after
+crashfix1 passed health checks. Private-fork module-hash warnings remain expected because both physical
+server-core copies retain the authorized compatibility patch. The immutable deployment checksum manifests
+and the save's cutover hash are stored under release `2026-08-08-crashfix1-1501a1b`; the live save is
+intentionally mutable and changed when the verified post-upgrade autosave completed.
 
 ## Player travel-group specification
 
@@ -99,8 +115,8 @@ is never replaced implicitly.
 
 ## Live-session acceptance checklist
 
-1. All three players install the v3.0.1 test kit with `Run-Setup.cmd`, run `Run-Verify.cmd`, and confirm the
-   expected DLL hashes and load order before connecting to `friendeditionprfix1`.
+1. All three players install the v3.1.0 test kit with `Run-Setup.cmd`, run `Run-Verify.cmd`, and confirm the
+   expected DLL hashes and load order before reconnecting to the preserved `friendeditionprfix1` campaign.
 2. Surrender a battle, confirm captivity starts, pay ransom, and verify party-scoped safe conduct prevents
    immediate recapture without changing kingdom diplomacy.
 3. Win village resistance and confirm the same action advances directly into raiding. Complete demand-goods
@@ -112,6 +128,8 @@ is never replaced implicitly.
 6. Save, restart, and reconnect all players. Confirm travel-group state, captivity safe conduct, family data,
    and ongoing campaign state persist.
 7. Run a longer Birth & Death soak and observe hideout/bandit-party behavior for several in-game days.
+8. Confirm client logs do not rapidly repeat unchanged `Settlement.IsVisible` writes. If a native access
+   violation recurs, preserve the TaleWorlds crash report/dump instead of cancelling its generation.
 
 ## Dedicated-server deployment constraints
 
@@ -120,13 +138,14 @@ source-only compatibility tool in `tools/DedicatedServerCompatibilityPatcher` ma
 server-side compatibility change reproducible. Never commit or redistribute a patched
 `DedicatedServer.Core.dll`.
 
-The prfix1 deployment followed these constraints:
+The crashfix1 deployment followed these constraints:
 
 - overlay module assemblies into both client and server module-bin directories without deleting server-only
   files;
 - preserve the server's empty `SubModules` manifest instead of replacing it with the client manifest;
 - retain the official server's `0Harmony.dll`;
-- patch both physical copies of `DedicatedServer.Core.dll` only after resolving symlinks;
+- resolve and verify both physical copies of `DedicatedServer.Core.dll`; crashfix1 retained their already
+  compatibility-patched bytes and backed both up rather than patching an in-use or already-patched file;
 - take checksummed module and save backups before restart;
 - roll back unless the service stays active, UDP 4200 binds, and multiple pulses appear.
 
@@ -139,7 +158,10 @@ are not.
   remain the provenance for these changes.
 - PR #2823 is integrated exactly and is test-only; it does not change runtime behavior.
 - PR #2787 and PR #2657 are already part of the `60bf5cd` baseline.
-- PR #2758 (party-state robustness) and draft PR #2768 (party disbanding) are not included because their
-  upstream validation is not yet clean.
+- PR #2758's first no-op/log-flood commit is included; the remainder of that open party-state PR is not
+  included because its upstream validation is not yet clean.
+- Draft PR #2846 contributed only its dedicated-server encounter-close guard; its test deletions remain
+  excluded and the PR should continue to be watched for a reviewed form.
+- Draft PR #2768 (party disbanding) is not included.
 - Issues #2243, #2385, #2415, #2473, #2576, #2766, #2771, #2783, #2812, and #2817 remain useful
   reproduction anchors.

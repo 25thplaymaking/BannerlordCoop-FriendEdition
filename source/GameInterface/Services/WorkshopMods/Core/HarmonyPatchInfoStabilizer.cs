@@ -22,10 +22,40 @@ namespace GameInterface.Services.WorkshopMods.Core;
 /// exist to catch, while absorbing the proven-transient ones. Callers pass a predicate that reads
 /// live Harmony state and returns true once it looks acceptable; the guard should still throw if the
 /// predicate never returns true across every attempt.
+///
+/// <para>
+/// <b>The retry budget is calibrated for production, not for the test processes.</b> Both test
+/// assemblies carry a <c>HarmonySerializationBootstrap</c> module initializer that sets the
+/// <c>System.Runtime.Serialization.EnableUnsafeBinaryFormatterSerialization</c> AppContext switch to
+/// false, which pushes HarmonyLib onto its System.Text.Json fallback and measurably cut the misread
+/// rate (~10x, per the run that introduced it). No production assembly sets that switch, and it
+/// would not matter if one did: HarmonyLib only reads it from its net5.0-and-newer builds. Verified
+/// by scanning every per-TFM <c>0Harmony.dll</c> in Lib.Harmony 2.4.2 for the switch literal — it is
+/// present in net5.0/net6.0/net8.0 alongside <c>UseBinaryFormatter</c> and <c>JsonSerializer</c>, and
+/// absent from net35/net452/net472/net48/netcoreapp3.x, which carry no JSON path at all. The binary
+/// actually deployed to the game (<c>Modules/Coop/bin/Win64_Shipping_Client/0Harmony.dll</c>,
+/// 2.4.2.0, stamped <c>.NETFramework,Version=v4.7.2</c>) is one of those: it serializes patch info
+/// through BinaryFormatter unconditionally. Bannerlord runs on .NET Framework 4.7.2, so production
+/// faces the UN-mitigated misread rate with the retry as its only mitigation, while the numbers
+/// below were tuned against the mitigated one.
+/// </para>
+/// <para>
+/// The budget is therefore set well above what the test suites need. Raising it is close to free:
+/// <see cref="StabilizeUntilAcceptable"/> returns on the first acceptable read, so extra attempts
+/// cost nothing on a healthy startup and are only fully spent on a path that is about to fail closed
+/// anyway. Fail-closed behaviour is unchanged — the guards still throw when every attempt disagrees;
+/// only the number of transient misreads that can be absorbed before that happens has gone up.
+/// </para>
 /// </remarks>
 internal static class HarmonyPatchInfoStabilizer
 {
-    private const int Attempts = 5;
+    /// <summary>
+    /// Reads a retry-until-acceptable check will make before failing closed. Doubled from the
+    /// original 5 because production runs the un-mitigated BinaryFormatter path (see the type
+    /// remarks); 5 was calibrated against the test processes' ~10x-reduced misread rate, and that
+    /// calibration does not transfer.
+    /// </summary>
+    private const int Attempts = 10;
 
     /// <summary>
     /// How many consecutive agreeing reads <see cref="RequireAcceptableOnEveryAttempt"/> needs before

@@ -21,6 +21,16 @@ namespace E2E.Tests;
 /// The switch must be set before <c>HarmonySharedState</c>'s static constructor first runs, which a
 /// module initializer guarantees: it executes before any type in this module is used, ahead of every
 /// test class' static state.
+///
+/// <para>
+/// This mitigation is available to the test processes ONLY, and deliberately so rather than by
+/// oversight. HarmonyLib reads that switch — and ships the System.Text.Json fallback it selects —
+/// only in its net5.0-and-newer builds; the net472 build the game loads has neither, and serializes
+/// patch info through BinaryFormatter unconditionally. Setting the switch in GameInterface would be
+/// a no-op. Production therefore faces the un-mitigated misread rate, and the guards' only defence
+/// there is <c>HarmonyPatchInfoStabilizer</c>'s retry budget, which is sized for that case; see the
+/// remarks on that type. Do not calibrate that budget against the failure rate observed here.
+/// </para>
 /// </remarks>
 internal static class HarmonySerializationBootstrap
 {

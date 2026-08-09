@@ -1,6 +1,46 @@
 # Friend Edition Changelog
 
-## 2026-08-09 — workshop2 (current)
+## 2026-08-09 — workshop3 (current): ALL MODS ON
+
+**Client package:** `FriendEdition-WorkshopSuite-workshop3.zip` (sha in the
+sidecar `.sha256.txt`; also on the server under `private-distributions/`).
+**Supersedes workshop2 — everyone must update; a workshop2 client is refused**
+(the activation policy is part of the handshake).
+
+### For players
+
+- **Every mod is on, everywhere.** The installer enables all seventeen
+  modules in the pinned order: Harmony → ButterLib → UIExtenderEx →
+  MBOptionScreen → Native → SandBoxCore → CustomBattle → Sandbox →
+  StoryMode → Coop → RBM → ImprovedGarrisons → DismembermentPlus →
+  Fourberie → Diplomacy → UnblockableThrust → PlayerSettlement.
+  RBM combat, Fourberie, Diplomacy screens, ImprovedGarrisons — all of it
+  is live in your game now. Same rule as always: extract, run
+  `Run-ClientSetup.cmd`, don't rearrange the mod list by hand.
+- **Honest caveat:** mod actions that aren't yet routed through server
+  authority are best-effort for cross-player consistency — a mod feature
+  may apply on your screen before (or without) the server's world agreeing.
+  Routing work continues underneath and needs no further package updates.
+
+### Server / engineering record
+
+- Catalog activation policy flipped to all-active-both-peers
+  (commit `9914cbfff`); the handshake now byte-verifies every mod package
+  every session instead of warning that nothing is active.
+- The wine-hosted 117131 server engine loads module DLLs only from
+  `bin\Win64_Shipping_Server`; the host overlays client binaries there and
+  the module hasher ignores that overlay so audited pins stay valid.
+- **RBM runs as a server-side stub** (`SubModule.xml` only): its
+  combat-parameter data natively crashes the old server engine (bisected
+  live). The server attests RBM's audited receipt pins so clients are still
+  byte-verified; RBM executes on clients, which is where its combat math
+  matters. Full RBM module preserved at `backups/rbm-full-module`.
+- Discovered en route: the "legacy" modded server loadout had been running
+  bare module stubs all along — no mod data or code was ever loaded
+  server-side before tonight. Ten of eleven mods now load real data
+  server-side; boot verified SERVING on `friendeditionws1`.
+
+## 2026-08-09 — workshop2 (superseded)
 
 **Client package:** `FriendEdition-WorkshopSuite-workshop2.zip` — SHA-256
 `528c9e848a51765c80cd2d940d103ffe1aed7478283267d599653b48b09bf884` (724 MB).

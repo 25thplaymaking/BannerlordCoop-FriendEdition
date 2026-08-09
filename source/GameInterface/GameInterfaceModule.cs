@@ -25,6 +25,7 @@ using GameInterface.Services.MobileParties.Data;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Party;
 using GameInterface.Services.Players;
+using GameInterface.Services.Separatism;
 using GameInterface.Services.Stances;
 using GameInterface.Services.TroopRosters.Logging;
 using GameInterface.Services.Time;
@@ -86,6 +87,7 @@ public class GameInterfaceModule : Module
         builder.RegisterType<KingdomDecisionOutcomeResolver>().AsSelf().As<IKingdomDecisionOutcomeResolver>().InstancePerLifetimeScope();
         builder.RegisterType<KingdomDecisionVoteManager>().AsSelf().As<IKingdomDecisionVoteManager>().InstancePerLifetimeScope();
         builder.RegisterType<KingdomMembershipState>().AsSelf().As<IKingdomMembershipState>().InstancePerLifetimeScope();
+        builder.RegisterType<SeparatismCampaignService>().As<ISeparatismCampaignService>().InstancePerLifetimeScope();
         builder.RegisterType<MainPartyBattleRewardsCache>().As<IMainPartyBattleRewardsCache>().InstancePerLifetimeScope();
         builder.RegisterType<PacketManager>().As<IPacketManager>().InstancePerLifetimeScope();
         builder.RegisterType<MapEventInitializationBarrierBinding>().InstancePerLifetimeScope().AutoActivate();

@@ -49,6 +49,7 @@ namespace Coop.IntegrationTests.Serialization
         public void NetworkLoadModConfig_RoundTrips_OptionsTurnedOff_WhenModelUsesTheConstructor()
         {
             var model = RuntimeTypeModel.Create();
+            model.Add(typeof(SeparatismOptions), applyDefaultBehaviour: true).UseConstructor = true;
             model.Add(typeof(ModOptions), applyDefaultBehaviour: true).UseConstructor = true;
             model.Add(typeof(NetworkLoadModConfig), applyDefaultBehaviour: true).UseConstructor = true;
 
@@ -73,6 +74,18 @@ namespace Coop.IntegrationTests.Serialization
                 PlayerKingdomClanTierRequired = 2,
                 SmithingStaminaRecoveryMultiplier = 2.5f,
                 MaximumLootersMultiplier = 0.25f,
+                Separatism = new SeparatismOptionsData
+                {
+                    Enabled = true,
+                    ChaosStartEnabled = false,
+                    DailyLordRebellionChance = 0.37f,
+                    SettlementRebellionsEnabled = true,
+                    SettlementRebellionStartLoyaltyThreshold = 18,
+                    SettlementRebellionEndLoyaltyThreshold = 63,
+                    FriendThreshold = 25,
+                    EnemyThreshold = -30,
+                    KeepOriginalKingdomWars = true,
+                },
             });
 
             var copy = RoundTrip(new NetworkLoadModConfig(options)).ModOptions;
@@ -86,6 +99,15 @@ namespace Coop.IntegrationTests.Serialization
             Assert.Equal(2, copy.PlayerKingdomClanTierRequired);
             Assert.Equal(2.5f, copy.SmithingStaminaRecoveryMultiplier);
             Assert.Equal(0.25f, copy.MaximumLootersMultiplier);
+            Assert.True(copy.Separatism.Enabled);
+            Assert.False(copy.Separatism.ChaosStartEnabled);
+            Assert.Equal(0.37f, copy.Separatism.DailyLordRebellionChance);
+            Assert.True(copy.Separatism.SettlementRebellionsEnabled);
+            Assert.Equal(18, copy.Separatism.SettlementRebellionStartLoyaltyThreshold);
+            Assert.Equal(63, copy.Separatism.SettlementRebellionEndLoyaltyThreshold);
+            Assert.Equal(25, copy.Separatism.FriendThreshold);
+            Assert.Equal(-30, copy.Separatism.EnemyThreshold);
+            Assert.True(copy.Separatism.KeepOriginalKingdomWars);
 
             // Keys the operator left absent still resolve to the documented defaults, not to zero.
             Assert.True(copy.FastForwardEnabled);
@@ -109,6 +131,22 @@ namespace Coop.IntegrationTests.Serialization
             SmithingStaminaRecoveryOutsideSettlements = false,
             SmithingStaminaRecoveryMultiplier = 0f,
             MaximumLootersMultiplier = 0f,
+            Separatism = new SeparatismOptionsData
+            {
+                Enabled = false,
+                ChaosStartEnabled = false,
+                LordRebellionsEnabled = false,
+                AverageAmountOfKingdomFiefsIsEnoughToRebel = false,
+                NationalRebellionsEnabled = false,
+                AnarchyRebellionsEnabled = false,
+                BonusRebelFiefForHighTierClan = false,
+                SettlementRebellionsEnabled = false,
+                KeepEmptyKingdoms = false,
+                KeepOriginalKingdomWars = false,
+                AllowUnions = false,
+                KeepRebelBannerColors = false,
+                SameColorsForAllRebels = false,
+            },
         });
 
         private static void AssertAllOptionsOff(ModOptions copy)
@@ -127,6 +165,12 @@ namespace Coop.IntegrationTests.Serialization
             Assert.False(copy.SmithingStaminaRecoveryOutsideSettlements);
             Assert.Equal(0f, copy.SmithingStaminaRecoveryMultiplier);
             Assert.Equal(0f, copy.MaximumLootersMultiplier);
+            Assert.False(copy.Separatism.Enabled);
+            Assert.False(copy.Separatism.ChaosStartEnabled);
+            Assert.False(copy.Separatism.LordRebellionsEnabled);
+            Assert.False(copy.Separatism.NationalRebellionsEnabled);
+            Assert.False(copy.Separatism.AnarchyRebellionsEnabled);
+            Assert.False(copy.Separatism.AllowUnions);
         }
 
         private static T RoundTrip<T>(T original)

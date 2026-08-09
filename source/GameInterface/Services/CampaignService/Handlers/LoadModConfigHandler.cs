@@ -42,7 +42,7 @@ internal class LoadModConfigHandler : IHandler
         messageBroker.Unsubscribe<NetworkLoadModConfig>(Handle_NetworkLoadModConfig);
     }
 
-    private void Handle_CampaignReady(MessagePayload<CampaignReady> obj)
+    internal void Handle_CampaignReady(MessagePayload<CampaignReady> obj)
     {
         // Use server's config
         if (ModInformation.IsClient)

@@ -100,6 +100,51 @@ public sealed class ModOptionsData
 
     public bool? EnablePlayerClanMemberExecutions { get; set; }
 
+    /// <summary>
+    /// Server-owned Separatism campaign settings. The host evaluates all rebellion decisions;
+    /// clients receive the resolved options and authoritative campaign mutations.
+    /// </summary>
+    public SeparatismOptionsData Separatism { get; set; } = new SeparatismOptionsData();
+
+    [JsonExtensionData]
+    public IDictionary<string, JToken> UnknownKeys { get; set; }
+}
+
+public sealed class SeparatismOptionsData
+{
+    public bool? Enabled { get; set; }
+    public bool? ChaosStartEnabled { get; set; }
+    public int? MinimalNumberOfWarsPerChaosKingdom { get; set; }
+    public bool? LordRebellionsEnabled { get; set; }
+    public bool? AverageAmountOfKingdomFiefsIsEnoughToRebel { get; set; }
+    public int? MinimalAmountOfKingdomFiefsToRebel { get; set; }
+    public float? DailyLordRebellionChance { get; set; }
+    public bool? NationalRebellionsEnabled { get; set; }
+    public int? MinimalRequiredNumberOfNativeLords { get; set; }
+    public float? DailyNationalRebellionChance { get; set; }
+    public bool? AnarchyRebellionsEnabled { get; set; }
+    public int? CriticalAmountOfFiefsPerSingleClan { get; set; }
+    public int? NumberOfDaysAfterOwnerVisitToKeepOrder { get; set; }
+    public bool? BonusRebelFiefForHighTierClan { get; set; }
+    public float? DailyAnarchyRebellionChance { get; set; }
+    public bool? SettlementRebellionsEnabled { get; set; }
+    public int? SettlementRebellionStartLoyaltyThreshold { get; set; }
+    public int? SettlementRebellionEndLoyaltyThreshold { get; set; }
+    public int? FriendThreshold { get; set; }
+    public int? EnemyThreshold { get; set; }
+    public int? RelationChangeRebelWithRuler { get; set; }
+    public int? RelationChangeRebelWithRulerFriendVassals { get; set; }
+    public int? RelationChangeRebelWithRulerEnemyVassals { get; set; }
+    public int? RelationChangeRebelWithRulerVassals { get; set; }
+    public int? RelationChangeUnitedRulers { get; set; }
+    public int? RelationChangeRulerWithSupporter { get; set; }
+    public int? RelationChangeNationalRebellionClans { get; set; }
+    public bool? KeepEmptyKingdoms { get; set; }
+    public bool? KeepOriginalKingdomWars { get; set; }
+    public bool? AllowUnions { get; set; }
+    public bool? KeepRebelBannerColors { get; set; }
+    public bool? SameColorsForAllRebels { get; set; }
+
     [JsonExtensionData]
     public IDictionary<string, JToken> UnknownKeys { get; set; }
 }

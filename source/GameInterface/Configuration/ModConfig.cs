@@ -378,6 +378,10 @@ internal sealed class ModConfig : IModConfig
         if (data.UnknownKeys != null) WarnUnknownKeys(data.UnknownKeys);
         if (data.Difficulty?.UnknownKeys != null) WarnUnknownKeys(data.Difficulty.UnknownKeys, "difficulty ");
         if (data.ModOptions?.UnknownKeys != null) WarnUnknownKeys(data.ModOptions.UnknownKeys, "mod option ");
+        if (data.ModOptions?.Separatism?.UnknownKeys != null)
+        {
+            WarnUnknownKeys(data.ModOptions.Separatism.UnknownKeys, "Separatism option ");
+        }
     }
 
     private static void WarnUnknownKeys(IDictionary<string, JToken> unknownKeys, string keyType = "")

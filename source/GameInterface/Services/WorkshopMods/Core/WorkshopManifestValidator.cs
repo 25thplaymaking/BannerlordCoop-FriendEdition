@@ -82,14 +82,22 @@ public sealed class WorkshopManifestValidator : IWorkshopManifestValidator
             bool serverPresent = serverEntries.TryGetValue(expected.ModuleId, out var server);
             bool clientPresent = clientEntries.TryGetValue(expected.ModuleId, out var client);
 
-            // Even a client-presentation component that is intentionally inactive on a headless
-            // server must be staged there: its receipt-backed digest is the trusted value clients
-            // are compared against.
+            // Bannerlord's module system only resolves ACTIVE modules, so a component that is
+            // staged on disk but inactive can never appear in a manifest — on either side. A
+            // module absent from BOTH manifests therefore has no bytes in either runtime: there
+            // is nothing to compare and no activation to police. Requiring it anyway (as an
+            // earlier version of this loop did) made every join impossible — both sides were
+            // permanently "missing" every not-yet-activated mod. Absence must simply AGREE;
+            // one-sided presence stays fatal below because it means the runtimes differ.
+            if (!serverPresent && !clientPresent)
+            {
+                warnings.Add(
+                    $"'{expected.ModuleId}' is not active on either side; its package bytes are not verified this session.");
+                continue;
+            }
+
             if (!serverPresent)
                 diagnostics.Add($"Server package is missing '{expected.ModuleId}' {expected.Version}.");
-            // The private suite always stages all eleven exact components on both roles. Feature
-            // activation is a separate decision: guarded originals may remain inactive without
-            // weakening package/content agreement.
             if (!clientPresent)
                 diagnostics.Add($"Client package is missing '{expected.ModuleId}' {expected.Version}.");
 
@@ -156,7 +164,7 @@ public sealed class WorkshopManifestValidator : IWorkshopManifestValidator
     {
         if (!string.Equals(actual.WorkshopId, expected.WorkshopId, StringComparison.Ordinal))
             diagnostics.Add($"{source} has the wrong Workshop item for '{expected.ModuleId}'.");
-        if (!string.Equals(actual.Version, expected.Version, StringComparison.OrdinalIgnoreCase))
+        if (!VersionsMatch(actual.Version, expected.Version))
             diagnostics.Add($"{source} has '{expected.ModuleId}' {actual.Version}; expected {expected.Version}.");
         if (actual.Role != expected.Role || actual.Profile != expected.Profile)
             diagnostics.Add($"{source} has an invalid compatibility profile for '{expected.ModuleId}'.");
@@ -188,4 +196,27 @@ public sealed class WorkshopManifestValidator : IWorkshopManifestValidator
 
     private static bool EqualHash(string left, string right) =>
         string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// ApplicationVersion.ToString() normalizes a three-part version to four parts (an absent
+    /// change-set becomes 0), so an ACTIVE module reports "v4.3.4.0" where the catalog pins
+    /// "v4.3.4". Compare by parsed value like the discovery layer does; fall back to the ordinal
+    /// compare only when a side is unparsable.
+    /// </summary>
+    private static bool VersionsMatch(string actual, string expected)
+    {
+        if (string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.IsNullOrWhiteSpace(actual) || string.IsNullOrWhiteSpace(expected)) return false;
+        try
+        {
+            return TaleWorlds.Library.ApplicationVersion.FromString(actual)
+                .IsSame(TaleWorlds.Library.ApplicationVersion.FromString(expected), checkChangeSet: true);
+        }
+        catch (Exception)
+        {
+            // ApplicationVersion.FromString throws a bare Exception on malformed input; an
+            // unparsable version is simply not a match.
+            return false;
+        }
+    }
 }

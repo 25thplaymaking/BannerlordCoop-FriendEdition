@@ -214,6 +214,60 @@ public class WorkshopManifestValidatorTests
             diagnostic.Contains("Client must activate 'Bannerlord.Harmony'", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// Bannerlord only resolves ACTIVE modules, so a staged-but-inactive component can never
+    /// appear in either manifest. Real sessions therefore carry only the active subset — today
+    /// just Harmony — and that must MATCH (with a not-verified warning per absent module), or no
+    /// join is ever possible. One-sided absence stays fatal (covered above).
+    /// </summary>
+    [Fact]
+    public void ModuleAbsentFromBothSides_WarnsButMatches()
+    {
+        var harmonyOnlyServer = new WorkshopCompatibilityManifest(
+            WorkshopPeerRole.Server,
+            ManifestFactory.Create(WorkshopPeerRole.Server).Entries
+                .Where(entry => entry.ModuleId == "Bannerlord.Harmony"));
+        var harmonyOnlyClient = new WorkshopCompatibilityManifest(
+            WorkshopPeerRole.Client,
+            ManifestFactory.Create(WorkshopPeerRole.Client).Entries
+                .Where(entry => entry.ModuleId == "Bannerlord.Harmony"));
+
+        WorkshopManifestValidationResult result = validator.Validate(harmonyOnlyServer, harmonyOnlyClient);
+
+        Assert.True(result.Matches, result.ToNetworkReason());
+        Assert.Contains(result.Warnings, warning =>
+            warning.Contains("not active on either side", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// ApplicationVersion.ToString() turns a three-part version into four parts, so an active
+    /// module legitimately reports "v4.3.4.0" where the catalog pins "v4.3.4". That is the same
+    /// version, not a mismatch.
+    /// </summary>
+    [Fact]
+    public void NormalizedFourPartVersion_MatchesThreePartPin()
+    {
+        WorkshopCompatibilityManifest server = ManifestFactory.Create(WorkshopPeerRole.Server);
+        WorkshopCompatibilityManifest client = ManifestFactory.Create(
+            WorkshopPeerRole.Client,
+            module => new WorkshopCompatibilityManifestEntry(
+                module.ModuleId,
+                module.WorkshopId,
+                module.ModuleId == "RBM" ? "v4.3.4.0" : module.Version,
+                module.Role,
+                module.Profile,
+                ManifestFactory.StableHash(module.ModuleId, 'a'),
+                ManifestFactory.StableHash(module.ModuleId, 'b'),
+                managedDistributionComponent: true,
+                activationOrderValid: true,
+                loadOrder: module.LoadOrder,
+                active: module.FeatureActiveExpectedOnClient));
+
+        WorkshopManifestValidationResult result = validator.Validate(server, client);
+
+        Assert.True(result.Matches, result.ToNetworkReason());
+    }
+
     private static WorkshopCompatibilityManifestEntry Copy(
         WorkshopModuleExpectation module,
         string contentHash = null,

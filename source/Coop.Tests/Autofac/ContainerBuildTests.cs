@@ -6,6 +6,10 @@ using Coop.Core.Common.Configuration;
 using Coop.Core.Client;
 using Coop.Core.Server;
 using GameInterface;
+using GameInterface.Services.WorkshopMods.Core;
+using Coop.Core.Client.States;
+using Coop.Core.Server.Connections;
+using System.Linq;
 using Xunit;
 
 namespace Coop.Tests.Autofac
@@ -27,6 +31,7 @@ namespace Coop.Tests.Autofac
 
             var logic = container.Resolve<ILogic>();
             Assert.NotNull(logic);
+            Assert.IsType<WorkshopManifestProvider>(container.Resolve<IWorkshopManifestProvider>());
         }
 
         [Fact]
@@ -44,6 +49,18 @@ namespace Coop.Tests.Autofac
 
             var logic = container.Resolve<ILogic>();
             Assert.NotNull(logic);
+            Assert.IsType<WorkshopManifestProvider>(container.Resolve<IWorkshopManifestProvider>());
+        }
+
+        [Fact]
+        public void ProductionContexts_DoNotExposeOptionalWorkshopHandshakeFallback()
+        {
+            Assert.False(typeof(ClientContext).GetConstructors().Single()
+                .GetParameters().Single(parameter =>
+                    parameter.ParameterType == typeof(IWorkshopManifestProvider)).IsOptional);
+            Assert.False(typeof(ConnectionContext).GetConstructors().Single()
+                .GetParameters().Single(parameter =>
+                    parameter.ParameterType == typeof(IWorkshopManifestProvider)).IsOptional);
         }
 
         [Theory]

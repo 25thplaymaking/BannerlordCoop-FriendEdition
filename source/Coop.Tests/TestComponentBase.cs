@@ -5,6 +5,7 @@ using Common.Serialization;
 using Common.Tests.Utils;
 using Coop.Tests.Mocks;
 using GameInterface.AutoSync;
+using GameInterface.Configuration;
 using GameInterface.CoopSessionData;
 using GameInterface.Registry;
 using GameInterface.Registry.Auto;
@@ -39,6 +40,8 @@ using Xunit.Abstractions;
 using IGameInterface = GameInterface.IGameInterface;
 using GameInterface.Services.CampaignService.Interfaces;
 using GameInterface.Services.Chat;
+using GameInterface.Services.WorkshopMods.Core;
+using FriendEdition.WorkshopCompatibility;
 
 namespace Coop.Tests;
 
@@ -83,6 +86,9 @@ internal abstract class TestComponentBase
         builder.RegisterType<TestMessageBroker>().AsSelf().As<IMessageBroker>().InstancePerLifetimeScope();
         builder.RegisterType<TestNetwork>().AsSelf().As<INetwork>().InstancePerLifetimeScope();
         builder.RegisterType<ModuleValidator>().As<IModuleValidator>().SingleInstance();
+        builder.RegisterType<DisabledWorkshopManifestProvider>()
+            .As<IWorkshopManifestProvider>()
+            .SingleInstance();
 
 
         builder.RegisterType<ObjectManager>().As<IObjectManager>().InstancePerLifetimeScope();
@@ -96,6 +102,7 @@ internal abstract class TestComponentBase
         RegisterMock<IAutoSyncPatchCollector>(builder);
         RegisterMock<IHeroInterface>(builder);
         RegisterMock<IModuleInfoProvider>(builder);
+        RegisterMock<IModConfigAuthority>(builder);
         RegisterMock<IRegistryManager>(builder);
         RegisterPlayerManagerMock(builder);
         RegisterMock<IPlayerPartyRestorer>(builder);

@@ -35,9 +35,11 @@ namespace Coop.IntegrationTests.Serialization
         {
             var options = AllOptionsOff();
 
-            var copy = RoundTrip(new NetworkLoadModConfig(options)).ModOptions;
+            var envelope = RoundTrip(new NetworkLoadModConfig(Snapshot(options))).Snapshot;
+            var copy = envelope.ModOptions;
 
             AssertAllOptionsOff(copy);
+            Assert.True(ModConfigSnapshotCodec.TryValidate(envelope, out var failure), failure);
         }
 
         /// <summary>The same, through a model told to build the struct via its constructor. Wine-Mono
@@ -51,11 +53,14 @@ namespace Coop.IntegrationTests.Serialization
             var model = RuntimeTypeModel.Create();
             model.Add(typeof(SeparatismOptions), applyDefaultBehaviour: true).UseConstructor = true;
             model.Add(typeof(ModOptions), applyDefaultBehaviour: true).UseConstructor = true;
+            model.Add(typeof(ModConfigSnapshot), applyDefaultBehaviour: true);
             model.Add(typeof(NetworkLoadModConfig), applyDefaultBehaviour: true).UseConstructor = true;
 
-            var copy = RoundTrip(new NetworkLoadModConfig(AllOptionsOff()), model).ModOptions;
+            var envelope = RoundTrip(new NetworkLoadModConfig(Snapshot(AllOptionsOff())), model).Snapshot;
+            var copy = envelope.ModOptions;
 
             AssertAllOptionsOff(copy);
+            Assert.True(ModConfigSnapshotCodec.TryValidate(envelope, out var failure), failure);
         }
 
         /// <summary>The ordinary direction: configured values that differ from both the documented
@@ -88,7 +93,8 @@ namespace Coop.IntegrationTests.Serialization
                 },
             });
 
-            var copy = RoundTrip(new NetworkLoadModConfig(options)).ModOptions;
+            var envelope = RoundTrip(new NetworkLoadModConfig(Snapshot(options))).Snapshot;
+            var copy = envelope.ModOptions;
 
             Assert.True(copy.ClientsCanUseCheats);
             Assert.Equal(GoldFoodChangeMode.Enabled, copy.GoldFoodInfluenceChangeInBattles);
@@ -113,7 +119,12 @@ namespace Coop.IntegrationTests.Serialization
             Assert.True(copy.FastForwardEnabled);
             Assert.True(copy.AutoPauseEnabled);
             Assert.True(copy.SpeedLimitWhilePlayersInBattle);
+            Assert.True(envelope.BirthAndDeathEnabled);
+            Assert.True(ModConfigSnapshotCodec.TryValidate(envelope, out var failure), failure);
         }
+
+        private static ModConfigSnapshot Snapshot(ModOptions options) =>
+            new("0123456789abcdef0123456789abcdef", 1, options, birthAndDeathEnabled: true);
 
         private static ModOptions AllOptionsOff() => new(new ModOptionsData
         {

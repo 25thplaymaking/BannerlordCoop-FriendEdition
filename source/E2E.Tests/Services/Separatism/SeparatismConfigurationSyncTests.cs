@@ -137,8 +137,11 @@ public sealed class SeparatismConfigurationSyncTests : IDisposable
     }
 
     [Fact]
-    public void UnmappedClientCannotRequestHostModConfig()
+    public void UnmappedClientRequest_IsIgnoredWithoutDisconnectAndServedOnceMapped()
     {
+        // A joining client fires this request when character creation finishes, before the server
+        // has unpacked its hero transfer and mapped the peer. Disconnecting here killed every
+        // first join, so the unmapped request must be dropped while the connection survives.
         Server.Call(() => Server.Resolve<LoadModConfigHandler>().Handle_CampaignReady(
             new MessagePayload<CampaignReady>(this, new CampaignReady())));
         Server.NetworkSentMessages.Clear();
@@ -150,7 +153,23 @@ public sealed class SeparatismConfigurationSyncTests : IDisposable
         Server.SimulateMessage(client.NetPeer, new NetworkRequestServerModConfig(accepted));
 
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkLoadModConfig>());
-        Assert.Equal(LiteNetLib.ConnectionState.ShutdownRequested, client.NetPeer.ConnectionState);
+        Assert.NotEqual(LiteNetLib.ConnectionState.ShutdownRequested, client.NetPeer.ConnectionState);
+
+        Server.Call(() =>
+        {
+            var players = Server.Resolve<IPlayerManager>();
+            Assert.True(players.AddPlayer(new Player(
+                "joining-client",
+                "joining-hero",
+                "joining-party",
+                "joining-clan",
+                "joining-character")));
+            players.SetPeer("joining-client", client.NetPeer);
+        });
+        Server.SimulateMessage(client.NetPeer, new NetworkRequestServerModConfig(accepted));
+
+        Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkLoadModConfig>());
+        Assert.NotEqual(LiteNetLib.ConnectionState.ShutdownRequested, client.NetPeer.ConnectionState);
     }
 
     [Fact]

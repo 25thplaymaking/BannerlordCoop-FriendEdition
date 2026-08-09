@@ -100,11 +100,14 @@ internal class LoadModConfigHandler : IHandler
         if (!ModInformation.IsServer || obj?.Who is not NetPeer peer) return;
 
         // Initial configuration is delivered by the module-validation response. Requests are only
-        // valid after the peer has an authenticated controller mapping and are bounded per peer.
+        // answered after the peer has an authenticated controller mapping and are bounded per peer.
+        // A joining peer legitimately requests while still unmapped: finishing character creation
+        // fires CampaignReady (and this request) before the server has unpacked that peer's hero
+        // transfer, so an unmapped requester is ignored — never disconnected — and is served by the
+        // request it sends after entering the transferred campaign.
         if (playerManager == null || !playerManager.TryGetPlayer(peer, out _))
         {
-            Logger.Warning("Disconnecting unmapped peer {Peer} that requested the host mod-config", peer.Id);
-            peer.Disconnect();
+            Logger.Warning("Ignoring mod-config request from peer {Peer} with no player mapping yet", peer.Id);
             return;
         }
         if (!obj.What.TryValidateWireShape(out string requestFailure))

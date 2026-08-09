@@ -7,6 +7,7 @@ using Missions.Agents.Extensions;
 using Serilog;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
@@ -25,6 +26,13 @@ internal static class RbmPatchWaveCompatibilityPatch
             "RBM.SubModule",
             "ApplyHarmonyPatches");
     }
+
+    // A same-named-but-different RBM build can leave IsFamilyPresent (the category-level gate in
+    // MissionModule) true while this class's own target still fails to resolve — e.g. a renamed or
+    // removed ApplyHarmonyPatches method. Prepare makes this class immune to that mismatch: Harmony
+    // skips it entirely instead of throwing "Undefined target method" when TargetMethods() is empty.
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
 
     [HarmonyPrefix]
     private static bool Prefix(MethodBase __originalMethod, out bool __state)
@@ -58,6 +66,11 @@ internal static class RbmConfigLoadPatch
             "RBMConfig.RBMConfig",
             "LoadConfig");
     }
+
+    // See RbmPatchWaveCompatibilityPatch.Prepare: this class's own target must independently resolve
+    // before Harmony is allowed to try patching it, regardless of the category-level presence gate.
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
 
     [HarmonyPrefix]
     private static bool Prefix(MethodBase __originalMethod, out bool __state)
@@ -106,6 +119,10 @@ internal static class RbmConfigSavePatch
             "saveXmlConfig");
     }
 
+    // See RbmPatchWaveCompatibilityPatch.Prepare.
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
+
     [HarmonyPrefix]
     private static bool Prefix(MethodBase __originalMethod)
     {
@@ -144,6 +161,10 @@ internal static class RbmConfigUiDonePatch
             "RBMConfig.RBMConfigViewModel",
             "ExecuteDone");
     }
+
+    // See RbmPatchWaveCompatibilityPatch.Prepare.
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
 
     [HarmonyPrefix]
     private static bool Prefix(MethodBase __originalMethod, out bool __state)
@@ -192,6 +213,10 @@ internal static class RbmMissionBehaviorInitializationPatch
             "OnMissionBehaviorInitialize");
     }
 
+    // See RbmPatchWaveCompatibilityPatch.Prepare.
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
+
     [HarmonyPrefix]
     private static bool Prefix(MethodBase __originalMethod)
     {
@@ -235,6 +260,10 @@ internal static class RbmGameInitializationFinishedPatch
             "RBM",
             "OnGameInitializationFinished");
     }
+
+    // See RbmPatchWaveCompatibilityPatch.Prepare.
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
 
     [HarmonyPrefix]
     private static bool Prefix(MethodBase __originalMethod)
@@ -286,6 +315,10 @@ internal static class DismembermentMissionInitializerPatch
         }
     }
 
+    // See RbmPatchWaveCompatibilityPatch.Prepare.
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
+
     [HarmonyPrefix]
     private static bool Prefix()
     {
@@ -311,6 +344,10 @@ internal static class DismembermentRegisterBlowPatch
             "OnRegisterBlow");
         if (target != null) yield return target;
     }
+
+    // See RbmPatchWaveCompatibilityPatch.Prepare.
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
 
     [HarmonyPrefix]
     private static bool Prefix()
@@ -343,6 +380,10 @@ internal static class DismembermentSlowMotionPatch
             "CheckSetSlowMotion");
         if (target != null) yield return target;
     }
+
+    // See RbmPatchWaveCompatibilityPatch.Prepare.
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
 
     [HarmonyPrefix]
     private static bool Prefix()

@@ -34,16 +34,31 @@ These will waste hours if rediscovered:
 
 ---
 
-## 3. Current state of the branch
+## 3. Current state of the branch — CI IS RED. START HERE.
 
-Green and stable, verified 3× each on the merge commit `782169c82` and again after the §6 fix wave:
+**Do not trust the "green" figures below without reading the CI section under them.**
 
-| Suite | Result |
+Namespace-scoped local runs, 3× each on the fix-wave head:
+
+| Suite (scoped) | Result |
 |---|---|
-| `GameInterface.Tests` → `...Services.WorkshopMods` | 254 tests, **2 failed**, identical every run |
-| `E2E.Tests` → `...Services.WorkshopMods` | 95 tests, **0 failed**, identical every run |
+| `GameInterface.Tests` → `...Services.WorkshopMods` | 254 tests, 2 failed, identical every run |
+| `E2E.Tests` → `...Services.WorkshopMods` | 95 tests, 0 failed, identical every run |
 
-The 2 failures are a protobuf round-trip pair, **environmental** — proven by control: `Common.Tests`, untouched by this branch, fails an unrelated round-trip identically under the same runner. Do not "fix" them by changing production serialization. CI under vstest should show them passing; **that confirmation has not happened yet** because the draft PR was skipped.
+**CI run 31333186560 (first ever on this branch): build ✅, `test` ❌, all 8 E2E shards ❌.**
+
+Local runs were only ever *namespace-scoped* to `WorkshopMods`. CI runs everything. Four real failures live outside that scope and were therefore structurally invisible locally:
+
+1. **`GameInterface.Tests.PatchTest.HarmonyPatchesAll`** — fails with the *exact* defect this branch exists to fix:
+   `ArgumentException: Undefined target method for patch method … DiplomacySharedMutationAuthorityPatch::Prefix`.
+   **The categorisation fix is incomplete.** Adding `[HarmonyPatchCategory]` removes a class from `PatchAllUncategorized` — which is what `GameInterface.PatchAll()` calls, so the *production* path is genuinely fixed — but Harmony's blanket `PatchAll(assembly)` applies categorised patches too, and this test calls that. Any caller using blanket `PatchAll` still aborts. Fix properly with `[HarmonyPrepare]` returning `TargetMethods().Any()` on the Diplomacy classes (the pattern already used on the RBM/DismembermentPlus classes), which is immune regardless of how patching is invoked.
+2. **`WorkshopCompatibilityManifestTests.Protobuf_RoundTrip_PreservesAndValidatesManifest`** — fails on CI as `Assert.All() Failure: 10 out of 11 items`. **This is a different symptom from the local failure and it means the "environmental" verdict was WRONG.** Locally it failed as an `Assert.IsType` type-identity artifact of the console runner; on CI under vstest it fails as a genuine round-trip content mismatch. The control experiment (`Common.Tests` failing similarly) proved only that the *local runner* has a problem — it did not prove this test has none. **Treat this as a real manifest serialization bug.**
+3. **`CampaignOptionsAuthorityTests.OtherOptionsWireShape_RejectsNullAndUnknownDifficulty`** — fails on CI, never run locally.
+4. **All 8 E2E shards** — `SeparatismConfigurationSyncTests.ClientCannotOverwriteServerBirthAndDeathThroughCampaignOptionsWireMessage` throws
+   `InvalidOperationException: Friend Edition release preflight requires difficulty.birthAndDeath=true in the resolved CoopData/mod-config.json`.
+   A **release preflight check is executing inside the test suite** and depends on the operator's real `CoopData/mod-config.json`, which does not exist on a CI runner or on any fresh machine. This comes from the baseline, not from this increment's work. Either the preflight must not run in tests, or the test must supply its own resolved config.
+
+**Lesson for whoever continues:** namespace-scoped runs were used all session because the full `E2E.Tests` assembly is order-unstable in one process. That was correct for iteration and wrong as an acceptance gate. **CI is the only gate of record — get it green before building anything on this branch.**
 
 ### What exists
 
@@ -167,6 +182,13 @@ Two temporary worktrees exist and can be deleted once PR #3 is settled:
 ---
 
 ## 9. Immediate next actions
+
+**Everything below is superseded by §3: get CI green first.** The four CI failures are the real
+first job — two of them (the incomplete patch fix, and the manifest round-trip that is not
+environmental after all) are defects in what this branch claims to have delivered. Routing work
+starts after that, not before.
+
+### Original ordering, still valid once CI is green
 
 1. ~~Verify whether the §6 fix wave landed.~~ It landed; see §6.
 2. `gh pr ready 3 --repo 25thplaymaking/BannerlordCoop-FriendEdition` — CI has never run on this branch (drafts are skipped). Confirm the 8 shards, and that the 2 protobuf tests pass under vstest.

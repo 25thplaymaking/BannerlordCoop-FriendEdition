@@ -96,6 +96,9 @@ internal static class DiplomacyCompatibilityPolicy
             },
             ["Diplomacy.ViewModel.GrantFiefVM"] = new[] { ("OnGrantFief", 0) },
             ["Diplomacy.ViewModel.DonateGoldVM"] = new[] { ("ExecutePropose", 0) },
+            // The routed donation's server-side apply. Hero-parameterised in the audited binary
+            // (no MainHero in its body) — the reason DiplomacyDonateGoldInterface may reuse it.
+            ["Diplomacy.Actions.GiveGoldToClanAction"] = new[] { ("ApplyFromHeroToClan", 3) },
             ["Diplomacy.ViewModelMixin.EncyclopediaHeroPageVMMixin"] = new[] { ("SendMessenger", 0) },
             ["Diplomacy.ViewModelMixin.KingdomWarItemVMMixin"] = new[] { ("ExecuteDirectAction", 0) },
             ["Diplomacy.ViewModelMixin.KingdomTruceItemVMMixin"] = new[]

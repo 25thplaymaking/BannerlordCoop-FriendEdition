@@ -244,7 +244,8 @@ internal static class DiplomacyUnsupportedPlayerActionPatch
         new Dictionary<string, string[]>(System.StringComparer.Ordinal)
         {
             ["Diplomacy.ViewModel.GrantFiefVM"] = new[] { "OnGrantFief" },
-            ["Diplomacy.ViewModel.DonateGoldVM"] = new[] { "ExecutePropose" },
+            // DonateGoldVM.ExecutePropose is deliberately absent: it is routed through
+            // DiplomacyDonateGoldRoutingPatch instead of blocked.
             ["Diplomacy.ViewModelMixin.EncyclopediaHeroPageVMMixin"] = new[] { "SendMessenger" },
             ["Diplomacy.ViewModelMixin.KingdomWarItemVMMixin"] = new[] { "ExecuteDirectAction" },
             ["Diplomacy.ViewModelMixin.KingdomTruceItemVMMixin"] = new[]

@@ -1,7 +1,7 @@
 # Handoff — Workshop Mod Co-op Routing
 
 **Written:** 2026-08-09
-**Branch:** `25vid/workshop-integration` (pushed; open as draft [PR #3](https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/pull/3))
+**Branch:** `25vid/workshop-integration` (pushed; [PR #3](https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/pull/3) marked ready 2026-08-09, **CI green** on run 31334171473)
 **Worktree:** `C:\Users\Bryce\Documents\ServerWork\workshop-integration`
 **For:** whoever picks this up next. Assume no context from the session that produced it.
 
@@ -11,9 +11,21 @@
 
 **Goal:** seven third-party Workshop gameplay mods run under co-op authority — the server learns about every mutation, clients can request them, state converges.
 
-**Status: not started.** No gameplay is routed. Three of these mods (RBM, ImprovedGarrisons, Diplomacy) run on the live dedicated server *today* with no co-op awareness at all; every mutation they make is local to whichever machine executed it. That is unchanged by this branch.
+**Status: first action routed (2026-08-09).** Diplomacy's **Donate Gold** goes through the full
+four-part shape end-to-end: `DiplomacyDonateGoldRoutingPatch` (client prefix, suppress + intent) →
+`DiplomacyGoldDonationAttempted` → `DiplomacyDonateGoldHandler` (ids-only
+`NetworkRequestDiplomacyDonateGold`; server half re-derives the hero from the peer) →
+`IDiplomacyDonateGoldInterface.TryApplyDonation` (amount validated against the server's books, the
+mod's own hero-parameterised `GiveGoldToClanAction.ApplyFromHeroToClan` invoked reflectively
+against the pinned assembly, relation gain recomputed from native models with explicit heroes;
+trait XP documented-skipped as MainHero-bound). Five E2E gates pin the funnel; the apply itself is
+live-smoke scope because the pinned mod is absent in tests. **Every other player action of every
+mod remains blocked, and the ledger in §4.4 is what "routed" means.**
 
-What this branch did was clear the ground: the mod no longer crashes when a Workshop mod is absent, the test suite is deterministic, the ~13k-line integration is committed instead of living in a dirty working tree, and there is a contract for declaring modules. Necessary, not sufficient. **The work the user asked for is section 4 onward.**
+Everything else this branch did cleared the ground: no crash when a Workshop mod is absent, a
+deterministic test suite, the ~13k-line integration committed, a contract for declaring modules —
+and, as of today, a green CI as the gate of record. **The remaining work is section 4's
+repetition of the donate-gold shape across the action ledger.**
 
 ---
 
@@ -88,9 +100,11 @@ an acceptance gate. **CI is the only gate of record.**
 
 ### What does NOT exist
 
-- Any inbound intent path. `IWorkshopModule.Actions` is deliberately absent — it cannot be designed before one real action is routed.
+- The `IWorkshopModule.Actions` table. ONE inbound intent path now exists (Donate Gold, see §1),
+  built directly on the four-part shape; the table abstraction is deliberately deferred until 2–3
+  routed actions show what it must express (§9.3).
 - Declarations for **ImprovedGarrisons, Fourberie, PlayerSettlement**. They carry zero Harmony attributes and patch imperatively from their handlers, so they have no pin, no config key, and none of the shared gates.
-- Any runtime effect from the per-module config switch.
+- Any runtime effect from the config switch beyond the routed donation's gate (§5.2).
 
 ---
 
@@ -135,9 +149,23 @@ Do not invent a parallel transport. Everything needed exists.
 4. **Fourberie** — blocked on a pending Steam update (§7); its initializer replaces ~14 campaign models overlapping Coop authority, so routing may be rejected in favour of permanent blocking. Decide on evidence.
 5. **PlayerSettlement** — dynamic campaign objects, largest identity surface. Last.
 
-### 4.4 Per-mod definition of done
+### 4.4 Per-mod definition of done — the action ledger
 
 Coverage is **per action, not per mod**. "Diplomacy is routed" must mean a named, reviewed list of actions. Enumerate each mod's player-initiated surface from its decompiled code and record it, or "done" is unfalsifiable.
+
+**Diplomacy's player-initiated surface** (from the 1.4.7 decompile; this list IS the definition of
+"Diplomacy is routed" — every entry either gets the four-part shape or a recorded decision not to):
+
+| Action | Entry point | State |
+|---|---|---|
+| Donate gold to a clan | `DonateGoldVM.ExecutePropose` | **ROUTED** (2026-08-09) |
+| Grant fief to a vassal | `GrantFiefVM.OnGrantFief` | blocked; next candidate — discrete, ids (settlement + hero), server recomputes relation |
+| Declare war (kingdom screen) | `KingdomWarItemVMMixin.ExecuteDirectAction` | blocked; overlaps Coop's native stance/decision authority — assess against it before routing |
+| Propose peace (kingdom screen) | `KingdomTruceItemVMMixin.ExecuteDirectAction` | blocked; same overlap |
+| Propose non-aggression pact | `KingdomTruceItemVMMixin.ProposeNonAggressionPact` + `FormNonAggressionPactAction` | blocked; also feature-gated in `DiplomacyPlayerKingdomActionGuardPatch` — needs agreement-manager snapshot on apply |
+| Send messenger | `EncyclopediaHeroPageVMMixin.SendMessenger` | whole `MessengerBehavior` feature-blocked; routing needs a PlayerEncounter shape — decide, don't drift |
+| Keep fief after siege | `KeepFiefAfterSiegeBehavior.OnPlayerSettlementTaken` | blocked; deferred-inquiry capture of MainHero — needs its own routed prompt |
+| Civil war actions (create/join/leave faction, start rebellion) | `RebelFactionsVM` / `RebelFactionItemVM` / `CivilWar.Actions.*` | permanently blocked while Friend Separatism owns rebellions (recorded decision, not debt) |
 
 ---
 
@@ -146,9 +174,9 @@ Coverage is **per action, not per mod**. "Diplomacy is routed" must mean a named
 ### 5.1 Three mods can't be declared without a decision
 ImprovedGarrisons, Fourberie and PlayerSettlement have no Harmony attributes. When declared they will **all** need `PatchCategory => null`, making the nullable escape hatch the majority case (4 of 7) rather than the single reviewed exception it was approved as. Revisit whether the contract should express "patches imperatively" as a first-class state instead.
 
-### 5.2 The config switch gates nothing
-`GameInterface.PatchAll()` runs at container-build; `ModConfigAuthority` doesn't install options until `CampaignReady`. So presence-and-pin gates patching, and the operator switch has **no runtime consumer**. Its natural first consumer is the routing funnel you are about to build — bind it there, or delete `ResolveLiveModules`. Do not let another increment pass with an unreferenced public API.
-Also: `workshopModules` was deliberately **left out of `deploy/mod-config.default.json`** — do not advertise a switch that does nothing. Note the wire member is a **deny list** (`DisabledWorkshopModules`), because protobuf omits empty repeated fields and an allow list would silently disable every adapter on a zeroed receiver.
+### 5.2 The config switch — FIRST CONSUMER LANDED, but only one
+`GameInterface.PatchAll()` runs at container-build; `ModConfigAuthority` doesn't install options until `CampaignReady`. So presence-and-pin gates patching, and the operator switch gates **runtime intents**: `DiplomacyDonateGoldInterface` is now `ResolveLiveModules`'s first production consumer — a module the operator disabled refuses the donation (`ModuleDisabled`) before any state is touched, and an E2E gate pins it. Every FUTURE routed action must go through the same gate; the switch still gates nothing else (snapshots, AutoSync, the existing compatibility adapters run on presence alone).
+Also: `workshopModules` was deliberately **left out of `deploy/mod-config.default.json`**; revisit once the switch gates enough behaviour to be worth advertising. Note the wire member is a **deny list** (`DisabledWorkshopModules`), because protobuf omits empty repeated fields and an allow list would silently disable every adapter on a zeroed receiver.
 
 ### 5.3 The registrar's fingerprint check is a tautology
 `ResolveInstalledSha256()` returns the pinned constant or null, so `Fingerprint.Matches(...)` can never fail for a non-null answer. **All real safety lives inside each module's `ResolveInstalledSha256`**, and nothing in the contract or the shared gates can detect a lazy implementation. The gates only ever assert absent behaviour — they never prove a module works when installed.
@@ -198,16 +226,22 @@ Two temporary worktrees exist and can be deleted once PR #3 is settled:
 
 ---
 
-## 9. Immediate next actions
+## 9. Immediate next actions (updated 2026-08-09, post-CI-green)
 
-**Everything below is superseded by §3: get CI green first.** The four CI failures are the real
-first job — two of them (the incomplete patch fix, and the manifest round-trip that is not
-environmental after all) are defects in what this branch claims to have delivered. Routing work
-starts after that, not before.
+Done this session: §6 fix wave verified · scoped gates re-verified · PR #2 **merged** to
+`development` · PR #3 marked ready · first CI run's failures (§3) all fixed, **CI green** ·
+Diplomacy action surface enumerated (§4.4) · **Donate Gold routed end-to-end** with five E2E gates
+· config switch's first runtime consumer landed (§5.2).
 
-### Original ordering, still valid once CI is green
-
-1. ~~Verify whether the §6 fix wave landed.~~ It landed; see §6.
-2. `gh pr ready 3 --repo 25thplaymaking/BannerlordCoop-FriendEdition` — CI has never run on this branch (drafts are skipped). Confirm the 8 shards, and that the 2 protobuf tests pass under vstest.
-3. Decide whether to merge PR #3. Also outstanding: **PR #2** (battle E2E fixes, CI-green, unmerged).
-4. Then start §4 — pick Diplomacy, enumerate its player-initiated action surface from the decompiled assembly, and route one action end-to-end through the four-part shape. Everything after that is repetition.
+1. **Merge PR #3** — CI is green; this is now a judgment call on scope, not readiness. After
+   merge, delete the two temporary worktrees (§8).
+2. **Live smoke the routed donation** — needs Bryce's game + the real Diplomacy 1.4.7 DLL: donate
+   from a client, watch the server apply and the gold/relation deltas replicate. E2E cannot cover
+   the applied path (mod absent by construction); until this runs, "routed" is proven only up to
+   the `ModuleNotInstalled` boundary.
+3. **Next action: GrantFief** (`GrantFiefVM.OnGrantFief`) — same shape, discrete, ids-only.
+   After 2–3 routed actions, extract the common client-half/server-half plumbing into the
+   `IWorkshopModule.Actions` table the design deferred (one instance was too early to abstract;
+   three is not).
+4. Then the §4.3 mod order: ImprovedGarrisons (declare first, §5.1), the mission-side trio,
+   Fourberie (after its Steam update re-pin, §7), PlayerSettlement.

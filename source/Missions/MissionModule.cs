@@ -5,6 +5,7 @@ using GameInterface.Services.Locations;
 using GameInterface.Services.MapEvents;
 using GameInterface.Services.Tournaments;
 using GameInterface.Services.Time.UI;
+using GameInterface.Services.WorkshopMods.Core;
 using Missions.Agents;
 using Missions.Agents.Handlers;
 using Missions.Agents.Patches;
@@ -16,6 +17,8 @@ using Missions.Services.Network;
 using Missions.Taverns;
 using Missions.Tournaments;
 using Missions.Tournaments.Spectators;
+using Missions.WorkshopMods.Combat;
+using System;
 using System.Collections.Generic;
 
 namespace Missions;
@@ -224,5 +227,30 @@ public class MissionModule : Module
         yield return new HarmonyPatchCategoryRegistration(
             typeof(HumanAIMountSearchSafetyPatch).Assembly,
             MountAiSafetyPatchCategory);
+
+        // Workshop combat-mod adapters (RBM, DismembermentPlus): registered ONLY when their
+        // assemblies are present. These used to share CombatHitPresentationPatchCategory with
+        // mandatory patches like MeleeHitPresentationPatch; unconditionally applying that category
+        // threw the same "Undefined target method" HarmonyException PatchAllUncategorized threw for
+        // an absent Diplomacy, aborting every remaining Coop patch. Splitting them into their own
+        // presence-gated categories fixes that without touching the mandatory patches, which stay in
+        // CombatHitPresentationPatchCategory above, registered unconditionally as before.
+        if (CombatModFingerprintCatalog.IsFamilyPresent(
+                CombatModFamily.Rbm434,
+                AppDomain.CurrentDomain.GetAssemblies()))
+        {
+            yield return new HarmonyPatchCategoryRegistration(
+                typeof(RbmPatchWaveCompatibilityPatch).Assembly,
+                WorkshopPatchCategories.Rbm);
+        }
+
+        if (CombatModFingerprintCatalog.IsFamilyPresent(
+                CombatModFamily.DismembermentPlus2087,
+                AppDomain.CurrentDomain.GetAssemblies()))
+        {
+            yield return new HarmonyPatchCategoryRegistration(
+                typeof(DismembermentMissionInitializerPatch).Assembly,
+                WorkshopPatchCategories.DismembermentPlus);
+        }
     }
 }

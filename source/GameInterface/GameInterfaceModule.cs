@@ -29,6 +29,8 @@ using GameInterface.Services.Separatism;
 using GameInterface.Services.Stances;
 using GameInterface.Services.TroopRosters.Logging;
 using GameInterface.Services.Time;
+using GameInterface.Services.WorkshopMods.Core;
+using GameInterface.Services.WorkshopMods.Diplomacy;
 using GameInterface.Services.Workshops;
 using GameInterface.Surrogates;
 using HarmonyLib;
@@ -53,6 +55,7 @@ public class GameInterfaceModule : Module
         builder.RegisterType<GameInterface>().As<IGameInterface>().InstancePerLifetimeScope().AutoActivate();
         // mod-config.json: one lazy read per session container (see IModConfig).
         builder.RegisterType<ModConfig>().As<IModConfig>().InstancePerLifetimeScope();
+        builder.RegisterType<ModConfigAuthority>().As<IModConfigAuthority>().InstancePerLifetimeScope();
         builder.RegisterType<BinaryPackageFactory>().As<IBinaryPackageFactory>().InstancePerLifetimeScope();
         builder.RegisterType<ControllerIdProvider>().As<IControllerIdProvider>().InstancePerLifetimeScope();
         builder.RegisterType<TimeControlModeConverter>().As<ITimeControlModeConverter>().InstancePerLifetimeScope();
@@ -91,6 +94,15 @@ public class GameInterfaceModule : Module
         builder.RegisterType<MainPartyBattleRewardsCache>().As<IMainPartyBattleRewardsCache>().InstancePerLifetimeScope();
         builder.RegisterType<PacketManager>().As<IPacketManager>().InstancePerLifetimeScope();
         builder.RegisterType<MapEventInitializationBarrierBinding>().InstancePerLifetimeScope().AutoActivate();
+
+        // Registered ONLY when the assembly resolves. Applying a category whose patch classes have no
+        // resolvable targets throws exactly like the uncategorised path did.
+        if (DiplomacyCompatibilityPolicy.ResolveAssembly() != null)
+        {
+            builder.RegisterInstance(new HarmonyPatchCategoryRegistration(
+                typeof(GameInterface).Assembly,
+                WorkshopPatchCategories.Diplomacy));
+        }
 
         builder.RegisterModule<ServiceModule>();
         builder.RegisterModule<ObjectManagerModule>();

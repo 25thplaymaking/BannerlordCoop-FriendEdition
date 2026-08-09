@@ -53,6 +53,19 @@ Also at `~/bannerlord-coop/private-distributions/BannerlordCoop-FriendEdition-20
 - CI became the gate of record and is green (first-ever runs on this branch
   surfaced six latent defects, all fixed; PR #2 and PR #3 merged).
 
+### Server hotfix (same day, after release cut)
+
+- **First join died right after character creation** ("Client has been
+  stopped"): finishing character creation fires a mod-config request before
+  the server has unpacked the joiner's hero transfer, and the server's
+  unmapped-peer guard answered it by disconnecting. The guard now ignores
+  requests from not-yet-mapped peers instead of disconnecting (commit
+  `dc915a727`), deployed server-side only — the workshop2 client package is
+  unaffected and stays current. Live-verified milestones from the same
+  session: the fixed validator accepted a real join (all eleven staged mods
+  warn-only), and launching with RBM hand-enabled was refused one-sided as
+  designed.
+
 ### Known state / caveats
 
 - **The audited Workshop bytes now live only in the suite** (and the server's

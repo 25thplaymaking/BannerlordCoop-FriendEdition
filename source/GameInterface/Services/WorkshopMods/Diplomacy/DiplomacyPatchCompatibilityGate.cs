@@ -41,14 +41,25 @@ internal static class DiplomacyPatchCompatibilityGate
         => RemovePatches(removeEveryDiplomacyPatch: true);
 
     /// <summary>
-    /// True if a forbidden Diplomacy-owned patch is currently installed. Callers that need this to be
-    /// false (post-cleanup verification, and the one test that checks it directly) get the benefit of
-    /// HarmonyPatchInfoStabilizer automatically: a scan that finds something forbidden is retried
-    /// before being trusted, since a stale/corrupted GetPatchInfo read is indistinguishable from a real
-    /// forbidden patch until it is re-checked. A genuinely-forbidden patch reports true on every retry.
+    /// True if a forbidden Diplomacy-owned patch is currently installed.
+    /// <para>
+    /// This is an existence scan, so — unlike the exact-inventory asserts elsewhere — a transient
+    /// GetPatchInfo misread can manufacture a false CLEAN as easily as a false alarm: a real
+    /// <c>Diplomacy.Patches.*</c> patch whose <c>PatchMethod</c> deserializes as null, or as the
+    /// allow-listed <c>DefaultClanPoliticsModelPatch</c>, vanishes from that one scan. Retrying until
+    /// some scan reports clean would therefore shop for the misread — reporting clean if any one of
+    /// the attempts said so — and let Coop run with an unremoved Diplomacy mutation funnel installed.
+    /// </para>
+    /// <para>
+    /// So the retry runs the other way round: every read must agree that nothing forbidden is
+    /// installed before this reports false, and one read that sees something forbidden ends the loop
+    /// immediately. Retries can only ever confirm the fail-closed verdict. The false-alarm case that
+    /// motivated the stabilizer is absorbed by <see cref="RemoveAndAssert"/>, which re-runs the
+    /// removal and asks again rather than aborting on the first disagreement.
+    /// </para>
     /// </summary>
     internal static bool HasForbiddenPatches(bool removeEveryDiplomacyPatch) =>
-        !HarmonyPatchInfoStabilizer.StabilizeUntilAcceptable(
+        !HarmonyPatchInfoStabilizer.RequireAcceptableOnEveryAttempt(
             () => !ScanForForbiddenPatches(removeEveryDiplomacyPatch));
 
     private static bool ScanForForbiddenPatches(bool removeEveryDiplomacyPatch)
@@ -78,6 +89,12 @@ internal static class DiplomacyPatchCompatibilityGate
         // back from GetPatchInfo, and that value has been observed to transiently deserialize to the
         // wrong MethodInfo. Unpatching the wrong (unrelated) method leaves the real target patched, so
         // only re-reading and re-attempting the removal — not just re-checking — recovers from it.
+        //
+        // Cost is bounded, and paid where it should be. HasForbiddenPatches now returns on the FIRST
+        // read that sees something forbidden, so the failure path here is one GetAllPatchedMethods()
+        // sweep per outer attempt, not one per read of both loops as it was when the inner check
+        // retried until it found a clean read. The multi-read confirmation is only fully spent when
+        // the surface really is clean, which happens once, on the outer loop's first attempt.
         var clean = HarmonyPatchInfoStabilizer.StabilizeUntilAcceptable(() =>
         {
             RemovePatches(removeEveryDiplomacyPatch);

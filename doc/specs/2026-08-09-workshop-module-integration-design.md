@@ -71,23 +71,48 @@ interface IWorkshopModule
     string ModuleId { get; }              // "Bannerlord.Diplomacy"
     ulong  WorkshopId { get; }            // 2881380744
     ModuleFingerprint Fingerprint { get; }// assembly name, version, SHA-256
-    string PatchCategory { get; }         // applied only when the module is live
+    string PatchCategory { get; }         // applied only when installed; null = owns no category
 
+    string ResolveInstalledSha256();      // digest of the build actually loaded, or null
     void RegisterSync(AutoSyncRegistry registry);      // replicated members
-    IEnumerable<ModuleAction> Actions { get; }         // intents to route
+    IEnumerable<ModuleAction> Actions { get; }         // intents to route  (not yet shipped)
 }
 ```
 
-`ModuleAction` names the target method, the validator that runs on the server, and the apply. That
-is the whole surface a new mod must implement.
+`ResolveInstalledSha256` lives on the module rather than on a shared catalog because the registrar
+treats its answer as authority to apply a Harmony category, and only the module knows how strictly
+its own presence must be established — Diplomacy validates every patched method shape before it will
+claim to be loaded, and RBM requires all five of its assemblies to match their audited digests. A
+generic name-and-hash probe would weaken both.
+
+`ModuleAction` names the target method, the validator that runs on the server, and the apply. It is
+not in the shipped interface yet: it is added with the first routed action, because it cannot be
+designed honestly before there is one.
 
 ## Architecture
 
-**Registration.** `WorkshopModuleRegistrar` runs at `GameInterface` load. For each registered
-module: if config enables it *and* `WorkshopModuleCatalog` finds it present at the pinned
-fingerprint, apply its Harmony category, register its `IAutoSync`, and wire its handlers.
-Otherwise do nothing at all. A module that is absent, mismatched, or disabled contributes zero
-patches — which removes the `PatchAll` abort by construction.
+**Registration.** `WorkshopModuleRegistrar` answers two questions, and they are deliberately
+separate because they become answerable at different moments. `ResolveInstalledModules` — "is the
+pinned build loaded, byte for byte?" — is answerable while the container is built, which is when
+Harmony categories must be registered, and it is what gates patch application and `IAutoSync`
+registration. `ResolveLiveModules` adds the operator's per-module switch and is for consumers that
+run inside a live campaign.
+
+Config **cannot** gate patch application, and an earlier version of this section said it could.
+`GameInterface.PatchAll()` runs off the container's activation, but `ModConfigAuthority` does not
+install the resolved options until `CampaignReady`; reading the file eagerly is not an alternative
+either, because `ModConfig.Load` seeds and migrates the file on disk. Gating categories on an unread
+config disables every Workshop adapter unconditionally. Presence is already peer-symmetric —
+`WorkshopManifestValidator` refuses a session whose members do not carry the same components at the
+same versions — so gating on presence alone loses nothing. A module that is absent or mismatched
+contributes zero patches, which removes the `PatchAll` abort by construction. The config switch's
+enforcement point is a runtime gate inside the adapters, and it lands with the first consumer that
+runs after config load.
+
+Both assemblies that own adapters run the same registrar over their own declared list: campaign-side
+modules in `GameInterfaceModule`, mission-side combat modules in `MissionModule`. `PatchCategory` may
+be `null`, meaning the module owns no presence-gated category — correct for an adapter whose targets
+always resolve (a native engine method) and which must keep applying when the mod is absent.
 
 **State tracking → `IAutoSync`.** `AutoSyncRegistry.AddProperty(PropertyInfo)` and
 `AddField(FieldInfo)` take reflection objects, so a mod's members register exactly as
@@ -111,19 +136,46 @@ made server-authoritative by the existing `ModConfigAuthority` and delivered in 
 handshake (`NetworkModuleVersionsValidate`). Enabling a module is a server decision; a client
 cannot opt itself in or out.
 
-**Snapshot codecs.** Where AutoSync covers the state, the per-module snapshot pair is deleted. It
-is retained only where a module genuinely needs bulk transfer that the campaign/save transfer does
-not already provide. This is a net deletion.
+**Snapshot codecs.** An earlier version of this section said the per-module snapshot pairs largely
+fold away into AutoSync and that the integration is a net deletion. That is false, and structurally
+so rather than by accident. Diplomacy was measured against it and the codec has to stay. The rule the
+evidence supports:
+
+- **AutoSync** where the replicated state is a plain member that the mod itself mutates during play,
+  whose key and value types `AutoSyncDictionaryBuilderBase.ValidateSyncable` accepts — protobuf
+  serializable by value (add a surrogate to `SurrogateCollection` if needed) or managed by a registry.
+  This is a lower bar than it looks: `Dictionary<string, CampaignTime>` and
+  `Dictionary<Kingdom, CampaignTime>` both pass.
+- **Snapshot codec** where a mod owns manager singletons holding composite state — records and
+  `List<>`-valued dictionaries of the mod's own types, which `ValidateSyncable` rejects by design —
+  **or** where that state already has revisioned, server-authoritative ownership. The second
+  condition is the one that decided Diplomacy: `DiplomacyRuntime` already owns expansionism, the
+  cooldown dictionaries, the non-aggression agreements and the war-exhaustion tables, and adding
+  AutoSync over the same members would put a second independent writer on one piece of campaign
+  state. Two replication paths over one dictionary diverge nondeterministically.
+
+A module can need both, for different members. Neither mechanism is the default, and "convert the
+codec to AutoSync" is not a task that can be assumed into an increment plan. **The remaining six mods
+must each be assessed against this rule individually, with the mod decompiled, before their increment
+is planned** — the answer for Diplomacy predicts nothing about ImprovedGarrisons, Fourberie or
+PlayerSettlement.
 
 ## Testing
 
-`WorkshopModuleTestBase` gives every module the same four gates, derived from its `IWorkshopModule`
+`WorkshopModuleTestBase` gives every module the same gates, derived from its `IWorkshopModule`
 declaration rather than hand-written per mod:
 
-1. **Absent** — module not installed: Coop loads, patches apply, nothing throws.
-2. **Disabled** — installed but off in config: no patches applied, no sync registered, inert.
-3. **Authority** — server may perform the mutation; every client is refused.
-4. **Round trip** — client intent reaches the server, is applied once, and converges on all peers.
+1. **Absent** — module not installed: Coop loads, patches apply, nothing throws; the module resolves
+   as not installed, so its category is never registered.
+2. **Disabled** — the operator's switch reaches this module's id and removes it from the live set,
+   and changes the config digest. Note this gates runtime behaviour, not patch application; see
+   Registration above.
+3. **Declaration** — the fingerprint is a real pin; the `ModuleId`/`WorkshopId` reconcile with
+   `FriendEditionWorkshopModuleCatalog`; the patch category is a declared constant or `null`;
+   `RegisterSync` survives the mod being missing.
+4. **Authority** — server may perform the mutation; every client is refused. *(pending)*
+5. **Round trip** — client intent reaches the server, is applied once, and converges on all peers.
+   *(pending: needs a routed action to exist)*
 
 A new mod earns its coverage by filling the table. Per-action behavioural tests are written on top,
 per module, in `E2E.Tests/Services/WorkshopMods/<Module>/`.

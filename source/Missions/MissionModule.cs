@@ -38,12 +38,30 @@ public class MissionModule : Module
     internal const string WeaponPickupPatchCategory = "CoopWeaponPickupPatches";
     internal const string MountAiSafetyPatchCategory = "CoopMountAiSafetyPatches";
 
+    /// <summary>
+    /// The Workshop modules whose adapters live in this assembly. Declared here rather than in
+    /// GameInterfaceModule because the registrar applies a module's category against the assembly
+    /// that declares it, and because these gate mission-side patches the campaign container never
+    /// loads. Adding a combat mod is one entry here plus its <see cref="IWorkshopModule"/>.
+    /// </summary>
+    private static readonly IWorkshopModule[] DeclaredWorkshopModules =
+    {
+        new RbmModule(),
+        new DismembermentPlusModule(),
+        new UnblockableThrustModule(),
+    };
+
     protected override void Load(ContainerBuilder builder)
     {
         base.Load(builder);
 
         foreach (HarmonyPatchCategoryRegistration registration in CreatePatchCategoryRegistrations())
             builder.RegisterInstance(registration);
+
+        // Published for DI so WorkshopModuleAutoSync drives their RegisterSync through the same path
+        // as Diplomacy's, and so the operator's per-module config keys resolve to real declarations.
+        foreach (IWorkshopModule module in DeclaredWorkshopModules)
+            builder.RegisterInstance(module).As<IWorkshopModule>();
 
         builder.RegisterType<LiteNetP2PClient>().As<IBattleNetwork>().InstancePerLifetimeScope();
         builder.RegisterType<MovementPacketCompressor>()
@@ -228,29 +246,28 @@ public class MissionModule : Module
             typeof(HumanAIMountSearchSafetyPatch).Assembly,
             MountAiSafetyPatchCategory);
 
-        // Workshop combat-mod adapters (RBM, DismembermentPlus): registered ONLY when their
-        // assemblies are present. These used to share CombatHitPresentationPatchCategory with
-        // mandatory patches like MeleeHitPresentationPatch; unconditionally applying that category
-        // threw the same "Undefined target method" HarmonyException PatchAllUncategorized threw for
-        // an absent Diplomacy, aborting every remaining Coop patch. Splitting them into their own
-        // presence-gated categories fixes that without touching the mandatory patches, which stay in
+        // Workshop combat-mod adapters (RBM, DismembermentPlus): registered ONLY when their module
+        // resolves. These used to share CombatHitPresentationPatchCategory with mandatory patches
+        // like MeleeHitPresentationPatch; unconditionally applying that category threw the same
+        // "Undefined target method" HarmonyException PatchAllUncategorized threw for an absent
+        // Diplomacy, aborting every remaining Coop patch. Splitting them into their own gated
+        // categories fixes that without touching the mandatory patches, which stay in
         // CombatHitPresentationPatchCategory above, registered unconditionally as before.
-        if (CombatModFingerprintCatalog.IsFamilyPresent(
-                CombatModFamily.Rbm434,
-                AppDomain.CurrentDomain.GetAssemblies()))
+        //
+        // The gate is WorkshopModuleRegistrar — the same rule Diplomacy goes through — rather than
+        // the assembly-NAME check this used to do. A same-named build with a different patch surface
+        // no longer gets its category registered at all, so the adapters' [HarmonyPrepare] guards
+        // become defence in depth instead of the only thing standing between a mismatched mod and an
+        // aborted PatchAll. UnblockableThrust declares a null category on purpose; see
+        // UnblockableThrustModule.
+        foreach (IWorkshopModule module in
+                 WorkshopModuleRegistrar.ResolveInstalledModules(DeclaredWorkshopModules))
         {
-            yield return new HarmonyPatchCategoryRegistration(
-                typeof(RbmPatchWaveCompatibilityPatch).Assembly,
-                WorkshopPatchCategories.Rbm);
-        }
+            if (module.PatchCategory == null) continue;
 
-        if (CombatModFingerprintCatalog.IsFamilyPresent(
-                CombatModFamily.DismembermentPlus2087,
-                AppDomain.CurrentDomain.GetAssemblies()))
-        {
             yield return new HarmonyPatchCategoryRegistration(
-                typeof(DismembermentMissionInitializerPatch).Assembly,
-                WorkshopPatchCategories.DismembermentPlus);
+                module.GetType().Assembly,
+                module.PatchCategory);
         }
     }
 }

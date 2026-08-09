@@ -22,7 +22,17 @@ public interface IWorkshopModule
     /// <summary>The exact assembly build this declaration was audited against.</summary>
     ModuleFingerprint Fingerprint { get; }
 
-    /// <summary>Harmony category holding this module's adapter patches. Applied only when live.</summary>
+    /// <summary>
+    /// Harmony category holding this module's adapter patches, applied only when the module resolves.
+    /// <para>
+    /// <c>null</c> is legitimate and means "this module owns no presence-gated category". That is the
+    /// right answer when a module's adapters patch methods that always resolve — a native TaleWorlds
+    /// method, say — because such patches have none of the empty-TargetMethods defect the category
+    /// split exists to fix, and moving them behind a presence gate would stop Coop applying its own
+    /// authoritative behaviour whenever the mod is absent. Those adapters gate on the module at call
+    /// time instead. <c>UnblockableThrustModule</c> is the worked example.
+    /// </para>
+    /// </summary>
     string PatchCategory { get; }
 
     /// <summary>

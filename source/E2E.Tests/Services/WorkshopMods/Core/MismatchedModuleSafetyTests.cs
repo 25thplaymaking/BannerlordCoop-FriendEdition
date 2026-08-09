@@ -12,13 +12,20 @@ namespace E2E.Tests.Services.WorkshopMods.Core;
 /// AbsentModuleSafetyTests covers a Workshop mod that is not installed at all: TargetMethods()
 /// resolves to nothing AND the category is never registered (MissionModule/GameInterfaceModule gate
 /// registration on presence). This file covers the other half of the binding constraint — "absent,
-/// mismatched, or disabled": a same-named-but-internally-different build, where the presence gate is
-/// fooled (it only checks assembly NAMES, e.g. CombatModFingerprintCatalog.IsFamilyPresent), the
-/// category DOES get registered and applied, and an individual patch class's own TargetMethods()
-/// still resolves to nothing because the specific type/method it looks for isn't there. That is
-/// exactly the HarmonyException shape this whole task exists to remove, and it is the scenario the
-/// [HarmonyPrepare] guards added to every RBM/DismembermentPlus adapter exist to catch as a second,
-/// independent line of defense underneath the presence gate.
+/// mismatched, or disabled": a same-named-but-internally-different build where the category DOES get
+/// registered and applied, and an individual patch class's own TargetMethods() still resolves to
+/// nothing because the specific type/method it looks for isn't there. That is exactly the
+/// HarmonyException shape this whole task exists to remove, and it is the scenario the
+/// [HarmonyPrepare] guards on every RBM/DismembermentPlus adapter exist to catch.
+///
+/// Those guards are now defense in depth rather than the only defense. Both module sets go through
+/// WorkshopModuleRegistrar, which registers a category only when the module's own
+/// ResolveInstalledSha256() matches its pinned digest — for the combat mods that is
+/// CombatModCompatibilityGuard.IsFamilyCompatible, which hashes every DLL in the family, so a
+/// mismatched build no longer fools the gate the way the older assembly-NAME check
+/// (CombatModFingerprintCatalog.IsFamilyPresent) could. The guards still matter: a build can match
+/// its digest and still be reached through a code path that resolves nothing, and nothing about a
+/// gate one layer up makes an unguarded empty TargetMethods() safe.
 ///
 /// A fully faithful reproduction would need a real assembly loaded into the process literally named
 /// "RBM"/"RBMAI"/"RBMCombat"/"RBMConfig"/"RBMTournament" (CombatModFingerprintCatalog.IsFamilyPresent

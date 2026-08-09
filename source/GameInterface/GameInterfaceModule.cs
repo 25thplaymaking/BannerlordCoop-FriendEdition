@@ -52,9 +52,10 @@ public class GameInterfaceModule : Module
     /// fingerprinting, patch application and sync registration from there.
     /// </summary>
     /// <remarks>
-    /// Combat-mod adapters (RBM, DismembermentPlus) live in the Missions assembly and are registered
-    /// by MissionModule against the same <see cref="WorkshopPatchCategories"/> constants; they have
-    /// no declaration here yet.
+    /// Combat mods (RBM, DismembermentPlus, UnblockableThrust) declare themselves in MissionModule
+    /// instead, next to the Missions-assembly adapters they gate, and go through the same registrar.
+    /// A module's category is applied against the assembly that declares the module, so each side
+    /// owns its own list.
     /// </remarks>
     private static readonly IWorkshopModule[] DeclaredWorkshopModules =
     {
@@ -148,6 +149,9 @@ public class GameInterfaceModule : Module
         foreach (IWorkshopModule module in
                  WorkshopModuleRegistrar.ResolveInstalledModules(DeclaredWorkshopModules))
         {
+            // A null category means the module owns no presence-gated adapters; see IWorkshopModule.
+            if (module.PatchCategory == null) continue;
+
             builder.RegisterInstance(new HarmonyPatchCategoryRegistration(
                 module.GetType().Assembly,
                 module.PatchCategory));

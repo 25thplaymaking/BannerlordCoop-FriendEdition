@@ -79,20 +79,52 @@ public abstract class WorkshopModuleTestBase : IDisposable
     /// The operator's kill switch has to reach THIS module. The failure it catches is a module whose
     /// ModuleId does not match the key an operator would write, which leaves the switch inert with
     /// nothing anywhere reporting a problem.
+    /// <para>
+    /// Asserting <c>ResolveLiveModules</c> is empty would prove nothing here — the mod is absent, so
+    /// it is empty either way. Instead this drives the decision with a stand-in that reports itself
+    /// installed at the real module's id, which isolates the config term as the only thing that can
+    /// make the difference.
+    /// </para>
     /// </summary>
     [Fact]
     public void Disabled_IsNotLive()
     {
-        var options = new ModOptions(new ModOptionsData
+        var disabled = new ModOptions(new ModOptionsData
         {
             WorkshopModules = new Dictionary<string, bool> { [Module.ModuleId] = false },
         });
+        var installed = new InstalledStandIn(Module);
 
-        Assert.False(options.IsWorkshopModuleEnabled(Module.ModuleId));
-        Assert.Empty(WorkshopModuleRegistrar.ResolveLiveModules(new[] { Module }, options));
-        Assert.NotEqual(
-            Digest(new ModOptions(new ModOptionsData())),
-            Digest(options));
+        Assert.False(disabled.IsWorkshopModuleEnabled(Module.ModuleId));
+        Assert.NotEqual(Digest(new ModOptions(new ModOptionsData())), Digest(disabled));
+
+        // Same module, same "installed" answer: only the operator's switch differs.
+        Assert.Same(
+            installed,
+            Assert.Single(WorkshopModuleRegistrar.ResolveLiveModules(
+                new IWorkshopModule[] { installed },
+                new ModOptions(new ModOptionsData()))));
+        Assert.Empty(WorkshopModuleRegistrar.ResolveLiveModules(
+            new IWorkshopModule[] { installed },
+            disabled));
+    }
+
+    /// <summary>
+    /// The module under test with one behaviour replaced: it reports its own pinned digest as the
+    /// installed one. Nothing else is stubbed — the id the config is keyed on is the real module's.
+    /// </summary>
+    private sealed class InstalledStandIn : IWorkshopModule
+    {
+        private readonly IWorkshopModule module;
+
+        internal InstalledStandIn(IWorkshopModule module) => this.module = module;
+
+        public string ModuleId => module.ModuleId;
+        public ulong WorkshopId => module.WorkshopId;
+        public ModuleFingerprint Fingerprint => module.Fingerprint;
+        public string PatchCategory => module.PatchCategory;
+        public string ResolveInstalledSha256() => module.Fingerprint.Sha256;
+        public void RegisterSync(AutoSyncRegistry registry) => module.RegisterSync(registry);
     }
 
     /// <summary>Silence in the operator's file means the module behaves as it did before the key existed.</summary>
@@ -130,11 +162,14 @@ public abstract class WorkshopModuleTestBase : IDisposable
     /// <summary>
     /// Patch categories are shared vocabulary between the module, its adapter patch classes and the
     /// registrar. A literal typed into one of the three is a category that is registered but never
-    /// applied, or applied but never registered.
+    /// applied, or applied but never registered. A module may legitimately own no category at all
+    /// (see <see cref="IWorkshopModule.PatchCategory"/>); what it may not do is invent a name.
     /// </summary>
     [Fact]
-    public void PatchCategory_IsOneOfTheDeclaredWorkshopCategories()
+    public void PatchCategory_IsOneOfTheDeclaredWorkshopCategoriesOrNone()
     {
+        if (Module.PatchCategory == null) return;
+
         string[] declared = typeof(WorkshopPatchCategories)
             .GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
             .Where(field => field.IsLiteral && field.FieldType == typeof(string))

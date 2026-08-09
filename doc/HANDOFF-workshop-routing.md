@@ -36,7 +36,7 @@ These will waste hours if rediscovered:
 
 ## 3. Current state of the branch
 
-Green and stable, verified 3× each on the merge commit `782169c82`:
+Green and stable, verified 3× each on the merge commit `782169c82` and again after the §6 fix wave:
 
 | Suite | Result |
 |---|---|
@@ -121,26 +121,29 @@ Also: `workshopModules` was deliberately **left out of `deploy/mod-config.defaul
 ### 5.3 The registrar's fingerprint check is a tautology
 `ResolveInstalledSha256()` returns the pinned constant or null, so `Fingerprint.Matches(...)` can never fail for a non-null answer. **All real safety lives inside each module's `ResolveInstalledSha256`**, and nothing in the contract or the shared gates can detect a lazy implementation. The gates only ever assert absent behaviour — they never prove a module works when installed.
 
-### 5.4 Dead constants
-Four of seven `WorkshopPatchCategories` constants are unused (ImprovedGarrisons, Fourberie, PlayerSettlement, UnblockableThrust). `WorkshopModuleTestBase.PatchCategory_IsOneOfTheDeclaredWorkshopCategoriesOrNone` therefore validates against a partly aspirational list and would accept a typo matching a dead constant.
+### 5.4 Dead constants — FIXED
+Four of seven `WorkshopPatchCategories` constants were unused, so `WorkshopModuleTestBase.PatchCategory_IsOneOfTheDeclaredWorkshopCategoriesOrNone` validated against a partly aspirational list. ImprovedGarrisons, Fourberie and PlayerSettlement are removed (those mods patch imperatively and would still declare `PatchCategory => null`, so the names were never going to be applied). UnblockableThrust stays, documented as deliberately unapplied — its adapter patches a native method that always resolves and must keep applying when the mod is absent.
 
 ---
 
-## 6. Open findings — fix before merging PR #3
+## 6. Review findings — fix wave landed
 
-A whole-branch review found these; **a fix wave was dispatched but its result was not confirmed before this handoff was written. Verify current state before acting.**
+The whole-branch review's findings are fixed on this branch. Re-verified after the wave: GameInterface `...Services.WorkshopMods` 254/2 failed and E2E `...Services.WorkshopMods` 95/0, identical across 3 runs each; `Coop.IntegrationTests` 148/0 with 2 template skips.
 
-**Important — `FourberieHarmonyIsolation.PurgeAndAssertAuditedSurface` (`:23-72`) misses the stabilizer, and its failure latches.**
-Every other scan→unpatch→verify cycle is wrapped in `HarmonyPatchInfoStabilizer`; this one isn't. One transient misread sets the **static, never-cleared** `rejectedSurface` (`:57`) and throws — after which `:27` throws immediately on every later call for the life of the process. The same unstabilized check exists at `FourberieCompatibilityHandler.cs:164-168`.
+**FIXED — `FourberieHarmonyIsolation.PurgeAndAssertAuditedSurface` missed the stabilizer, and its failure latched.**
+Every other scan→unpatch→verify cycle was wrapped in `HarmonyPatchInfoStabilizer`; this one wasn't, so one transient misread set the static, never-cleared `rejectedSurface` and rejected the mod for the life of the process. The whole cycle is now wrapped and `rejectedSurface` is written only once the retried cycle genuinely fails; the undeclared-patch catalog accumulates across retries so a later clean pass cannot erase a real finding. The same unstabilized check in `FourberieCompatibilityHandler.TryInstall` is fixed too.
 
-**Important — `DiplomacyPatchCompatibilityGate.HasForbiddenPatches` (`:50-52`) fails OPEN.**
-`StabilizeUntilAcceptable` returns on the **first** attempt whose predicate is true. Wrapping `() => !ScanForForbiddenPatches(...)` means "clean" is reported if **any one of five** scans says clean — a 5× amplified false negative. Failure: a real `Diplomacy.Patches.*` patch survives removal, one re-read deserializes its `PatchMethod` as null or as the allow-listed type, the scan returns clean, and Coop runs with an unremoved Diplomacy mutation funnel installed. The retry shape is correct for the exact-inventory asserts elsewhere and **wrong here** — retries must only confirm a dirty verdict, never shop for a clean one.
-Secondary: `RemoveAndAssert:81-85` nests the stabilizer, giving 5×5 = 25 full `GetAllPatchedMethods()` sweeps and ~120 ms of `Thread.Sleep` on the game thread during `PatchAll`.
+**FIXED — `DiplomacyPatchCompatibilityGate.HasForbiddenPatches` failed OPEN.**
+`StabilizeUntilAcceptable` returns on the first attempt whose predicate holds, so wrapping `() => !ScanForForbiddenPatches(...)` reported clean if any one of five scans said clean. It now uses `HarmonyPatchInfoStabilizer.RequireAcceptableOnEveryAttempt`: every read must agree before it reports clean, and the first read that sees something forbidden ends the loop — retries can only confirm the fail-closed verdict. That inner short-circuit also removes the secondary cost finding: `RemoveAndAssert`'s failure path is now one `GetAllPatchedMethods()` sweep per outer attempt instead of 5×5 = 25 sweeps and ~120 ms of `Thread.Sleep` on the game thread.
 
-**Decision needed — the flakiness mitigation is test-only.**
-`HarmonySerializationBootstrap` (both test assemblies) disables HarmonyLib's legacy BinaryFormatter path, which cut the misread rate ~10×; the 5×5 ms retry budget was calibrated **with that reduction in place**. No production assembly sets it, and the game is .NET Framework 4.7.2 where BinaryFormatter is on by default — so production faces the un-mitigated rate with only the retry. (The `AppContext` switch is .NET Core-era and may not be honoured on net472.) Either raise the production budget or record why the calibration transfers. It fails closed, so this is robustness, not a safety hole.
+**DECIDED — the flakiness mitigation is test-only, so the production budget was raised.**
+Setting the `AppContext` switch in a production assembly cannot work: HarmonyLib reads `System.Runtime.Serialization.EnableUnsafeBinaryFormatterSerialization` only from its net5.0-and-newer builds. Scanning every per-TFM `0Harmony.dll` in Lib.Harmony 2.4.2 finds the switch literal (with `UseBinaryFormatter` and `JsonSerializer`) in net5.0/net6.0/net8.0 and none of the three in net35/net452/net472/net48/netcoreapp3.x — those carry no System.Text.Json fallback at all. The binary deployed to the game, `Modules/Coop/bin/Win64_Shipping_Client/0Harmony.dll` 2.4.2.0, is stamped `.NETFramework,Version=v4.7.2` and is byte-size-identical to the net472 lib, so production serializes patch info through BinaryFormatter unconditionally and the 5×5 ms calibration does not transfer. `HarmonyPatchInfoStabilizer.Attempts` is therefore doubled to 10 and the finding recorded on the type and on both bootstraps. Retry-until-acceptable returns on the first good read, so the extra attempts cost nothing on a healthy startup and are spent only on a path about to fail closed. Fails-closed behaviour is unchanged.
 
-**Deferred, agreed not to block merge:** deny-list keys aren't validated against the catalog; `Append()` dereferences an unvalidated digest string; audit doc figures predate the merges (233/63 vs the real 254/95).
+**FIXED — the record said all seven mods were declared.** Four are. See §5.1 and the design doc's Architecture section.
+
+**FIXED — audit doc figures predated the merges** (233/63 vs the real 254/95).
+
+**Still deferred, agreed not to block merge:** deny-list keys aren't validated against the catalog; `Append()` dereferences an unvalidated digest string.
 
 ---
 
@@ -165,7 +168,7 @@ Two temporary worktrees exist and can be deleted once PR #3 is settled:
 
 ## 9. Immediate next actions
 
-1. Verify whether the §6 fix wave landed; if not, do those two fixes.
+1. ~~Verify whether the §6 fix wave landed.~~ It landed; see §6.
 2. `gh pr ready 3 --repo 25thplaymaking/BannerlordCoop-FriendEdition` — CI has never run on this branch (drafts are skipped). Confirm the 8 shards, and that the 2 protobuf tests pass under vstest.
 3. Decide whether to merge PR #3. Also outstanding: **PR #2** (battle E2E fixes, CI-green, unmerged).
 4. Then start §4 — pick Diplomacy, enumerate its player-initiated action surface from the decompiled assembly, and route one action end-to-end through the four-part shape. Everything after that is repetition.

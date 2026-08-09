@@ -200,6 +200,14 @@ public class BattleMountIdentityTests : MissionTestEnvironment
             var controller = owner.Resolve<CoopBattleController>();
             var registry = owner.Resolve<INetworkAgentRegistry>();
 
+            // Put the peer in the mission before anything spawns. The replicator encodes no spawn batch at
+            // all while the membership mirror is empty — a solo battle has nobody to tell, and a later
+            // joiner is served the full catch-up snapshot instead (SendJoinInfo -> ReplicateCurrentAgentsTo).
+            // This test is about what a peer that IS in the battle receives, so announce it the way the
+            // server does. MissionContext keys membership by controller id; the instance id it carries is
+            // only used for the mesh handshake.
+            owner.Resolve<IMessageBroker>().Publish(this, new NetworkMissionPeerEntered("peer", "battle-instance"));
+
             Assert.True(owner.ObjectManager.TryGetObject<CharacterObject>(characterId, out var character));
             var rider = mock.SpawnAgent(new AgentBuildData(character).Controller(AgentControllerType.AI));
             var horse = rider.MountAgent;

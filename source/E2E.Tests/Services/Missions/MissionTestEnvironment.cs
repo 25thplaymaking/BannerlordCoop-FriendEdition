@@ -52,6 +52,48 @@ public class MissionTestEnvironment : E2ETestEnvironment
     }
 
     /// <summary>
+    /// Registers a battle party a <see cref="GameInterface.Services.MapEvents.TroopSupply.CoopTroopSupplier"/>
+    /// can resolve, and returns its <see cref="MapEventParty"/> id — the key a
+    /// <c>PartyReserve</c> is built with.
+    /// </summary>
+    /// <remarks>
+    /// A supplier only hands back origins for a reserve whose party id resolves to a MapEventParty WITH a
+    /// PartyBase: <c>BuildOrigin</c> refuses to give the engine an origin with a null BattleCombatant,
+    /// because that can cross into native team/formation setup and surface as a 0xC0000005 rather than a
+    /// managed exception. Tests that only care about wave sizing or casualty bookkeeping still need a
+    /// resolvable party to get past that, so they share this instead of each inventing a fixture.
+    ///
+    /// MapEventParty.Party is AutoSynced (MapEventPartySync), so assigning it on the server is what carries
+    /// it to the clients — hence the assignment rather than relying on whatever the builder left behind.
+    /// The per-instance assertions are deliberate: without them a break in that sync shows up as an empty
+    /// origin list in an unrelated assertion, which is exactly how it was diagnosed the slow way before.
+    /// </remarks>
+    protected string CreateResolvableBattlePartyId()
+    {
+        var mapEventPartyId = CreateRegisteredObject<MapEventParty>();
+        var partyBaseId = CreateRegisteredObject<PartyBase>();
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MapEventParty>(mapEventPartyId, out var mapEventParty));
+            Assert.True(Server.ObjectManager.TryGetObject<PartyBase>(partyBaseId, out var partyBase));
+
+            mapEventParty.Party = partyBase;
+        });
+
+        foreach (var client in Clients)
+        {
+            client.Call(() =>
+            {
+                Assert.True(client.ObjectManager.TryGetObject<MapEventParty>(mapEventPartyId, out var mapEventParty));
+                Assert.NotNull(mapEventParty.Party);
+            });
+        }
+
+        return mapEventPartyId;
+    }
+
+    /// <summary>
     /// Stands up a coop field battle: one player <see cref="MobileParty"/> per supplied controller id, all in
     /// a single <see cref="MapEvent"/> and registered as players on every instance, with client <c>i</c> given
     /// <c>controllerIds[i]</c>. Returns the map event id and the per-controller party ids.

@@ -122,10 +122,18 @@ public class BattleAgentRenderCapTests : MissionTestEnvironment
         return entries;
     }
 
-    private static CoopTroopSupplier CreateSuppliedSupplier(IObjectManager objectManager, string characterId, int reserveCount)
+    /// <summary>
+    /// A populated supplier keyed by <paramref name="battlePartyId"/>. The render-slot clamp under test is
+    /// independent of the party, but the party still has to RESOLVE for origins to come back at all —
+    /// BuildOrigin skips any entry whose party id does not, so pass a
+    /// <see cref="MissionTestEnvironment.CreateResolvableBattlePartyId"/> id unless the test is specifically
+    /// about the unresolvable case.
+    /// </summary>
+    private static CoopTroopSupplier CreateSuppliedSupplier(
+        IObjectManager objectManager, string characterId, string battlePartyId, int reserveCount)
     {
         var supplier = new CoopTroopSupplier("M1", BattleSideEnum.Defender, objectManager, new BattleAgentBudget());
-        supplier.SetReserve(new[] { new PartyReserve("unresolvable-party", 0, Entries(characterId, reserveCount)) });
+        supplier.SetReserve(new[] { new PartyReserve(battlePartyId, 0, Entries(characterId, reserveCount)) });
         return supplier;
     }
 
@@ -137,7 +145,8 @@ public class BattleAgentRenderCapTests : MissionTestEnvironment
 
         client.Call(() =>
         {
-            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, reserveCount: 1);
+            var supplier = CreateSuppliedSupplier(
+                client.ObjectManager, characterId, "unresolvable-party", reserveCount: 1);
 
             var origins = supplier.SupplyTroops(1).ToArray();
 
@@ -479,6 +488,7 @@ public class BattleAgentRenderCapTests : MissionTestEnvironment
     {
         using var fixture = new MissionEngineFixture();
         var characterId = CreateRegisteredObject<CharacterObject>();
+        var battlePartyId = CreateResolvableBattlePartyId();
         var client = Clients.First();
 
         client.Call(() =>
@@ -491,7 +501,7 @@ public class BattleAgentRenderCapTests : MissionTestEnvironment
             var mock = fixture.CreateMission(client);
             FloodToLiveCount(mock, EngineAgentLimit - 5);
 
-            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, reserveCount: 50);
+            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, battlePartyId, reserveCount: 50);
             var origins = supplier.SupplyTroops(30).ToList();
 
             Assert.Equal(5, origins.Count);                             // only the remaining engine capacity
@@ -506,6 +516,7 @@ public class BattleAgentRenderCapTests : MissionTestEnvironment
     {
         using var fixture = new MissionEngineFixture();
         var characterId = CreateRegisteredObject<CharacterObject>();
+        var battlePartyId = CreateResolvableBattlePartyId();
         var client = Clients.First();
 
         client.Call(() =>
@@ -513,7 +524,7 @@ public class BattleAgentRenderCapTests : MissionTestEnvironment
             var mock = fixture.CreateMission(client);
             FloodToLiveCount(mock, EngineAgentLimit);
 
-            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, reserveCount: 50);
+            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, battlePartyId, reserveCount: 50);
             var origins = supplier.SupplyTroops(10).ToList();
 
             Assert.Empty(origins);
@@ -532,6 +543,7 @@ public class BattleAgentRenderCapTests : MissionTestEnvironment
     {
         using var fixture = new MissionEngineFixture();
         var characterId = CreateRegisteredObject<CharacterObject>();
+        var battlePartyId = CreateResolvableBattlePartyId();
         var client = Clients.First();
 
         client.Call(() =>
@@ -544,7 +556,7 @@ public class BattleAgentRenderCapTests : MissionTestEnvironment
             var mock = fixture.CreateMission(client);
             FloodToLiveCount(mock, EngineAgentLimit - 3);   // three slots free — room for one mounted troop only
 
-            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, reserveCount: 50);
+            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, battlePartyId, reserveCount: 50);
             var origins = supplier.SupplyTroops(30).ToList();
 
             Assert.Single(origins);                          // 1 mounted troop (2 slots); a second would need 2 more

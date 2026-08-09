@@ -107,7 +107,13 @@ internal class MapEventSideDataHandler : IHandler
         if (!objectManager.TryGetIdWithLogging(payload.What.MapEvent, out var mapEventId)) return;
         if (!objectManager.TryGetIdWithLogging(payload.What.MapEventSide, out var mapEventSideId)) return;
 
-        Logger.Information(
+        // [SideDiag] traces every side assignment and every party added to a side, so it fires once per
+        // party per battle across a whole campaign - the same per-object-per-event shape that made the
+        // Settlement.IsVisible flood the dominant cost on the game thread. Debug level keeps it available
+        // in a DEBUG build (CoopMod sets MinimumLevel.Debug there) while Release drops it before the
+        // template is ever rendered. The MISMATCH line below stays at Error: it reports a real defect and
+        // fires at most once per side.
+        Logger.Debug(
             "[SideDiag][server] assign side {Side} of {MapEventId} -> {SideId} (MissionSide={MissionSide}, leader={Leader})",
             payload.What.Side, mapEventId, mapEventSideId,
             payload.What.MapEventSide?.MissionSide, payload.What.MapEventSide?.LeaderParty?.Id ?? "<none>");
@@ -143,7 +149,7 @@ internal class MapEventSideDataHandler : IHandler
                 }
                 else
                 {
-                    Logger.Information(
+                    Logger.Debug(
                         "[SideDiag][client] assigned index {Index} <- {SideId} (MissionSide={MissionSide})",
                         side, data.MapEventSideId, mapEventSide.MissionSide);
                 }
@@ -162,7 +168,7 @@ internal class MapEventSideDataHandler : IHandler
         if (!objectManager.TryGetIdWithLogging(payload.What.MapEventSide, out var mapEventSideId))
             return;
 
-        Logger.Information(
+        Logger.Debug(
             "[SideDiag][server] add party {Party} -> side {SideId} (MissionSide={MissionSide}, leader={Leader})",
             payload.What.MapEventParty?.Party?.Id ?? mapEventPartyId, mapEventSideId,
             payload.What.MapEventSide?.MissionSide, payload.What.MapEventSide?.LeaderParty?.Id ?? "<none>");
@@ -197,7 +203,7 @@ internal class MapEventSideDataHandler : IHandler
                 // and abort the battle.
                 if (isLocalPlayer)
                 {
-                    Logger.Information(
+                    Logger.Debug(
                         "[SideDiag][client] LOCAL PLAYER {Party} attached to side {SideId} (MissionSide={MissionSide}, leader={Leader}); MainParty.Side now {Resolved}",
                         addedParty.Id, data.MapEventSideId, mapEventSide.MissionSide,
                         mapEventSide.LeaderParty?.Id ?? "<none>", PartyBase.MainParty.Side);

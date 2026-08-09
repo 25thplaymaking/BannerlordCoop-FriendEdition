@@ -288,17 +288,20 @@ public class AgentMovementHandler : IAgentMovementHandler
         if (movementPollElapsed < MovementPollingIntervalSeconds) return;
         movementPollElapsed %= MovementPollingIntervalSeconds;
 
-        // Get the route budget before touching every authoritative agent. A zero budget means either
-        // that this mission currently has no remote members (the common solo-battle case) or that none
-        // of its routes can carry an unreliable packet. In both cases building AgentData, grouping it,
-        // and logging hundreds of deferred snapshots every 25 ms is pure work with no possible receiver.
-        // When a peer appears, spawn catch-up supplies its baseline and this handler's unchanged caches
-        // make the next eligible poll send a fresh movement snapshot.
+        // Get the route budget before the send stage. A zero budget means either that this mission
+        // currently has no remote members (the common solo-battle case) or that none of its routes can
+        // carry an unreliable packet; either way, serialising and compressing every snapshot and logging
+        // hundreds of deferred ones every 25 ms is pure work with no possible receiver.
+        //
+        // Only the SEND is skipped, not the walk below. The walk is not just batching: it drives
+        // EnsureLocallyDrivenMountController and the synthetic mount-turn animation upkeep, it seeds
+        // movementPendingSince/lastEquipment, and it ends in RemoveStaleLocalState, which is the only
+        // thing that drops an agent's cached state once it goes inactive. Returning here instead left
+        // those caches unpruned for the rest of the mission and stopped mount-turn maintenance outright.
+        // When a peer appears, spawn catch-up supplies its baseline (SendJoinInfo ->
+        // ReplicateCurrentAgentsTo) and the caches kept here make the next poll send a fresh snapshot.
         int maxPayloadBytes = client.GetMaxUnreliablePayloadBytes();
-        if (maxPayloadBytes <= 0)
-        {
-            return;
-        }
+        bool hasReachablePeer = maxPayloadBytes > 0;
 
         var movementGroups = new Dictionary<string, MovementBatch<AgentData>>();
         var priorityMovementGroups = new Dictionary<string, MovementBatch<AgentData>>();
@@ -423,6 +426,11 @@ public class AgentMovementHandler : IAgentMovementHandler
         }
 
         RemoveStaleLocalState(broadcastAgentIds);
+
+        // Nothing can receive any of the batches built above; drop them rather than paying for the encode,
+        // the compression and the per-agent deferral logging. Local caches are already up to date.
+        if (!hasReachablePeer) return;
+
         SendEquipment(equipmentGroups.Values);
         SendEquipment(legacyEquipment);
         // The local player's current input/position gets first access to each refill. Formation AI then uses

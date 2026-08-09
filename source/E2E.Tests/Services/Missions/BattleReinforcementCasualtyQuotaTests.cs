@@ -40,13 +40,15 @@ public class BattleReinforcementCasualtyQuotaTests : MissionTestEnvironment
         return entries;
     }
 
-    /// <summary>A populated supplier whose origins resolve a real registered character. The party id is
-    /// deliberately unresolvable — the casualty hooks under test don't need a party, and the origins then
-    /// take the simple (party-less) path through the removal prefix.</summary>
-    private static CoopTroopSupplier CreateSuppliedSupplier(IObjectManager objectManager, string characterId, int reserveCount)
+    /// <summary>A populated supplier whose origins resolve a real registered character and a real registered
+    /// battle party. The party is incidental to the casualty hooks under test, but it has to RESOLVE:
+    /// BuildOrigin skips any entry whose party id does not, so an unresolvable one yields no origins at all
+    /// and there is nothing left to report a casualty for.</summary>
+    private static CoopTroopSupplier CreateSuppliedSupplier(
+        IObjectManager objectManager, string characterId, string battlePartyId, int reserveCount)
     {
         var supplier = new CoopTroopSupplier("M1", BattleSideEnum.Defender, objectManager, new BattleAgentBudget());
-        supplier.SetReserve(new[] { new PartyReserve("unresolvable-party", 0, Entries(characterId, reserveCount)) });
+        supplier.SetReserve(new[] { new PartyReserve(battlePartyId, 0, Entries(characterId, reserveCount)) });
         return supplier;
     }
 
@@ -55,6 +57,7 @@ public class BattleReinforcementCasualtyQuotaTests : MissionTestEnvironment
     public void MigrationRecovery_ClaimsMissingOrigins_WhenServerPointerIsAlreadyExhausted()
     {
         var characterId = CreateRegisteredObject<CharacterObject>();
+        var battlePartyId = CreateResolvableBattlePartyId();
         var client = Clients.First();
 
         client.Call(() =>
@@ -62,11 +65,11 @@ public class BattleReinforcementCasualtyQuotaTests : MissionTestEnvironment
             var supplier = new CoopTroopSupplier("M1", BattleSideEnum.Attacker, client.ObjectManager, new BattleAgentBudget());
             supplier.SetReserve(new[]
             {
-                new PartyReserve("unresolvable-party", suppliedCount: 10, entries: Entries(characterId, count: 10)),
+                new PartyReserve(battlePartyId, suppliedCount: 10, entries: Entries(characterId, count: 10)),
             });
 
             var origins = supplier.ClaimRecoveryTroops(
-                "unresolvable-party",
+                battlePartyId,
                 new Dictionary<string, int> { [characterId] = 3 },
                 new HashSet<int> { 500, 501, 502 });
 
@@ -88,11 +91,12 @@ public class BattleReinforcementCasualtyQuotaTests : MissionTestEnvironment
     public void OwnTroopKilled_AdvancesSupplierRemovedQuota()
     {
         var characterId = CreateRegisteredObject<CharacterObject>();
+        var battlePartyId = CreateResolvableBattlePartyId();
         var client = Clients.First();
 
         client.Call(() =>
         {
-            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, reserveCount: 10);
+            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, battlePartyId, reserveCount: 10);
             var origins = supplier.SupplyTroops(3).Cast<CoopAgentOrigin>().ToList();
             Assert.Equal(3, origins.Count);
             Assert.Equal(0, supplier.NumRemovedTroops);
@@ -116,11 +120,12 @@ public class BattleReinforcementCasualtyQuotaTests : MissionTestEnvironment
     public void OwnTroopWoundedAndRouted_AdvanceSupplierRemovedQuota()
     {
         var characterId = CreateRegisteredObject<CharacterObject>();
+        var battlePartyId = CreateResolvableBattlePartyId();
         var client = Clients.First();
 
         client.Call(() =>
         {
-            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, reserveCount: 10);
+            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, battlePartyId, reserveCount: 10);
             var origins = supplier.SupplyTroops(3).Cast<CoopAgentOrigin>().ToList();
             Assert.Equal(3, origins.Count);
 
@@ -143,12 +148,13 @@ public class BattleReinforcementCasualtyQuotaTests : MissionTestEnvironment
     {
         using var fixture = new MissionEngineFixture();
         var characterId = CreateRegisteredObject<CharacterObject>();
+        var battlePartyId = CreateResolvableBattlePartyId();
         var client = Clients.First();
 
         client.Call(() =>
         {
             var mock = fixture.CreateMission(client);
-            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, reserveCount: 5);
+            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, battlePartyId, reserveCount: 5);
             var origin = (CoopAgentOrigin)supplier.SupplyTroops(1).Single();
 
             Assert.True(client.ObjectManager.TryGetObject<CharacterObject>(characterId, out var character));
@@ -175,11 +181,12 @@ public class BattleReinforcementCasualtyQuotaTests : MissionTestEnvironment
     public void PuppetOriginCasualty_DoesNotCountAgainstForeignSupplier()
     {
         var characterId = CreateRegisteredObject<CharacterObject>();
+        var battlePartyId = CreateResolvableBattlePartyId();
         var client = Clients.First();
 
         client.Call(() =>
         {
-            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, reserveCount: 2);
+            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, battlePartyId, reserveCount: 2);
             supplier.SupplyTroops(2);
 
             Assert.True(client.ObjectManager.TryGetObject<CharacterObject>(characterId, out var character));
@@ -208,12 +215,13 @@ public class BattleReinforcementCasualtyQuotaTests : MissionTestEnvironment
     public void WaveBatchGate_UnlocksWhenRemovedQuotaReachesWaveSize()
     {
         var characterId = CreateRegisteredObject<CharacterObject>();
+        var battlePartyId = CreateResolvableBattlePartyId();
         var client = Clients.First();
 
         client.Call(() =>
         {
             // The live shape: 1500 owned, 600 spawned initially (BattleSize option 600), 900 wave-eligible.
-            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, reserveCount: 1500);
+            var supplier = CreateSuppliedSupplier(client.ObjectManager, characterId, battlePartyId, reserveCount: 1500);
             var origins = supplier.SupplyTroops(600).Cast<CoopAgentOrigin>().ToList();
             Assert.Equal(600, origins.Count);
 

@@ -352,7 +352,10 @@ public sealed class PlayerSettlementCompatibilityTests : IDisposable
 
         Assert.Equal(9, copy.Revision);
         Assert.Equal(PlayerSettlementFeatureStatus.GuardedFeatureBlocked, copy.FeatureStatus);
-        Assert.Empty(copy.Entries);
+        // protobuf-net omits an empty repeated field, so an empty snapshot legitimately
+        // deserializes with null Entries — the exact zeroed-receiver shape TryValidate
+        // normalizes with its `Entries ?? Array.Empty` before validating.
+        Assert.True(copy.Entries == null || copy.Entries.Length == 0);
         Assert.True(PlayerSettlementStateCodec.TryValidate(copy, out var failure), failure);
     }
 

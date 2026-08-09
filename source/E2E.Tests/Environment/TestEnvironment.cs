@@ -14,6 +14,7 @@ using Missions;
 using Missions.Agents.Handlers;
 using GameInterface.Services.WorkshopMods.Core;
 using FriendEdition.WorkshopCompatibility;
+using IModConfig = GameInterface.Configuration.IModConfig;
 using Xunit.Abstractions;
 
 namespace E2E.Tests.Environment;
@@ -114,6 +115,11 @@ public class TestEnvironment
         // own provider directly at the core/connection seam.
         builder.RegisterType<DisabledWorkshopManifestProvider>()
             .As<IWorkshopManifestProvider>()
+            .SingleInstance();
+
+        // Same determinism rule for the operator config: never read the hosting machine's real
+        // CoopData/mod-config.json (see DeterministicModConfig).
+        builder.RegisterInstance<IModConfig>(new DeterministicModConfig())
             .SingleInstance();
 
         builder.RegisterInstance(networkOrchestrator).AsSelf().SingleInstance();

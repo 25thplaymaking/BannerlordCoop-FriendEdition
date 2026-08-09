@@ -34,31 +34,48 @@ These will waste hours if rediscovered:
 
 ---
 
-## 3. Current state of the branch — CI IS RED. START HERE.
+## 3. Current state of the branch
 
-**Do not trust the "green" figures below without reading the CI section under them.**
+**The CI-red findings below were all fixed on 2026-08-09 (commits after `481902edb`); local
+verification of every affected class is green.** Re-confirm on the next CI run, then trust these:
 
-Namespace-scoped local runs, 3× each on the fix-wave head:
-
-| Suite (scoped) | Result |
+| Suite (scoped) | Result after fixes |
 |---|---|
-| `GameInterface.Tests` → `...Services.WorkshopMods` | 254 tests, 2 failed, identical every run |
-| `E2E.Tests` → `...Services.WorkshopMods` | 95 tests, 0 failed, identical every run |
+| `GameInterface.Tests` → `...Services.WorkshopMods` | 254 tests, **0 failed** |
+| `E2E.Tests` → `...Services.WorkshopMods` | 95 tests, **0 failed** |
+| `PatchTest` + `ContainerTest` (blanket PatchAll, standalone container) | 8 tests, 0 failed |
+| `E2E...SeparatismConfigurationSyncTests` | 8 tests, 0 failed |
 
-**CI run 31333186560 (first ever on this branch): build ✅, `test` ❌, all 8 E2E shards ❌.**
+What CI run 31333186560 (first ever on this branch) found, and what was done:
 
-Local runs were only ever *namespace-scoped* to `WorkshopMods`. CI runs everything. Four real failures live outside that scope and were therefore structurally invisible locally:
+1. **`PatchTest.HarmonyPatchesAll`** — blanket `PatchAll(assembly)` hit the categorised Diplomacy
+   classes, whose `TargetMethods()` resolve to nothing without the mod. Fixed as recommended: all
+   nine classes in `DiplomacyCompatibilityPatches.cs` now carry the `[HarmonyPrepare] =>
+   TargetMethods().Any()` guard the RBM/DismembermentPlus adapters already had, and the test
+   deliberately stays blanket `PatchAll` so those guards are exercised.
+2. **`WorkshopCompatibilityManifestTests.Protobuf_RoundTrip…`** — NOT a serialization bug (an
+   earlier note here claimed it was; measurement says otherwise). The test's own wire-shape
+   validation recomputes the digest over `Active` and PASSED — so `Active` was false *before*
+   serialization. The catalog deliberately declares only Harmony `FeatureActiveExpectedOnClient`;
+   the test's blanket `Assert.All(entries, Active)` was stale. It now asserts each entry matches
+   the catalog's per-role expectation, plus an explicit Harmony-is-active check so a true still
+   provably crosses the wire. The sibling PlayerSettlement failure was the same class of test bug
+   (`Assert.Empty` on the null protobuf legitimately deserializes for an omitted empty repeated
+   field — the exact shape `PlayerSettlementStateCodec.TryValidate` normalizes).
+3. **`NetworkUpdateOtherOptions.TryValidateWireShape`** — real production bug: `Enum.IsDefined`
+   throws on an int probe against a non-Int32-backed enum. Fixed underlying-type-agnostically
+   (compare against each defined value; no narrowing cast).
+4. **All 8 E2E shards** — `ModConfigAuthority.InitializeHost`'s birthAndDeath preflight ran against
+   whatever `CoopData/mod-config.json` the hosting machine has: the developer's live file locally
+   (tests silently coupled to it), nothing on CI. The E2E environment now registers
+   `DeterministicModConfig` — a fixed, preflight-valid config — for every instance.
+5. **Standalone GameInterface containers** (`ContainerTest`, `PatchBootstrap`) — this branch's
+   `RuntimeWorkshopModuleDiscovery` needs `IModuleInfoProvider`, which production registers from
+   Coop.Core's `CommonModule`; the test bootstraps now register a stand-in.
 
-1. **`GameInterface.Tests.PatchTest.HarmonyPatchesAll`** — fails with the *exact* defect this branch exists to fix:
-   `ArgumentException: Undefined target method for patch method … DiplomacySharedMutationAuthorityPatch::Prefix`.
-   **The categorisation fix is incomplete.** Adding `[HarmonyPatchCategory]` removes a class from `PatchAllUncategorized` — which is what `GameInterface.PatchAll()` calls, so the *production* path is genuinely fixed — but Harmony's blanket `PatchAll(assembly)` applies categorised patches too, and this test calls that. Any caller using blanket `PatchAll` still aborts. Fix properly with `[HarmonyPrepare]` returning `TargetMethods().Any()` on the Diplomacy classes (the pattern already used on the RBM/DismembermentPlus classes), which is immune regardless of how patching is invoked.
-2. **`WorkshopCompatibilityManifestTests.Protobuf_RoundTrip_PreservesAndValidatesManifest`** — fails on CI as `Assert.All() Failure: 10 out of 11 items`. **This is a different symptom from the local failure and it means the "environmental" verdict was WRONG.** Locally it failed as an `Assert.IsType` type-identity artifact of the console runner; on CI under vstest it fails as a genuine round-trip content mismatch. The control experiment (`Common.Tests` failing similarly) proved only that the *local runner* has a problem — it did not prove this test has none. **Treat this as a real manifest serialization bug.**
-3. **`CampaignOptionsAuthorityTests.OtherOptionsWireShape_RejectsNullAndUnknownDifficulty`** — fails on CI, never run locally.
-4. **All 8 E2E shards** — `SeparatismConfigurationSyncTests.ClientCannotOverwriteServerBirthAndDeathThroughCampaignOptionsWireMessage` throws
-   `InvalidOperationException: Friend Edition release preflight requires difficulty.birthAndDeath=true in the resolved CoopData/mod-config.json`.
-   A **release preflight check is executing inside the test suite** and depends on the operator's real `CoopData/mod-config.json`, which does not exist on a CI runner or on any fresh machine. This comes from the baseline, not from this increment's work. Either the preflight must not run in tests, or the test must supply its own resolved config.
-
-**Lesson for whoever continues:** namespace-scoped runs were used all session because the full `E2E.Tests` assembly is order-unstable in one process. That was correct for iteration and wrong as an acceptance gate. **CI is the only gate of record — get it green before building anything on this branch.**
+**Lesson, still standing:** namespace-scoped runs were used all session because the full
+`E2E.Tests` assembly is order-unstable in one process. That was correct for iteration and wrong as
+an acceptance gate. **CI is the only gate of record.**
 
 ### What exists
 

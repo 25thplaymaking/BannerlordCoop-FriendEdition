@@ -29,6 +29,14 @@ internal static class DiplomacySharedMutationAuthorityPatch
     private static IEnumerable<MethodBase> TargetMethods() =>
         DiplomacyCompatibilityPolicy.ResolveSharedMutationMethods();
 
+    // The category gate keeps this class out of GameInterface.PatchAll when Diplomacy is absent,
+    // but Harmony's blanket PatchAll(assembly) applies categorised classes too and throws
+    // "Undefined target method" on an empty TargetMethods(). Prepare makes the class immune
+    // regardless of how patching is invoked — the same defence the RBM/DismembermentPlus
+    // adapters carry (see RbmPatchWaveCompatibilityPatch.Prepare).
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
+
     [HarmonyPrefix]
     private static bool Prefix(MethodBase __originalMethod, object[] __args)
     {
@@ -198,6 +206,10 @@ internal static class DiplomacyCivilWarCollisionPatch
     private static IEnumerable<MethodBase> TargetMethods() =>
         DiplomacyCompatibilityPolicy.ResolveCivilWarEntryPoints();
 
+    // See DiplomacySharedMutationAuthorityPatch.Prepare.
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
+
     [HarmonyPrefix]
     private static bool Prefix(MethodBase __originalMethod)
     {
@@ -260,6 +272,10 @@ internal static class DiplomacyUnsupportedPlayerActionPatch
         }
     }
 
+    // See DiplomacySharedMutationAuthorityPatch.Prepare.
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
+
     [HarmonyPrefix]
     private static bool Prefix(MethodBase __originalMethod)
     {
@@ -297,6 +313,10 @@ internal static class DiplomacyServerUiGuardPatch
         }
     }
 
+    // See DiplomacySharedMutationAuthorityPatch.Prepare.
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
+
     [HarmonyPrefix]
     private static bool Prefix() => ModInformation.IsClient;
 }
@@ -332,6 +352,10 @@ internal static class DiplomacyMessengerFeatureGuardPatch
         }
     }
 
+    // See DiplomacySharedMutationAuthorityPatch.Prepare.
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
+
     [HarmonyPrefix]
     private static bool Prefix() => false;
 }
@@ -352,6 +376,10 @@ internal static class DiplomacyKeepFiefBehaviorGuardPatch
         var method = type == null ? null : AccessTools.Method(type, "RegisterEvents");
         if (method != null) yield return method;
     }
+
+    // See DiplomacySharedMutationAuthorityPatch.Prepare.
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
 
     [HarmonyPrefix]
     private static bool Prefix() => false;
@@ -388,6 +416,10 @@ internal static class DiplomacyPlayerKingdomActionGuardPatch
         if (peaceMethod != null) yield return peaceMethod;
     }
 
+    // See DiplomacySharedMutationAuthorityPatch.Prepare.
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
+
     [HarmonyPrefix]
     private static bool Prefix(MethodBase __originalMethod)
     {
@@ -416,6 +448,10 @@ internal static class DiplomacyServerNotificationGuardPatch
         var method = type == null ? null : AccessTools.Method(type, "NotifyExpired");
         if (method != null) yield return method;
     }
+
+    // See DiplomacySharedMutationAuthorityPatch.Prepare.
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
 
     [HarmonyPrefix]
     private static bool Prefix() => ModInformation.IsClient;
@@ -446,6 +482,10 @@ internal static class DiplomacyDecisionPermissionModelGuardPatch
             }
         }
     }
+
+    // See DiplomacySharedMutationAuthorityPatch.Prepare.
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
 
     [HarmonyPrefix]
     private static bool Prefix(

@@ -1,5 +1,6 @@
 using Common;
 using Common.Logging;
+using GameInterface.Services.WorkshopMods.Core;
 using HarmonyLib;
 using Missions.Agents.Extensions;
 using Serilog;
@@ -731,7 +732,24 @@ internal static class CombatModCompatibilityGuard
         return -1;
     }
 
+    /// <summary>
+    /// Sweeps and classifies every known-optional patch, removing or guarding it as
+    /// <see cref="ClassifyPatch"/> directs. Retried as a whole via HarmonyPatchInfoStabilizer (see
+    /// that type's remarks): HarmonyLib hands back the PatchMethod to unpatch from GetPatchInfo, and
+    /// that value has been observed to transiently deserialize to the wrong MethodInfo. Unpatching the
+    /// wrong (unrelated) method leaves the real target patched, so only re-scanning and re-attempting
+    /// the removal — not a plain single pass — recovers from it.
+    /// </summary>
     private static void SanitizeLoadedPatches()
+    {
+        HarmonyPatchInfoStabilizer.StabilizeUntilAcceptable(() =>
+        {
+            RunSanitizationPass();
+            return !HasPendingRemovablePatches();
+        });
+    }
+
+    private static void RunSanitizationPass()
     {
         foreach (MethodBase original in Harmony.GetAllPatchedMethods().ToArray())
         {
@@ -787,6 +805,42 @@ internal static class CombatModCompatibilityGuard
                 }
             }
         }
+    }
+
+    /// <summary>True if a known-optional patch that should have been removed is still present.</summary>
+    private static bool HasPendingRemovablePatches()
+    {
+        foreach (MethodBase original in Harmony.GetAllPatchedMethods().ToArray())
+        {
+            HarmonyLib.Patches patchInfo = Harmony.GetPatchInfo(original);
+            if (patchInfo == null) continue;
+
+            IEnumerable<Patch> patches = patchInfo.Prefixes
+                .Concat(patchInfo.Postfixes)
+                .Concat(patchInfo.Transpilers)
+                .Concat(patchInfo.Finalizers);
+
+            foreach (Patch patch in patches)
+            {
+                if (!IsKnownOptionalPatch(patch)) continue;
+
+                Assembly patchAssembly = patch.PatchMethod?.DeclaringType?.Assembly;
+                if (patchAssembly == null || !IsAssemblyCompatible(patchAssembly)) return true;
+
+                CombatPatchDisposition disposition = ClassifyPatch(
+                    patch.owner,
+                    original.DeclaringType?.FullName,
+                    original.Name,
+                    ModInformation.IsServer,
+                    patchAssembly?.GetName().Name);
+
+                if (disposition == CombatPatchDisposition.Remove
+                    || disposition == CombatPatchDisposition.ServerOnly)
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool InstallAuthorityGuard(MethodInfo patchMethod)

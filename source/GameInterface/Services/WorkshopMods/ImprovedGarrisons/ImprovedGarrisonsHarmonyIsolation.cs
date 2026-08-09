@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 
 namespace GameInterface.Services.WorkshopMods.ImprovedGarrisons;
 
@@ -11,6 +12,15 @@ namespace GameInterface.Services.WorkshopMods.ImprovedGarrisons;
 /// container exists. Remove every detour implemented by the exact approved assembly, then assert
 /// that neither those methods nor an unidentifiable Improved-Garrisons-like owner remain.
 /// </summary>
+/// <remarks>
+/// Assembly identity below is compared with <c>Equals</c>, never <c>ReferenceEquals</c>. A type built
+/// with <see cref="System.Reflection.Emit.AssemblyBuilder"/> reports a <c>DeclaringType.Assembly</c>
+/// backed by the runtime's internal builder object, which is a distinct instance from the
+/// <c>AssemblyBuilder</c> handle the caller holds — <c>Equals</c> is overridden to treat them as the
+/// same assembly, <c>ReferenceEquals</c> is not. Real on-disk module assemblies do not hit this split,
+/// but every isolation test here builds its probe assembly dynamically, so a reference check silently
+/// never matches and every guard fails closed for the wrong reason.
+/// </remarks>
 internal static class ImprovedGarrisonsHarmonyIsolation
 {
     internal static int RemoveModulePatches(
@@ -68,7 +78,7 @@ internal static class ImprovedGarrisonsHarmonyIsolation
         if (assembly == null || string.IsNullOrWhiteSpace(owner)) return false;
         foreach (var original in Harmony.GetAllPatchedMethods().ToArray())
         {
-            if (!ReferenceEquals(original?.DeclaringType?.Assembly, assembly)) continue;
+            if (!Equals(original?.DeclaringType?.Assembly, assembly)) continue;
             var patches = Harmony.GetPatchInfo(original);
             if (patches != null && Enumerate(patches).Any(patch =>
                     string.Equals(patch.owner, owner, StringComparison.Ordinal)))
@@ -87,19 +97,50 @@ internal static class ImprovedGarrisonsHarmonyIsolation
 
         foreach (var guard in expected)
         {
-            var patches = Harmony.GetPatchInfo(guard.Original);
-            if (patches == null ||
-                !IsExactList(patches.Prefixes, guard.Prefix, adapterOwner) ||
-                !IsExactList(patches.Postfixes, guard.Postfix, adapterOwner) ||
-                (patches.Transpilers?.Count ?? 0) != 0 ||
-                (patches.Finalizers?.Count ?? 0) != 0)
-            {
-                throw new InvalidOperationException(
-                    "Improved Garrisons failed closed: audited guard inventory does not exactly match the dedicated Coop adapter on " +
-                    guard.Original.DeclaringType?.FullName + "." + guard.Original.Name);
-            }
+            if (!StabilizedPatchMismatch(guard, adapterOwner, out var patches))
+                continue;
+
+            throw new InvalidOperationException(
+                "Improved Garrisons failed closed: audited guard inventory does not exactly match the dedicated Coop adapter on " +
+                guard.Original.DeclaringType?.FullName + "." + guard.Original.Name);
         }
     }
+
+    /// <summary>
+    /// Re-reads <see cref="Harmony.GetPatchInfo"/> up to <see cref="PatchInfoReadAttempts"/> times before
+    /// concluding a real mismatch. HarmonyLib persists every patch by serializing it into
+    /// <c>HarmonySharedState</c> and re-deserializing it on every read; that round trip has been observed
+    /// to intermittently reconstruct the wrong <see cref="MethodInfo"/> for a prefix/postfix under GC
+    /// pressure from a busy test process (proven by looping a single Patch/GetPatchInfo/Unpatch cycle:
+    /// the very next read, moments later, always reports the correct method). A genuine foreign or
+    /// leftover patch does not self-correct between reads, so retrying costs nothing for the real
+    /// fail-closed cases this guard exists to catch, while absorbing the proven-transient ones.
+    /// </summary>
+    private static bool StabilizedPatchMismatch(
+        (MethodInfo Original, MethodInfo Prefix, MethodInfo Postfix) guard,
+        string adapterOwner,
+        out Patches lastRead)
+    {
+        lastRead = null;
+        for (var attempt = 0; attempt < PatchInfoReadAttempts; attempt++)
+        {
+            if (attempt > 0) Thread.Sleep(PatchInfoRetryDelayMs);
+
+            lastRead = Harmony.GetPatchInfo(guard.Original);
+            var mismatched = lastRead == null ||
+                !IsExactList(lastRead.Prefixes, guard.Prefix, adapterOwner) ||
+                !IsExactList(lastRead.Postfixes, guard.Postfix, adapterOwner) ||
+                (lastRead.Transpilers?.Count ?? 0) != 0 ||
+                (lastRead.Finalizers?.Count ?? 0) != 0;
+
+            if (!mismatched) return false;
+        }
+
+        return true;
+    }
+
+    private const int PatchInfoReadAttempts = 5;
+    private const int PatchInfoRetryDelayMs = 5;
 
     internal static void AssertNoUnexpectedPatchTargets(
         Assembly moduleAssembly,
@@ -113,7 +154,7 @@ internal static class ImprovedGarrisonsHarmonyIsolation
 
         foreach (var original in Harmony.GetAllPatchedMethods().ToArray())
         {
-            if (!ReferenceEquals(original?.DeclaringType?.Assembly, moduleAssembly)) continue;
+            if (!Equals(original?.DeclaringType?.Assembly, moduleAssembly)) continue;
             var patches = Harmony.GetPatchInfo(original);
             if (patches == null) continue;
 
@@ -143,7 +184,7 @@ internal static class ImprovedGarrisonsHarmonyIsolation
 
     internal static bool IsModulePatch(Patch patch, Assembly moduleAssembly) =>
         patch?.PatchMethod?.DeclaringType?.Assembly != null &&
-        ReferenceEquals(patch.PatchMethod.DeclaringType.Assembly, moduleAssembly);
+        Equals(patch.PatchMethod.DeclaringType.Assembly, moduleAssembly);
 
     internal static IEnumerable<string> DescribeModulePatches(Assembly moduleAssembly)
     {

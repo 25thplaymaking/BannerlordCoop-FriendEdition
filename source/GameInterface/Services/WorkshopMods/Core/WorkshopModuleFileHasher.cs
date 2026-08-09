@@ -10,14 +10,21 @@ namespace GameInterface.Services.WorkshopMods.Core;
 
 public sealed class WorkshopModuleHashResult
 {
-    public WorkshopModuleHashResult(string contentSha256, string configurationSha256)
+    public WorkshopModuleHashResult(string contentSha256, string configurationSha256, bool subModuleOnly = false)
     {
         ContentSha256 = contentSha256;
         ConfigurationSha256 = configurationSha256;
+        SubModuleOnly = subModuleOnly;
     }
 
     public string ContentSha256 { get; }
     public string ConfigurationSha256 { get; }
+
+    /// <summary>
+    /// True when the module root contains nothing hashable beyond its root SubModule.xml — the
+    /// shape of a headless-server stub, whose engine cannot load the module's real content.
+    /// </summary>
+    public bool SubModuleOnly { get; }
 }
 
 /// <summary>
@@ -75,7 +82,9 @@ public sealed class WorkshopModuleFileHasher
 
         var configuration = files.Where(file => IsConfiguration(file.RelativePath)).ToArray();
         var content = files.Where(file => !IsConfiguration(file.RelativePath)).ToArray();
-        return new WorkshopModuleHashResult(HashFiles(content), HashFiles(configuration));
+        bool subModuleOnly = files.Length == 1 &&
+            string.Equals(files[0].RelativePath, "submodule.xml", StringComparison.Ordinal);
+        return new WorkshopModuleHashResult(HashFiles(content), HashFiles(configuration), subModuleOnly);
     }
 
     private static IEnumerable<string> EnumerateFiles(string root)
@@ -102,8 +111,15 @@ public sealed class WorkshopModuleFileHasher
         }
     }
 
+    // The dedicated-server host overlays each module's client binaries into a server bin folder
+    // (TaleWorlds' server engine only resolves bin\Win64_Shipping_Server). The shipped package
+    // never contains that folder — it is a host-side duplicate of already-hashed client bytes —
+    // so it must not perturb the package contract on the peer that adds it.
+    private const string ServerBinOverlayPrefix = "bin/win64_shipping_server/";
+
     private static bool ShouldHash(string relativePath)
     {
+        if (relativePath.StartsWith(ServerBinOverlayPrefix, StringComparison.Ordinal)) return false;
         string fileName = Path.GetFileName(relativePath);
         if (MutableFileNames.Contains(fileName)) return false;
         return !IgnoredExtensions.Contains(Path.GetExtension(fileName));

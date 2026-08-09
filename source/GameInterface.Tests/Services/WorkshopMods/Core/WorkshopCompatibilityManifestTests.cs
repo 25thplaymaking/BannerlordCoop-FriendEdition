@@ -25,10 +25,9 @@ public class WorkshopCompatibilityManifestTests
         Assert.Equal(WorkshopPeerRole.Client, roundTrip.PeerRole);
         Assert.Equal(160, roundTrip.Entries.Single(entry => entry.ModuleId == "PlayerSettlement").LoadOrder);
 
-        // A client manifest carries the catalog's staged-inactive policy — only Harmony is
-        // expected active on a client today — so the round trip must preserve that MIXED
-        // pattern, not all-true. The explicit Harmony check proves a true Active actually
-        // crossed the wire; without it an all-false wire bug would pass vacuously.
+        // Each entry's Active flag must survive the round trip exactly as the catalog policy
+        // dictates it. The explicit Harmony check proves a true Active actually crossed the
+        // wire; without it an all-false wire bug would pass vacuously.
         var catalog = new FriendEditionWorkshopModuleCatalog();
         Assert.All(roundTrip.Entries, entry =>
         {

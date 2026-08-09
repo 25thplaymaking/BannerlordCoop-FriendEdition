@@ -82,6 +82,10 @@ public interface IWorkshopModuleCatalog
 /// </summary>
 public sealed class FriendEditionWorkshopModuleCatalog : IWorkshopModuleCatalog
 {
+    // Every bundled component runs on every peer: the group chose the full modded experience
+    // over the staged per-module rollout. Cross-player consistency for actions no one has routed
+    // yet is best-effort; routing work (doc/HANDOFF-workshop-routing.md §4) hardens mods in place
+    // without another activation flip.
     private static readonly WorkshopModuleExpectation[] ExpectedModules =
     {
         new("Bannerlord.Harmony", "2859188632", "5023964903723709557", "v2.4.2.248", 0,
@@ -89,25 +93,45 @@ public sealed class FriendEditionWorkshopModuleCatalog : IWorkshopModuleCatalog
             featureActiveExpectedOnServer: true,
             featureActiveExpectedOnClient: true),
         new("Bannerlord.ButterLib", "2859232415", "6795008217820882669", "v2.11.1", 10,
-            WorkshopModuleRole.Framework, WorkshopCompatibilityProfile.AllPeersExact),
+            WorkshopModuleRole.Framework, WorkshopCompatibilityProfile.AllPeersExact,
+            featureActiveExpectedOnServer: true,
+            featureActiveExpectedOnClient: true),
         new("Bannerlord.UIExtenderEx", "2859222409", "4162172930197019416", "v2.13.3", 20,
-            WorkshopModuleRole.Framework, WorkshopCompatibilityProfile.AllPeersExact),
+            WorkshopModuleRole.Framework, WorkshopCompatibilityProfile.AllPeersExact,
+            featureActiveExpectedOnServer: true,
+            featureActiveExpectedOnClient: true),
         new("Bannerlord.MBOptionScreen", "2859238197", "4045451207505706745", "v5.12.2", 30,
-            WorkshopModuleRole.Framework, WorkshopCompatibilityProfile.AllPeersExact),
+            WorkshopModuleRole.Framework, WorkshopCompatibilityProfile.AllPeersExact,
+            featureActiveExpectedOnServer: true,
+            featureActiveExpectedOnClient: true),
         new("RBM", "2859251492", "8508128689459287315", "v4.3.4", 100,
-            WorkshopModuleRole.Mission, WorkshopCompatibilityProfile.DeterministicMission),
+            WorkshopModuleRole.Mission, WorkshopCompatibilityProfile.DeterministicMission,
+            featureActiveExpectedOnServer: true,
+            featureActiveExpectedOnClient: true),
         new("ImprovedGarrisons", "2859265386", "5143458534246082850", "v4.2.0.7", 110,
-            WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign),
+            WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign,
+            featureActiveExpectedOnServer: true,
+            featureActiveExpectedOnClient: true),
         new("DismembermentPlus", "2875093027", "4587731243779119835", "v2.0.8.7", 120,
-            WorkshopModuleRole.Presentation, WorkshopCompatibilityProfile.ClientPresentation),
+            WorkshopModuleRole.Presentation, WorkshopCompatibilityProfile.ClientPresentation,
+            featureActiveExpectedOnServer: true,
+            featureActiveExpectedOnClient: true),
         new("Fourberie", "2875710877", "4391404683672989722", "v1.4.7.5", 130,
-            WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign),
+            WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign,
+            featureActiveExpectedOnServer: true,
+            featureActiveExpectedOnClient: true),
         new("Bannerlord.Diplomacy", "2881380744", "3938505074920035905", "v1.4.7", 140,
-            WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign),
+            WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign,
+            featureActiveExpectedOnServer: true,
+            featureActiveExpectedOnClient: true),
         new("UnblockableThrust", "3614435151", "3108412629025003964", "v1.1.3.1", 150,
-            WorkshopModuleRole.Mission, WorkshopCompatibilityProfile.DeterministicMission),
+            WorkshopModuleRole.Mission, WorkshopCompatibilityProfile.DeterministicMission,
+            featureActiveExpectedOnServer: true,
+            featureActiveExpectedOnClient: true),
         new("PlayerSettlement", "3720376888", "6398100776119441137", "v7.5.0", 160,
-            WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign),
+            WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign,
+            featureActiveExpectedOnServer: true,
+            featureActiveExpectedOnClient: true),
     };
 
     private readonly IReadOnlyDictionary<string, WorkshopModuleExpectation> modulesById =

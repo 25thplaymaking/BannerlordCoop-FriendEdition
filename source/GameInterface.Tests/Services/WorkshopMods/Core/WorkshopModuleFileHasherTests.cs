@@ -66,4 +66,32 @@ public sealed class WorkshopModuleFileHasherTests : IDisposable
         WorkshopModuleHashResult codeChanged = hasher.Hash(module);
         Assert.NotEqual(configurationChanged.ContentSha256, codeChanged.ContentSha256);
     }
+
+    /// <summary>
+    /// A dedicated-server host copies each module's client binaries into bin\Win64_Shipping_Server
+    /// because TaleWorlds' server engine only resolves that folder. The shipped package never
+    /// contains it, so the overlay must not change either hash — otherwise every server-side
+    /// module would report as an unmanaged copy and no client could join.
+    /// </summary>
+    [Fact]
+    public void Hash_IgnoresServerBinOverlay()
+    {
+        string module = Path.Combine(root, "module");
+        Directory.CreateDirectory(Path.Combine(module, "bin", "Win64_Shipping_Client"));
+        File.WriteAllBytes(Path.Combine(module, "bin", "Win64_Shipping_Client", "component.dll"),
+            new byte[] { 1, 2, 3 });
+        File.WriteAllText(Path.Combine(module, "SubModule.xml"), "<Module />");
+
+        var hasher = new WorkshopModuleFileHasher();
+        WorkshopModuleHashResult original = hasher.Hash(module);
+
+        Directory.CreateDirectory(Path.Combine(module, "bin", "Win64_Shipping_Server"));
+        File.WriteAllBytes(Path.Combine(module, "bin", "Win64_Shipping_Server", "component.dll"),
+            new byte[] { 1, 2, 3 });
+        File.WriteAllText(Path.Combine(module, "bin", "Win64_Shipping_Server", "extra.xml"), "<x />");
+        WorkshopModuleHashResult overlaid = hasher.Hash(module);
+
+        Assert.Equal(original.ContentSha256, overlaid.ContentSha256);
+        Assert.Equal(original.ConfigurationSha256, overlaid.ConfigurationSha256);
+    }
 }

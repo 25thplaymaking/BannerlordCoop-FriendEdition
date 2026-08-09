@@ -43,11 +43,11 @@ The receipt establishes that co-located `Modules/<id>` directories belong to the
 distribution; runtime hashing proves their installed bytes still match it. Numeric load order is
 part of both the receipt and wire identity, while actual activation order is independently verified
 from TaleWorlds' active-module enumeration. Package presence and feature activation are separate
-claims. The current safe activation policy requires only `Bannerlord.Harmony` to be active among
-the eleven managed components on either client or server; the other ten must remain staged and
-hash-verified but inactive. Either a missing required activation or an unexpected active component
-is a hard handshake failure. Feature adapters remain fail-closed while their upstream module is
-inactive.
+claims. The current activation policy requires all eleven managed components to be active on both
+client and server — the group runs the full modded experience, and the handshake verifies every
+component's bytes each session. Either a missing required activation or an unexpected active
+component is a hard handshake failure. Feature adapters remain fail-closed while their upstream
+module is inactive.
 
 Runtime preparation is deliberately split by thread affinity. TaleWorlds active-module and path
 metadata is captured into an immutable snapshot on the game thread. Only deterministic filesystem

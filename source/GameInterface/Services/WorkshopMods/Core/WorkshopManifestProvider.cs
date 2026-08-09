@@ -142,17 +142,32 @@ public sealed class WorkshopManifestProvider : IWorkshopManifestProvider
                     hashesByRoot.Add(module.RootPath, hashes);
                 }
 
+                bool pinsMatch = module.ManagedDistributionComponent &&
+                    string.Equals(module.PinnedContentSha256, hashes.ContentSha256, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(module.PinnedConfigurationSha256, hashes.ConfigurationSha256, StringComparison.OrdinalIgnoreCase);
+
+                // Headless-server stub: the wine-hosted server engine cannot load some modules'
+                // real content (RBM's combat parameters crash it natively), so those modules are
+                // activated as a bare SubModule.xml. The receipt still carries the audited pins,
+                // and the server advertises THOSE — every client is byte-verified against the
+                // audited package even though the server itself cannot execute it. Clients never
+                // take this branch: a stub on a client is a broken install, reported as-is.
+                bool serverStubAttestation = !pinsMatch &&
+                    preparation.PeerRole == WorkshopPeerRole.Server &&
+                    module.ManagedDistributionComponent &&
+                    hashes.SubModuleOnly &&
+                    !string.IsNullOrEmpty(module.PinnedContentSha256) &&
+                    !string.IsNullOrEmpty(module.PinnedConfigurationSha256);
+
                 entries.Add(new WorkshopCompatibilityManifestEntry(
                     module.Expectation.ModuleId,
                     module.Expectation.WorkshopId,
                     module.Version,
                     module.Expectation.Role,
                     module.Expectation.Profile,
-                    hashes.ContentSha256,
-                    hashes.ConfigurationSha256,
-                    module.ManagedDistributionComponent &&
-                    string.Equals(module.PinnedContentSha256, hashes.ContentSha256, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(module.PinnedConfigurationSha256, hashes.ConfigurationSha256, StringComparison.OrdinalIgnoreCase),
+                    serverStubAttestation ? module.PinnedContentSha256 : hashes.ContentSha256,
+                    serverStubAttestation ? module.PinnedConfigurationSha256 : hashes.ConfigurationSha256,
+                    pinsMatch || serverStubAttestation,
                     module.ActivationOrderValid,
                     module.Expectation.LoadOrder,
                     module.Active));

@@ -142,7 +142,7 @@ public class WorkshopManifestValidatorTests
     }
 
     [Fact]
-    public void SafeStagedInactivePackages_AreAcceptedOnBothRoles()
+    public void FullyActiveSuite_IsAcceptedOnBothRoles()
     {
         WorkshopCompatibilityManifest server = ManifestFactory.Create(WorkshopPeerRole.Server);
         WorkshopCompatibilityManifest client = ManifestFactory.Create(WorkshopPeerRole.Client);
@@ -151,42 +151,38 @@ public class WorkshopManifestValidatorTests
 
         Assert.True(result.Matches, result.ToNetworkReason());
         Assert.Empty(result.Warnings);
-        Assert.Single(server.Entries.Where(entry => entry.Active));
-        Assert.Single(client.Entries.Where(entry => entry.Active));
-        Assert.All(server.Entries.Where(entry => entry.ModuleId != "Bannerlord.Harmony"),
-            entry => Assert.False(entry.Active));
-        Assert.All(client.Entries.Where(entry => entry.ModuleId != "Bannerlord.Harmony"),
-            entry => Assert.False(entry.Active));
+        Assert.All(server.Entries, entry => Assert.True(entry.Active));
+        Assert.All(client.Entries, entry => Assert.True(entry.Active));
     }
 
     [Fact]
-    public void OptionalActiveServerPackage_IsRejected()
+    public void InactiveRequiredServerPackage_IsRejected()
     {
         WorkshopCompatibilityManifest server = ManifestFactory.Create(
             WorkshopPeerRole.Server,
-            module => Copy(module, active: module.ModuleId is "Bannerlord.Harmony" or "RBM"));
+            module => Copy(module, active: module.ModuleId != "RBM"));
         WorkshopCompatibilityManifest client = ManifestFactory.Create(WorkshopPeerRole.Client);
 
         WorkshopManifestValidationResult result = validator.Validate(server, client);
 
         Assert.False(result.Matches);
         Assert.Contains(result.Diagnostics, diagnostic =>
-            diagnostic.Contains("Server must keep 'RBM' inactive", StringComparison.Ordinal));
+            diagnostic.Contains("Server must activate 'RBM'", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void OptionalActiveClientPackage_IsRejected()
+    public void InactiveRequiredClientPackage_IsRejected()
     {
         WorkshopCompatibilityManifest server = ManifestFactory.Create(WorkshopPeerRole.Server);
         WorkshopCompatibilityManifest client = ManifestFactory.Create(
             WorkshopPeerRole.Client,
-            module => Copy(module, active: module.ModuleId is "Bannerlord.Harmony" or "RBM"));
+            module => Copy(module, active: module.ModuleId != "RBM"));
 
         WorkshopManifestValidationResult result = validator.Validate(server, client);
 
         Assert.False(result.Matches);
         Assert.Contains(result.Diagnostics, diagnostic =>
-            diagnostic.Contains("Client must keep 'RBM' inactive", StringComparison.Ordinal));
+            diagnostic.Contains("Client must activate 'RBM'", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -216,9 +212,10 @@ public class WorkshopManifestValidatorTests
 
     /// <summary>
     /// Bannerlord only resolves ACTIVE modules, so a staged-but-inactive component can never
-    /// appear in either manifest. Real sessions therefore carry only the active subset — today
-    /// just Harmony — and that must MATCH (with a not-verified warning per absent module), or no
-    /// join is ever possible. One-sided absence stays fatal (covered above).
+    /// appear in either manifest. A module absent from BOTH manifests has no bytes in either
+    /// runtime, so agreement is a warning, never a refusal — otherwise no session could ever run
+    /// a subset (e.g. during a future mod retirement). One-sided absence stays fatal (covered
+    /// above).
     /// </summary>
     [Fact]
     public void ModuleAbsentFromBothSides_WarnsButMatches()

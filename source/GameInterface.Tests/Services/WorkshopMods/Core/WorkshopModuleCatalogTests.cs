@@ -39,17 +39,10 @@ public class WorkshopModuleCatalogTests
         Assert.Equal(4, modules.Count(module =>
             module.Profile == WorkshopCompatibilityProfile.ServerAuthoritativeCampaign));
 
-        WorkshopModuleExpectation visual = Assert.Single(modules.Where(module =>
-            module.ModuleId == "DismembermentPlus"));
-        Assert.False(visual.FeatureActiveExpectedOnServer);
-        Assert.False(visual.FeatureActiveExpectedOnClient);
-
-        WorkshopModuleExpectation harmony = Assert.Single(modules.Where(module =>
-            module.ModuleId == "Bannerlord.Harmony"));
-        Assert.True(harmony.FeatureActiveExpectedOnServer);
-        Assert.True(harmony.FeatureActiveExpectedOnClient);
-        Assert.Single(modules.Where(module => module.FeatureActiveExpectedOnServer));
-        Assert.Single(modules.Where(module => module.FeatureActiveExpectedOnClient));
+        // The group runs the full modded experience: every bundled component is expected active
+        // on both peers, and the handshake byte-verifies each one every session.
+        Assert.All(modules, module => Assert.True(module.FeatureActiveExpectedOnServer));
+        Assert.All(modules, module => Assert.True(module.FeatureActiveExpectedOnClient));
     }
 
     private static void AssertModule(

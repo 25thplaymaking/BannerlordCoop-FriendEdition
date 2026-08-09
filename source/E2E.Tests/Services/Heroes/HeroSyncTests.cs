@@ -233,5 +233,40 @@ namespace E2E.Tests.Services.Heroes
                 Assert.True(hero.IsPregnant);
             }
         }
+
+        [Fact]
+        public void Server_NewbornParents_PropagateFamilyGraphToClients()
+        {
+            var motherId = TestEnvironment.CreateRegisteredObject<Hero>();
+            var fatherId = TestEnvironment.CreateRegisteredObject<Hero>();
+            var childId = TestEnvironment.CreateRegisteredObject<Hero>();
+
+            Server.Call(() =>
+            {
+                Assert.True(Server.ObjectManager.TryGetObject(motherId, out Hero mother));
+                Assert.True(Server.ObjectManager.TryGetObject(fatherId, out Hero father));
+                Assert.True(Server.ObjectManager.TryGetObject(childId, out Hero child));
+
+                child.Mother = mother;
+                child.Father = father;
+
+                Assert.Same(mother, child.Mother);
+                Assert.Same(father, child.Father);
+                Assert.Contains(child, mother.Children);
+                Assert.Contains(child, father.Children);
+            });
+
+            foreach (var client in Clients)
+            {
+                Assert.True(client.ObjectManager.TryGetObject(motherId, out Hero mother));
+                Assert.True(client.ObjectManager.TryGetObject(fatherId, out Hero father));
+                Assert.True(client.ObjectManager.TryGetObject(childId, out Hero child));
+
+                Assert.Same(mother, child.Mother);
+                Assert.Same(father, child.Father);
+                Assert.Contains(child, mother.Children);
+                Assert.Contains(child, father.Children);
+            }
+        }
     }
 }

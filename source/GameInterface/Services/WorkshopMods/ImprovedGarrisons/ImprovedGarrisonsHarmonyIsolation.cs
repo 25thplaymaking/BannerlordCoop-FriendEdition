@@ -1,9 +1,9 @@
+using GameInterface.Services.WorkshopMods.Core;
 using HarmonyLib;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Threading;
 
 namespace GameInterface.Services.WorkshopMods.ImprovedGarrisons;
 
@@ -97,50 +97,26 @@ internal static class ImprovedGarrisonsHarmonyIsolation
 
         foreach (var guard in expected)
         {
-            if (!StabilizedPatchMismatch(guard, adapterOwner, out var patches))
-                continue;
+            // See HarmonyPatchInfoStabilizer for why this reads GetPatchInfo more than once before
+            // failing closed.
+            var acceptable = HarmonyPatchInfoStabilizer.StabilizeUntilAcceptable(() =>
+            {
+                var patches = Harmony.GetPatchInfo(guard.Original);
+                return patches != null &&
+                    IsExactList(patches.Prefixes, guard.Prefix, adapterOwner) &&
+                    IsExactList(patches.Postfixes, guard.Postfix, adapterOwner) &&
+                    (patches.Transpilers?.Count ?? 0) == 0 &&
+                    (patches.Finalizers?.Count ?? 0) == 0;
+            });
 
-            throw new InvalidOperationException(
-                "Improved Garrisons failed closed: audited guard inventory does not exactly match the dedicated Coop adapter on " +
-                guard.Original.DeclaringType?.FullName + "." + guard.Original.Name);
+            if (!acceptable)
+            {
+                throw new InvalidOperationException(
+                    "Improved Garrisons failed closed: audited guard inventory does not exactly match the dedicated Coop adapter on " +
+                    guard.Original.DeclaringType?.FullName + "." + guard.Original.Name);
+            }
         }
     }
-
-    /// <summary>
-    /// Re-reads <see cref="Harmony.GetPatchInfo"/> up to <see cref="PatchInfoReadAttempts"/> times before
-    /// concluding a real mismatch. HarmonyLib persists every patch by serializing it into
-    /// <c>HarmonySharedState</c> and re-deserializing it on every read; that round trip has been observed
-    /// to intermittently reconstruct the wrong <see cref="MethodInfo"/> for a prefix/postfix under GC
-    /// pressure from a busy test process (proven by looping a single Patch/GetPatchInfo/Unpatch cycle:
-    /// the very next read, moments later, always reports the correct method). A genuine foreign or
-    /// leftover patch does not self-correct between reads, so retrying costs nothing for the real
-    /// fail-closed cases this guard exists to catch, while absorbing the proven-transient ones.
-    /// </summary>
-    private static bool StabilizedPatchMismatch(
-        (MethodInfo Original, MethodInfo Prefix, MethodInfo Postfix) guard,
-        string adapterOwner,
-        out Patches lastRead)
-    {
-        lastRead = null;
-        for (var attempt = 0; attempt < PatchInfoReadAttempts; attempt++)
-        {
-            if (attempt > 0) Thread.Sleep(PatchInfoRetryDelayMs);
-
-            lastRead = Harmony.GetPatchInfo(guard.Original);
-            var mismatched = lastRead == null ||
-                !IsExactList(lastRead.Prefixes, guard.Prefix, adapterOwner) ||
-                !IsExactList(lastRead.Postfixes, guard.Postfix, adapterOwner) ||
-                (lastRead.Transpilers?.Count ?? 0) != 0 ||
-                (lastRead.Finalizers?.Count ?? 0) != 0;
-
-            if (!mismatched) return false;
-        }
-
-        return true;
-    }
-
-    private const int PatchInfoReadAttempts = 5;
-    private const int PatchInfoRetryDelayMs = 5;
 
     internal static void AssertNoUnexpectedPatchTargets(
         Assembly moduleAssembly,

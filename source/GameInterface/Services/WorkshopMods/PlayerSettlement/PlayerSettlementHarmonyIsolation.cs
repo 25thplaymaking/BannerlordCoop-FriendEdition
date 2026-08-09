@@ -1,3 +1,4 @@
+using GameInterface.Services.WorkshopMods.Core;
 using HarmonyLib;
 using System;
 using System.Collections.Generic;
@@ -28,27 +29,40 @@ internal static class PlayerSettlementHarmonyIsolation
         if (unpatcher == null)
             throw new ArgumentNullException(nameof(unpatcher));
 
+        // See HarmonyPatchInfoStabilizer for why this retries the whole scan-then-unpatch pass, not
+        // just a verification afterward: HarmonyLib hands back the PatchMethod to unpatch from
+        // GetPatchInfo, and that value has been observed to transiently deserialize to the wrong
+        // MethodInfo. Unpatching the wrong (unrelated) method leaves the real target patched, so only
+        // re-scanning and re-attempting the removal recovers from it.
         var removed = 0;
-        foreach (var original in Harmony.GetAllPatchedMethods().ToArray())
+        var clean = HarmonyPatchInfoStabilizer.StabilizeUntilAcceptable(() =>
         {
-            var patchInfo = Harmony.GetPatchInfo(original);
-            if (patchInfo == null) continue;
-
-            foreach (var patch in Enumerate(patchInfo).ToArray())
+            var passRemoved = 0;
+            foreach (var original in Harmony.GetAllPatchedMethods().ToArray())
             {
-                if (!IsModulePatch(patch, mainAssembly, fixesAssembly)) continue;
-                unpatcher.Unpatch(original, patch.PatchMethod);
-                removed++;
-            }
-        }
+                var patchInfo = Harmony.GetPatchInfo(original);
+                if (patchInfo == null) continue;
 
-        var remaining = DescribeModulePatches(mainAssembly, fixesAssembly).ToArray();
-        if (remaining.Length != 0)
+                foreach (var patch in Enumerate(patchInfo).ToArray())
+                {
+                    if (!IsModulePatch(patch, mainAssembly, fixesAssembly)) continue;
+                    unpatcher.Unpatch(original, patch.PatchMethod);
+                    passRemoved++;
+                }
+            }
+
+            removed += passRemoved;
+            return !DescribeModulePatches(mainAssembly, fixesAssembly).Any();
+        });
+
+        if (!clean)
         {
+            var remaining = DescribeModulePatches(mainAssembly, fixesAssembly).ToArray();
             throw new InvalidOperationException(
                 "Player Settlement failed closed: original/fixes Harmony patches remain after isolation: " +
                 string.Join("; ", remaining));
         }
+
         return removed;
     }
 
@@ -73,8 +87,8 @@ internal static class PlayerSettlementHarmonyIsolation
     {
         var patchAssembly = patchMethod?.DeclaringType?.Assembly;
         return patchAssembly != null &&
-               (ReferenceEquals(patchAssembly, mainAssembly) ||
-                ReferenceEquals(patchAssembly, fixesAssembly));
+               (Equals(patchAssembly, mainAssembly) ||
+                Equals(patchAssembly, fixesAssembly));
     }
 
     internal static IEnumerable<string> DescribeModulePatches(
@@ -135,22 +149,30 @@ internal static class PlayerSettlementHarmonyIsolation
             expected.Select(pair => (MethodBase)pair.Original));
         foreach (var pair in expected)
         {
-            var patches = Harmony.GetPatchInfo(pair.Original);
-            var prefixes = patches?.Prefixes?.ToArray() ?? Array.Empty<Patch>();
-            var postfixes = patches?.Postfixes?.ToArray() ?? Array.Empty<Patch>();
-            var transpilers = patches?.Transpilers?.ToArray() ?? Array.Empty<Patch>();
-            var finalizers = patches?.Finalizers?.ToArray() ?? Array.Empty<Patch>();
-            if (prefixes.Length != 1 ||
-                !string.Equals(prefixes[0].owner, AdapterHarmonyOwner, StringComparison.Ordinal) ||
-                !Equals(prefixes[0].PatchMethod, pair.Prefix) ||
-                postfixes.Length != 0 ||
-                transpilers.Length != 0 ||
-                finalizers.Length != 0)
+            // See HarmonyPatchInfoStabilizer for why this reads GetPatchInfo more than once before
+            // failing closed.
+            Patches lastRead = null;
+            var acceptable = HarmonyPatchInfoStabilizer.StabilizeUntilAcceptable(() =>
+            {
+                lastRead = Harmony.GetPatchInfo(pair.Original);
+                var prefixes = lastRead?.Prefixes?.ToArray() ?? Array.Empty<Patch>();
+                var postfixes = lastRead?.Postfixes?.ToArray() ?? Array.Empty<Patch>();
+                var transpilers = lastRead?.Transpilers?.ToArray() ?? Array.Empty<Patch>();
+                var finalizers = lastRead?.Finalizers?.ToArray() ?? Array.Empty<Patch>();
+                return prefixes.Length == 1 &&
+                    string.Equals(prefixes[0].owner, AdapterHarmonyOwner, StringComparison.Ordinal) &&
+                    Equals(prefixes[0].PatchMethod, pair.Prefix) &&
+                    postfixes.Length == 0 &&
+                    transpilers.Length == 0 &&
+                    finalizers.Length == 0;
+            });
+
+            if (!acceptable)
             {
                 throw new InvalidOperationException(
                     "Player Settlement failed closed: adapter Harmony inventory mismatch for " +
                     pair.Original.DeclaringType?.FullName + "." + pair.Original.Name + ": " +
-                    DescribePatches(pair.Original, patches));
+                    DescribePatches(pair.Original, lastRead));
             }
         }
 

@@ -95,6 +95,11 @@ namespace GameInterface.Services.Banners.Handlers
                         warParty?.MobileParty?.Party?.SetVisualAsDirty();
                     }
 
+                    foreach (var settlement in clan.Settlements)
+                    {
+                        settlement?.Party?.SetVisualAsDirty();
+                    }
+
                     // The small banner flag on each party's map nameplate is a separate UI cache that
                     // only rebuilds when the nameplate is flagged dirty. There is no vanilla event for a
                     // banner edit, so force the affected nameplates to refresh their banner here.

@@ -4,6 +4,7 @@ using Common.Messaging;
 using Common.Network;
 using GameInterface.Configuration;
 using GameInterface.Registry.Auto;
+using GameInterface.Services.Banners.Messages;
 using GameInterface.Services.Clans.Messages;
 using GameInterface.Services.Kingdoms;
 using GameInterface.Services.Kingdoms.Messages;
@@ -22,6 +23,7 @@ using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
 using TaleWorlds.Localization;
+using TaleWorlds.ObjectSystem;
 
 namespace GameInterface.Services.Separatism;
 
@@ -297,6 +299,7 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
             if (rebelClan == null || !Roll(options.DailyAnarchyRebellionChance)) continue;
 
             var oldKingdom = ownerClan.Kingdom;
+            var rebelClanPreviousKingdom = rebelClan.Kingdom;
             if (oldKingdom == null) continue;
 
             var seized = new List<Settlement> { town };
@@ -311,7 +314,13 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
                 if (nearbyCastle != null) seized.Add(nearbyCastle);
             }
 
-            if (!TryCreateRebelKingdom(rebelClan, town, BuildAnarchyIntro(rebelClan, ownerClan, town), oldKingdom, rebellion: false, out var rebelKingdom)) continue;
+            if (!TryCreateRebelKingdom(
+                    rebelClan,
+                    town,
+                    BuildAnarchyIntro(rebelClan, ownerClan, town),
+                    rebelClanPreviousKingdom,
+                    rebellion: false,
+                    out var rebelKingdom)) continue;
 
             CopyPolicies(oldKingdom, rebelKingdom);
             foreach (var settlement in seized)
@@ -380,7 +389,8 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
         GetKingdomText(rulingClan, out var kingdomName, out var rulerTitle);
         intro.SetTextVariable("RebelKingdom", kingdomName);
 
-        var colors = GetRebelColors(rulingClan, Options);
+        var options = Options;
+        var colors = GetRebelColors(rulingClan, options);
         var banner = rulingClan.Banner == null ? new Banner() : new Banner(rulingClan.Banner);
         banner.ChangePrimaryColor(colors.primary);
         banner.ChangeIconColors(colors.secondary);
@@ -391,8 +401,31 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
 
         try
         {
-            kingdom = Kingdom.CreateKingdom(baseId);
+            // A clan can found, lose and later re-found its separatist kingdom. Reuse the native
+            // object when it still exists instead of attempting to register the same MBObject id
+            // twice (the original Separatism implementation follows the same rule).
+            kingdom = Kingdom.All.FirstOrDefault(candidate => candidate?.StringId == baseId)
+                      ?? MBObjectManager.Instance?.GetObject<Kingdom>(baseId)
+                      ?? Kingdom.CreateKingdom(baseId);
+            if (kingdom.IsEliminated)
+            {
+                // DestroyKingdomAction keeps the native object registered and only deactivates it.
+                // Re-found titles therefore need an explicit, AutoSync-visible reactivation.
+                kingdom.ReactivateKingdom();
+            }
             KingdomRegistry.EnsureRuntimeCollections(kingdom);
+
+            if (!options.KeepRebelBannerColors)
+            {
+                rulingClan.Banner ??= new Banner();
+                rulingClan.Banner.ChangePrimaryColor(colors.primary);
+                rulingClan.Banner.ChangeIconColors(colors.secondary);
+                rulingClan.Color = colors.primary;
+                rulingClan.Color2 = colors.secondary;
+                banner = new Banner(rulingClan.Banner);
+            }
+
+            rulingClan.SetInitialHomeSettlement(capital);
             kingdom.InitializeKingdom(
                 kingdomName,
                 kingdomName,
@@ -417,6 +450,20 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
                 return false;
             }
 
+            // Constructor lifetime patches normally register the object before InitializeKingdom.
+            // Repeat the presentation assignments after the explicit registration fallback so the
+            // AutoSync layer can always resolve the new owner and deliver the complete client state.
+            kingdom.Banner = banner;
+            kingdom.Color = colors.primary;
+            kingdom.Color2 = colors.secondary;
+            kingdom.Culture = rulingClan.Culture;
+            kingdom.Name = kingdomName;
+            kingdom.InformalName = kingdomName;
+            kingdom.EncyclopediaText = intro;
+            kingdom.EncyclopediaTitle = kingdomName;
+            kingdom.EncyclopediaRulerTitle = rulerTitle;
+            kingdom._rulingClan = rulingClan;
+
             MoveClan(rulingClan, oldKingdom, kingdom, rebellion);
 
             objectManager.TryGetId(rulingClan.Culture, out var cultureId);
@@ -437,6 +484,7 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
 
     private void MoveClan(Clan clan, Kingdom oldKingdom, Kingdom newKingdom, bool rebellion)
     {
+        FinishStaleHostileActions(clan, newKingdom);
         clan.EndMercenaryService(true);
         membershipState.MoveClanToKingdom(oldKingdom, newKingdom, clan, publishCollectionChanges: true);
         CampaignEventDispatcher.Instance.OnClanChangedKingdom(
@@ -449,6 +497,33 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
                     ? ChangeKingdomAction.ChangeKingdomActionDetail.LeaveKingdom
                     : ChangeKingdomAction.ChangeKingdomActionDetail.JoinKingdom,
             true);
+
+        if (clan.Banner != null)
+        {
+            // The service intentionally bypasses ChangeKingdomAction.ApplyInternal, so its normal
+            // banner refresh postfix never runs. Reuse the established banner packet to update
+            // client party/nameplate/settlement visuals after the membership transition.
+            messageBroker.Publish(this, new PlayerBannerChanged(clan));
+        }
+    }
+
+    private static void FinishStaleHostileActions(Clan clan, Kingdom newKingdom)
+    {
+        if (clan == null || newKingdom == null) return;
+
+        foreach (var otherKingdom in Kingdom.All.ToArray())
+        {
+            if (otherKingdom == null || otherKingdom == newKingdom || newKingdom.IsAtWarWith(otherKingdom)) continue;
+
+            FactionHelper.FinishAllRelatedHostileActionsOfFactionToFaction(clan, otherKingdom);
+            FactionHelper.FinishAllRelatedHostileActionsOfFactionToFaction(otherKingdom, clan);
+        }
+
+        foreach (var otherClan in Clan.All.ToArray())
+        {
+            if (otherClan == null || otherClan == clan || otherClan.Kingdom != null || newKingdom.IsAtWarWith(otherClan)) continue;
+            FactionHelper.FinishAllRelatedHostileActions(clan, otherClan);
+        }
     }
 
     private void ApplyRebellionRelations(Clan rebel, Kingdom oldKingdom, IEnumerable<Clan> oldClans, SeparatismOptions options)
@@ -583,7 +658,10 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
     {
         if (options.KeepRebelBannerColors) return (clan.Color, clan.Color2);
 
-        var palette = BannerManager.Instance.ReadOnlyColorPalette.Values.Select(color => color.Color).Distinct().ToArray();
+        var bannerManager = BannerManager.Instance;
+        if (bannerManager?.ReadOnlyColorPalette == null) return (clan.Color, clan.Color2);
+
+        var palette = bannerManager.ReadOnlyColorPalette.Values.Select(color => color.Color).Distinct().ToArray();
         if (palette.Length == 0) return (clan.Color, clan.Color2);
         if (options.SameColorsForAllRebels) return (palette.Max(), palette.Min());
 

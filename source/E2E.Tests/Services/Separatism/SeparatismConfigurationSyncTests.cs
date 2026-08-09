@@ -2,6 +2,7 @@ using Common.Messaging;
 using E2E.Tests.Environment;
 using E2E.Tests.Environment.Instance;
 using GameInterface.Configuration;
+using GameInterface.Services.CampaignService.Handlers;
 using GameInterface.Services.CampaignService.Messages;
 using GameInterface.Services.GameState.Messages;
 using Xunit.Abstractions;
@@ -23,7 +24,10 @@ public sealed class SeparatismConfigurationSyncTests : IDisposable
     [Fact]
     public void CampaignReady_BroadcastsHostSeparatismConfigurationToEveryClient()
     {
-        Server.Call(() => Server.Resolve<IMessageBroker>().Publish(this, new CampaignReady()));
+        // Invoke the config handler directly: publishing CampaignReady would also execute unrelated
+        // engine-backed difficulty/UI handlers and turn this networking test into an engine smoke test.
+        Server.Call(() => Server.Resolve<LoadModConfigHandler>().Handle_CampaignReady(
+            new MessagePayload<CampaignReady>(this, new CampaignReady())));
 
         var sent = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkLoadModConfig>());
         Assert.True(sent.ModOptions.Separatism.Enabled);

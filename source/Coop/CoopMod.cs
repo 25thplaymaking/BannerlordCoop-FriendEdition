@@ -14,6 +14,7 @@ using GameInterface.Services.Modules;
 using GameInterface.Services.Modules.Handlers;
 using GameInterface.Services.Chat;
 using GameInterface.Services.MapEvents.PlayerPartyInteractions;
+using GameInterface.Services.Separatism;
 using GameInterface.Services.Tournaments.UI;
 using GameInterface.Services.UI;
 using GameInterface.Services.UI.CoopOptions;
@@ -496,6 +497,8 @@ namespace Coop
             {
                 campaignGameStarter.AddBehavior(new PlayerPartyInteractionCampaignBehavior());
                 campaignGameStarter.AddBehavior(new CoopTournamentCampaignBehavior());
+                campaignGameStarter.AddBehavior(new SeparatismCampaignBehavior());
+                campaignGameStarter.AddModel(new SeparatismSettlementLoyaltyModel());
             }
         }
 

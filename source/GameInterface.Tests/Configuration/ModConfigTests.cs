@@ -309,6 +309,41 @@ public class ModConfigTests : IDisposable
     }
 
     [Fact]
+    public void ShippedTemplate_SeparatismOptions_AllBind_AndAreTheDefaults()
+    {
+        File.Copy(ShippedTemplatePath, ConfigPath);
+
+        var config = NewModConfig().Data;
+
+        Assert.NotNull(config.ModOptions.Separatism);
+        Assert.True(config.ModOptions.Separatism.UnknownKeys == null || config.ModOptions.Separatism.UnknownKeys.Count == 0,
+            "every separatism key in the template must name a schema property, but these did not: " +
+            string.Join(", ", config.ModOptions.Separatism.UnknownKeys?.Keys ?? Array.Empty<string>()));
+        Assert.Equal(ModConfigProvider.ModOptions.Separatism, new SeparatismOptions(config.ModOptions.Separatism));
+    }
+
+    [Fact]
+    public void SeparatismOptions_ClampProbabilitiesAndNormalizeThresholdPairs()
+    {
+        var options = new SeparatismOptions(new SeparatismOptionsData
+        {
+            DailyLordRebellionChance = 5f,
+            DailyNationalRebellionChance = -2f,
+            SettlementRebellionStartLoyaltyThreshold = 80,
+            SettlementRebellionEndLoyaltyThreshold = 20,
+            FriendThreshold = -25,
+            EnemyThreshold = 40,
+        });
+
+        Assert.Equal(1f, options.DailyLordRebellionChance);
+        Assert.Equal(0f, options.DailyNationalRebellionChance);
+        Assert.Equal(20, options.SettlementRebellionStartLoyaltyThreshold);
+        Assert.Equal(80, options.SettlementRebellionEndLoyaltyThreshold);
+        Assert.Equal(40, options.FriendThreshold);
+        Assert.Equal(-25, options.EnemyThreshold);
+    }
+
+    [Fact]
     public void ConfiguredValues_Read_WithCommentsTrailingCommasAndAnyCase()
     {
         File.WriteAllText(ConfigPath, @"{

@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using TaleWorlds.Library;
 using TaleWorldsModuleHelper = TaleWorlds.ModuleManager.ModuleHelper;
 
 namespace GameInterface.Services.WorkshopMods.Core;
@@ -96,7 +97,7 @@ public sealed class RuntimeWorkshopModuleDiscovery : IWorkshopModuleDiscovery
                 WorkshopSuiteReceiptEntry receiptEntry = null;
                 bool managed = receipt != null &&
                     receipt.TryGet(expectation.ModuleId, out receiptEntry) &&
-                    string.Equals(receiptEntry.Version, active.Version.ToString(), StringComparison.OrdinalIgnoreCase) &&
+                    IsSameVersion(receiptEntry.Version, active.Version) &&
                     IsManagedComponentPath(coopRoot, externalRoot, expectation.ModuleId);
                 result.Add(new WorkshopModuleRuntimeInfo(
                     expectation,
@@ -192,6 +193,29 @@ public sealed class RuntimeWorkshopModuleDiscovery : IWorkshopModuleDiscovery
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Compares versions by their parsed value, not their formatted string. ApplicationVersion.FromString
+    /// defaults an absent change-set segment to 0, so a pinned three-part version like "v2.11.1" round-trips
+    /// through ToString() as "v2.11.1.0" — a raw string comparison against the receipt's original three-part
+    /// text would spuriously reject every module whose upstream author never publishes a change-set segment.
+    /// </summary>
+    private static bool IsSameVersion(string pinnedVersion, ApplicationVersion active)
+    {
+        if (string.IsNullOrWhiteSpace(pinnedVersion)) return false;
+        try
+        {
+            return ApplicationVersion.FromString(pinnedVersion).IsSame(active, checkChangeSet: true);
+        }
+        catch (Exception)
+        {
+            // ApplicationVersion.FromString throws a bare Exception (not a specific type) on malformed
+            // input. The receipt is untrusted disk content by the time it reaches here in production
+            // (though this test harness's FakeReceiptProvider bypasses TryValidate's format check), so
+            // treat anything unparsable as "not managed" rather than letting discovery crash.
+            return false;
+        }
     }
 
     private static bool IsManagedComponentPath(string coopRoot, string componentRoot, string moduleId)

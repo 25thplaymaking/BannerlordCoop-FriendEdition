@@ -4,12 +4,24 @@ namespace GameInterface.Configuration;
 
 public class ModConfigProvider
 {
+    private sealed class OptionsBox
+    {
+        internal OptionsBox(ModOptions value) => Value = value;
+        internal readonly ModOptions Value;
+    }
+
+    private static OptionsBox options = new(new ModOptions(new ModOptionsData()));
+
     /// <summary>What the session runs on until a config is loaded (server) or received (client).
     /// Built from an all-absent <see cref="ModOptionsData"/> so every option falls back to its
     /// documented default. It has to go through that constructor: the options struct declares no
     /// parameterless one, so a plain <c>new ModOptions()</c> is just <c>default</c> — the property
     /// initializers below never run and every option reads back false/0.</summary>
-    public static ModOptions ModOptions = new(new ModOptionsData());
+    public static ModOptions ModOptions
+    {
+        get => System.Threading.Volatile.Read(ref options).Value;
+        set => System.Threading.Volatile.Write(ref options, new OptionsBox(value));
+    }
 
     public static void LoadModConfig(ModOptionsData modOptionsData)
     {

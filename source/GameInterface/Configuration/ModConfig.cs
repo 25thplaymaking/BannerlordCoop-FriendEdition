@@ -69,6 +69,7 @@ internal sealed class ModConfig : IModConfig
 
     private readonly string directoryOverride;
     private readonly Lazy<ModConfigData> data;
+    private string resolvedPath;
 
     public ModConfig() : this(null)
     {
@@ -82,6 +83,14 @@ internal sealed class ModConfig : IModConfig
     }
 
     public ModConfigData Data => data.Value;
+    internal string ResolvedPath
+    {
+        get
+        {
+            _ = data.Value;
+            return resolvedPath;
+        }
+    }
 
     private ModConfigData Load()
     {
@@ -92,6 +101,7 @@ internal sealed class ModConfig : IModConfig
         }
 
         string path = Path.Combine(dir, FileName);
+        resolvedPath = path;
         try
         {
             if (!File.Exists(path))

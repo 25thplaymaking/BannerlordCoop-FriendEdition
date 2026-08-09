@@ -2,6 +2,7 @@
 using Common.Network;
 using Coop.Core.Common;
 using GameInterface;
+using GameInterface.Configuration;
 using GameInterface.Registry;
 using GameInterface.Services.Entity;
 using GameInterface.Services.GameState.Interfaces;
@@ -10,6 +11,7 @@ using GameInterface.Services.Modules;
 using GameInterface.Services.Players;
 using GameInterface.Services.Time.Interfaces;
 using GameInterface.Services.UI.Interfaces;
+using GameInterface.Services.WorkshopMods.Core;
 
 namespace Coop.Core.Client.States;
 
@@ -32,7 +34,9 @@ public class ClientContext
         IHeroInterface heroInterface,
         IRegistryManager registryManager,
         IPlayerManager playerManager,
-        IMapTimeTrackerInterface mapTimeTrackerInterface)
+        IMapTimeTrackerInterface mapTimeTrackerInterface,
+        IWorkshopManifestProvider workshopManifestProvider,
+        IModConfigAuthority modConfigAuthority)
     {
         MessageBroker = messageBroker;
         Network = network;
@@ -46,6 +50,10 @@ public class ClientContext
         RegistryManager = registryManager;
         PlayerManager = playerManager;
         MapTimeTrackerInterface = mapTimeTrackerInterface;
+        WorkshopManifestProvider = workshopManifestProvider ??
+            throw new System.ArgumentNullException(nameof(workshopManifestProvider));
+        ModConfigAuthority = modConfigAuthority ??
+            throw new System.ArgumentNullException(nameof(modConfigAuthority));
     }
 
     public IMessageBroker MessageBroker { get; }
@@ -60,4 +68,6 @@ public class ClientContext
     public IRegistryManager RegistryManager { get; }
     public IPlayerManager PlayerManager { get; }
     public IMapTimeTrackerInterface MapTimeTrackerInterface { get; }
+    public IWorkshopManifestProvider WorkshopManifestProvider { get; }
+    public IModConfigAuthority ModConfigAuthority { get; }
 }

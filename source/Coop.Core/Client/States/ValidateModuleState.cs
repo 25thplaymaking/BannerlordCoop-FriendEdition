@@ -4,13 +4,17 @@ using Common.Messaging;
 using Common.Network;
 using Coop.Core.Common;
 using Coop.Core.Server.Connections.Messages;
+using GameInterface.Configuration;
+using GameInterface.Services.CampaignService.Messages;
 using GameInterface.Services.CharacterCreation.Messages;
 using GameInterface.Services.Entity;
 using GameInterface.Services.GameDebug.Messages;
 using GameInterface.Services.GameState.Interfaces;
 using GameInterface.Services.Modules;
+using GameInterface.Services.WorkshopMods.Core;
 using Serilog;
 using System;
+using System.Diagnostics;
 using System.Threading;
 
 namespace Coop.Core.Client.States;
@@ -32,12 +36,19 @@ public class ValidateModuleState : ClientStateBase
     /// "Validating modules..." loading screen forever.
     /// </summary>
     internal static readonly TimeSpan ValidationTimeout = TimeSpan.FromSeconds(30);
+    internal static readonly TimeSpan ManifestPreparationTimeout = TimeSpan.FromMinutes(2);
 
     private readonly IMessageBroker messageBroker;
     private readonly INetwork network;
     private readonly IControllerIdProvider controllerIdProvider;
     private readonly ICoopFinalizer coopFinalizer;
     private readonly IGameStateInterface gameStateInterface;
+    private readonly IWorkshopManifestProvider workshopManifestProvider;
+    private readonly IWorkshopManifestValidator workshopManifestValidator;
+    private readonly IModConfigAuthority modConfigAuthority;
+    private readonly IModuleInfoProvider moduleInfoProvider;
+    private volatile WorkshopCompatibilityManifest localWorkshopManifest;
+    private volatile string localWorkshopManifestError;
     private readonly Timer validationTimeoutTimer;
 
     private volatile bool disposed;
@@ -52,6 +63,7 @@ public class ValidateModuleState : ClientStateBase
     // firing as the state cleanly transitions finds completion handled instead of tearing the next
     // state down.
     private int completionClaimed;
+    private int validationRequestSent;
     private string disconnectReason;
 
     // Claims this state's single completion for the calling terminal path; returns false if another
@@ -65,16 +77,25 @@ public class ValidateModuleState : ClientStateBase
         IControllerIdProvider controllerIdProvider,
         ICoopFinalizer coopFinalizer,
         IGameStateInterface gameStateInterface,
-        IModuleInfoProvider moduleInfoProvider) : base(logic)
+        IModuleInfoProvider moduleInfoProvider,
+        IWorkshopManifestProvider workshopManifestProvider,
+        IModConfigAuthority modConfigAuthority) : base(logic)
     {
         this.messageBroker = messageBroker;
         this.network = network;
         this.controllerIdProvider = controllerIdProvider;
         this.coopFinalizer = coopFinalizer;
         this.gameStateInterface = gameStateInterface;
+        this.moduleInfoProvider = moduleInfoProvider ?? throw new ArgumentNullException(nameof(moduleInfoProvider));
+        this.workshopManifestProvider = workshopManifestProvider ?? throw new ArgumentNullException(nameof(workshopManifestProvider));
+        this.modConfigAuthority = modConfigAuthority ?? throw new ArgumentNullException(nameof(modConfigAuthority));
+        workshopManifestValidator = new WorkshopManifestValidator();
         messageBroker.Subscribe<NetworkModuleVersionsValidated>(Handle_NetworkModuleVersionsValidated);
         messageBroker.Subscribe<NetworkClientValidated>(Handle_NetworkClientValidated);
         messageBroker.Subscribe<CharacterCreationStarted>(Handle_CharacterCreationStarted);
+
+        localWorkshopManifest = null;
+        localWorkshopManifestError = null;
 
 #if DEBUG
         controllerIdProvider.SetControllerFromProgramArgs();
@@ -82,14 +103,118 @@ public class ValidateModuleState : ClientStateBase
         controllerIdProvider.SetControllerAsPlatformId();
 #endif
 
-        network.SendAll(new NetworkModuleVersionsValidate(moduleInfoProvider.GetModuleInfos()));
-
-        // One-shot deadline covering this state's whole exchange; leaving the state disposes it.
-        // The timer thread only marshals — the decision runs on the game thread like every other
-        // state transition. RunSafe (not Run) so a throw during teardown is logged instead of
-        // escaping into the game-loop pump and killing that frame's queue drain.
+        // Preparation has its own bounded deadline. Once the request is sent, SendValidationRequest
+        // switches this same one-shot timer to the shorter network-response deadline.
         validationTimeoutTimer = new Timer(
-            _ => GameThread.RunSafe(TimeoutValidation), null, ValidationTimeout, Timeout.InfiniteTimeSpan);
+            _ => GameThread.RunSafe(TimeoutValidation),
+            null,
+            ManifestPreparationTimeout,
+            Timeout.InfiniteTimeSpan);
+
+        // Runtime module metadata/path discovery reads TaleWorlds ModuleHelper state and therefore
+        // runs on the game thread. Only the frozen snapshot's potentially multi-gigabyte file hash
+        // moves to a worker. The non-enforcing narrow-test provider stays synchronous because those
+        // test compositions do not have a game-loop pump.
+        if (workshopManifestProvider.EnforceHandshake)
+        {
+            GameThread.RunSafe(CaptureAndBuildValidationRequest,
+                context: nameof(CaptureAndBuildValidationRequest));
+        }
+        else
+        {
+            CaptureAndBuildValidationRequest();
+        }
+    }
+
+    private void CaptureAndBuildValidationRequest()
+    {
+        if (disposed || Volatile.Read(ref completionClaimed) != 0) return;
+
+        WorkshopManifestPreparation preparation;
+        try
+        {
+            preparation = workshopManifestProvider.PrepareManifest(WorkshopPeerRole.Client);
+        }
+        catch (Exception exception)
+        {
+            localWorkshopManifestError =
+                $"Unable to inspect the Friend Edition Workshop installation ({exception.GetType().Name}).";
+            Logger.Error(exception, "Capturing the client Workshop compatibility metadata failed");
+            SendValidationRequest();
+            return;
+        }
+
+        if (workshopManifestProvider.EnforceHandshake)
+        {
+            ThreadPool.QueueUserWorkItem(_ => BuildValidationRequest(preparation));
+        }
+        else
+        {
+            BuildValidationRequest(preparation);
+        }
+    }
+
+    private void BuildValidationRequest(WorkshopManifestPreparation preparation)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            localWorkshopManifest = workshopManifestProvider.BuildPreparedManifest(preparation);
+        }
+        catch (Exception exception)
+        {
+            localWorkshopManifestError =
+                $"Unable to build the Friend Edition Workshop manifest ({exception.GetType().Name}).";
+            Logger.Error(exception, "Building the client Workshop compatibility manifest failed");
+        }
+
+        stopwatch.Stop();
+        Logger.Information(
+            "Built Friend Edition Workshop manifest in {ElapsedMilliseconds} ms",
+            stopwatch.ElapsedMilliseconds);
+
+        if (disposed || Volatile.Read(ref completionClaimed) != 0) return;
+
+        if (workshopManifestProvider.EnforceHandshake)
+        {
+            GameThread.RunSafe(SendValidationRequest, context: nameof(SendValidationRequest));
+        }
+        else
+        {
+            // Legacy unit-test compositions have no game-loop pump and use a deterministic
+            // non-enforcing provider, so their request remains immediate.
+            SendValidationRequest();
+        }
+    }
+
+    private void SendValidationRequest()
+    {
+        if (disposed || Volatile.Read(ref completionClaimed) != 0) return;
+
+        if (localWorkshopManifestError != null || localWorkshopManifest == null)
+        {
+            DenyValidation(localWorkshopManifestError ??
+                "Unable to build the required Friend Edition Workshop manifest.");
+            return;
+        }
+
+        try
+        {
+            // Arm the response deadline before sending. A loopback/very fast server can otherwise
+            // complete the state and dispose the timer between SendAll and Timer.Change.
+            Interlocked.Exchange(ref validationRequestSent, 1);
+            validationTimeoutTimer.Change(ValidationTimeout, Timeout.InfiniteTimeSpan);
+            network.SendAll(new NetworkModuleVersionsValidate(
+                moduleInfoProvider.GetModuleInfos(),
+                localWorkshopManifest));
+        }
+        catch (Exception exception)
+        {
+            localWorkshopManifestError =
+                $"Unable to send the Friend Edition Workshop manifest ({exception.GetType().Name}).";
+            Logger.Error(exception, "Sending the client Workshop compatibility manifest failed");
+            DenyValidation(localWorkshopManifestError);
+        }
     }
 
     public override void Dispose()
@@ -115,33 +240,112 @@ public class ValidateModuleState : ClientStateBase
         if (disposed || Logic.State != this) return;
         if (!TryClaimCompletion()) return;
 
+        bool requestSent = Volatile.Read(ref validationRequestSent) != 0;
+        TimeSpan deadline = requestSent ? ValidationTimeout : ManifestPreparationTimeout;
         Logger.Error(
-            "Timed out after {Timeout}s waiting for the server to validate the connection",
-            ValidationTimeout.TotalSeconds);
+            "Timed out after {Timeout}s during {Phase}",
+            deadline.TotalSeconds,
+            requestSent ? "server module validation" : "Workshop manifest preparation");
 
-        disconnectReason =
-            "Timed out waiting for the server to validate the connection.\n" +
-            "The server may be running an incompatible version of the mod.";
+        disconnectReason = requestSent
+            ? "Timed out waiting for the server to validate the connection.\n" +
+              "The server may be running an incompatible version of the mod."
+            : "Timed out preparing the Friend Edition Workshop compatibility manifest.\n" +
+              "Verify the private suite installation and disk health, then try again.";
         TearDown();
     }
 
     internal void Handle_NetworkModuleVersionsValidated(MessagePayload<NetworkModuleVersionsValidated> obj)
     {
-        // Reaching this handshake proves both sides run Coop; only a version mismatch should block it.
-        if (obj.What.Matches || string.Equals(obj.What.Reason, UnsupportedCoopModuleReason, StringComparison.Ordinal))
+        // The compatibility manifest is checked in both directions: the server already compared
+        // our manifest before setting Matches, and the client independently checks the server's
+        // returned manifest before it is allowed to request character/save transfer.
+        if (obj.What.Matches)
+        {
+            if (workshopManifestProvider.EnforceHandshake)
+            {
+                if (obj?.Who is not LiteNetLib.NetPeer serverPeer)
+                {
+                    DenyValidation("Rejected module/config validation from an untrusted local source.");
+                    return;
+                }
+                if (!modConfigAuthority.TryBindTrustedServer(serverPeer, out string trustFailure))
+                {
+                    DenyValidation("Rejected module/config validation transport.\n" + trustFailure);
+                    return;
+                }
+
+                if (localWorkshopManifestError != null)
+                {
+                    DenyValidation(localWorkshopManifestError);
+                    return;
+                }
+
+                WorkshopManifestValidationResult workshopResult = workshopManifestValidator.Validate(
+                    obj.What.ServerWorkshopManifest,
+                    localWorkshopManifest);
+                foreach (string warning in workshopResult.Warnings)
+                    Logger.Warning("Workshop compatibility warning: {Warning}", warning);
+                if (!workshopResult.Matches)
+                {
+                    DenyValidation("Workshop compatibility validation failed!\n" +
+                                   workshopResult.ToNetworkReason());
+                    return;
+                }
+                if (workshopResult.Warnings.Count > 0)
+                {
+                    messageBroker.Publish(this, new SendInformationMessage(
+                        "Friend Edition package validation passed with feature warnings:\n" +
+                        workshopResult.ToNetworkWarning()));
+                }
+
+                // This is the mandatory configuration barrier. The host envelope is validated and
+                // atomically committed before the character/save request can leave this process.
+                ModConfigAcceptanceResult configResult =
+                    modConfigAuthority.AcceptClientSnapshot(obj.What.HostModConfig);
+                if (!configResult.Succeeded)
+                {
+                    DenyValidation(
+                        $"Host mod-config validation failed ({configResult.Status}).\n" +
+                        configResult.Reason);
+                    return;
+                }
+                messageBroker.Publish(this, new HostModConfigAccepted(obj.What.HostModConfig));
+                Logger.Information(
+                    "Accepted initial host mod-config barrier: session={Session}, revision={Revision}, " +
+                    "sha256={Sha256}, difficulty.birthAndDeath={BirthAndDeath}",
+                    obj.What.HostModConfig.SessionId,
+                    obj.What.HostModConfig.Revision,
+                    obj.What.HostModConfig.Sha256,
+                    obj.What.HostModConfig.BirthAndDeathEnabled);
+            }
+
+            network.SendAll(new NetworkClientValidate(
+                controllerIdProvider.ControllerId,
+                obj.What.HostModConfig));
+            return;
+        }
+
+        // Retain the historical narrow-test fallback without weakening the real private suite.
+        // Production providers always enforce the manifest and therefore never take this path.
+        if (!workshopManifestProvider.EnforceHandshake &&
+            string.Equals(obj.What.Reason, UnsupportedCoopModuleReason, StringComparison.Ordinal))
         {
             network.SendAll(new NetworkClientValidate(controllerIdProvider.ControllerId));
+            return;
         }
-        else
-        {
-            var reason = "Module validation failed!\nReason: " + obj.What.Reason;
-            messageBroker.Publish(this, new SendInformationMessage(reason));
 
-            // Carry the reason into the teardown pop-up: the information message above lands in the
-            // chat log, which is invisible behind the forced loading screen the player is watching.
-            disconnectReason = reason;
-            Logic.Disconnect();
-        }
+        DenyValidation("Module validation failed!\nReason: " + obj.What.Reason);
+    }
+
+    private void DenyValidation(string reason)
+    {
+        messageBroker.Publish(this, new SendInformationMessage(reason));
+
+        // Carry the reason into the teardown pop-up: the information message above lands in the
+        // chat log, which is invisible behind the forced loading screen the player is watching.
+        disconnectReason = reason;
+        Logic.Disconnect();
     }
 
     internal void Handle_NetworkClientValidated(MessagePayload<NetworkClientValidated> obj)

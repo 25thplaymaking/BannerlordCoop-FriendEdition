@@ -4,6 +4,7 @@ using Common.Network;
 using Common.Serialization;
 using Coop.Core.Common.Configuration;
 using Coop.Tests.Mocks;
+using IModuleInfoProvider = GameInterface.Services.Modules.IModuleInfoProvider;
 using System;
 using System.Threading;
 
@@ -36,6 +37,11 @@ internal class PatchBootstrap : IDisposable
         builder.RegisterType<TestNetwork>().As<INetwork>().SingleInstance();
         builder.RegisterType<NetworkConfig>().As<INetworkConfig>().SingleInstance();
         builder.RegisterType<SerializableTypeMapper>().As<ISerializableTypeMapper>().SingleInstance();
+        // Production registers this from Coop.Core's CommonModule; a standalone GameInterface
+        // container needs a stand-in or the Workshop manifest warmup fails to activate.
+        builder.RegisterInstance(new Moq.Mock<IModuleInfoProvider>().Object)
+            .As<IModuleInfoProvider>()
+            .SingleInstance();
         builder.RegisterModule<GameInterfaceModule>();
         Container = builder.Build();
 

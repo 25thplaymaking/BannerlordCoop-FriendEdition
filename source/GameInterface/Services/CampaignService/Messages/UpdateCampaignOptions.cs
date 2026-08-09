@@ -7,7 +7,7 @@ namespace GameInterface.Services.CampaignService.Messages;
 public readonly struct UpdateCampaignOptions : IEvent { }
 
 [ProtoContract(SkipConstructor = true)]
-internal readonly struct NetworkUpdateCampaignOptions : ICommand
+internal readonly struct NetworkUpdateCampaignOptions : IEvent
 {
     [ProtoMember(1)]
     public readonly bool AutoAllocateClanMemberPerks;
@@ -67,4 +67,31 @@ internal readonly struct NetworkUpdateCampaignOptions : ICommand
         IsIronmanMode = isIronmanMode;
         BattleDeath = battleDeath;
     }
+
+    public bool TryValidateWireShape(out string failure)
+    {
+        if (!IsDifficulty(PlayerTroopsReceivedDamage) ||
+            !IsDifficulty(RecruitmentDifficulty) ||
+            !IsDifficulty(PlayerMapMovementSpeed) ||
+            !IsDifficulty(StealthAndDisguiseDifficulty) ||
+            !IsDifficulty(CombatAIDifficulty) ||
+            !IsDifficulty(PersuasionSuccessChance) ||
+            !IsDifficulty(ClanMemberDeathChance) ||
+            !IsDifficulty(BattleDeath))
+        {
+            failure = "Campaign options contain a value outside the difficulty enum domain.";
+            return false;
+        }
+        if (IsLifeDeathCycleDisabled)
+        {
+            failure = "Friend Edition requires the Birth & Death lifecycle to remain enabled.";
+            return false;
+        }
+
+        failure = null;
+        return true;
+    }
+
+    private static bool IsDifficulty(CampaignOptions.Difficulty value) =>
+        System.Enum.IsDefined(typeof(CampaignOptions.Difficulty), value);
 }

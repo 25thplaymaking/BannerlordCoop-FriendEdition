@@ -14,6 +14,11 @@ namespace GameInterface.Tests
 {
     public class PatchTest
     {
+        /// <summary>
+        /// Blanket PatchAll, deliberately: it applies categorised classes too, so every Workshop
+        /// adapter's [HarmonyPrepare] absent-mod guard is exercised here — a class whose
+        /// TargetMethods resolves to nothing must skip itself rather than abort the run.
+        /// </summary>
         [Fact]
         public void HarmonyPatchesAll()
         {

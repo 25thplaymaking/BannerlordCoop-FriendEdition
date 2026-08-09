@@ -29,6 +29,8 @@ using GameInterface.Services.Separatism;
 using GameInterface.Services.Stances;
 using GameInterface.Services.TroopRosters.Logging;
 using GameInterface.Services.Time;
+using GameInterface.Services.WorkshopMods.Core;
+using GameInterface.Services.WorkshopMods.Diplomacy;
 using GameInterface.Services.Workshops;
 using GameInterface.Surrogates;
 using HarmonyLib;
@@ -44,6 +46,32 @@ public class GameInterfaceModule : Module
 
     private static readonly Harmony harmony = new Harmony(HarmonyId);
 
+    /// <summary>
+    /// The Workshop modules this assembly declares through the module contract. Adding a mod is one
+    /// entry here plus its <see cref="IWorkshopModule"/> implementation — the registrar takes care of
+    /// presence, fingerprinting, patch application and sync registration from there.
+    /// </summary>
+    /// <remarks>
+    /// Combat mods (RBM, DismembermentPlus, UnblockableThrust) declare themselves in MissionModule
+    /// instead, next to the Missions-assembly adapters they gate, and go through the same registrar.
+    /// A module's category is applied against the assembly that declares the module, so each side
+    /// owns its own list.
+    /// <para>
+    /// This is NOT every Workshop mod Coop carries an adapter for, and reading it as such is the
+    /// mistake to avoid. Four of the seven gameplay mods are declared: Diplomacy here, and RBM,
+    /// DismembermentPlus and UnblockableThrust in MissionModule. ImprovedGarrisons, Fourberie and
+    /// Player Settlement are not. Those three carry no Harmony attributes at all — their adapters
+    /// patch imperatively from their own compatibility handlers rather than through a category — so
+    /// they have no catalog-reconciled pin, no operator config key, and none of the shared gates in
+    /// <c>WorkshopModuleTestBase</c>. Declaring them is follow-on work, not an oversight in this
+    /// list.
+    /// </para>
+    /// </remarks>
+    private static readonly IWorkshopModule[] DeclaredWorkshopModules =
+    {
+        new DiplomacyModule(),
+    };
+
     protected override void Load(ContainerBuilder builder)
     {
         builder.RegisterInstance(harmony).As<Harmony>().SingleInstance();
@@ -53,6 +81,7 @@ public class GameInterfaceModule : Module
         builder.RegisterType<GameInterface>().As<IGameInterface>().InstancePerLifetimeScope().AutoActivate();
         // mod-config.json: one lazy read per session container (see IModConfig).
         builder.RegisterType<ModConfig>().As<IModConfig>().InstancePerLifetimeScope();
+        builder.RegisterType<ModConfigAuthority>().As<IModConfigAuthority>().InstancePerLifetimeScope();
         builder.RegisterType<BinaryPackageFactory>().As<IBinaryPackageFactory>().InstancePerLifetimeScope();
         builder.RegisterType<ControllerIdProvider>().As<IControllerIdProvider>().InstancePerLifetimeScope();
         builder.RegisterType<TimeControlModeConverter>().As<ITimeControlModeConverter>().InstancePerLifetimeScope();
@@ -92,6 +121,8 @@ public class GameInterfaceModule : Module
         builder.RegisterType<PacketManager>().As<IPacketManager>().InstancePerLifetimeScope();
         builder.RegisterType<MapEventInitializationBarrierBinding>().InstancePerLifetimeScope().AutoActivate();
 
+        RegisterWorkshopModules(builder);
+
         builder.RegisterModule<ServiceModule>();
         builder.RegisterModule<ObjectManagerModule>();
         builder.RegisterModule<RegistryModule>();
@@ -99,6 +130,42 @@ public class GameInterfaceModule : Module
 
 
         base.Load(builder);
+    }
+
+    /// <summary>
+    /// Publishes the declared modules for DI (WorkshopModuleAutoSync consumes them) and registers a
+    /// Harmony category for each one whose pinned build is actually loaded.
+    /// </summary>
+    /// <remarks>
+    /// The category is registered ONLY when the module resolves. Applying a category whose patch
+    /// classes have no resolvable targets throws exactly like the uncategorised path did, and takes
+    /// every remaining Coop patch with it.
+    /// <para>
+    /// Presence is the only term consulted here, not <c>ResolveLiveModules</c>: this runs while the
+    /// container is built, and the operator's configuration does not exist yet — ModConfigAuthority
+    /// installs it at CampaignReady, well after <c>GameInterface.PatchAll</c>. Gating patch
+    /// application on an unread config would disable every Workshop adapter unconditionally. Presence
+    /// is already peer-symmetric: WorkshopManifestValidator refuses a session whose members do not
+    /// carry the same components at the same versions.
+    /// </para>
+    /// </remarks>
+    private static void RegisterWorkshopModules(ContainerBuilder builder)
+    {
+        foreach (IWorkshopModule module in DeclaredWorkshopModules)
+        {
+            builder.RegisterInstance(module).As<IWorkshopModule>();
+        }
+
+        foreach (IWorkshopModule module in
+                 WorkshopModuleRegistrar.ResolveInstalledModules(DeclaredWorkshopModules))
+        {
+            // A null category means the module owns no presence-gated adapters; see IWorkshopModule.
+            if (module.PatchCategory == null) continue;
+
+            builder.RegisterInstance(new HarmonyPatchCategoryRegistration(
+                module.GetType().Assembly,
+                module.PatchCategory));
+        }
     }
 
     // Log injector

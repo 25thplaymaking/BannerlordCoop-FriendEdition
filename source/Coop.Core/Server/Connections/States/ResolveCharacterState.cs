@@ -4,13 +4,16 @@ using Common.Messaging;
 using Common.Network;
 using Coop.Core.Client.Services.Heroes.Messages;
 using Coop.Core.Server.Connections.Messages;
+using GameInterface.Configuration;
 using GameInterface.Services.Modules;
 using GameInterface.Services.Modules.Validators;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
+using GameInterface.Services.WorkshopMods.Core;
 using LiteNetLib;
 using Serilog;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.Library;
@@ -24,6 +27,9 @@ namespace Coop.Core.Server.Connections.States;
 public class ResolveCharacterState : ConnectionStateBase
 {
     private static readonly ILogger Logger = LogManager.GetLogger<ResolveCharacterState>();
+    private static readonly HashSet<string> ManagedWorkshopModuleIds = new(
+        new FriendEditionWorkshopModuleCatalog().Modules.Select(module => module.ModuleId),
+        StringComparer.OrdinalIgnoreCase);
 
     private readonly IMessageBroker messageBroker;
     private readonly INetwork network;
@@ -33,6 +39,12 @@ public class ResolveCharacterState : ConnectionStateBase
     private readonly IObjectManager objectManager;
     private readonly IModuleInfoProvider moduleInfoProvider;
     private readonly IExistingPlayerSender existingPlayerSender;
+    private readonly IWorkshopManifestProvider workshopManifestProvider;
+    private readonly IWorkshopManifestValidator workshopManifestValidator;
+    private readonly IModConfigAuthority modConfigAuthority;
+    private volatile bool workshopHandshakeValidated;
+
+    internal bool WorkshopHandshakeValidated => workshopHandshakeValidated;
 
     public ResolveCharacterState(IConnectionLogic connectionLogic,
         IMessageBroker messageBroker,
@@ -42,7 +54,9 @@ public class ResolveCharacterState : ConnectionStateBase
         IPlayerPartyRestorer playerPartyRestorer,
         IObjectManager objectManager,
         IModuleInfoProvider moduleInfoProvider,
-        IExistingPlayerSender existingPlayerSender)
+        IExistingPlayerSender existingPlayerSender,
+        IWorkshopManifestProvider workshopManifestProvider,
+        IModConfigAuthority modConfigAuthority)
         : base(connectionLogic)
     {
         this.messageBroker = messageBroker;
@@ -53,6 +67,10 @@ public class ResolveCharacterState : ConnectionStateBase
         this.objectManager = objectManager;
         this.moduleInfoProvider = moduleInfoProvider;
         this.existingPlayerSender = existingPlayerSender;
+        this.workshopManifestProvider = workshopManifestProvider ?? throw new ArgumentNullException(nameof(workshopManifestProvider));
+        this.modConfigAuthority = modConfigAuthority ?? throw new ArgumentNullException(nameof(modConfigAuthority));
+        workshopManifestValidator = new WorkshopManifestValidator();
+        workshopHandshakeValidated = !workshopManifestProvider.EnforceHandshake;
 
         messageBroker.Subscribe<NetworkClientValidate>(Handle_ClientValidate);
         messageBroker.Subscribe<NetworkModuleVersionsValidate>(Handle_ModuleVersionsValidate);
@@ -74,12 +92,73 @@ public class ResolveCharacterState : ConnectionStateBase
 
         bool result;
         string error;
+        WorkshopCompatibilityManifest serverWorkshopManifest = null;
+        ModConfigSnapshot hostModConfig = null;
         try
         {
-            var clientModules = obj.What.Modules;
-            var serverModules = moduleInfoProvider.GetModuleInfos();
+            workshopHandshakeValidated = !workshopManifestProvider.EnforceHandshake;
+            if (!obj.What.TryValidateWireShape(
+                    out error,
+                    requireOfficialModule: workshopManifestProvider.EnforceHandshake))
+            {
+                result = false;
+            }
+            else
+            {
+                var clientModules = obj.What.Modules;
+                var serverModules = moduleInfoProvider.GetModuleInfos();
 
-            result = moduleValidator.Validate(serverModules, clientModules.Select(ConvertToModuleInfo), out error);
+                // The richer pinned-content manifest below owns the private Workshop suite. Remove
+                // those IDs from the legacy version-only comparison so a client-visual module may be
+                // inactive on a headless server while remaining installed and hash-verified there.
+                result = moduleValidator.Validate(
+                    serverModules.Where(module => !ManagedWorkshopModuleIds.Contains(module.Id)),
+                    clientModules.Select(ConvertToModuleInfo)
+                        .Where(module => !ManagedWorkshopModuleIds.Contains(module.Id)),
+                    out error);
+                if (workshopManifestProvider.EnforceHandshake &&
+                    !workshopManifestProvider.TryGetPreparedManifest(
+                        WorkshopPeerRole.Server,
+                        out serverWorkshopManifest,
+                        out string manifestUnavailableReason))
+                {
+                    result = false;
+                    error = "The server Friend Edition Workshop manifest is unavailable: " +
+                            manifestUnavailableReason + ".";
+                }
+                else if (!workshopManifestProvider.EnforceHandshake)
+                {
+                    workshopManifestProvider.TryGetPreparedManifest(
+                        WorkshopPeerRole.Server,
+                        out serverWorkshopManifest,
+                        out _);
+                }
+
+                if (result && workshopManifestProvider.EnforceHandshake)
+                {
+                    WorkshopManifestValidationResult workshopResult = workshopManifestValidator.Validate(
+                        serverWorkshopManifest,
+                        obj.What.WorkshopManifest);
+                    foreach (string warning in workshopResult.Warnings)
+                    {
+                        Logger.Warning(
+                            "Workshop compatibility warning for peer {Peer}: {Warning}",
+                            ConnectionLogic.Peer?.Id,
+                            warning);
+                    }
+                    result = workshopResult.Matches;
+                    error = result ? null : workshopResult.ToNetworkReason();
+                }
+
+                if (result && workshopManifestProvider.EnforceHandshake &&
+                    !modConfigAuthority.TryGetCurrent(out hostModConfig))
+                {
+                    result = false;
+                    error = "The authoritative host mod-config has not completed release preflight.";
+                }
+            }
+
+            workshopHandshakeValidated = result || !workshopManifestProvider.EnforceHandshake;
         }
         catch (Exception e)
         {
@@ -90,9 +169,14 @@ public class ResolveCharacterState : ConnectionStateBase
             result = false;
             error = $"The server failed to validate the module list ({e.GetType().Name}). " +
                     "Check that the client and server run the same game and mod versions.";
+            workshopHandshakeValidated = !workshopManifestProvider.EnforceHandshake;
         }
 
-        var validateMessage = new NetworkModuleVersionsValidated(result, error);
+        var validateMessage = new NetworkModuleVersionsValidated(
+            result,
+            error,
+            serverWorkshopManifest,
+            result ? hostModConfig : null);
         network.SendImmediate(ConnectionLogic.Peer, validateMessage);
     }
 
@@ -100,6 +184,28 @@ public class ResolveCharacterState : ConnectionStateBase
     {
         var peer = obj.Who as NetPeer;
         if (peer != ConnectionLogic.Peer) return;
+
+        if (!workshopHandshakeValidated)
+        {
+            Logger.Warning(
+                "Peer {Peer} attempted character resolution before completing the Workshop manifest handshake",
+                peer?.Id);
+            peer?.Disconnect();
+            return;
+        }
+
+        if (workshopManifestProvider.EnforceHandshake)
+        {
+            if (!modConfigAuthority.TryGetCurrent(out ModConfigSnapshot hostConfig) ||
+                !obj.What.Acknowledges(hostConfig))
+            {
+                Logger.Warning(
+                    "Peer {Peer} attempted character resolution without acknowledging the accepted host mod-config",
+                    peer?.Id);
+                peer?.Disconnect();
+                return;
+            }
+        }
 
         try
         {

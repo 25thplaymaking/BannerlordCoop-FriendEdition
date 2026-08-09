@@ -28,11 +28,16 @@ internal class CampaignDifficultyHandler : IHandler
 
     private readonly IMessageBroker messageBroker;
     private readonly IModConfig modConfig;
+    private readonly IModConfigAuthority configAuthority;
 
-    public CampaignDifficultyHandler(IMessageBroker messageBroker, IModConfig modConfig)
+    public CampaignDifficultyHandler(
+        IMessageBroker messageBroker,
+        IModConfig modConfig,
+        IModConfigAuthority configAuthority)
     {
         this.messageBroker = messageBroker;
         this.modConfig = modConfig;
+        this.configAuthority = configAuthority;
         messageBroker.Subscribe<CampaignReady>(Handle_CampaignReady);
     }
 
@@ -58,6 +63,7 @@ internal class CampaignDifficultyHandler : IHandler
         }
 
         DifficultyConfigData config = modConfig.Data.Difficulty ?? new DifficultyConfigData();
+        ModConfigSnapshot authoritative = configAuthority.InitializeHost(modConfig.Data);
         var effective = new List<string>();
 
         ApplyOption("playerReceivedDamage", config.PlayerReceivedDamage, effective,
@@ -87,7 +93,22 @@ internal class CampaignDifficultyHandler : IHandler
         ApplyToggle("autoAllocateClanMemberPerks", config.AutoAllocateClanMemberPerks, effective,
             CampaignOptions.AutoAllocateClanMemberPerks, v => CampaignOptions.AutoAllocateClanMemberPerks = v);
 
+        if (!authoritative.BirthAndDeathEnabled || CampaignOptions.IsLifeDeathCycleDisabled)
+        {
+            Logger.Fatal(
+                "Birth & Death release invariant failed after difficulty apply: " +
+                "snapshot={SnapshotEnabled}, IsLifeDeathCycleDisabled={Disabled}",
+                authoritative.BirthAndDeathEnabled,
+                CampaignOptions.IsLifeDeathCycleDisabled);
+            throw new InvalidOperationException(
+                "Friend Edition requires CampaignOptions.IsLifeDeathCycleDisabled=false after applying host difficulty.");
+        }
+
         Logger.Information("difficulty (effective): {Effective}", string.Join(" ", effective));
+        Logger.Information(
+            "Birth & Death engine invariant verified: difficulty.birthAndDeath=true, " +
+            "CampaignOptions.IsLifeDeathCycleDisabled=false, configSha256={Sha256}",
+            authoritative.Sha256);
     }
 
     /// <summary>By name, not ordinal — the game enum's numbering is not ours to rely on.</summary>

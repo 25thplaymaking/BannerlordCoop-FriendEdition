@@ -5,6 +5,7 @@ using GameInterface.Services.Locations;
 using GameInterface.Services.MapEvents;
 using GameInterface.Services.Tournaments;
 using GameInterface.Services.Time.UI;
+using GameInterface.Services.WorkshopMods.Core;
 using Missions.Agents;
 using Missions.Agents.Handlers;
 using Missions.Agents.Patches;
@@ -16,6 +17,8 @@ using Missions.Services.Network;
 using Missions.Taverns;
 using Missions.Tournaments;
 using Missions.Tournaments.Spectators;
+using Missions.WorkshopMods.Combat;
+using System;
 using System.Collections.Generic;
 
 namespace Missions;
@@ -35,12 +38,30 @@ public class MissionModule : Module
     internal const string WeaponPickupPatchCategory = "CoopWeaponPickupPatches";
     internal const string MountAiSafetyPatchCategory = "CoopMountAiSafetyPatches";
 
+    /// <summary>
+    /// The Workshop modules whose adapters live in this assembly. Declared here rather than in
+    /// GameInterfaceModule because the registrar applies a module's category against the assembly
+    /// that declares it, and because these gate mission-side patches the campaign container never
+    /// loads. Adding a combat mod is one entry here plus its <see cref="IWorkshopModule"/>.
+    /// </summary>
+    private static readonly IWorkshopModule[] DeclaredWorkshopModules =
+    {
+        new RbmModule(),
+        new DismembermentPlusModule(),
+        new UnblockableThrustModule(),
+    };
+
     protected override void Load(ContainerBuilder builder)
     {
         base.Load(builder);
 
         foreach (HarmonyPatchCategoryRegistration registration in CreatePatchCategoryRegistrations())
             builder.RegisterInstance(registration);
+
+        // Published for DI so WorkshopModuleAutoSync drives their RegisterSync through the same path
+        // as Diplomacy's, and so the operator's per-module config keys resolve to real declarations.
+        foreach (IWorkshopModule module in DeclaredWorkshopModules)
+            builder.RegisterInstance(module).As<IWorkshopModule>();
 
         builder.RegisterType<LiteNetP2PClient>().As<IBattleNetwork>().InstancePerLifetimeScope();
         builder.RegisterType<MovementPacketCompressor>()
@@ -224,5 +245,29 @@ public class MissionModule : Module
         yield return new HarmonyPatchCategoryRegistration(
             typeof(HumanAIMountSearchSafetyPatch).Assembly,
             MountAiSafetyPatchCategory);
+
+        // Workshop combat-mod adapters (RBM, DismembermentPlus): registered ONLY when their module
+        // resolves. These used to share CombatHitPresentationPatchCategory with mandatory patches
+        // like MeleeHitPresentationPatch; unconditionally applying that category threw the same
+        // "Undefined target method" HarmonyException PatchAllUncategorized threw for an absent
+        // Diplomacy, aborting every remaining Coop patch. Splitting them into their own gated
+        // categories fixes that without touching the mandatory patches, which stay in
+        // CombatHitPresentationPatchCategory above, registered unconditionally as before.
+        //
+        // The gate is WorkshopModuleRegistrar — the same rule Diplomacy goes through — rather than
+        // the assembly-NAME check this used to do. A same-named build with a different patch surface
+        // no longer gets its category registered at all, so the adapters' [HarmonyPrepare] guards
+        // become defence in depth instead of the only thing standing between a mismatched mod and an
+        // aborted PatchAll. UnblockableThrust declares a null category on purpose; see
+        // UnblockableThrustModule.
+        foreach (IWorkshopModule module in
+                 WorkshopModuleRegistrar.ResolveInstalledModules(DeclaredWorkshopModules))
+        {
+            if (module.PatchCategory == null) continue;
+
+            yield return new HarmonyPatchCategoryRegistration(
+                module.GetType().Assembly,
+                module.PatchCategory);
+        }
     }
 }

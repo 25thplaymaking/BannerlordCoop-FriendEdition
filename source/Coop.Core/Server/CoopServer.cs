@@ -43,6 +43,7 @@ public class CoopServer : CoopNetworkBase, ICoopServer
     private readonly IPacketManager packetManager;
     private readonly IMessagePacketHandler messagePacketHandler;
     private readonly IConnectionMessageQueue connectionMessageQueue;
+    private readonly ServerInboundPayloadProcessor<NetPeer> inboundPayloadProcessor;
     // Buffers per-change sends and merges them into one send per key. Drained each tick in Update.
     private readonly ISendCoalescer coalescer;
     // Lazy breaks the construction cycle: the manager depends on ITimeControlInterface, which depends
@@ -71,6 +72,11 @@ public class CoopServer : CoopNetworkBase, ICoopServer
         this.packetManager = packetManager;
         this.messagePacketHandler = messagePacketHandler;
         this.connectionMessageQueue = connectionMessageQueue;
+        inboundPayloadProcessor = new ServerInboundPayloadProcessor<NetPeer>(
+            serializer,
+            packetManager.HandleReceive,
+            messagePacketHandler.PublishEvent,
+            IsolatePeer);
         this.missionManager = missionManager;
         this.overloadedPeerManager = overloadedPeerManager;
         this.coalescer = coalescer;
@@ -136,19 +142,65 @@ public class CoopServer : CoopNetworkBase, ICoopServer
 
     public override void OnNetworkReceive(NetPeer peer, NetPacketReader reader, byte channelNumber, DeliveryMethod deliveryMethod)
     {
-        object received = serializer.Deserialize(reader.GetRemainingBytes());
+        int payloadBytes = -1;
 
-        if (received is IPacket packet)
+        try
         {
-            packetManager.HandleReceive(peer, packet);
+            payloadBytes = reader.AvailableBytes;
+            if (!ServerInboundPayloadAdmission.IsAllowed(payloadBytes))
+            {
+                IsolatePeer(peer, payloadBytes, null);
+                return;
+            }
+
+            inboundPayloadProcessor.Process(peer, reader.GetRemainingBytes());
         }
-        else if (received is IMessage message)
+        catch (Exception ex)
         {
-            messagePacketHandler.PublishEvent(peer, message);
+            IsolatePeer(peer, payloadBytes, ex);
         }
-        else
+    }
+
+    private static void IsolatePeer(NetPeer peer, int payloadBytes, Exception failure)
+    {
+        try
         {
-            Logger.Error("Received payload deserialized to neither IPacket nor IMessage: {Type}", received?.GetType());
+            if (failure == null)
+            {
+                Logger.Warning(
+                    "Disconnecting peer {PeerId}@{Address}: inbound payload size {PayloadBytes:N0} bytes is outside the allowed range of 1 to {MaximumPayloadBytes:N0} bytes",
+                    peer?.Id,
+                    peer?.Address,
+                    payloadBytes,
+                    ServerInboundPayloadAdmission.MaximumPayloadBytes);
+            }
+            else
+            {
+                Logger.Warning(
+                    failure,
+                    "Disconnecting peer {PeerId}@{Address}: failed to process inbound payload of {PayloadBytes:N0} bytes",
+                    peer?.Id,
+                    peer?.Address,
+                    payloadBytes);
+            }
+        }
+        catch (Exception)
+        {
+        }
+
+        try
+        {
+            peer?.Disconnect();
+        }
+        catch (Exception disconnectFailure)
+        {
+            try
+            {
+                Logger.Error(disconnectFailure, "Failed to disconnect an invalid inbound peer");
+            }
+            catch (Exception)
+            {
+            }
         }
     }
 

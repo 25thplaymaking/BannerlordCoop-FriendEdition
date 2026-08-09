@@ -19,6 +19,7 @@ using GameInterface.Services.Tournaments.UI;
 using GameInterface.Services.UI;
 using GameInterface.Services.UI.CoopOptions;
 using GameInterface.Services.UI.CrashReporting;
+using GameInterface.Services.WorkshopMods.Frameworks;
 using GameInterface.Utils;
 using HarmonyLib;
 using Serilog;
@@ -70,6 +71,11 @@ namespace Coop
             MBDebug.DisableLogging = false;
 
             AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+
+            // Constructors for every active submodule run before the OnSubModuleLoad pass. Validate
+            // the canonical Harmony provider now and, if an operator deliberately activated the
+            // staged framework cohort, install its pre-load fail-closed guard in that narrow window.
+            FrameworkCompatibilityBootstrap.PrepareBeforeOptionalModuleLoad();
 
             // Must be called here (constructor), not in NoHarmonyLoad().
             // Module.LoadSubModules() calls all submodule constructors first, then all
@@ -410,6 +416,11 @@ namespace Coop
 
         public override void NoHarmonyLoad()
         {
+            // ButterLib/UIExtenderEx/MCM normally remain staged-inactive. If they were explicitly
+            // activated, all earlier framework OnSubModuleLoad hooks have now run; purge/assert their
+            // original patches and guard every later lifecycle/settings mutation before continuing.
+            FrameworkCompatibilityBootstrap.CompleteAfterOptionalModuleLoad();
+
             Coop = new CoopartiveMultiplayerExperience(isServer, CrashDiagnostics.SetPhase);
 
             Updateables.Add(GameThread.Instance);

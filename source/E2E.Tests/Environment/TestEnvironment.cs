@@ -12,6 +12,9 @@ using GameInterface;
 using GameInterface.Policies;
 using Missions;
 using Missions.Agents.Handlers;
+using GameInterface.Services.WorkshopMods.Core;
+using FriendEdition.WorkshopCompatibility;
+using IModConfig = GameInterface.Configuration.IModConfig;
 using Xunit.Abstractions;
 
 namespace E2E.Tests.Environment;
@@ -106,6 +109,18 @@ public class TestEnvironment
         {
             builder.RegisterModule<GameInterfaceModule>();
         }
+
+        // This in-process environment has synthetic module roots rather than an installed private
+        // suite. Keep legacy E2E scenarios deterministic; compatibility-specific tests inject their
+        // own provider directly at the core/connection seam.
+        builder.RegisterType<DisabledWorkshopManifestProvider>()
+            .As<IWorkshopManifestProvider>()
+            .SingleInstance();
+
+        // Same determinism rule for the operator config: never read the hosting machine's real
+        // CoopData/mod-config.json (see DeterministicModConfig).
+        builder.RegisterInstance<IModConfig>(new DeterministicModConfig())
+            .SingleInstance();
 
         builder.RegisterInstance(networkOrchestrator).AsSelf().SingleInstance();
         builder.RegisterType<MockAgentVisualActionAccessor>()

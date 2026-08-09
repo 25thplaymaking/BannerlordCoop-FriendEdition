@@ -102,11 +102,24 @@ internal class CampaignOptionsCommands
     [CommandLineArgumentFunction("IsLifeDeathCycleDisabled", "coop.debug.campaignoptions")]
     public static string IsLifeDeathCycleDisabledCommand(List<string> strings)
     {
-        return HandleBooleanOptionCommand(
-            strings,
-            nameof(IsLifeDeathCycleDisabled),
-            () => IsLifeDeathCycleDisabled,
-            value => IsLifeDeathCycleDisabled = value);
+        if (strings.Count == 0)
+            return $"{nameof(IsLifeDeathCycleDisabled)} is currently " +
+                $"{(IsLifeDeathCycleDisabled ? "enabled" : "disabled")}.";
+        if (ModInformation.IsClient)
+            return "Managing campaign options is disabled on clients; the host does this.";
+        if (strings.Count != 1 || !TryParseBool(strings[0], out var value))
+            return $"Usage: coop.debug.campaignoptions.{nameof(IsLifeDeathCycleDisabled)} <false|0>";
+        if (value)
+        {
+            // The Friend Edition handshake attests BirthAndDeath=true. Letting a debug command
+            // violate that immutable session snapshot would make every connected peer divergent.
+            IsLifeDeathCycleDisabled = false;
+            return "Birth & Death is required for this Friend Edition session and cannot be disabled.";
+        }
+
+        IsLifeDeathCycleDisabled = false;
+        UpdateCampaignOptions();
+        return $"{nameof(IsLifeDeathCycleDisabled)} disabled (Birth & Death enabled).";
     }
 
     [CommandLineArgumentFunction("PersuasionSuccessChance", "coop.debug.campaignoptions")]

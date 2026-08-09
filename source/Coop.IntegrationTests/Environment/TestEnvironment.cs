@@ -13,6 +13,8 @@ using GameInterface;
 using GameInterface.Policies;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Settlements.Interfaces;
+using GameInterface.Services.WorkshopMods.Core;
+using FriendEdition.WorkshopCompatibility;
 using Moq;
 using Serilog;
 using TaleWorlds.CampaignSystem.Party;
@@ -97,6 +99,9 @@ public class TestEnvironment
     private ContainerBuilder AddSharedDependencies(ContainerBuilder builder)
     {
         builder.RegisterModule<GameInterfaceModule>();
+        builder.RegisterType<DisabledWorkshopManifestProvider>()
+            .As<IWorkshopManifestProvider>()
+            .SingleInstance();
 
         builder.RegisterInstance(Logger).As<ILogger>().SingleInstance();
         builder.RegisterInstance(networkOrchestrator).AsSelf().SingleInstance();

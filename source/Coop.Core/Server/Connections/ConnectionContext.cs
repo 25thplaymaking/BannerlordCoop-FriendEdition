@@ -2,6 +2,7 @@
 using Common.Network;
 using Common.Network.Coalescing;
 using Coop.Core.Server.Services.MobileParties;
+using GameInterface.Configuration;
 using GameInterface.CoopSessionData;
 using GameInterface.Services.CampaignService.Interfaces;
 using GameInterface.Services.Heroes.Interfaces;
@@ -9,6 +10,7 @@ using GameInterface.Services.Modules;
 using GameInterface.Services.Modules.Validators;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
+using GameInterface.Services.WorkshopMods.Core;
 
 namespace Coop.Core.Server.Connections;
 
@@ -35,7 +37,9 @@ public class ConnectionContext
         IAttachmentIdMapper attachmentIdMapper,
         IExistingPlayerSender existingPlayerSender,
         IServerOptionsProvider serverOptionsProvider,
-        IJoinCampaignBaselineSender joinCampaignBaselineSender)
+        IJoinCampaignBaselineSender joinCampaignBaselineSender,
+        IWorkshopManifestProvider workshopManifestProvider,
+        IModConfigAuthority modConfigAuthority)
     {
         MessageBroker = messageBroker;
         Network = network;
@@ -53,6 +57,10 @@ public class ConnectionContext
         ExistingPlayerSender = existingPlayerSender;
         ServerOptionsProvider = serverOptionsProvider;
         JoinCampaignBaselineSender = joinCampaignBaselineSender;
+        WorkshopManifestProvider = workshopManifestProvider ??
+            throw new System.ArgumentNullException(nameof(workshopManifestProvider));
+        ModConfigAuthority = modConfigAuthority ??
+            throw new System.ArgumentNullException(nameof(modConfigAuthority));
     }
 
     public IMessageBroker MessageBroker { get; }
@@ -71,4 +79,6 @@ public class ConnectionContext
     public IExistingPlayerSender ExistingPlayerSender { get; }
     public IServerOptionsProvider ServerOptionsProvider { get; }
     public IJoinCampaignBaselineSender JoinCampaignBaselineSender { get; }
+    public IWorkshopManifestProvider WorkshopManifestProvider { get; }
+    public IModConfigAuthority ModConfigAuthority { get; }
 }

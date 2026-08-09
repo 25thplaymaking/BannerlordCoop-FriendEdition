@@ -3,6 +3,7 @@ using Common.Messaging;
 using Common.Network;
 using Common.Serialization;
 using GameInterface.AutoSync;
+using GameInterface.Services.Modules;
 using GameInterface.Services.Players;
 using HarmonyLib;
 using Moq;
@@ -31,6 +32,9 @@ public class ContainerTest
             RegisterMock<INetwork>(containerBuilder);
             RegisterMock<INetworkConfig>(containerBuilder);
             RegisterMock<ISerializableTypeMapper>(containerBuilder);
+            // Production registers this from Coop.Core's CommonModule; a standalone GameInterface
+            // container needs a stand-in or the Workshop manifest warmup fails to activate.
+            RegisterMock<IModuleInfoProvider>(containerBuilder);
 
             containerBuilder.RegisterModule<GameInterfaceModule>();
 
@@ -83,6 +87,7 @@ public class ContainerTest
         RegisterMock<INetwork>(containerBuilder);
         RegisterMock<INetworkConfig>(containerBuilder);
         RegisterMock<ISerializableTypeMapper>(containerBuilder);
+        RegisterMock<IModuleInfoProvider>(containerBuilder);
 
         containerBuilder.RegisterModule<GameInterfaceModule>();
         containerBuilder.RegisterInstance(harmony).As<Harmony>().SingleInstance();

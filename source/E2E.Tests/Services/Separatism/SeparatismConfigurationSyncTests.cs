@@ -5,6 +5,10 @@ using GameInterface.Configuration;
 using GameInterface.Services.CampaignService.Handlers;
 using GameInterface.Services.CampaignService.Messages;
 using GameInterface.Services.GameState.Messages;
+using GameInterface.Services.Players;
+using GameInterface.Services.Players.Data;
+using Common.Tests.Utils;
+using TaleWorlds.CampaignSystem;
 using Xunit.Abstractions;
 
 namespace E2E.Tests.Services.Separatism;
@@ -17,6 +21,14 @@ public sealed class SeparatismConfigurationSyncTests : IDisposable
     public SeparatismConfigurationSyncTests(ITestOutputHelper output)
     {
         TestEnvironment = new E2ETestEnvironment(output);
+        foreach (var client in TestEnvironment.Clients)
+        {
+            client.Call(() => Assert.True(
+                client.Resolve<IModConfigAuthority>().TryBindTrustedServer(
+                    Server.NetPeer,
+                    out var failure),
+                failure));
+        }
     }
 
     public void Dispose() => TestEnvironment.Dispose();
@@ -30,36 +42,183 @@ public sealed class SeparatismConfigurationSyncTests : IDisposable
             new MessagePayload<CampaignReady>(this, new CampaignReady())));
 
         var sent = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkLoadModConfig>());
-        Assert.True(sent.ModOptions.Separatism.Enabled);
-        Assert.True(sent.ModOptions.Separatism.LordRebellionsEnabled);
-        Assert.True(sent.ModOptions.Separatism.NationalRebellionsEnabled);
+        Assert.True(sent.Snapshot.ModOptions.Separatism.Enabled);
+        Assert.True(sent.Snapshot.ModOptions.Separatism.LordRebellionsEnabled);
+        Assert.True(sent.Snapshot.ModOptions.Separatism.NationalRebellionsEnabled);
+        Assert.True(sent.Snapshot.BirthAndDeathEnabled);
+        Assert.True(ModConfigSnapshotCodec.TryValidate(sent.Snapshot, out var failure), failure);
 
         foreach (var client in TestEnvironment.Clients)
         {
             var received = Assert.Single(client.InternalMessages.GetMessages<NetworkLoadModConfig>());
-            Assert.Equal(sent.ModOptions.Separatism, received.ModOptions.Separatism);
+            Assert.Equal(sent.Snapshot.ModOptions.Separatism, received.Snapshot.ModOptions.Separatism);
         }
     }
 
     [Fact]
     public void LateClientRequest_ReceivesTheCurrentHostSeparatismConfiguration()
     {
-        Server.Call(() => ModConfigProvider.LoadModConfig(new ModOptionsData
-        {
-            Separatism = new SeparatismOptionsData
-            {
-                ChaosStartEnabled = false,
-                DailyLordRebellionChance = 0.42f,
-                SettlementRebellionsEnabled = true,
-            },
-        }));
+        Server.Call(() => Server.Resolve<LoadModConfigHandler>().Handle_CampaignReady(
+            new MessagePayload<CampaignReady>(this, new CampaignReady())));
+        Server.NetworkSentMessages.Clear();
 
         var client = TestEnvironment.Clients.First();
-        Server.SimulateMessage(client.NetPeer, new NetworkRequestServerModConfig());
+        Server.Call(() =>
+        {
+            var players = Server.Resolve<IPlayerManager>();
+            Assert.True(players.AddPlayer(new Player(
+                "config-client",
+                "config-hero",
+                "config-party",
+                "config-clan",
+                "config-character")));
+            players.SetPeer("config-client", client.NetPeer);
+        });
+        ModConfigSnapshot accepted = null;
+        Server.Call(() => Assert.True(
+            Server.Resolve<IModConfigAuthority>().TryGetCurrent(out accepted)));
+        Server.SimulateMessage(client.NetPeer, new NetworkRequestServerModConfig(accepted));
 
         var sent = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkLoadModConfig>());
-        Assert.False(sent.ModOptions.Separatism.ChaosStartEnabled);
-        Assert.Equal(0.42f, sent.ModOptions.Separatism.DailyLordRebellionChance);
-        Assert.True(sent.ModOptions.Separatism.SettlementRebellionsEnabled);
+        Assert.True(sent.Snapshot.ModOptions.Separatism.ChaosStartEnabled);
+        Assert.Equal(1f, sent.Snapshot.ModOptions.Separatism.DailyLordRebellionChance);
+        Assert.False(sent.Snapshot.ModOptions.Separatism.SettlementRebellionsEnabled);
     }
+
+    [Fact]
+    public void HostOptionAttempt_CannotDisableBirthAndDeathAfterConfigAttestation()
+    {
+        Server.Call(() => Server.Resolve<LoadModConfigHandler>().Handle_CampaignReady(
+            new MessagePayload<CampaignReady>(this, new CampaignReady())));
+        Server.NetworkSentMessages.Clear();
+
+        Server.Call(() =>
+        {
+            CampaignOptions.IsLifeDeathCycleDisabled = true;
+            Assert.True(CampaignOptions.IsLifeDeathCycleDisabled);
+            Server.Resolve<TestMessageBroker>().Publish(this, new UpdateCampaignOptions());
+            Assert.False(CampaignOptions.IsLifeDeathCycleDisabled);
+        });
+
+        var sent = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkUpdateCampaignOptions>());
+        Assert.False(sent.IsLifeDeathCycleDisabled);
+    }
+
+    [Fact]
+    public void ClientCannotOverwriteServerBirthAndDeathThroughCampaignOptionsWireMessage()
+    {
+        Server.Call(() => Server.Resolve<LoadModConfigHandler>().Handle_CampaignReady(
+            new MessagePayload<CampaignReady>(this, new CampaignReady())));
+        var client = TestEnvironment.Clients.First();
+        var forged = CampaignOptionsMessage(isLifeDeathCycleDisabled: true);
+
+        Server.Call(() =>
+        {
+            CampaignOptions.IsLifeDeathCycleDisabled = false;
+        });
+        Server.SimulateMessage(client.NetPeer, forged);
+
+        Server.Call(() => Assert.False(CampaignOptions.IsLifeDeathCycleDisabled));
+        Assert.Equal(LiteNetLib.ConnectionState.ShutdownRequested, client.NetPeer.ConnectionState);
+    }
+
+    [Fact]
+    public void ClientCannotTriggerServerOwnedCampaignOptionsBroadcast()
+    {
+        Server.Call(() => Server.Resolve<LoadModConfigHandler>().Handle_CampaignReady(
+            new MessagePayload<CampaignReady>(this, new CampaignReady())));
+        Server.NetworkSentMessages.Clear();
+        var client = TestEnvironment.Clients.First();
+
+        Server.SimulateMessage(client.NetPeer, new UpdateCampaignOptions());
+
+        Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkUpdateCampaignOptions>());
+        Assert.Equal(LiteNetLib.ConnectionState.ShutdownRequested, client.NetPeer.ConnectionState);
+    }
+
+    [Fact]
+    public void UnmappedClientCannotRequestHostModConfig()
+    {
+        Server.Call(() => Server.Resolve<LoadModConfigHandler>().Handle_CampaignReady(
+            new MessagePayload<CampaignReady>(this, new CampaignReady())));
+        Server.NetworkSentMessages.Clear();
+        var client = TestEnvironment.Clients.First();
+        ModConfigSnapshot accepted = null;
+        Server.Call(() => Assert.True(
+            Server.Resolve<IModConfigAuthority>().TryGetCurrent(out accepted)));
+
+        Server.SimulateMessage(client.NetPeer, new NetworkRequestServerModConfig(accepted));
+
+        Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkLoadModConfig>());
+        Assert.Equal(LiteNetLib.ConnectionState.ShutdownRequested, client.NetPeer.ConnectionState);
+    }
+
+    [Fact]
+    public void ClientCannotPushModConfigEnvelopeOntoServer()
+    {
+        Server.Call(() => Server.Resolve<LoadModConfigHandler>().Handle_CampaignReady(
+            new MessagePayload<CampaignReady>(this, new CampaignReady())));
+        var client = TestEnvironment.Clients.First();
+        ModConfigSnapshot accepted = null;
+        Server.Call(() => Assert.True(
+            Server.Resolve<IModConfigAuthority>().TryGetCurrent(out accepted)));
+
+        Server.SimulateMessage(client.NetPeer, new NetworkLoadModConfig(accepted));
+
+        Assert.Equal(LiteNetLib.ConnectionState.ShutdownRequested, client.NetPeer.ConnectionState);
+        Server.Call(() =>
+        {
+            Assert.True(Server.Resolve<IModConfigAuthority>().TryGetCurrent(out var current));
+            Assert.Equal(accepted.Sha256, current.Sha256);
+        });
+    }
+
+    [Fact]
+    public void ClientCampaignOptions_AcceptOnlyPinnedServerTransport()
+    {
+        Server.Call(() => Server.Resolve<LoadModConfigHandler>().Handle_CampaignReady(
+            new MessagePayload<CampaignReady>(this, new CampaignReady())));
+        var clients = TestEnvironment.Clients.ToArray();
+        var client = clients[0];
+        var forgedPeer = clients[1].NetPeer;
+        var realistic = CampaignOptionsMessage(
+            isLifeDeathCycleDisabled: false,
+            primaryDifficulty: CampaignOptions.Difficulty.Realistic);
+
+        client.Call(() => CampaignOptions.PlayerTroopsReceivedDamage = CampaignOptions.Difficulty.Easy);
+        client.SimulateMessage(null, realistic);
+        client.Call(() => Assert.Equal(
+            CampaignOptions.Difficulty.Easy,
+            CampaignOptions.PlayerTroopsReceivedDamage));
+
+        client.SimulateMessage(Server.NetPeer, realistic);
+        client.Call(() => Assert.Equal(
+            CampaignOptions.Difficulty.Realistic,
+            CampaignOptions.PlayerTroopsReceivedDamage));
+
+        var veryEasy = CampaignOptionsMessage(
+            isLifeDeathCycleDisabled: false,
+            primaryDifficulty: CampaignOptions.Difficulty.VeryEasy);
+        client.SimulateMessage(forgedPeer, veryEasy);
+        client.Call(() => Assert.Equal(
+            CampaignOptions.Difficulty.Realistic,
+            CampaignOptions.PlayerTroopsReceivedDamage));
+        Assert.Equal(LiteNetLib.ConnectionState.ShutdownRequested, forgedPeer.ConnectionState);
+    }
+
+    private static NetworkUpdateCampaignOptions CampaignOptionsMessage(
+        bool isLifeDeathCycleDisabled,
+        CampaignOptions.Difficulty primaryDifficulty = CampaignOptions.Difficulty.VeryEasy) =>
+        new(
+            false,
+            primaryDifficulty,
+            CampaignOptions.Difficulty.VeryEasy,
+            CampaignOptions.Difficulty.VeryEasy,
+            CampaignOptions.Difficulty.VeryEasy,
+            CampaignOptions.Difficulty.VeryEasy,
+            isLifeDeathCycleDisabled,
+            CampaignOptions.Difficulty.VeryEasy,
+            CampaignOptions.Difficulty.VeryEasy,
+            false,
+            CampaignOptions.Difficulty.VeryEasy);
 }

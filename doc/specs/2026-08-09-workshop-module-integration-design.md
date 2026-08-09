@@ -114,6 +114,18 @@ modules in `GameInterfaceModule`, mission-side combat modules in `MissionModule`
 be `null`, meaning the module owns no presence-gated category — correct for an adapter whose targets
 always resolve (a native engine method) and which must keep applying when the mod is absent.
 
+**Coverage today: four of the seven gameplay mods, not all seven.** Declared through the contract:
+`Bannerlord.Diplomacy`, RBM, DismembermentPlus, UnblockableThrust. Not declared: ImprovedGarrisons,
+Fourberie, Player Settlement. The three undeclared ones carry no Harmony attributes anywhere — their
+adapters call `harmony.Patch` imperatively from `*CompatibilityHandler.TryInstall`, so the category
+split has nothing to gate and there was no `PatchAll` abort to fix for them. The consequence is that
+they have no `IWorkshopModule`, and therefore no catalog-reconciled fingerprint pin, no operator
+config key, and none of the `WorkshopModuleTestBase` gates: their absent/disabled/declaration
+behaviour is asserted nowhere. Declaring them means giving each an `IWorkshopModule` (a
+`ResolveInstalledSha256` over the assembly its handler already validates) and a
+`<Mod>ModuleGateTests`; converting their imperative patching to a category is optional and separate.
+That work is not in this pass.
+
 **State tracking → `IAutoSync`.** `AutoSyncRegistry.AddProperty(PropertyInfo)` and
 `AddField(FieldInfo)` take reflection objects, so a mod's members register exactly as
 `MapEventPartySync` registers `MapEventParty`'s. The generated property-set prefix publishes on the

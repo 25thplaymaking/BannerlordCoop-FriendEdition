@@ -209,7 +209,7 @@ Setting the `AppContext` switch in a production assembly cannot work: HarmonyLib
 
 ## 7. External blockers
 
-- **Fourberie is not updated.** Installed manifest `4391404683672989722` (2026-08-02); latest `1598945672157391038` (2026-08-09 13:42 UTC). ACF says `NeedsUpdate 1`; the installed `Fourberie.dll` still hashes to `fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71`, identical to the audited copy. Steam must download it, then **re-fingerprint and re-pin** — `deploy/workshop-mods.json` still pins the old manifest.
+- **Fourberie and RBM have newer upstream manifests** (Fourberie: installed `4391404683672989722`, latest `1598945672157391038`; RBM: installed `8508128689459287315`, latest `3016800505162011905`). **No longer a packaging blocker:** the suite builder now builds against the installed, pin-verified content and only WARNS about newer upstreams — a Steam download in flight (`NeedsDownload≠0`) stays fatal, and the per-file SHA-256 pins plus the post-staging source re-hash remain the integrity gates. Adopting either update still requires the full re-audit + re-pin of `deploy/workshop-mods.json`; until then the suite deliberately ships the audited builds.
 - **`Nightly Release` workflow is disabled** on the fork, deliberately. It ran nightly against `development`, built this private code successfully, and failed one step before **`Publish latest client to public R2`**. Do not re-enable without deciding whether publishing this derivative publicly is acceptable.
 
 ---
@@ -236,6 +236,19 @@ Diplomacy action surface enumerated (§4.4) · **Donate Gold routed end-to-end**
 1. ~~Merge PR #3~~ — **merged to `development` 2026-08-09** (merge commit `8e389f11e`); the two
    temporary worktrees and their `wi-fixes`/`wi-contract` branches are deleted (junctions removed
    as links, game install verified intact).
+1b. **The distributable suite is BUILT and the installer PROVEN (2026-08-09).**
+   `Build-PrivateWorkshopSuite` ran clean against the audited pins (11 Workshop modules + the
+   freshly built development-head Coop; 965 files verified; sources unchanged after staging):
+   staged at `C:\Users\Bryce\Documents\ServerWork\FriendEdition-WorkshopSuite`, archive
+   `FriendEdition-WorkshopSuite.zip` (SHA-256
+   `a773e1bb555a589cd40ea1a49ca0404225e63c15268bbb5965e4d6582e95bbc4`). The guided client
+   installer from that real suite was executed against a synthetic Bannerlord install:
+   INSTALLATION PASSED — all 12 managed modules written separately, launcher data selecting
+   exactly `Bannerlord.Harmony → Native → SandBoxCore → CustomBattle → Sandbox → StoryMode →
+   Coop` with every Workshop gameplay/framework module staged-inactive, the handshake receipt at
+   `Coop/WorkshopSuite/MANIFEST.json`, and the installed Diplomacy DLL byte-identical to the
+   compatibility pin (`90930a1d…`). The fixture test suite (13 checks incl. injected-failure
+   rollback) is green. Give friends the ZIP; they run `Run-ClientSetup.cmd`.
 2. **Live smoke the routed donation** — needs Bryce's game + the real Diplomacy 1.4.7 DLL: donate
    from a client, watch the server apply and the gold/relation deltas replicate. E2E cannot cover
    the applied path (mod absent by construction); until this runs, "routed" is proven only up to

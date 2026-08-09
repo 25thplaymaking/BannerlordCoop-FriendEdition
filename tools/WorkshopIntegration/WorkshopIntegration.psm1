@@ -1055,8 +1055,21 @@ function New-WorkshopSuitePlan {
     )
 
     $state = Read-WorkshopState -Workshop $Workshop
-    if ($state.NeedsUpdate -ne '0' -or $state.NeedsDownload -ne '0') {
-        throw "Steam reports pending Workshop work (NeedsUpdate=$($state.NeedsUpdate), NeedsDownload=$($state.NeedsDownload)). Let Steam finish first."
+    if ($state.NeedsDownload -ne '0') {
+        # A download in flight means source files may be half-written; no hash check can make
+        # reading them safe. This stays fatal.
+        throw "Steam reports a Workshop download in progress (NeedsUpdate=$($state.NeedsUpdate), NeedsDownload=$($state.NeedsDownload)). Let Steam finish first."
+    }
+    if ($state.NeedsUpdate -ne '0') {
+        # NeedsUpdate with no download queued means Steam merely KNOWS a newer manifest exists
+        # (it fetches at next game launch); the on-disk content is stable. The real integrity
+        # gates are the per-file SHA-256 pins validated before staging and the full source
+        # re-hash after staging — if Steam does start rewriting content mid-build, those abort.
+        # Blocking here would make the suite unbuildable for as long as any upstream author
+        # keeps publishing updates we have not yet audited and re-pinned.
+        Write-Warning ("Steam reports a newer manifest for at least one Workshop item " +
+            "(NeedsUpdate=$($state.NeedsUpdate), NeedsDownload=0). Building against the installed, " +
+            "pin-verified content; re-audit and re-pin before adopting the update.")
     }
 
     $expectedIds = @($Manifest.modules | ForEach-Object { [string]$_.workshopId } | Sort-Object)
@@ -1078,7 +1091,13 @@ function New-WorkshopSuitePlan {
         $stateItem = $state.Items[$workshopId]
         if ($stateItem.ManifestId -ne $stateItem.LatestManifest -or
             $stateItem.TimeUpdated -ne $stateItem.LatestTimeUpdated) {
-            throw "Workshop item $workshopId is stale relative to its latest ACF detail. Let Steam update it."
+            # The upstream author published something newer than what is installed. The suite
+            # deliberately ships the AUDITED, pinned build — the fatal check below proves the
+            # installed manifest IS that pin, and the per-file SHA-256 pins prove the bytes.
+            # Newer-upstream-exists is a re-audit reminder, not a packaging error.
+            Write-Warning ("Workshop item $workshopId has a newer upstream manifest " +
+                "($($stateItem.LatestManifest)) than the installed one ($($stateItem.ManifestId)). " +
+                "Building the installed, audited pin; re-audit and re-pin to adopt the update.")
         }
         if ($stateItem.ManifestId -ne [string]$configured.steamManifestId) {
             throw "Workshop item $workshopId manifest is '$($stateItem.ManifestId)', expected '$($configured.steamManifestId)'. Review and repin deploy/workshop-mods.json before distributing an update."

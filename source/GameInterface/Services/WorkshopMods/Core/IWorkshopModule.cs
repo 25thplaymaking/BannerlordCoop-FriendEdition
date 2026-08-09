@@ -1,0 +1,55 @@
+using GameInterface.AutoSync;
+
+namespace GameInterface.Services.WorkshopMods.Core;
+
+/// <summary>
+/// Everything Coop needs to know to integrate one Workshop module. Implementing this is the entire
+/// surface a new mod requires: <see cref="WorkshopModuleRegistrar"/> handles presence, fingerprinting,
+/// config gating, patch application and sync registration on its behalf.
+/// </summary>
+public interface IWorkshopModule
+{
+    /// <summary>
+    /// The module's folder/Id as the launcher knows it, e.g. <c>Bannerlord.Diplomacy</c>. Must match
+    /// the <c>FriendEditionWorkshopModuleCatalog</c> entry for the same mod — that agreement is what
+    /// lets an operator's config key, the packaged suite receipt and this declaration name one thing.
+    /// </summary>
+    string ModuleId { get; }
+
+    /// <summary>Steam Workshop file id, for diagnostics and operator-facing messages.</summary>
+    ulong WorkshopId { get; }
+
+    /// <summary>The exact assembly build this declaration was audited against.</summary>
+    ModuleFingerprint Fingerprint { get; }
+
+    /// <summary>Harmony category holding this module's adapter patches. Applied only when live.</summary>
+    string PatchCategory { get; }
+
+    /// <summary>
+    /// SHA-256 of the module assembly this process would actually patch, or <c>null</c> when there is
+    /// no single verified implementation loaded.
+    /// <para>
+    /// Returning a hash is a promise, not a hint: the registrar takes a match against
+    /// <see cref="Fingerprint"/> as authority to register <see cref="PatchCategory"/>, and a category
+    /// whose patch classes resolve no targets throws out of <c>Harmony.PatchCategory</c> and aborts
+    /// EVERY remaining Coop patch. An implementation that cannot prove which assembly it measured
+    /// must return <c>null</c>.
+    /// </para>
+    /// </summary>
+    string ResolveInstalledSha256();
+
+    /// <summary>
+    /// Declare the module members whose changes replicate. Members are resolved reflectively from the
+    /// mod assembly, so this runs only after presence and fingerprint have been confirmed.
+    /// <para>
+    /// Registering nothing is a legitimate answer, and the right one whenever the module's shared
+    /// state already has an authoritative replication path: two independent writers over the same
+    /// campaign state diverge nondeterministically.
+    /// </para>
+    /// </summary>
+    void RegisterSync(AutoSyncRegistry registry);
+
+    // NOTE: the design's contract also carries `IEnumerable<ModuleAction> Actions` for inbound
+    // intent. It is deliberately absent here — ModuleAction cannot be designed honestly before one
+    // real action has been routed. It is added, with its first consumer, in the follow-on plan.
+}

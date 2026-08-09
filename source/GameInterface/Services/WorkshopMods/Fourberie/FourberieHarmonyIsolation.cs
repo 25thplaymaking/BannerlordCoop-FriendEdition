@@ -1,3 +1,4 @@
+using GameInterface.Services.WorkshopMods.Core;
 using HarmonyLib;
 using System;
 using System.Collections.Generic;
@@ -79,12 +80,19 @@ internal static class FourberieHarmonyIsolation
 
         foreach (var guard in expected)
         {
-            var patches = Harmony.GetPatchInfo(guard.Original);
-            if (patches == null ||
-                !IsExactList(patches.Prefixes, guard.Prefix, adapterOwner) ||
-                !IsExactList(patches.Postfixes, guard.Postfix, adapterOwner) ||
-                (patches.Transpilers?.Count ?? 0) != 0 ||
-                (patches.Finalizers?.Count ?? 0) != 0)
+            // See HarmonyPatchInfoStabilizer for why this reads GetPatchInfo more than once before
+            // failing closed.
+            var acceptable = HarmonyPatchInfoStabilizer.StabilizeUntilAcceptable(() =>
+            {
+                var patches = Harmony.GetPatchInfo(guard.Original);
+                return patches != null &&
+                    IsExactList(patches.Prefixes, guard.Prefix, adapterOwner) &&
+                    IsExactList(patches.Postfixes, guard.Postfix, adapterOwner) &&
+                    (patches.Transpilers?.Count ?? 0) == 0 &&
+                    (patches.Finalizers?.Count ?? 0) == 0;
+            });
+
+            if (!acceptable)
             {
                 throw new InvalidOperationException(
                     "Fourberie failed closed: audited guard inventory does not exactly match the Coop adapter on " +
@@ -98,7 +106,7 @@ internal static class FourberieHarmonyIsolation
 
     internal static bool IsImplementedBy(MethodInfo patchMethod, Assembly assembly) =>
         patchMethod?.DeclaringType?.Assembly != null &&
-        ReferenceEquals(patchMethod.DeclaringType.Assembly, assembly);
+        Equals(patchMethod.DeclaringType.Assembly, assembly);
 
     internal static bool IsAttributableToApprovedModule(Patch patch, Assembly assembly) =>
         IsImplementedBy(patch, assembly) ||

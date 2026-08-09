@@ -1,5 +1,6 @@
 using Common;
 using Common.Logging;
+using GameInterface.Services.WorkshopMods.Core;
 using HarmonyLib;
 using Serilog;
 using System;
@@ -39,7 +40,18 @@ internal static class DiplomacyPatchCompatibilityGate
     internal static int RemoveAllDiplomacyPatches()
         => RemovePatches(removeEveryDiplomacyPatch: true);
 
-    internal static bool HasForbiddenPatches(bool removeEveryDiplomacyPatch)
+    /// <summary>
+    /// True if a forbidden Diplomacy-owned patch is currently installed. Callers that need this to be
+    /// false (post-cleanup verification, and the one test that checks it directly) get the benefit of
+    /// HarmonyPatchInfoStabilizer automatically: a scan that finds something forbidden is retried
+    /// before being trusted, since a stale/corrupted GetPatchInfo read is indistinguishable from a real
+    /// forbidden patch until it is re-checked. A genuinely-forbidden patch reports true on every retry.
+    /// </summary>
+    internal static bool HasForbiddenPatches(bool removeEveryDiplomacyPatch) =>
+        !HarmonyPatchInfoStabilizer.StabilizeUntilAcceptable(
+            () => !ScanForForbiddenPatches(removeEveryDiplomacyPatch));
+
+    private static bool ScanForForbiddenPatches(bool removeEveryDiplomacyPatch)
     {
         foreach (var original in Harmony.GetAllPatchedMethods().ToArray())
         {
@@ -61,8 +73,17 @@ internal static class DiplomacyPatchCompatibilityGate
 
     internal static void RemoveAndAssert(bool removeEveryDiplomacyPatch)
     {
-        RemovePatches(removeEveryDiplomacyPatch);
-        if (!HasForbiddenPatches(removeEveryDiplomacyPatch)) return;
+        // See HarmonyPatchInfoStabilizer for why this retries the whole remove-then-verify cycle, not
+        // only the verification: RemovePatches itself unpatches by the PatchMethod HarmonyLib hands
+        // back from GetPatchInfo, and that value has been observed to transiently deserialize to the
+        // wrong MethodInfo. Unpatching the wrong (unrelated) method leaves the real target patched, so
+        // only re-reading and re-attempting the removal — not just re-checking — recovers from it.
+        var clean = HarmonyPatchInfoStabilizer.StabilizeUntilAcceptable(() =>
+        {
+            RemovePatches(removeEveryDiplomacyPatch);
+            return !HasForbiddenPatches(removeEveryDiplomacyPatch);
+        });
+        if (clean) return;
 
         throw new InvalidOperationException(
             removeEveryDiplomacyPatch

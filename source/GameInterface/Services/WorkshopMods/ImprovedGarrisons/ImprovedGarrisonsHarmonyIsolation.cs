@@ -1,3 +1,4 @@
+using GameInterface.Services.WorkshopMods.Core;
 using HarmonyLib;
 using System;
 using System.Collections.Generic;
@@ -11,6 +12,15 @@ namespace GameInterface.Services.WorkshopMods.ImprovedGarrisons;
 /// container exists. Remove every detour implemented by the exact approved assembly, then assert
 /// that neither those methods nor an unidentifiable Improved-Garrisons-like owner remain.
 /// </summary>
+/// <remarks>
+/// Assembly identity below is compared with <c>Equals</c>, never <c>ReferenceEquals</c>. A type built
+/// with <see cref="System.Reflection.Emit.AssemblyBuilder"/> reports a <c>DeclaringType.Assembly</c>
+/// backed by the runtime's internal builder object, which is a distinct instance from the
+/// <c>AssemblyBuilder</c> handle the caller holds — <c>Equals</c> is overridden to treat them as the
+/// same assembly, <c>ReferenceEquals</c> is not. Real on-disk module assemblies do not hit this split,
+/// but every isolation test here builds its probe assembly dynamically, so a reference check silently
+/// never matches and every guard fails closed for the wrong reason.
+/// </remarks>
 internal static class ImprovedGarrisonsHarmonyIsolation
 {
     internal static int RemoveModulePatches(
@@ -68,7 +78,7 @@ internal static class ImprovedGarrisonsHarmonyIsolation
         if (assembly == null || string.IsNullOrWhiteSpace(owner)) return false;
         foreach (var original in Harmony.GetAllPatchedMethods().ToArray())
         {
-            if (!ReferenceEquals(original?.DeclaringType?.Assembly, assembly)) continue;
+            if (!Equals(original?.DeclaringType?.Assembly, assembly)) continue;
             var patches = Harmony.GetPatchInfo(original);
             if (patches != null && Enumerate(patches).Any(patch =>
                     string.Equals(patch.owner, owner, StringComparison.Ordinal)))
@@ -87,12 +97,19 @@ internal static class ImprovedGarrisonsHarmonyIsolation
 
         foreach (var guard in expected)
         {
-            var patches = Harmony.GetPatchInfo(guard.Original);
-            if (patches == null ||
-                !IsExactList(patches.Prefixes, guard.Prefix, adapterOwner) ||
-                !IsExactList(patches.Postfixes, guard.Postfix, adapterOwner) ||
-                (patches.Transpilers?.Count ?? 0) != 0 ||
-                (patches.Finalizers?.Count ?? 0) != 0)
+            // See HarmonyPatchInfoStabilizer for why this reads GetPatchInfo more than once before
+            // failing closed.
+            var acceptable = HarmonyPatchInfoStabilizer.StabilizeUntilAcceptable(() =>
+            {
+                var patches = Harmony.GetPatchInfo(guard.Original);
+                return patches != null &&
+                    IsExactList(patches.Prefixes, guard.Prefix, adapterOwner) &&
+                    IsExactList(patches.Postfixes, guard.Postfix, adapterOwner) &&
+                    (patches.Transpilers?.Count ?? 0) == 0 &&
+                    (patches.Finalizers?.Count ?? 0) == 0;
+            });
+
+            if (!acceptable)
             {
                 throw new InvalidOperationException(
                     "Improved Garrisons failed closed: audited guard inventory does not exactly match the dedicated Coop adapter on " +
@@ -113,7 +130,7 @@ internal static class ImprovedGarrisonsHarmonyIsolation
 
         foreach (var original in Harmony.GetAllPatchedMethods().ToArray())
         {
-            if (!ReferenceEquals(original?.DeclaringType?.Assembly, moduleAssembly)) continue;
+            if (!Equals(original?.DeclaringType?.Assembly, moduleAssembly)) continue;
             var patches = Harmony.GetPatchInfo(original);
             if (patches == null) continue;
 
@@ -143,7 +160,7 @@ internal static class ImprovedGarrisonsHarmonyIsolation
 
     internal static bool IsModulePatch(Patch patch, Assembly moduleAssembly) =>
         patch?.PatchMethod?.DeclaringType?.Assembly != null &&
-        ReferenceEquals(patch.PatchMethod.DeclaringType.Assembly, moduleAssembly);
+        Equals(patch.PatchMethod.DeclaringType.Assembly, moduleAssembly);
 
     internal static IEnumerable<string> DescribeModulePatches(Assembly moduleAssembly)
     {

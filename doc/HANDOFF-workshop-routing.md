@@ -233,8 +233,9 @@ Done this session: §6 fix wave verified · scoped gates re-verified · PR #2 **
 Diplomacy action surface enumerated (§4.4) · **Donate Gold routed end-to-end** with five E2E gates
 · config switch's first runtime consumer landed (§5.2).
 
-1. **Merge PR #3** — CI is green; this is now a judgment call on scope, not readiness. After
-   merge, delete the two temporary worktrees (§8).
+1. ~~Merge PR #3~~ — **merged to `development` 2026-08-09** (merge commit `8e389f11e`); the two
+   temporary worktrees and their `wi-fixes`/`wi-contract` branches are deleted (junctions removed
+   as links, game install verified intact).
 2. **Live smoke the routed donation** — needs Bryce's game + the real Diplomacy 1.4.7 DLL: donate
    from a client, watch the server apply and the gold/relation deltas replicate. E2E cannot cover
    the applied path (mod absent by construction); until this runs, "routed" is proven only up to

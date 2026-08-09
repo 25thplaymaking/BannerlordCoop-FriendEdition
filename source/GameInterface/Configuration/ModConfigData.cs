@@ -106,6 +106,19 @@ public sealed class ModOptionsData
     /// </summary>
     public SeparatismOptionsData Separatism { get; set; } = new SeparatismOptionsData();
 
+    /// <summary>
+    /// Per-Workshop-module integration switch, keyed by the module id the launcher shows
+    /// (e.g. <c>"Bannerlord.Diplomacy"</c>). A module the operator does not list is integrated
+    /// normally when it is installed — the map only ever turns something OFF. That polarity is
+    /// deliberate: an operator file written before this key existed, and a protobuf message that
+    /// omits the empty collection, both have to keep meaning "behave as before".
+    /// <para>
+    /// Server-authoritative: the host's decision travels to every client inside
+    /// <see cref="ModOptions"/> and is covered by the configuration digest.
+    /// </para>
+    /// </summary>
+    public Dictionary<string, bool> WorkshopModules { get; set; } = new Dictionary<string, bool>();
+
     [JsonExtensionData]
     public IDictionary<string, JToken> UnknownKeys { get; set; }
 }

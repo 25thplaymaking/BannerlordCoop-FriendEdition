@@ -69,6 +69,33 @@ public readonly struct ModOptions
     [ProtoMember(18)]
     public readonly SeparatismOptions Separatism { get; } = new SeparatismOptions(new SeparatismOptionsData());
 
+    /// <summary>
+    /// Workshop module ids the host switched off, sorted and de-duplicated. A deny list rather than
+    /// an allow list, because protobuf omits an empty collection and a receiver that starts zeroed
+    /// must land on "integrate every installed module", which is what every peer did before this
+    /// option existed. See <see cref="ModOptionsData.WorkshopModules"/>.
+    /// </summary>
+    [ProtoMember(19)]
+    public readonly string[] DisabledWorkshopModules { get; } = System.Array.Empty<string>();
+
+    /// <summary>
+    /// Whether the host wants Coop to integrate a Workshop module. Unknown ids are enabled: the map
+    /// can only take something away.
+    /// </summary>
+    public bool IsWorkshopModuleEnabled(string moduleId)
+    {
+        if (string.IsNullOrEmpty(moduleId)) return false;
+        string[] disabled = DisabledWorkshopModules;
+        if (disabled == null) return true;
+
+        foreach (string entry in disabled)
+        {
+            if (string.Equals(entry, moduleId, System.StringComparison.OrdinalIgnoreCase)) return false;
+        }
+
+        return true;
+    }
+
     public ModOptions(ModOptionsData modOptionsData)
     {
         FastForwardEnabled = modOptionsData.FastForwardEnabled ?? FastForwardEnabled;
@@ -89,6 +116,28 @@ public readonly struct ModOptions
         EnableHeroExecutions = modOptionsData.EnableHeroExecutions ?? EnableHeroExecutions;
         EnablePlayerClanMemberExecutions = modOptionsData.EnablePlayerClanMemberExecutions ?? EnablePlayerClanMemberExecutions;
         Separatism = new SeparatismOptions(modOptionsData.Separatism ?? new SeparatismOptionsData());
+        DisabledWorkshopModules = ResolveDisabledWorkshopModules(modOptionsData.WorkshopModules);
+    }
+
+    /// <summary>Sorted so the configuration digest is stable across two files that differ only in
+    /// key order, and case-insensitively de-duplicated so it stays stable across spelling too.</summary>
+    private static string[] ResolveDisabledWorkshopModules(
+        System.Collections.Generic.IDictionary<string, bool> workshopModules)
+    {
+        if (workshopModules == null || workshopModules.Count == 0) return System.Array.Empty<string>();
+
+        var disabled = new System.Collections.Generic.SortedSet<string>(
+            System.StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in workshopModules)
+        {
+            if (!entry.Value && !string.IsNullOrWhiteSpace(entry.Key)) disabled.Add(entry.Key.Trim());
+        }
+
+        if (disabled.Count == 0) return System.Array.Empty<string>();
+
+        var result = new string[disabled.Count];
+        disabled.CopyTo(result);
+        return result;
     }
 }
 

@@ -4,6 +4,7 @@ using Common.Messaging;
 using Common.Network;
 using GameInterface.Registry.Messages;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.WorkshopMods.Core;
 using HarmonyLib;
 using LiteNetLib;
 using Serilog;
@@ -161,11 +162,17 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                 }
 
                 FourberieHarmonyIsolation.AssertOnlyAdapterGuards(expected, harmony.Id);
-                var modulePatches = FourberieHarmonyIsolation.DescribeAssemblyPatches(assembly).ToArray();
-                if (modulePatches.Length != 0)
+                // See HarmonyPatchInfoStabilizer for why this reads Harmony's inventory more than once
+                // before failing closed: an unretried misread here aborts Coop startup outright, and
+                // PurgeAndAssertAuditedSurface has already proved this surface empty a few lines above
+                // with a retried remove-and-verify cycle inside the same lock.
+                if (!HarmonyPatchInfoStabilizer.StabilizeUntilAcceptable(
+                        () => !FourberieHarmonyIsolation.DescribeAssemblyPatches(assembly).Any()))
+                {
                     throw new InvalidOperationException(
                         "Fourberie assembly-owned Harmony patches appeared while installing Coop guards: " +
-                        string.Join("; ", modulePatches));
+                        string.Join("; ", FourberieHarmonyIsolation.DescribeAssemblyPatches(assembly)));
+                }
 
                 patchedAssembly = assembly;
             }

@@ -26,34 +26,52 @@ internal static class FourberieHarmonyIsolation
         if (unpatcher == null) throw new ArgumentNullException(nameof(unpatcher));
         if (rejectedSurface != null) throw new InvalidOperationException(rejectedSurface);
 
+        // See HarmonyPatchInfoStabilizer for why this retries the whole scan-then-unpatch-then-verify
+        // cycle rather than reading Harmony's inventory once. This guard is structurally identical to
+        // PlayerSettlementHarmonyIsolation.RemoveModulePatches — it unpatches by the PatchMethod
+        // HarmonyLib hands back from GetPatchInfo, and that value has been observed to transiently
+        // deserialize to the wrong MethodInfo, which both misdirects the Unpatch and can make the
+        // verification below report a patch that is not there. Retrying matters more here than
+        // anywhere else: rejectedSurface LATCHES for the life of the process, so one unretried
+        // misread would reject Fourberie permanently for the session.
         var unknown = new List<string>();
         var removed = 0;
-        foreach (var original in Harmony.GetAllPatchedMethods().ToArray())
+        var clean = HarmonyPatchInfoStabilizer.StabilizeUntilAcceptable(() =>
         {
-            var patches = Harmony.GetPatchInfo(original);
-            if (patches == null) continue;
-
-            foreach (var item in Enumerate(patches).ToArray())
+            foreach (var original in Harmony.GetAllPatchedMethods().ToArray())
             {
-                var patch = item.Patch;
-                if (!IsAttributableToApprovedModule(patch, fourberieAssembly)) continue;
+                var patches = Harmony.GetPatchInfo(original);
+                if (patches == null) continue;
 
-                var identity = Describe(original, item.Kind, patch);
-                // The approved binary declares no Harmony surface. Retain the explicit catalog so
-                // a later supported digest must name every owner/original/patch method before it
-                // can be accepted here.
-                if (!AuditedPatchIdentities.Contains(identity, StringComparer.Ordinal) ||
-                    !AuditedOwnerIds.Contains(patch.owner, StringComparer.Ordinal))
-                    unknown.Add(identity);
+                foreach (var item in Enumerate(patches).ToArray())
+                {
+                    var patch = item.Patch;
+                    if (!IsAttributableToApprovedModule(patch, fourberieAssembly)) continue;
 
-                unpatcher.Unpatch(original, patch.PatchMethod);
-                removed++;
+                    var identity = Describe(original, item.Kind, patch);
+                    // The approved binary declares no Harmony surface. Retain the explicit catalog so
+                    // a later supported digest must name every owner/original/patch method before it
+                    // can be accepted here.
+                    //
+                    // This list accumulates across retries instead of being rebuilt per pass: a real
+                    // undeclared patch is removed by the pass that finds it, so a later clean pass
+                    // must not erase the finding that already tainted this process.
+                    if ((!AuditedPatchIdentities.Contains(identity, StringComparer.Ordinal) ||
+                         !AuditedOwnerIds.Contains(patch.owner, StringComparer.Ordinal)) &&
+                        !unknown.Contains(identity, StringComparer.Ordinal))
+                        unknown.Add(identity);
+
+                    unpatcher.Unpatch(original, patch.PatchMethod);
+                    removed++;
+                }
             }
-        }
 
-        var remaining = DescribeAssemblyPatches(fourberieAssembly).ToArray();
-        if (remaining.Length != 0)
+            return !DescribeAssemblyPatches(fourberieAssembly).Any();
+        });
+
+        if (!clean)
         {
+            var remaining = DescribeAssemblyPatches(fourberieAssembly).ToArray();
             rejectedSurface =
                 "Fourberie failed closed: assembly-owned Harmony patches remain after purge: " +
                 string.Join("; ", remaining);

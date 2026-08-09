@@ -429,6 +429,13 @@ public static class ModConfigSnapshotCodec
         Append(text, o.EnableHeroExecutions);
         Append(text, o.EnablePlayerClanMemberExecutions);
 
+        // Which Workshop modules the host integrates decides which Harmony adapters and sync
+        // registrations exist on each peer, so it belongs in the digest exactly like any other
+        // option. ModOptions sorts and de-duplicates the list, so this is order-stable.
+        string[] disabledModules = o.DisabledWorkshopModules ?? Array.Empty<string>();
+        Append(text, disabledModules.Length);
+        foreach (string moduleId in disabledModules) Append(text, moduleId);
+
         SeparatismOptions s = o.Separatism;
         Append(text, s.Enabled);
         Append(text, s.ChaosStartEnabled);

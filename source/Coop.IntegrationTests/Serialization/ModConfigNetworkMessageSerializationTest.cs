@@ -123,6 +123,65 @@ namespace Coop.IntegrationTests.Serialization
             Assert.True(ModConfigSnapshotCodec.TryValidate(envelope, out var failure), failure);
         }
 
+        /// <summary>
+        /// The Workshop module deny list is the only collection member on <see cref="ModOptions"/>,
+        /// and it is the member whose polarity the wire decides: protobuf omits an empty repeated
+        /// field, so a receiver that starts zeroed has to land on "integrate every installed module"
+        /// — what every peer did before the key existed. An allow list would have inverted that and
+        /// silently dropped every Workshop adapter on an older or minimal host file.
+        /// </summary>
+        [Fact]
+        public void NetworkLoadModConfig_RoundTrips_DisabledWorkshopModules()
+        {
+            var options = new ModOptions(new ModOptionsData
+            {
+                WorkshopModules = new Dictionary<string, bool>
+                {
+                    ["Bannerlord.Diplomacy"] = false,
+                    ["ImprovedGarrisons"] = true,
+                },
+            });
+
+            var envelope = RoundTrip(new NetworkLoadModConfig(Snapshot(options))).Snapshot;
+            var copy = envelope.ModOptions;
+
+            Assert.Equal(new[] { "Bannerlord.Diplomacy" }, copy.DisabledWorkshopModules);
+            Assert.False(copy.IsWorkshopModuleEnabled("Bannerlord.Diplomacy"));
+            Assert.True(copy.IsWorkshopModuleEnabled("ImprovedGarrisons"));
+            Assert.True(ModConfigSnapshotCodec.TryValidate(envelope, out var failure), failure);
+        }
+
+        /// <summary>The same through the constructor-building model Wine-Mono clients are forced onto.</summary>
+        [Fact]
+        public void NetworkLoadModConfig_RoundTrips_DisabledWorkshopModules_WhenModelUsesTheConstructor()
+        {
+            var model = RuntimeTypeModel.Create();
+            model.Add(typeof(SeparatismOptions), applyDefaultBehaviour: true).UseConstructor = true;
+            model.Add(typeof(ModOptions), applyDefaultBehaviour: true).UseConstructor = true;
+            model.Add(typeof(ModConfigSnapshot), applyDefaultBehaviour: true);
+            model.Add(typeof(NetworkLoadModConfig), applyDefaultBehaviour: true).UseConstructor = true;
+
+            var options = new ModOptions(new ModOptionsData
+            {
+                WorkshopModules = new Dictionary<string, bool> { ["Bannerlord.Diplomacy"] = false },
+            });
+
+            var copy = RoundTrip(new NetworkLoadModConfig(Snapshot(options)), model).Snapshot.ModOptions;
+
+            Assert.Equal(new[] { "Bannerlord.Diplomacy" }, copy.DisabledWorkshopModules);
+            Assert.False(copy.IsWorkshopModuleEnabled("Bannerlord.Diplomacy"));
+        }
+
+        /// <summary>A host that says nothing about Workshop modules integrates all of them.</summary>
+        [Fact]
+        public void NetworkLoadModConfig_WithNoDisabledModules_ArrivesWithEveryModuleEnabled()
+        {
+            var copy = RoundTrip(new NetworkLoadModConfig(Snapshot(AllOptionsOff()))).Snapshot.ModOptions;
+
+            Assert.Empty(copy.DisabledWorkshopModules ?? System.Array.Empty<string>());
+            Assert.True(copy.IsWorkshopModuleEnabled("Bannerlord.Diplomacy"));
+        }
+
         private static ModConfigSnapshot Snapshot(ModOptions options) =>
             new("0123456789abcdef0123456789abcdef", 1, options, birthAndDeathEnabled: true);
 

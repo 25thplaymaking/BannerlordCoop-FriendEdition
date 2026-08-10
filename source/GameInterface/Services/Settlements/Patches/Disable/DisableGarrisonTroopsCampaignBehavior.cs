@@ -8,7 +8,6 @@ using TaleWorlds.CampaignSystem.Settlements;
 
 namespace GameInterface.Services.Settlements.Patches.Disable;
 
-
 [HarmonyPatch(typeof(GarrisonTroopsCampaignBehavior))]
 internal class DisableGarrisonTroopsCampaignBehavior
 {

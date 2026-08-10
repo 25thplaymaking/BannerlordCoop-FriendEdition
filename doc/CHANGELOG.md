@@ -1,6 +1,44 @@
 # Friend Edition Changelog
 
-## 2026-08-10 — workshop6 (current): join fixed (PlayerSettlement pin)
+## 2026-08-10 — workshop7 (current): per-role activation
+
+**Supersedes workshop6**, whose all-seventeen-active policy crashes clients
+while loading into the server.
+
+### What changed and why
+
+Loading into the server crashed clients with a native access violation while
+initialising the transferred world. The cause was an asymmetry, not a bug in
+any one mod: the client was running four campaign-mutating modules that the
+host was not running at all, so the two sides did not agree on the world's
+objects.
+
+I then tested whether the host could run them. **It cannot, and the wall is
+specific: the headless dedicated build cannot initialise Bannerlord.ButterLib.**
+Verified live three ways — plain client-binary copy, de-duplicating the eight
+Serilog/System assemblies ButterLib ships at different versions than Coop's,
+and seeding the shared dependencies into the root bin so they resolve before
+Coop loads. It dies loading `Bannerlord.ButterLib.dll` every time. Diplomacy,
+ImprovedGarrisons, Fourberie and PlayerSettlement all depend on ButterLib.
+
+### Activation is now per role
+
+| Module | Host | Client |
+| --- | --- | --- |
+| Bannerlord.Harmony | active | active |
+| ButterLib, UIExtenderEx, MBOptionScreen | inactive | active |
+| RBM, DismembermentPlus, UnblockableThrust | inactive | active |
+| ImprovedGarrisons, Fourberie, Diplomacy, PlayerSettlement | inactive | inactive |
+
+Combat and visual modules create no campaign objects, so they run where they
+are felt and the host stays authoritative over the world. The four campaign
+modules stay packaged, hash-pinned and handshake-verified — enabling them later
+is a catalog change, not a repackage — but they stay off on **both** roles,
+because client-side-only campaign mods are exactly what crashed the load.
+
+Commit `9a9db6751`; 259 unit tests green; installer validate-mode passes.
+
+## 2026-08-10 — workshop6 (superseded): join fixed (PlayerSettlement pin)
 
 **Client package:** `FriendEdition-WorkshopSuite-workshop6.zip` — SHA-256
 `c238782e4632df1eb6d7e3c569eb8185dc28ec52e71c145648e163e1d656d6fb`.

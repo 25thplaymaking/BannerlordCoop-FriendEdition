@@ -1,6 +1,37 @@
 # Friend Edition Changelog
 
-## 2026-08-10 — workshop5 (current): all seventeen modules active
+## 2026-08-10 — workshop6 (current): join fixed (PlayerSettlement pin)
+
+**Client package:** `FriendEdition-WorkshopSuite-workshop6.zip` — SHA-256
+`c238782e4632df1eb6d7e3c569eb8185dc28ec52e71c145648e163e1d656d6fb`.
+On the server as `BannerlordCoop-FriendEdition-2026-08-10-workshop6-WorkshopSuite.zip`.
+**Supersedes workshop5, whose receipt refuses every join.**
+
+### Fixed
+
+- **"Server/Client loads an unmanaged copy of 'PlayerSettlement'" — every
+  join refused.** The installed files were correct on both peers; the
+  *pin* was wrong. The suite builder ordered each module's hash lines with
+  PowerShell's `Sort-Object -CaseSensitive`, which is culture-aware, while
+  the runtime hasher orders with `StringComparer.Ordinal`. For ten of the
+  eleven modules those orders coincide — PlayerSettlement's file names
+  diverge, so its pinned configuration hash was one the game could never
+  reproduce. It stayed invisible while the module was staged-inactive
+  (inactive modules advertise their pins without re-hashing) and surfaced
+  the instant it was activated. Builder now sorts ordinally for both the
+  module digests and the receipt digest; the receipt's PlayerSettlement
+  entry is corrected and its digest recomputed (commit `ec5b60013`).
+  A culture-dependent pin was also a latent cross-machine bug — two
+  builders in different locales could disagree.
+- Discovery now logs *which* condition made a component count as unmanaged
+  (receipt entry / version / managed path), so this class of refusal is
+  self-explaining instead of needing a live bisection.
+
+Verified: all eleven modules re-hash to their pins under the ordinal rule;
+server restarted with zero unmanaged reports; tooling suite passes;
+installer validate-mode passes against a real game install.
+
+## 2026-08-10 — workshop5 (superseded): all seventeen modules active
 
 **Client package:** `FriendEdition-WorkshopSuite-workshop5.zip` — SHA-256
 `3adce32dbdf7735ea354daf2d484fa4fbf89c602fa1a0aea32752054a53843a3`.

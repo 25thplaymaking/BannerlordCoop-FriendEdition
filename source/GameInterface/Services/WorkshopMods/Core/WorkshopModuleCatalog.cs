@@ -128,10 +128,14 @@ public sealed class FriendEditionWorkshopModuleCatalog : IWorkshopModuleCatalog
             WorkshopModuleRole.Mission, WorkshopCompatibilityProfile.DeterministicMission,
             featureActiveExpectedOnServer: true,
             featureActiveExpectedOnClient: true),
+        // PlayerSettlement v7.5.0 is packaged and hash-pinned but MUST stay inactive: on game
+        // build 1.4.7.117484 it crashes the client during startup even in plain singleplayer with
+        // only its own frameworks and no Coop (verified by bisection), and hangs startup when Coop
+        // is also active. This is upstream mod/game-version breakage, not a co-op limitation.
+        // Reactivate only after a PlayerSettlement build that boots on this game version is
+        // audited and re-pinned.
         new("PlayerSettlement", "3720376888", "6398100776119441137", "v7.5.0", 160,
-            WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign,
-            featureActiveExpectedOnServer: true,
-            featureActiveExpectedOnClient: true),
+            WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign),
     };
 
     private readonly IReadOnlyDictionary<string, WorkshopModuleExpectation> modulesById =

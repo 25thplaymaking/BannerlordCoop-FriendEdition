@@ -142,7 +142,7 @@ public class WorkshopManifestValidatorTests
     }
 
     [Fact]
-    public void FullyActiveSuite_IsAcceptedOnBothRoles()
+    public void CatalogActivationPolicy_IsAcceptedOnBothRoles()
     {
         WorkshopCompatibilityManifest server = ManifestFactory.Create(WorkshopPeerRole.Server);
         WorkshopCompatibilityManifest client = ManifestFactory.Create(WorkshopPeerRole.Client);
@@ -151,8 +151,16 @@ public class WorkshopManifestValidatorTests
 
         Assert.True(result.Matches, result.ToNetworkReason());
         Assert.Empty(result.Warnings);
-        Assert.All(server.Entries, entry => Assert.True(entry.Active));
-        Assert.All(client.Entries, entry => Assert.True(entry.Active));
+
+        // Everything runs except PlayerSettlement, which is pinned inactive because it crashes
+        // client startup on this game build (see the catalog).
+        var catalog = new FriendEditionWorkshopModuleCatalog();
+        foreach (WorkshopCompatibilityManifestEntry entry in server.Entries.Concat(client.Entries))
+        {
+            Assert.True(catalog.TryGet(entry.ModuleId, out WorkshopModuleExpectation expectation));
+            Assert.Equal(entry.ModuleId != "PlayerSettlement", entry.Active);
+            Assert.Equal(expectation.FeatureActiveExpectedOnServer, entry.Active);
+        }
     }
 
     [Fact]

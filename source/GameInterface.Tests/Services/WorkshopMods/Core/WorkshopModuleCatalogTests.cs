@@ -40,9 +40,21 @@ public class WorkshopModuleCatalogTests
             module.Profile == WorkshopCompatibilityProfile.ServerAuthoritativeCampaign));
 
         // The group runs the full modded experience: every bundled component is expected active
-        // on both peers, and the handshake byte-verifies each one every session.
-        Assert.All(modules, module => Assert.True(module.FeatureActiveExpectedOnServer));
-        Assert.All(modules, module => Assert.True(module.FeatureActiveExpectedOnClient));
+        // on both peers and byte-verified each session — except PlayerSettlement, which crashes
+        // client startup on game build 1.4.7.117484 even without Coop and is therefore pinned
+        // inactive until an upstream build that boots on this game version is audited.
+        Assert.All(
+            modules.Where(module => module.ModuleId != "PlayerSettlement"),
+            module =>
+            {
+                Assert.True(module.FeatureActiveExpectedOnServer);
+                Assert.True(module.FeatureActiveExpectedOnClient);
+            });
+
+        WorkshopModuleExpectation playerSettlement = Assert.Single(modules.Where(module =>
+            module.ModuleId == "PlayerSettlement"));
+        Assert.False(playerSettlement.FeatureActiveExpectedOnServer);
+        Assert.False(playerSettlement.FeatureActiveExpectedOnClient);
     }
 
     private static void AssertModule(

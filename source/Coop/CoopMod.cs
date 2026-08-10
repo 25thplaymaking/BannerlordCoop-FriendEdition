@@ -73,9 +73,13 @@ namespace Coop
             AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
             // The TaleWorlds watchdog is an attached debugger: a fatal exception is intercepted
             // and the process killed before UnhandledException (or a Serilog flush) can run, so
-            // startup fatals routinely die unrecorded. Capture Coop-originated exceptions at
-            // first chance, written synchronously beside the game executable.
-            AppDomain.CurrentDomain.FirstChanceException += OnFirstChanceException;
+            // startup fatals routinely die unrecorded. First-chance capture makes them visible,
+            // but it runs inside the throwing thread while the CLR may hold loader/JIT locks —
+            // during Harmony patching that deadlocked startup outright. It is therefore
+            // OPT-IN for a diagnostic session only: set COOP_DIAG_FIRSTCHANCE=1.
+            if (string.Equals(
+                    Environment.GetEnvironmentVariable("COOP_DIAG_FIRSTCHANCE"), "1", StringComparison.Ordinal))
+                AppDomain.CurrentDomain.FirstChanceException += OnFirstChanceException;
 
             // Constructors for every active submodule run before the OnSubModuleLoad pass. Validate
             // the canonical Harmony provider now and, if an operator deliberately activated the
@@ -675,7 +679,7 @@ namespace Coop
         private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
         {
             Exception ex = (Exception)e.ExceptionObject;
-            WriteFirstChanceRecord("UNHANDLED", ex, Environment.StackTrace);
+            WriteFirstChanceRecord("UNHANDLED", ex, ex?.StackTrace ?? string.Empty);
             Logger?.Fatal(ex, "Unhandled exception");
             Logger?.Fatal(ex.StackTrace);
             Serilog.Log.CloseAndFlush();
@@ -691,9 +695,10 @@ namespace Coop
             firstChanceReentry = true;
             try
             {
-                // Only record exceptions thrown from (or through) our own code; the engine and
-                // mods throw benign exceptions constantly.
-                string stack = Environment.StackTrace;
+                // Use the exception's own captured trace, never Environment.StackTrace: walking the
+                // live thread stack from inside a first-chance handler is what deadlocked startup
+                // while Harmony held CLR locks.
+                string stack = e.Exception?.StackTrace ?? string.Empty;
                 if (stack.IndexOf("GameInterface.", StringComparison.Ordinal) < 0 &&
                     stack.IndexOf("Coop.", StringComparison.Ordinal) < 0)
                     return;

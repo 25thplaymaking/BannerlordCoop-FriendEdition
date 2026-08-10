@@ -1,4 +1,6 @@
+using Common.Logging;
 using GameInterface.Services.Modules;
+using Serilog;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -52,6 +54,7 @@ public interface IWorkshopModuleDiscovery : IGameAbstraction
 public sealed class RuntimeWorkshopModuleDiscovery : IWorkshopModuleDiscovery
 {
     private const string CoopModuleId = "Coop";
+    private static readonly ILogger Logger = LogManager.GetLogger<RuntimeWorkshopModuleDiscovery>();
 
     private readonly IModuleInfoProvider moduleInfoProvider;
     private readonly IWorkshopModuleCatalog catalog;
@@ -95,10 +98,31 @@ public sealed class RuntimeWorkshopModuleDiscovery : IWorkshopModuleDiscovery
             {
                 string externalRoot = modulePathResolver(expectation.ModuleId);
                 WorkshopSuiteReceiptEntry receiptEntry = null;
-                bool managed = receipt != null &&
-                    receipt.TryGet(expectation.ModuleId, out receiptEntry) &&
-                    IsSameVersion(receiptEntry.Version, active.Version) &&
+                bool hasReceiptEntry = receipt != null &&
+                    receipt.TryGet(expectation.ModuleId, out receiptEntry);
+                bool versionMatches = hasReceiptEntry &&
+                    IsSameVersion(receiptEntry.Version, active.Version);
+                bool pathIsManaged =
                     IsManagedComponentPath(coopRoot, externalRoot, expectation.ModuleId);
+                bool managed = hasReceiptEntry && versionMatches && pathIsManaged;
+
+                // "Unmanaged copy" refuses the join, so record which specific condition failed;
+                // otherwise the message cannot be told apart from a genuinely modified install.
+                if (!managed)
+                {
+                    Logger.Warning(
+                        "'{ModuleId}' is not a managed component: receiptEntry={HasEntry} " +
+                        "versionMatch={VersionMatch} (receipt='{ReceiptVersion}' active='{ActiveVersion}') " +
+                        "managedPath={PathManaged} (component='{ComponentRoot}' coop='{CoopRoot}')",
+                        expectation.ModuleId,
+                        hasReceiptEntry,
+                        versionMatches,
+                        receiptEntry?.Version ?? "<none>",
+                        active.Version.ToString(),
+                        pathIsManaged,
+                        externalRoot ?? "<null>",
+                        coopRoot ?? "<null>");
+                }
                 result.Add(new WorkshopModuleRuntimeInfo(
                     expectation,
                     active.Version.ToString(),

@@ -1358,6 +1358,25 @@ function New-WorkshopSuitePlan {
     }
 }
 
+function Get-ReceiptDigest {
+    <#
+        .SYNOPSIS
+        Canonical receipt digest, byte-identical to WorkshopSuiteReceipt.ComputeDigest.
+
+        .DESCRIPTION
+        The runtime orders records by module id with StringComparer.OrdinalIgnoreCase. Each line
+        already begins with the lowercased module id, so sorting the lines ordinally reproduces
+        that order. Sort-Object -CaseSensitive must not be used here: it is culture-aware and can
+        order differently from the runtime, producing a digest the game rejects.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][System.Collections.Generic.List[string]]$ReceiptLines)
+
+    $ordered = [System.Collections.Generic.List[string]]::new($ReceiptLines)
+    $ordered.Sort([System.StringComparer]::Ordinal)
+    return Get-StringSha256 -Text ($ordered -join "`n")
+}
+
 function Get-ManagedModuleDigests {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][object[]]$Files)
@@ -1375,8 +1394,14 @@ function Get-ManagedModuleDigests {
         $line = "$path|$($file.Length)|$($file.Sha256.ToLowerInvariant())"
         if ($extension -in $configurationExtensions) { $configurationLines.Add($line) } else { $contentLines.Add($line) }
     }
-    $content = @($contentLines | Sort-Object -CaseSensitive) -join "`n"
-    $configuration = @($configurationLines | Sort-Object -CaseSensitive) -join "`n"
+    # Sort ORDINALLY, exactly like the runtime hasher (StringComparer.Ordinal). Sort-Object
+    # -CaseSensitive is culture-aware: for most modules its order coincides with ordinal, but
+    # PlayerSettlement's file names diverge, which produced a pinned configuration hash the
+    # runtime could never reproduce and refused every join as an "unmanaged copy".
+    $contentLines.Sort([System.StringComparer]::Ordinal)
+    $configurationLines.Sort([System.StringComparer]::Ordinal)
+    $content = $contentLines -join "`n"
+    $configuration = $configurationLines -join "`n"
     return [pscustomobject]@{
         ContentSha256 = Get-StringSha256 -Text $content
         ConfigurationSha256 = Get-StringSha256 -Text $configuration
@@ -1407,7 +1432,7 @@ function New-ManagedSuiteReceipt {
         schemaVersion = 1
         suiteId = [string]$Plan.Manifest.suite.id
         moduleCount = $records.Count
-        receiptSha256 = Get-StringSha256 -Text ((@($receiptLines | Sort-Object -CaseSensitive)) -join "`n")
+        receiptSha256 = Get-ReceiptDigest -ReceiptLines $receiptLines
         modules = $records.ToArray()
     }
     return [pscustomobject]@{ Record = $receipt; Json = ($receipt | ConvertTo-Json -Depth 20) }
@@ -1776,7 +1801,7 @@ function Test-WorkshopSuite {
         }
         $receiptLines.Add("$(([string]$entry.moduleId).ToLowerInvariant())|$($entry.workshopId)|$($entry.steamManifestId)|$($entry.version)|$($entry.loadOrder)|$($entry.contentSha256)|$($entry.configurationSha256)")
     }
-    $calculatedReceipt = Get-StringSha256 -Text ((@($receiptLines | Sort-Object -CaseSensitive)) -join "`n")
+    $calculatedReceipt = Get-ReceiptDigest -ReceiptLines $receiptLines
     if ($calculatedReceipt -cne [string]$managed.receiptSha256) {
         throw 'Managed Workshop receipt SHA-256 does not match its canonical module records.'
     }

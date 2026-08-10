@@ -40,7 +40,7 @@ public sealed class FrameworkCompatibilityTests
             FrameworkCompatibilityBootstrap.DetermineActivationState(
                 new[] { "0Harmony", "Coop" }, required));
         Assert.Equal(
-            FrameworkActivationState.ActiveExactBlocked,
+            FrameworkActivationState.ActiveExact,
             FrameworkCompatibilityBootstrap.DetermineActivationState(
                 new[] { "Butter", "UIExtender", "MCM" }, required));
 
@@ -212,9 +212,12 @@ public sealed class FrameworkCompatibilityTests
     }
 
     [Fact]
-    public void ActiveFrameworkCohort_IsExplicitlyBlockedAndInventoriesNonDisableableButterSubsystems()
+    public void ActiveFrameworkCohort_IsAllowedUnderTheAllModsPolicy()
     {
-        Assert.False(FrameworkCompatibilityManifest.OptionalFrameworkActivationAllowed);
+        // The group runs the full modded experience: an active, byte-exact framework cohort is
+        // the production state. Partial activation remains rejected (covered above) and the
+        // subsystem inventory stays pinned for reference.
+        Assert.True(FrameworkCompatibilityManifest.OptionalFrameworkActivationAllowed);
         Assert.Contains(
             "Bannerlord.ButterLib.DelayedSubModule.DelayedSubModuleSubSystem",
             FrameworkCompatibilityManifest.ButterSubsystemTypes);

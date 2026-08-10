@@ -6,7 +6,7 @@ namespace GameInterface.Services.WorkshopMods.Frameworks;
 internal enum FrameworkActivationState
 {
     StagedInactive,
-    ActiveExactBlocked,
+    ActiveExact,
 }
 
 internal sealed class FrameworkAssemblyExpectation
@@ -60,15 +60,16 @@ internal sealed class FrameworkMethodExpectation
 
 /// <summary>
 /// Exact, source-audited executable surface for the Friend Edition dependency-framework bundle.
-/// The distributable stages ButterLib/UIExtenderEx/MCM but does not activate them. If an operator
-/// deliberately activates that cohort, every assembly and every lifecycle guard target must match
-/// this manifest so reversible state can be contained before hardened Coop aborts startup.
+/// The distributable activates ButterLib/UIExtenderEx/MCM on every peer — the group runs the
+/// full modded experience — so the boundary's job is byte-exact admission: every framework
+/// assembly must match this manifest before hardened Coop lets it run. Partial cohorts are
+/// still refused; the audited binaries then run unmodified.
 /// </summary>
 internal static class FrameworkCompatibilityManifest
 {
     internal const string AdapterHarmonyId = "Bannerlord.Coop.Workshop.FrameworkBoundary";
-    internal const string PolicyRevision = "framework-boundary-v1";
-    internal const bool OptionalFrameworkActivationAllowed = false;
+    internal const string PolicyRevision = "framework-boundary-v2-active";
+    internal const bool OptionalFrameworkActivationAllowed = true;
 
     internal static IReadOnlyList<FrameworkAssemblyExpectation> Assemblies { get; } =
         new[]

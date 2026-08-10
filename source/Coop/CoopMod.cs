@@ -71,6 +71,11 @@ namespace Coop
             MBDebug.DisableLogging = false;
 
             AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+            // The TaleWorlds watchdog is an attached debugger: a fatal exception is intercepted
+            // and the process killed before UnhandledException (or a Serilog flush) can run, so
+            // startup fatals routinely die unrecorded. Capture Coop-originated exceptions at
+            // first chance, written synchronously beside the game executable.
+            AppDomain.CurrentDomain.FirstChanceException += OnFirstChanceException;
 
             // Constructors for every active submodule run before the OnSubModuleLoad pass. Validate
             // the canonical Harmony provider now and, if an operator deliberately activated the
@@ -416,9 +421,9 @@ namespace Coop
 
         public override void NoHarmonyLoad()
         {
-            // ButterLib/UIExtenderEx/MCM normally remain staged-inactive. If they were explicitly
-            // activated, all earlier framework OnSubModuleLoad hooks have now run; purge/assert their
-            // original patches and guard every later lifecycle/settings mutation before continuing.
+            // All earlier framework OnSubModuleLoad hooks have now run. Byte-verify the active
+            // ButterLib/UIExtenderEx/MCM cohort against the audited manifest; verified frameworks
+            // then run unmodified (the group runs the full modded experience).
             FrameworkCompatibilityBootstrap.CompleteAfterOptionalModuleLoad();
 
             Coop = new CoopartiveMultiplayerExperience(isServer, CrashDiagnostics.SetPhase);
@@ -670,9 +675,54 @@ namespace Coop
         private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
         {
             Exception ex = (Exception)e.ExceptionObject;
+            WriteFirstChanceRecord("UNHANDLED", ex, Environment.StackTrace);
             Logger?.Fatal(ex, "Unhandled exception");
             Logger?.Fatal(ex.StackTrace);
             Serilog.Log.CloseAndFlush();
+        }
+
+        private const long FirstChanceLogMaximumBytes = 2L * 1024 * 1024;
+        [ThreadStatic] private static bool firstChanceReentry;
+
+        private static void OnFirstChanceException(
+            object sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs e)
+        {
+            if (firstChanceReentry) return;
+            firstChanceReentry = true;
+            try
+            {
+                // Only record exceptions thrown from (or through) our own code; the engine and
+                // mods throw benign exceptions constantly.
+                string stack = Environment.StackTrace;
+                if (stack.IndexOf("GameInterface.", StringComparison.Ordinal) < 0 &&
+                    stack.IndexOf("Coop.", StringComparison.Ordinal) < 0)
+                    return;
+                WriteFirstChanceRecord("FIRST-CHANCE", e.Exception, stack);
+            }
+            catch
+            {
+                // A diagnostics failure must never alter control flow.
+            }
+            finally
+            {
+                firstChanceReentry = false;
+            }
+        }
+
+        private static void WriteFirstChanceRecord(string kind, Exception exception, string stack)
+        {
+            try
+            {
+                string path = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Coop_firstchance.log");
+                var file = new FileInfo(path);
+                if (file.Exists && file.Length > FirstChanceLogMaximumBytes) return;
+                File.AppendAllText(path,
+                    $"[{DateTime.Now:O}] {kind}: {exception}{Environment.NewLine}" +
+                    $"--- handler stack ---{Environment.NewLine}{stack}{Environment.NewLine}{Environment.NewLine}");
+            }
+            catch
+            {
+            }
         }
 
         internal static void JoinWindow()

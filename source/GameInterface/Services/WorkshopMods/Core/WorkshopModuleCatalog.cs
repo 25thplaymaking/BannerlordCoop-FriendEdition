@@ -39,8 +39,10 @@ public sealed class WorkshopModuleExpectation
         WorkshopModuleRole role,
         WorkshopCompatibilityProfile profile,
         bool featureActiveExpectedOnServer = false,
-        bool featureActiveExpectedOnClient = false)
+        bool featureActiveExpectedOnClient = false,
+        bool loadsBeforeCoop = false)
     {
+        LoadsBeforeCoop = loadsBeforeCoop;
         ModuleId = moduleId ?? throw new ArgumentNullException(nameof(moduleId));
         WorkshopId = workshopId ?? throw new ArgumentNullException(nameof(workshopId));
         SteamManifestId = steamManifestId ?? throw new ArgumentNullException(nameof(steamManifestId));
@@ -67,6 +69,15 @@ public sealed class WorkshopModuleExpectation
     /// </summary>
     public bool FeatureActiveExpectedOnServer { get; }
     public bool FeatureActiveExpectedOnClient { get; }
+
+    /// <summary>
+    /// True when this component must be activated AFTER the native modules but BEFORE Coop,
+    /// instead of the usual after-Coop slot. Coop's adapter for such a component purges and
+    /// re-guards the component's module-load Harmony patches, which requires those patches to
+    /// already exist when Coop's container is built. Loading it after Coop instead deadlocks or
+    /// crashes client startup (verified live for PlayerSettlement).
+    /// </summary>
+    public bool LoadsBeforeCoop { get; }
 }
 
 public interface IWorkshopModuleCatalog
@@ -128,14 +139,14 @@ public sealed class FriendEditionWorkshopModuleCatalog : IWorkshopModuleCatalog
             WorkshopModuleRole.Mission, WorkshopCompatibilityProfile.DeterministicMission,
             featureActiveExpectedOnServer: true,
             featureActiveExpectedOnClient: true),
-        // PlayerSettlement v7.5.0 is packaged and hash-pinned but MUST stay inactive: on game
-        // build 1.4.7.117484 it crashes the client during startup even in plain singleplayer with
-        // only its own frameworks and no Coop (verified by bisection), and hangs startup when Coop
-        // is also active. This is upstream mod/game-version breakage, not a co-op limitation.
-        // Reactivate only after a PlayerSettlement build that boots on this game version is
-        // audited and re-pinned.
+        // PlayerSettlement must load BEFORE Coop: its co-op adapter purges and re-guards the
+        // module's load-time Harmony patches, so those patches have to exist by the time Coop's
+        // container is built. Activating it after Coop deadlocks or crashes client startup.
         new("PlayerSettlement", "3720376888", "6398100776119441137", "v7.5.0", 160,
-            WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign),
+            WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign,
+            featureActiveExpectedOnServer: true,
+            featureActiveExpectedOnClient: true,
+            loadsBeforeCoop: true),
     };
 
     private readonly IReadOnlyDictionary<string, WorkshopModuleExpectation> modulesById =

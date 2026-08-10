@@ -53,19 +53,7 @@ public sealed class WorkshopSuiteReceiptTests : IDisposable
     public void RuntimeDiscovery_AcceptsManagedSeparateModules_AndTracksInactiveVisualPackage()
     {
         WorkshopSuiteReceipt receipt = CreateReceipt();
-        var active = catalog.Modules
-            .Where(module => module.Role == WorkshopModuleRole.Framework)
-            .Select(ToModuleInfo)
-            .Concat(new[]
-            {
-                new ModuleInfo("Native", true, false, ApplicationVersion.FromString("v1.4.3")),
-                new ModuleInfo("Coop", false, false, ApplicationVersion.FromString("v0.1.0")),
-            })
-            .Concat(catalog.Modules
-                .Where(module => module.Role != WorkshopModuleRole.Framework &&
-                                 module.ModuleId != "DismembermentPlus")
-                .Select(ToModuleInfo))
-            .ToArray();
+        ModuleInfo[] active = ActiveOrder(exclude: "DismembermentPlus");
         var discovery = new RuntimeWorkshopModuleDiscovery(
             new FakeModuleInfoProvider(active),
             catalog,
@@ -105,24 +93,36 @@ public sealed class WorkshopSuiteReceiptTests : IDisposable
         Assert.All(discovery.Discover(), module => Assert.False(module.ActivationOrderValid));
     }
 
+    /// <summary>
+    /// PlayerSettlement's adapter re-guards the module's load-time Harmony patches, so the module
+    /// must be activated before Coop. Activating it in the usual after-Coop slot deadlocks client
+    /// startup, so discovery must report that arrangement as an invalid activation order.
+    /// </summary>
+    [Fact]
+    public void RuntimeDiscovery_RejectsPreCoopComponentPlacedAfterCoop()
+    {
+        WorkshopSuiteReceipt receipt = CreateReceipt();
+        ModuleInfo[] afterCoop = ActiveOrder()
+            .Where(module => module.Id != "PlayerSettlement")
+            .Concat(new[] { ToModuleInfo(
+                catalog.Modules.Single(module => module.ModuleId == "PlayerSettlement")) })
+            .ToArray();
+        var discovery = new RuntimeWorkshopModuleDiscovery(
+            new FakeModuleInfoProvider(afterCoop),
+            catalog,
+            moduleId => Path.Combine(root, moduleId),
+            new FakeReceiptProvider(receipt));
+
+        Assert.All(discovery.Discover(), module => Assert.False(module.ActivationOrderValid));
+    }
+
     [Fact]
     public void RuntimeDiscovery_RejectsIdenticalExternalWorkshopCopyAsUnmanaged()
     {
         WorkshopSuiteReceipt receipt = CreateReceipt();
         string externalRoot = Path.Combine(root, "external-workshop", "RBM");
         Directory.CreateDirectory(externalRoot);
-        var active = catalog.Modules
-            .Where(module => module.Role == WorkshopModuleRole.Framework)
-            .Select(ToModuleInfo)
-            .Concat(new[]
-            {
-                new ModuleInfo("Native", true, false, ApplicationVersion.FromString("v1.4.3")),
-                new ModuleInfo("Coop", false, false, ApplicationVersion.FromString("v0.1.0")),
-            })
-            .Concat(catalog.Modules
-                .Where(module => module.Role != WorkshopModuleRole.Framework)
-                .Select(ToModuleInfo))
-            .ToArray();
+        ModuleInfo[] active = ActiveOrder();
         var discovery = new RuntimeWorkshopModuleDiscovery(
             new FakeModuleInfoProvider(active),
             catalog,
@@ -161,6 +161,30 @@ public sealed class WorkshopSuiteReceiptTests : IDisposable
 
     private static ModuleInfo ToModuleInfo(WorkshopModuleExpectation module) =>
         new(module.ModuleId, false, false, ApplicationVersion.FromString(module.Version));
+
+    /// <summary>
+    /// The production activation order: frameworks, Native, the components that must precede Coop
+    /// (PlayerSettlement), Coop, then the remaining managed components.
+    /// </summary>
+    private ModuleInfo[] ActiveOrder(string exclude = null)
+    {
+        var modules = catalog.Modules.Where(module => module.ModuleId != exclude).ToArray();
+        return modules
+            .Where(module => module.Role == WorkshopModuleRole.Framework)
+            .OrderBy(module => module.LoadOrder)
+            .Select(ToModuleInfo)
+            .Concat(new[] { new ModuleInfo("Native", true, false, ApplicationVersion.FromString("v1.4.3")) })
+            .Concat(modules
+                .Where(module => module.Role != WorkshopModuleRole.Framework && module.LoadsBeforeCoop)
+                .OrderBy(module => module.LoadOrder)
+                .Select(ToModuleInfo))
+            .Concat(new[] { new ModuleInfo("Coop", false, false, ApplicationVersion.FromString("v0.1.0")) })
+            .Concat(modules
+                .Where(module => module.Role != WorkshopModuleRole.Framework && !module.LoadsBeforeCoop)
+                .OrderBy(module => module.LoadOrder)
+                .Select(ToModuleInfo))
+            .ToArray();
+    }
 
     private sealed class FakeModuleInfoProvider : IModuleInfoProvider
     {

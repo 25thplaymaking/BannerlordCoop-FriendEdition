@@ -76,9 +76,12 @@ namespace Coop
             // startup fatals routinely die unrecorded. First-chance capture makes them visible,
             // but it runs inside the throwing thread while the CLR may hold loader/JIT locks —
             // during Harmony patching that deadlocked startup outright. It is therefore
-            // OPT-IN for a diagnostic session only: set COOP_DIAG_FIRSTCHANCE=1.
+            // OPT-IN for a diagnostic session only: set COOP_DIAG_FIRSTCHANCE=1, or drop a file
+            // named coop-diag.on beside the game executable (the file trigger survives launchers
+            // that do not forward environment variables).
             if (string.Equals(
-                    Environment.GetEnvironmentVariable("COOP_DIAG_FIRSTCHANCE"), "1", StringComparison.Ordinal))
+                    Environment.GetEnvironmentVariable("COOP_DIAG_FIRSTCHANCE"), "1", StringComparison.Ordinal) ||
+                File.Exists(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "coop-diag.on")))
                 AppDomain.CurrentDomain.FirstChanceException += OnFirstChanceException;
 
             // Constructors for every active submodule run before the OnSubModuleLoad pass. Validate

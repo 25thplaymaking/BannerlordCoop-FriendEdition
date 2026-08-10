@@ -146,9 +146,20 @@ public sealed class RuntimeWorkshopModuleDiscovery : IWorkshopModuleDiscovery
         string[] actualManagedOrder = activeIds
             .Where(id => catalog.TryGet(id, out _))
             .ToArray();
-        string[] expectedManagedOrder = catalog.Modules
-            .OrderBy(module => module.LoadOrder)
+
+        // Managed components occupy two slots around Coop: everything that must be loaded before
+        // Coop (frameworks, plus adapters that re-guard a module's load-time patches) and
+        // everything that loads after it. Each group keeps its pinned relative LoadOrder.
+        bool BeforeCoop(WorkshopModuleExpectation module) =>
+            module.Role == WorkshopModuleRole.Framework || module.LoadsBeforeCoop;
+
+        var activeCatalogModules = catalog.Modules
             .Where(module => activeSet.Contains(module.ModuleId))
+            .ToArray();
+        string[] expectedManagedOrder = activeCatalogModules
+            .Where(BeforeCoop)
+            .OrderBy(module => module.LoadOrder)
+            .Concat(activeCatalogModules.Where(module => !BeforeCoop(module)).OrderBy(module => module.LoadOrder))
             .Select(module => module.ModuleId)
             .ToArray();
 
@@ -161,13 +172,18 @@ public sealed class RuntimeWorkshopModuleDiscovery : IWorkshopModuleDiscovery
             id => string.Equals(id, CoopModuleId, StringComparison.OrdinalIgnoreCase));
         if (nativeIndex < 0 || coopIndex < 0) return false;
 
-        foreach (var module in catalog.Modules.Where(module => activeSet.Contains(module.ModuleId)))
+        foreach (var module in activeCatalogModules)
         {
             int moduleIndex = Array.FindIndex(activeIds,
                 id => string.Equals(id, module.ModuleId, StringComparison.OrdinalIgnoreCase));
             if (module.Role == WorkshopModuleRole.Framework)
             {
                 if (moduleIndex >= nativeIndex) return false;
+            }
+            else if (module.LoadsBeforeCoop)
+            {
+                // After the natives (it reads native campaign types) but before Coop.
+                if (moduleIndex <= nativeIndex || moduleIndex >= coopIndex) return false;
             }
             else if (moduleIndex <= coopIndex)
             {

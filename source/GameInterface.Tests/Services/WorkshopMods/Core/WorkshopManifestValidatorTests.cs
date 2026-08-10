@@ -152,15 +152,8 @@ public class WorkshopManifestValidatorTests
         Assert.True(result.Matches, result.ToNetworkReason());
         Assert.Empty(result.Warnings);
 
-        // Everything runs except PlayerSettlement, which is pinned inactive because it crashes
-        // client startup on this game build (see the catalog).
-        var catalog = new FriendEditionWorkshopModuleCatalog();
-        foreach (WorkshopCompatibilityManifestEntry entry in server.Entries.Concat(client.Entries))
-        {
-            Assert.True(catalog.TryGet(entry.ModuleId, out WorkshopModuleExpectation expectation));
-            Assert.Equal(entry.ModuleId != "PlayerSettlement", entry.Active);
-            Assert.Equal(expectation.FeatureActiveExpectedOnServer, entry.Active);
-        }
+        Assert.All(server.Entries, entry => Assert.True(entry.Active));
+        Assert.All(client.Entries, entry => Assert.True(entry.Active));
     }
 
     [Fact]

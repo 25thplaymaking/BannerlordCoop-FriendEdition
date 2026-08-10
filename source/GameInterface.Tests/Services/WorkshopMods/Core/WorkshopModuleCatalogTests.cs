@@ -39,16 +39,41 @@ public class WorkshopModuleCatalogTests
         Assert.Equal(4, modules.Count(module =>
             module.Profile == WorkshopCompatibilityProfile.ServerAuthoritativeCampaign));
 
-        // The group runs the full modded experience: every bundled component is expected active
-        // on both peers, and the handshake byte-verifies each one every session.
-        Assert.All(modules, module => Assert.True(module.FeatureActiveExpectedOnServer));
-        Assert.All(modules, module => Assert.True(module.FeatureActiveExpectedOnClient));
+        // Activation is per role. Bannerlord.Harmony is the only component the headless server can
+        // execute; combat/visual modules run client-side only; campaign-mutating modules stay off
+        // on both roles until the host can run them (see the catalog for the ButterLib finding).
+        string[] clientOnly =
+        {
+            "Bannerlord.ButterLib", "Bannerlord.UIExtenderEx", "Bannerlord.MBOptionScreen",
+            "RBM", "DismembermentPlus", "UnblockableThrust",
+        };
+        string[] offEverywhere =
+        {
+            "ImprovedGarrisons", "Fourberie", "Bannerlord.Diplomacy", "PlayerSettlement",
+        };
 
-        // PlayerSettlement is the one component that must be activated before Coop: its adapter
-        // re-guards the module's load-time Harmony patches and needs them to already exist.
-        WorkshopModuleExpectation playerSettlement = Assert.Single(modules.Where(module =>
-            module.ModuleId == "PlayerSettlement"));
-        Assert.True(playerSettlement.LoadsBeforeCoop);
+        WorkshopModuleExpectation harmony = Assert.Single(modules.Where(module =>
+            module.ModuleId == "Bannerlord.Harmony"));
+        Assert.True(harmony.FeatureActiveExpectedOnServer);
+        Assert.True(harmony.FeatureActiveExpectedOnClient);
+
+        foreach (string id in clientOnly)
+        {
+            WorkshopModuleExpectation module = Assert.Single(modules.Where(m => m.ModuleId == id));
+            Assert.False(module.FeatureActiveExpectedOnServer);
+            Assert.True(module.FeatureActiveExpectedOnClient);
+        }
+
+        foreach (string id in offEverywhere)
+        {
+            WorkshopModuleExpectation module = Assert.Single(modules.Where(m => m.ModuleId == id));
+            Assert.False(module.FeatureActiveExpectedOnServer);
+            Assert.False(module.FeatureActiveExpectedOnClient);
+        }
+
+        // PlayerSettlement is the one component that must be activated before Coop whenever it is
+        // activated at all: its adapter re-guards the module's load-time Harmony patches.
+        Assert.True(Assert.Single(modules.Where(m => m.ModuleId == "PlayerSettlement")).LoadsBeforeCoop);
         Assert.All(
             modules.Where(module => module.Role != WorkshopModuleRole.Framework &&
                                     module.ModuleId != "PlayerSettlement"),

@@ -25,7 +25,7 @@ public class WorkshopManifestValidatorTests
         WorkshopCompatibilityManifest server = ManifestFactory.Create(WorkshopPeerRole.Server);
         WorkshopCompatibilityManifest client = ManifestFactory.Create(
             WorkshopPeerRole.Client,
-            module => Copy(module, managedDistributionComponent: module.ModuleId != "RBM"));
+            module => Copy(module, forClient: true, managedDistributionComponent: module.ModuleId != "RBM"));
 
         WorkshopManifestValidationResult result = validator.Validate(server, client);
 
@@ -40,14 +40,14 @@ public class WorkshopManifestValidatorTests
         WorkshopCompatibilityManifest server = ManifestFactory.Create(WorkshopPeerRole.Server);
         WorkshopCompatibilityManifest cosmeticDifference = ManifestFactory.Create(
             WorkshopPeerRole.Client,
-            module => Copy(module,
+            module => Copy(module, forClient: true,
                 configurationHash: module.ModuleId == "DismembermentPlus" ? new string('f', 64) : null));
 
         Assert.True(validator.Validate(server, cosmeticDifference).Matches);
 
         WorkshopCompatibilityManifest codeDifference = ManifestFactory.Create(
             WorkshopPeerRole.Client,
-            module => Copy(module,
+            module => Copy(module, forClient: true,
                 contentHash: module.ModuleId == "DismembermentPlus" ? new string('f', 64) : null));
 
         WorkshopManifestValidationResult codeResult = validator.Validate(server, codeDifference);
@@ -61,7 +61,7 @@ public class WorkshopManifestValidatorTests
         WorkshopCompatibilityManifest server = ManifestFactory.Create(WorkshopPeerRole.Server);
         WorkshopCompatibilityManifest mismatchedClient = ManifestFactory.Create(
             WorkshopPeerRole.Client,
-            module => Copy(module,
+            module => Copy(module, forClient: true,
                 contentHash: module.ModuleId == "RBM" ? new string('f', 64) : null));
 
         WorkshopManifestValidationResult first = validator.Validate(server, mismatchedClient);
@@ -152,23 +152,39 @@ public class WorkshopManifestValidatorTests
         Assert.True(result.Matches, result.ToNetworkReason());
         Assert.Empty(result.Warnings);
 
-        Assert.All(server.Entries, entry => Assert.True(entry.Active));
-        Assert.All(client.Entries, entry => Assert.True(entry.Active));
+        // Per-role activation: each side's entries match that role's catalog expectation.
+        var catalog = new FriendEditionWorkshopModuleCatalog();
+        foreach (WorkshopCompatibilityManifestEntry entry in server.Entries)
+        {
+            Assert.True(catalog.TryGet(entry.ModuleId, out WorkshopModuleExpectation expectation));
+            Assert.Equal(expectation.FeatureActiveExpectedOnServer, entry.Active);
+        }
+        foreach (WorkshopCompatibilityManifestEntry entry in client.Entries)
+        {
+            Assert.True(catalog.TryGet(entry.ModuleId, out WorkshopModuleExpectation expectation));
+            Assert.Equal(expectation.FeatureActiveExpectedOnClient, entry.Active);
+        }
+        Assert.Contains(client.Entries, entry => entry.ModuleId == "RBM" && entry.Active);
     }
 
+    /// <summary>
+    /// The host cannot execute these modules, so activating one there is refused rather than
+    /// silently letting the host run code the policy says it must not.
+    /// </summary>
     [Fact]
-    public void InactiveRequiredServerPackage_IsRejected()
+    public void ClientOnlyModuleActivatedOnServer_IsRejected()
     {
         WorkshopCompatibilityManifest server = ManifestFactory.Create(
             WorkshopPeerRole.Server,
-            module => Copy(module, active: module.ModuleId != "RBM"));
+            module => Copy(module, active: module.ModuleId == "RBM" ||
+                                           module.FeatureActiveExpectedOnServer));
         WorkshopCompatibilityManifest client = ManifestFactory.Create(WorkshopPeerRole.Client);
 
         WorkshopManifestValidationResult result = validator.Validate(server, client);
 
         Assert.False(result.Matches);
         Assert.Contains(result.Diagnostics, diagnostic =>
-            diagnostic.Contains("Server must activate 'RBM'", StringComparison.Ordinal));
+            diagnostic.Contains("Server must keep 'RBM' inactive", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -177,7 +193,7 @@ public class WorkshopManifestValidatorTests
         WorkshopCompatibilityManifest server = ManifestFactory.Create(WorkshopPeerRole.Server);
         WorkshopCompatibilityManifest client = ManifestFactory.Create(
             WorkshopPeerRole.Client,
-            module => Copy(module, active: module.ModuleId != "RBM"));
+            module => Copy(module, forClient: true, active: module.ModuleId != "RBM"));
 
         WorkshopManifestValidationResult result = validator.Validate(server, client);
 
@@ -191,10 +207,10 @@ public class WorkshopManifestValidatorTests
     {
         WorkshopCompatibilityManifest inactiveServer = ManifestFactory.Create(
             WorkshopPeerRole.Server,
-            module => Copy(module, active: false));
+            module => Copy(module, forClient: true, active: false));
         WorkshopCompatibilityManifest inactiveClient = ManifestFactory.Create(
             WorkshopPeerRole.Client,
-            module => Copy(module, active: false));
+            module => Copy(module, forClient: true, active: false));
 
         WorkshopManifestValidationResult serverResult = validator.Validate(
             inactiveServer,
@@ -271,7 +287,8 @@ public class WorkshopManifestValidatorTests
         string contentHash = null,
         string configurationHash = null,
         bool managedDistributionComponent = true,
-        bool? active = null) =>
+        bool? active = null,
+        bool forClient = false) =>
         ManifestFactory.Entry(
             module.ModuleId,
             module.WorkshopId,
@@ -282,5 +299,7 @@ public class WorkshopManifestValidatorTests
             module.Profile,
             managedDistributionComponent,
             module.LoadOrder,
-            active ?? module.FeatureActiveExpectedOnServer);
+            active ?? (forClient
+                ? module.FeatureActiveExpectedOnClient
+                : module.FeatureActiveExpectedOnServer));
 }

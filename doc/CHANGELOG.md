@@ -1,6 +1,29 @@
 # Friend Edition Changelog
 
-## 2026-08-09 — workshop3 (current): ALL MODS ON
+## 2026-08-09 — workshop4 (current): all-mods client actually boots
+
+**Client package:** `FriendEdition-WorkshopSuite-workshop4.zip` (sidecar
+`.sha256.txt` beside it; also on the server under `private-distributions/`).
+**Supersedes workshop3, which crashed at first launch and was never playable.**
+
+### Fixed
+
+- **Every all-mods client launch crashed (or silently broke the mods) at
+  boot.** A second, older policy enforcer — the framework compatibility
+  boundary — still implemented the retired staged-inactive design: when it
+  saw ButterLib/UIExtenderEx/MCM active it deregistered UIExtenders,
+  disabled ButterLib subsystems, purged their patches, and aborted Coop
+  startup by design. It now byte-verifies the active framework cohort
+  against the audited fingerprints and lets it run unmodified; partial
+  cohorts and fingerprint drift still abort. Live-proven with three
+  consecutive clean full-17-module boots (commit `d122df3d1`).
+- **Startup fatals died invisible**: the TaleWorlds watchdog is an attached
+  debugger and kills the process before logs flush, which is why the crash
+  above took a live bisection to name. Coop now writes its own first-chance
+  and unhandled exceptions synchronously to `Coop_firstchance.log` beside
+  the game executable — the next mystery crash names itself.
+
+## 2026-08-09 — workshop3 (superseded, never playable): ALL MODS ON
 
 **Client package:** `FriendEdition-WorkshopSuite-workshop3.zip` (sha in the
 sidecar `.sha256.txt`; also on the server under `private-distributions/`).

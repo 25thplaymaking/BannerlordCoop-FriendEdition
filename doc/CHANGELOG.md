@@ -1,6 +1,56 @@
 # Friend Edition Changelog
 
-## 2026-08-09 — workshop4 (current): all-mods client actually boots
+## 2026-08-10 — workshop5 (current): all seventeen modules active
+
+**Client package:** `FriendEdition-WorkshopSuite-workshop5.zip` — SHA-256
+`3adce32dbdf7735ea354daf2d484fa4fbf89c602fa1a0aea32752054a53843a3`.
+Also on the server as
+`BannerlordCoop-FriendEdition-2026-08-10-workshop5-WorkshopSuite.zip`.
+**Supersedes workshop4** (whose order deadlocks client startup).
+
+### For players
+
+Every module is enabled, in this exact order — note PlayerSettlement's
+position, which is load-bearing, not cosmetic:
+
+`Bannerlord.Harmony → ButterLib → UIExtenderEx → MBOptionScreen → Native →
+SandBoxCore → CustomBattle → Sandbox → StoryMode → **PlayerSettlement** →
+Coop → RBM → ImprovedGarrisons → DismembermentPlus → Fourberie →
+Diplomacy → UnblockableThrust`
+
+### Fixed
+
+- **PlayerSettlement runs on 1.4.7 after all.** The apparent version
+  incompatibility was an environment fault: a stale
+  `BannerlordPlayerSettlement.debug.log` in `C:\ProgramData` left by an
+  elevated 2025 session, Administrator-owned and read-only for the player.
+  The mod opens it for append during `OnSubModuleLoad`, was denied, and
+  died. Clearing that file lets it boot normally.
+- **The remaining co-op hang was load order.** Coop's PlayerSettlement
+  adapter purges and re-guards the module's load-time Harmony patches, so
+  the module must load *before* Coop; the blanket "content mods load after
+  Coop" rule put it after and startup deadlocked. Components can now
+  declare `LoadsBeforeCoop`, activation-order validation expects two groups
+  around Coop, and a pre-Coop component placed after Coop is rejected
+  (commit `ea3c8ba95`). No LoadOrder pins changed, so receipts and package
+  hashes are unaffected.
+
+### What "every mod playable" means today
+
+Fully live: RBM combat, DismembermentPlus, UnblockableThrust, Fourberie,
+Diplomacy (its screens plus the routed Donate Gold), ImprovedGarrisons
+(settings routed client→server).
+
+Still gated: **PlayerSettlement's settlement construction.** This is not a
+switch. A new settlement is a new `MBObjectManager` object built from
+generated XML during module registration — which happens before a campaign
+loads — which is why the mod itself saves and restarts the game to
+materialise one. In co-op that means every player's game must re-enter the
+campaign with the new object registered, i.e. a coordinated group-wide
+save-and-reload. That is the next feature, not a flag flip, and it will be
+built and tested deliberately rather than rushed into a live world.
+
+## 2026-08-09 — workshop4 (superseded): all-mods client actually boots
 
 **Client package:** `FriendEdition-WorkshopSuite-workshop4.zip` (sidecar
 `.sha256.txt` beside it; also on the server under `private-distributions/`).

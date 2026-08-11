@@ -46,7 +46,6 @@ public class MissionModule : Module
     /// </summary>
     private static readonly IWorkshopModule[] DeclaredWorkshopModules =
     {
-        new RbmModule(),
         new DismembermentPlusModule(),
         new UnblockableThrustModule(),
     };

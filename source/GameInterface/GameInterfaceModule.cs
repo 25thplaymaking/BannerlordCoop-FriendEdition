@@ -31,6 +31,9 @@ using GameInterface.Services.TroopRosters.Logging;
 using GameInterface.Services.Time;
 using GameInterface.Services.WorkshopMods.Core;
 using GameInterface.Services.WorkshopMods.Diplomacy;
+using GameInterface.Services.WorkshopMods.Fourberie;
+using GameInterface.Services.WorkshopMods.ImprovedGarrisons;
+using GameInterface.Services.WorkshopMods.PlayerSettlement;
 using GameInterface.Services.Workshops;
 using GameInterface.Surrogates;
 using HarmonyLib;
@@ -52,24 +55,23 @@ public class GameInterfaceModule : Module
     /// presence, fingerprinting, patch application and sync registration from there.
     /// </summary>
     /// <remarks>
-    /// Combat mods (RBM, DismembermentPlus, UnblockableThrust) declare themselves in MissionModule
+    /// Combat mods (DismembermentPlus and UnblockableThrust) declare themselves in MissionModule
     /// instead, next to the Missions-assembly adapters they gate, and go through the same registrar.
     /// A module's category is applied against the assembly that declares the module, so each side
     /// owns its own list.
     /// <para>
-    /// This is NOT every Workshop mod Coop carries an adapter for, and reading it as such is the
-    /// mistake to avoid. Four of the seven gameplay mods are declared: Diplomacy here, and RBM,
-    /// DismembermentPlus and UnblockableThrust in MissionModule. ImprovedGarrisons, Fourberie and
-    /// Player Settlement are not. Those three carry no Harmony attributes at all — their adapters
-    /// patch imperatively from their own compatibility handlers rather than through a category — so
-    /// they have no catalog-reconciled pin, no operator config key, and none of the shared gates in
-    /// <c>WorkshopModuleTestBase</c>. Declaring them is follow-on work, not an oversight in this
-    /// list.
+    /// The four campaign adapters are declared here. Improved Garrisons, Fourberie, and Player
+    /// Settlement patch imperatively from their compatibility handlers, so their declarations use a
+    /// null category while still participating in the shared catalog, fingerprint, config, and sync
+    /// registration gates.
     /// </para>
     /// </remarks>
     private static readonly IWorkshopModule[] DeclaredWorkshopModules =
     {
+        new ImprovedGarrisonsModule(),
+        new FourberieModule(),
         new DiplomacyModule(),
+        new PlayerSettlementModule(),
     };
 
     protected override void Load(ContainerBuilder builder)

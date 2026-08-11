@@ -1,6 +1,9 @@
 using GameInterface.AutoSync;
+using GameInterface;
 using GameInterface.Services.WorkshopMods.Core;
 using System;
+using System.Linq;
+using System.Reflection;
 using Xunit;
 
 namespace GameInterface.Tests.Services.WorkshopMods.Core;
@@ -81,5 +84,29 @@ public sealed class WorkshopModuleContractTests
         Assert.Equal(1234567890UL, module.WorkshopId);
         Assert.Equal("CoopWorkshopStubPatches", module.PatchCategory);
         Assert.Equal("Stub.Assembly", module.Fingerprint.AssemblyName);
+    }
+
+    [Fact]
+    public void GameInterfaceModule_DeclaresEveryCampaignGameplayModule()
+    {
+        var field = typeof(GameInterfaceModule).GetField(
+            "DeclaredWorkshopModules",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        var modules = Assert.IsType<IWorkshopModule[]>(field?.GetValue(null));
+        var expected = new[]
+        {
+            "ImprovedGarrisons",
+            "Fourberie",
+            "Bannerlord.Diplomacy",
+            "PlayerSettlement",
+        };
+
+        Assert.Equal(expected, modules.Select(module => module.ModuleId));
+        var catalog = new FriendEditionWorkshopModuleCatalog();
+        Assert.All(modules, module =>
+        {
+            Assert.True(catalog.TryGet(module.ModuleId, out var entry));
+            Assert.Equal(entry.WorkshopId, module.WorkshopId.ToString());
+        });
     }
 }

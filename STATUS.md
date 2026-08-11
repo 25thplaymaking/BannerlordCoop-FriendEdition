@@ -182,18 +182,20 @@ rolls back canonical Fourberie state and created parties on failure, and returns
       encounter transition, preventing snapshots from repeatedly reopening a finished safehouse encounter.
       Safehouse mission-start geometry now runs on clients, so locally rendered upgrade entities are hidden as intended;
       mission-end marker changes remain server-owned.
+      The safehouse location-character spawn call tree is now explicitly client mission lifecycle: it reads the
+      replicated roster/state and mutates only transient spawn lists and local location characters.
       The initialization replacement now rebuilds replicated hero dictionaries only on the server; clients consume
       the canonical snapshot instead of independently rewriting those dictionaries.
   14. `OnMissionBehaviorInitialize` currently preserves the mod's required peer-local setup, but its
      mission callbacks remain open until their authoritative/controller ownership is proven end to end.
-  15. The exact secondary pass currently assigns metadata to 1,034/1,865 required candidates:
-     429 presentation-only helpers, 222 pure/read-only policy methods, 186 server callbacks, 53 Coop-owner
-     replacements, 59 server-command methods, 76 framework-lifecycle methods, and 9 unreachable
+  15. The exact secondary pass currently assigns metadata to 1,041/1,865 required candidates:
+     427 presentation-only helpers, 222 pure/read-only policy methods, 186 server callbacks, 53 Coop-owner
+     replacements, 59 server-command methods, 85 framework-lifecycle methods, and 9 unreachable
      Homesteads/Bellum Civile add-on methods.
      The strict gameplay gate also rejects campaign mutation, canonical Fourberie-state writes, and
-     authority-sensitive calls mislabeled as client presentation. That gate currently passes 960 and
-     rejects 905: 831 unclassified methods plus 74 unsafe presentation classifications.
-  - **OPEN:** 905 exact UI/mission/lifecycle routes remain, including roughly 300 menu/dialog helpers
+     authority-sensitive calls mislabeled as client presentation. That gate currently passes 968 and
+     rejects 897: 824 unclassified methods plus 73 unsafe presentation classifications.
+  - **OPEN:** 897 exact UI/mission/lifecycle routes remain, including roughly 300 menu/dialog helpers
     that reach shared state and therefore require live command or mission-authority owners. This strict
     count, not the lower metadata-only count, is the completion baseline for subsequent increments.
 

@@ -1881,7 +1881,6 @@
         "0x060004B5",
         "0x060004B6",
         "0x060004B8",
-        "0x060004BB",
         "0x060004BD",
         "0x060004BE",
         "0x060004BF",
@@ -2600,11 +2599,31 @@
       "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
       "metadataTokens": [
         "0x06000491",
-        "0x060004B7",
-        "0x060004B9"
+        "0x060004B7"
       ],
       "disposition": "ClientPresentation",
       "owner": "FourberieAuthorityPatches safehouse menu and mission-spawn presentation",
+      "capability": "ClientPresentation",
+      "tests": [
+        "FourberieManifestTests.PresentationEntryPoints_AreClientOnly"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x060004B9",
+        "0x060004BB",
+        "0x060004D0",
+        "0x060004D8",
+        "0x060004D9",
+        "0x060004DA",
+        "0x060004DB",
+        "0x060004DC",
+        "0x060004DD"
+      ],
+      "disposition": "FrameworkLifecycle",
+      "owner": "Fourberie client safehouse mission-spawn lifecycle",
       "capability": "ClientPresentation",
       "tests": [
         "FourberieManifestTests.PresentationEntryPoints_AreClientOnly"

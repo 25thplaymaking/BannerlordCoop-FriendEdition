@@ -132,10 +132,6 @@ namespace Coop
 
             isAutoConnect = args.Any(a => a.Equals("/autoconnect", StringComparison.OrdinalIgnoreCase));
 
-            // Parse from GetCommandLineArgs (quote-aware) rather than the space-split list so a
-            // future quoted password survives intact.
-            TryParseCoopJoin(Environment.GetCommandLineArgs());
-
             // GetFullCommandLineString splits on spaces, which would cut a quoted save
             // name apart; the managed-server arguments need real Windows arg parsing.
             if (ServerLaunchArguments.TryParse(Environment.GetCommandLineArgs(), out var managedSaveName,
@@ -149,6 +145,10 @@ namespace Coop
 
             SetupLogging();
             InitializeCrashReporting();
+
+            // Parse AFTER SetupLogging so the [CoopJoin] diagnostics have a Logger. Quote-aware args
+            // (GetCommandLineArgs) so a future quoted password survives intact.
+            TryParseCoopJoin(Environment.GetCommandLineArgs());
 
             // Creates the handler during launch
             if (!isServer)
@@ -711,7 +711,7 @@ namespace Coop
 
                 if (i + 2 >= argv.Length)
                 {
-                    Logger.Warning("[CoopJoin] /coopjoin requires <host> <port> [password] — ignoring");
+                    Logger?.Warning("[CoopJoin] /coopjoin requires <host> <port> [password] — ignoring");
                     return;
                 }
 
@@ -719,7 +719,7 @@ namespace Coop
                 if (!int.TryParse(argv[i + 2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var port)
                     || port < IPEndPoint.MinPort || port > IPEndPoint.MaxPort)
                 {
-                    Logger.Warning("[CoopJoin] Invalid port '{Port}' in /coopjoin — ignoring", argv[i + 2]);
+                    Logger?.Warning("[CoopJoin] Invalid port '{Port}' in /coopjoin — ignoring", argv[i + 2]);
                     return;
                 }
 
@@ -737,14 +737,14 @@ namespace Coop
                     }
                     catch (Exception ex)
                     {
-                        Logger.Warning(ex, "[CoopJoin] Could not resolve host '{Host}' — ignoring", host);
+                        Logger?.Warning(ex, "[CoopJoin] Could not resolve host '{Host}' — ignoring", host);
                         return;
                     }
                 }
 
                 if (ip == null)
                 {
-                    Logger.Warning("[CoopJoin] No IPv4 address found for host '{Host}' — ignoring", host);
+                    Logger?.Warning("[CoopJoin] No IPv4 address found for host '{Host}' — ignoring", host);
                     return;
                 }
 
@@ -753,7 +753,7 @@ namespace Coop
                 coopJoinPassword = password;
                 isCoopJoin = true;
                 // Password is group-private: log target host/port only, never the token.
-                Logger.Information("[CoopJoin] Auto-join armed for {Host}:{Port}", host, port);
+                Logger?.Information("[CoopJoin] Auto-join armed for {Host}:{Port}", host, port);
                 return;
             }
         }

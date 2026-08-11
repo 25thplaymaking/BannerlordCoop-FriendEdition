@@ -59,7 +59,7 @@ public interface IWorkshopModule
     /// </summary>
     void RegisterSync(AutoSyncRegistry registry);
 
-    // NOTE: the design's contract also carries `IEnumerable<ModuleAction> Actions` for inbound
-    // intent. It is deliberately absent here — ModuleAction cannot be designed honestly before one
-    // real action has been routed. It is added, with its first consumer, in the follow-on plan.
+    // Inbound gameplay intent uses per-mod typed command handlers. A generic reflection/action list
+    // is deliberately not part of this contract; IWorkshopCapabilitySource advertises which of
+    // those concrete routes are available without becoming an authorization boundary.
 }

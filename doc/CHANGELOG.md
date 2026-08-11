@@ -1,5 +1,28 @@
 # Friend Edition Changelog
 
+## 2026-08-11 — mod authority-routing foundation (development; stable held)
+
+The earlier ten-module RC is superseded for functional-completeness work. The generated review still
+covers 41,000 exact methods, now with deterministic IL called-member evidence and direct/transitive
+authority signals. A reconciled authority ledger identifies 10,079 candidates: 4,521 framework or
+retired records are classified, while release validation rejects 5,558 open active-gameplay records.
+
+All six active gameplay adapters now use the common `IWorkshopModule` catalog/fingerprint/config
+path; retired RBM is no longer declared by the mission composition root. A server-owned, canonical,
+revisioned capability snapshot reuses the authenticated host config session and is covered for
+registry validation, convergence, late requests, and forged local origin.
+
+This milestone does not call blocked behavior complete. Typed routes remain for Improved Garrisons
+management, Dismemberment cosmetics, Fourberie actions/models/mission entry, Diplomacy operations,
+Player Settlement construction/persistence, and Separatism's omitted conversation. Stable remains
+held until release-mode authority validation and rendered option coverage pass, followed by the
+existing install/join and auto-resolve gates.
+
+Foundation verification completed with 3,392 tests passed, 18 skipped, and zero failed. The solution
+build completed with zero errors; Workshop tooling, the 41,000-method inventory validator, and the
+development authority validator all passed. Release authority validation intentionally remains red
+on the exact 5,558 open gameplay candidates.
+
 ## 2026-08-11 — ten-module stabilization release candidate (stable held)
 
 The production contract now contains exactly ten Workshop modules; RBM is retired after its native

@@ -4,25 +4,17 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
-> **RELEASE CANDIDATE READY (2026-08-11): bounded repairs and non-stable packaging complete.** The
-> inherited launcher/auto-resolve work and the approved containment/certification repairs are pushed
-> through `6e3aaa7d9` on `25vid/workshop-integration`. Public launcher defaults/assets contain no join password; the live
-> password was rotated into only the server launch script and Bryce's private pinned config. Stable
-> releases are manual and development pushes are nightly-only. The all-functions review now covers
-> 41,000 metadata methods across the ten active Workshop modules, retired RBM, and integrated Separatism; its exact-hash
-> ledger and ownership decisions live in `doc/WorkshopFunctionReview.md`. Separatism is certified
-> across 5 unit, 17 synchronized E2E, 92 Diplomacy-collision, and 8 config-authority cases.
-> Fourberie's unsafe contextless create routes now fail closed, behavior initialization preflights
-> atomically, and the full GameInterface baseline is green (1,146 passed, 11 skipped, 0 failed).
-> Improved Garrisons recruit/upgrade/capture/save authority and the active combat-mod boundaries are
-> now covered by 44 focused IG tests and 70 combat tests. Dismemberment remains intentionally disabled
-> in live Coop; Unblockable Thrust's shield/parry/chamber and foot/mounted defaults are certified.
-> Launcher updates are transactional and SHA-required; auto-resolve completion, UDP probing, and
-> narrow map readiness are covered. The dedicated server now verifies the exact four-assembly Coop
-> pair and fails closed; the live host reached `serving`, bound UDP 4200 on IPv4/IPv6, and its complete
-> deployment ledger verifies. The full local build/test/tooling gate is green (3,383 passed, 18 skipped,
-> 0 failed), and the fresh ten-module RC independently verifies 845 files. Stable remains held only for
-> the rendered client install/update/join and Sea Raider auto-resolve proof.
+> **AUTHORITY ROUTING IN PROGRESS (2026-08-11): prior RC superseded; stable held.** The exact function
+> ledger covers 41,000 methods across the ten active Workshop modules, retired RBM, and integrated
+> Separatism. Deterministic IL evidence identifies 10,079 authority candidates; 4,521 framework/retired
+> records are classified and release validation rejects the remaining 5,558 active gameplay records.
+> All six active gameplay adapters now share `IWorkshopModule`, and a trusted host capability snapshot
+> is green in unit/E2E tests. This is a foundation, not a completed-mod claim: Improved Garrisons
+> management, Dismemberment cosmetics, Fourberie entry points, Diplomacy operations, Player Settlement
+> construction, and the omitted Separatism conversation still require typed server routes. The previous
+> ten-module archive remains an uninstalled historical RC and cannot be promoted. Stable also retains
+> the rendered install/join and Sea Raider auto-resolve gates after functional closure. Foundation
+> verification is green: 3,392 passed, 18 skipped, 0 failed; build completed with 0 errors.
 
 ## Known playtest bugs (live)
 
@@ -49,10 +41,10 @@ mod-config barrier + 34 MB save transfer succeed, and the client reaches a playa
 with all four campaign mods (Diplomacy, ImprovedGarrisons, Fourberie,
 PlayerSettlement) active. RBM is retired from the exact loadout after its native campaign-init
 crash. Map navigation now suppresses only the audited transient null-readiness path and propagates
-unrelated faults. The current ten-module release candidate is packaged and hash-verified; it still needs
-rendered join/playability and auto-resolve proof before stable promotion.
+unrelated faults. The previous ten-module release candidate is packaged and hash-verified but is now
+superseded by the authority-routing work; it is not eligible for stable promotion.
 
-### Current non-stable release candidate (2026-08-11)
+### Superseded non-stable release candidate (2026-08-11)
 
 - Commit: `6e3aaa7d9df629bef8c3fdfd4ba93cb4c01bc5db`.
 - Archive: `work/release-candidate/BannerlordCoop-FriendEdition-2026-08-11-6e3aaa7d9-RC.zip`
@@ -70,7 +62,7 @@ rendered join/playability and auto-resolve proof before stable promotion.
   GameInterface 1,153 + 11 skipped, Integration 146 + 2 skipped, E2E 1,367 + 4 skipped;
   3,383 passed, 18 skipped, 0 failed overall. Build, release safety, XAML, launcher (16),
   server-kit (6), packaging, function-inventory, and native hook gates are green.
-- Publication state: RC only. It was not installed, deployed, uploaded, or promoted to stable.
+- Publication state: superseded RC only. It was not installed, deployed, uploaded, or promoted.
 
 ## Decisions (locked)
 
@@ -84,29 +76,23 @@ rendered join/playability and auto-resolve proof before stable promotion.
 3. **No forking the campaign mods** to save folders — that's the "rewrite every time"
    treadmill we're avoiding. Fork a mod only if we deliberately choose to own it.
 
-## Program order (RENEGOTIATED 2026-08-10 — PS construction moved LAST)
-1. **Mods integrated** — Diplomacy ✅, ImprovedGarrisons ✅, Fourberie menus/guarded behaviors ✅.
-   Fourberie's contextless saboteur/bandit/scam create-actions intentionally fail closed.
-   PlayerSettlement loads; CONSTRUCTION deferred.
-2. **Launcher** (NOW) — self-updating, one-click `/coopjoin` into grain.silo, module list hidden.
-3. **Discord bot** — build/update alerts to Bryce's Discord (+ server up/down).
-4. **GitHub nightly sync** — merge upstream BannerlordCoop fixes.
-5. **Custom create-settlement (LAST)** — build OUR OWN lightweight settlement creation instead of
-   PlayerSettlement's save+reload flow: create the Settlement MBObject at runtime + sync via Coop's
-   Settlement create funnel, gated by a player VOTE-TO-PAUSE. Deferred because it needs multiple
-   live testers (Bryce has none today). PS's own BuildTown/Overwrite/Rebuild stay blocked.
+## Current program order (2026-08-11)
+1. Complete and classify every active mod authority route, including Separatism's omitted conversation.
+2. Pass the exact-method authority audit in release mode with no blocked/unclassified active candidates.
+3. Run rendered all-option client/server coverage, then the existing install/join and Sea Raider checks.
+4. Build a fresh ten-module candidate; stable promotion remains manual.
 
 ### Fourberie create-action boundary (CERTIFIED 2026-08-11)
 The audited create routines accept only an `int` and internally select the process-global
 `MainHero`, `MainParty`, and `_agentsParty`. Authenticating a request's peer does not pass that
 player context into the original routine, so replaying it on the server targets the wrong player.
-All three routes now fail closed on both roles, including legacy network requests. Building a new
-explicit-context/per-player Fourberie API is outside this bounded stabilization pass.
+All three routes currently fail closed on both roles, including legacy network requests. The active
+authority plan now requires explicit-context/per-player Coop commands before those options can ship.
 
 ### Mod integration progress (2026-08-10)
 - **Diplomacy** ✅ working (DiplomacyEvents client init).
-- **ImprovedGarrisons** ✅ server-authoritative (works, mostly background).
-- **PlayerSettlement** ⚠️ loads; new-settlement construction still blocked.
+- **ImprovedGarrisons** ⚠️ background authority works; 29 management/UI routes remain open.
+- **PlayerSettlement** ⚠️ loads; construction/rebuild/overwrite and persistence graph remain open.
 - **Fourberie** — integrated in increments:
   1. `BehaviorsWithoutModels` kind: `InitializeBehaviorsOnlyPrefix` adds the 8 gameplay
      behaviors, skips the 14 model replacements; `FourberieRuntimeSurface` now rejects only
@@ -114,10 +100,11 @@ explicit-context/per-player Fourberie API is outside this bounded stabilization 
   2. `RegisterEvents` un-gated (runs on both) so behaviors wire client menus.
   3. Menu builders (`AddGameMenus`/`*OnGaMenOpened`/contact/escape/spawn) → `ClientPresentation`.
   → Menus + simple actions confirmed working live.
-  - **CLOSED/FAIL-CLOSED:** actions that create authoritative parties/rosters cannot safely carry
+  - **OPEN/FAIL-CLOSED:** actions that create authoritative parties/rosters cannot safely carry
     the authenticated player's context through Fourberie's `static void M(int)` APIs. Saboteur
     enlistment, bandit recruitment, and scam spawning are blocked; client-side object creation and
-    host-singleton replay are both prevented. `OnMissionBehaviorInitialize` also stays blocked.
+    host-singleton replay are both prevented. `OnMissionBehaviorInitialize` also stays blocked until
+    its typed route is implemented and capability-enabled.
 
 ### Playable session (DONE 2026-08-10)
 - [x] Map-nav NRE fixed and narrowed (`MapNavigationReadinessPatches` suppresses only the transient

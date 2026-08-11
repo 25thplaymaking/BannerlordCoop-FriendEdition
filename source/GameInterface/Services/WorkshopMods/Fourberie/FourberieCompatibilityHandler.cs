@@ -290,6 +290,15 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.BusinessDowngradeConsequence:
                 method = nameof(FourberieAuthorityPatches.BusinessDowngradeConsequencePrefix);
                 break;
+            case FourberiePatchKind.SchemeBonusUpgradeConsequence:
+                method = nameof(FourberieAuthorityPatches.SchemeBonusUpgradeConsequencePrefix);
+                break;
+            case FourberiePatchKind.SchemeBonusDowngradeConsequence:
+                method = nameof(FourberieAuthorityPatches.SchemeBonusDowngradeConsequencePrefix);
+                break;
+            case FourberiePatchKind.SchemeBonusResetConsequence:
+                method = nameof(FourberieAuthorityPatches.SchemeBonusResetConsequencePrefix);
+                break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
                 break;

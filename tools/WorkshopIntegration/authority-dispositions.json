@@ -1012,6 +1012,26 @@
       "moduleId": "Fourberie",
       "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
       "metadataTokens": [
+        "0x06000068",
+        "0x0600006B",
+        "0x0600038A",
+        "0x0600038B"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieOperationExecutor scheme-bonus transaction",
+      "capability": "ExplicitOperations",
+      "tests": [
+        "FourberieAuthorityTests.OperationProtocol_RequiresExactCriminalBusinessShapes",
+        "FourberieAuthorityTests.SchemeBonusAuthority_UsesServerCoverageAndNetworkLimit",
+        "FourberieAuthorityTests.SchemeBonusAuthority_ComputesPinnedEnforcerBase",
+        "FourberieAuthorityTests.SchemeBonusPrefixes_SubmitTypedClientIntentAndNeverRunOriginal",
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
         "0x06000001",
         "0x06000002",
         "0x06000005",

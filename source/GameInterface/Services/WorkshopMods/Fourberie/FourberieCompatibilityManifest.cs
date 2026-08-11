@@ -31,6 +31,9 @@ internal enum FourberiePatchKind
     BusinessStartConsequence,
     BusinessUpgradeConsequence,
     BusinessDowngradeConsequence,
+    SchemeBonusUpgradeConsequence,
+    SchemeBonusDowngradeConsequence,
+    SchemeBonusResetConsequence,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -343,6 +346,14 @@ internal static class FourberieCompatibilityManifest
         Add("Fourberie.FourberieBehavior", "BizDowngrades",
             FourberiePatchKind.BusinessDowngradeConsequence,
             "System.Int32", "System.Int32");
+        Add("Fourberie.FourberieBehavior", "BonUpg",
+            FourberiePatchKind.SchemeBonusUpgradeConsequence, "System.Int32");
+        Add("Fourberie.FourberieBehavior", "BonDowng",
+            FourberiePatchKind.SchemeBonusDowngradeConsequence, "System.Int32");
+        Add("Fourberie.CriminalVM", "SchBonus1Re",
+            FourberiePatchKind.SchemeBonusResetConsequence);
+        Add("Fourberie.CriminalVM", "SchBonus2Re",
+            FourberiePatchKind.SchemeBonusResetConsequence);
 
         // These periodic entry points contain the random and persistent campaign decisions found
         // in the 1.4.7.5 audit. They are separately guarded so a duplicate listener cannot execute

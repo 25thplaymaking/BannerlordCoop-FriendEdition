@@ -272,6 +272,29 @@ internal static class FourberieAuthorityPatches
         return false;
     }
 
+    public static bool SchemeBonusUpgradeConsequencePrefix(object[] __args)
+    {
+        if (ModInformation.IsClient && TrySchemeSlot(__args, out int slot))
+            SubmitBusiness(FourberieOperation.UpgradeSchemeBonus, slot);
+        return false;
+    }
+
+    public static bool SchemeBonusDowngradeConsequencePrefix(object[] __args)
+    {
+        if (ModInformation.IsClient && TrySchemeSlot(__args, out int slot))
+            SubmitBusiness(FourberieOperation.DowngradeSchemeBonus, slot);
+        return false;
+    }
+
+    public static bool SchemeBonusResetConsequencePrefix(MethodBase __originalMethod)
+    {
+        if (!ModInformation.IsClient) return false;
+        int slot = string.Equals(__originalMethod?.Name, "SchBonus1Re", StringComparison.Ordinal) ? 7 :
+            string.Equals(__originalMethod?.Name, "SchBonus2Re", StringComparison.Ordinal) ? 8 : 0;
+        if (slot != 0) SubmitBusiness(FourberieOperation.ResetSchemeBonus, slot);
+        return false;
+    }
+
     public static bool MissionInitializationPrefix() => true;
 
     public static bool SeparatismLoyaltyCompositionPrefix(MethodBase __originalMethod, ref int __result)
@@ -432,6 +455,12 @@ internal static class FourberieAuthorityPatches
             : 0;
         return businessKey == 11 || businessKey == 12 || businessKey == 21 ||
                businessKey == 22 || businessKey == 31 || businessKey == 32;
+    }
+
+    private static bool TrySchemeSlot(object[] arguments, out int slot)
+    {
+        slot = arguments != null && arguments.Length > 0 && arguments[0] is int value ? value : 0;
+        return slot == 7 || slot == 8;
     }
 
     private static FourberieLocalTroopSelection[] Selections(TroopRoster roster)

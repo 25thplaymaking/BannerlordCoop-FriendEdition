@@ -16,6 +16,9 @@ internal enum FourberieOperation
     StartCriminalBusiness = 5,
     UpgradeCriminalBusiness = 6,
     DowngradeCriminalBusiness = 7,
+    UpgradeSchemeBonus = 8,
+    DowngradeSchemeBonus = 9,
+    ResetSchemeBonus = 10,
 }
 
 internal enum FourberieOperationStatus
@@ -178,6 +181,9 @@ internal static class FourberieOperationProtocol
                 EmptyContext(request) && (request.IntValue == 11 || request.IntValue == 21 || request.IntValue == 31),
             FourberieOperation.UpgradeCriminalBusiness or FourberieOperation.DowngradeCriminalBusiness =>
                 EmptyContext(request) && IsBusinessKey(request.IntValue),
+            FourberieOperation.UpgradeSchemeBonus or FourberieOperation.DowngradeSchemeBonus or
+                FourberieOperation.ResetSchemeBonus =>
+                EmptyContext(request) && (request.IntValue == 7 || request.IntValue == 8),
             _ => false,
         };
     }

@@ -162,6 +162,10 @@ public sealed class FourberieAuthorityTests
     [InlineData((int)FourberieOperation.UpgradeCriminalBusiness, 32, true)]
     [InlineData((int)FourberieOperation.UpgradeCriminalBusiness, 33, false)]
     [InlineData((int)FourberieOperation.DowngradeCriminalBusiness, 21, true)]
+    [InlineData((int)FourberieOperation.UpgradeSchemeBonus, 7, true)]
+    [InlineData((int)FourberieOperation.DowngradeSchemeBonus, 8, true)]
+    [InlineData((int)FourberieOperation.ResetSchemeBonus, 7, true)]
+    [InlineData((int)FourberieOperation.ResetSchemeBonus, 9, false)]
     public void OperationProtocol_RequiresExactCriminalBusinessShapes(
         int operationValue,
         int businessKey,
@@ -305,6 +309,83 @@ public sealed class FourberieAuthorityTests
             ModInformation.IsServer = true;
             Assert.False(FourberieAuthorityPatches.BusinessUpgradeConsequencePrefix(
                 new object[] { 6, 11, 3 }));
+            Assert.Equal(2, runtime.SubmissionCount);
+        }
+        finally
+        {
+            FourberiePatchRuntime.Current = previousRuntime;
+            ModInformation.IsServer = previousServer;
+        }
+    }
+
+    [Fact]
+    public void SchemeBonusAuthority_UsesServerCoverageAndNetworkLimit()
+    {
+        IDictionary crime = new Hashtable { [750] = 1 };
+        IDictionary clans = new Hashtable { ["FMal_kingdom_a"] = 5 };
+
+        Assert.True(FourberieSchemeBonusAuthority.TryUpgrade(
+            crime, clans, 7, "kingdom_a", schemeBase: 20, schemeNetwork: 10, out var failure), failure);
+        Assert.Equal(2, crime[750]);
+        Assert.False(FourberieSchemeBonusAuthority.TryUpgrade(
+            crime, clans, 7, "kingdom_a", schemeBase: 20, schemeNetwork: 0, out _));
+
+        Assert.True(FourberieSchemeBonusAuthority.TryDowngrade(crime, 7, out failure), failure);
+        Assert.Equal(1, crime[750]);
+        Assert.True(FourberieSchemeBonusAuthority.TryReset(crime, 7, out failure), failure);
+        Assert.False(crime.Contains(750));
+    }
+
+    [Fact]
+    public void SchemeBonusAuthority_RejectsUnsupportedSlotsWithoutMutation()
+    {
+        IDictionary crime = new Hashtable { [750] = 2 };
+        IDictionary clans = new Hashtable();
+
+        Assert.False(FourberieSchemeBonusAuthority.TryUpgrade(
+            crime, clans, 9, "kingdom_a", 90, 90, out _));
+        Assert.False(FourberieSchemeBonusAuthority.TryDowngrade(crime, 9, out _));
+        Assert.False(FourberieSchemeBonusAuthority.TryReset(crime, 9, out _));
+        Assert.Equal(2, crime[750]);
+    }
+
+    [Theory]
+    [InlineData(250, 170, -1, -1, 1, 1, 47)]
+    [InlineData(0, 0, 1, 1, -1, 0, 5)]
+    [InlineData(0, 0, 0, 0, 0, 0, 0)]
+    public void SchemeBonusAuthority_ComputesPinnedEnforcerBase(
+        int roguery,
+        int tactics,
+        int valor,
+        int mercy,
+        int honor,
+        int calculating,
+        int expected)
+    {
+        Assert.Equal(expected, FourberieSchemeBonusAuthority.ComputeBase(
+            roguery, tactics, valor, mercy, honor, calculating));
+    }
+
+    [Fact]
+    public void SchemeBonusPrefixes_SubmitTypedClientIntentAndNeverRunOriginal()
+    {
+        bool previousServer = ModInformation.IsServer;
+        IFourberiePatchRuntime previousRuntime = FourberiePatchRuntime.Current;
+        var runtime = new CaptureRuntime();
+        try
+        {
+            ModInformation.IsServer = false;
+            FourberiePatchRuntime.Current = runtime;
+
+            Assert.False(FourberieAuthorityPatches.SchemeBonusUpgradeConsequencePrefix(new object[] { 7 }));
+            Assert.Equal(FourberieOperation.UpgradeSchemeBonus, runtime.LastOperation.Operation);
+            Assert.Equal(7, runtime.LastOperation.IntValue);
+
+            Assert.False(FourberieAuthorityPatches.SchemeBonusDowngradeConsequencePrefix(new object[] { 8 }));
+            Assert.Equal(FourberieOperation.DowngradeSchemeBonus, runtime.LastOperation.Operation);
+
+            ModInformation.IsServer = true;
+            Assert.False(FourberieAuthorityPatches.SchemeBonusResetConsequencePrefix(null));
             Assert.Equal(2, runtime.SubmissionCount);
         }
         finally

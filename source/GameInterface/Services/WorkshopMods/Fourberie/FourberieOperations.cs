@@ -89,6 +89,11 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.DowngradeCriminalBusiness:
                     ApplyBusinessDowngrade(request.IntValue);
                     break;
+                case FourberieOperation.UpgradeSchemeBonus:
+                case FourberieOperation.DowngradeSchemeBonus:
+                case FourberieOperation.ResetSchemeBonus:
+                    ApplySchemeBonus(actor, actorParty, request.Operation, request.IntValue);
+                    break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
             }
@@ -285,6 +290,71 @@ internal sealed class FourberieOperationExecutor
             if (!FourberieEnterpriseAuthority.TryDowngrade(
                     GetDictionary("_crimeValue"), businessKey, out string failure))
                 throw new InvalidOperationException(failure);
+    }
+
+    private void ApplySchemeBonus(
+        Hero actor,
+        MobileParty actorParty,
+        FourberieOperation operation,
+        int slot)
+    {
+        IDictionary crime = GetDictionary("_crimeValue");
+        using (new AllowedThread())
+        {
+            string failure;
+            bool applied;
+            if (operation == FourberieOperation.UpgradeSchemeBonus)
+            {
+                Hero victim = ResolveMappedHero("victim" + slot) ??
+                              throw new InvalidOperationException("scheme victim is unavailable");
+                Kingdom kingdom = victim.Clan?.Kingdom ??
+                                  throw new InvalidOperationException("scheme victim has no kingdom");
+                int network;
+                using (new BarterPlayerContext(actor, actorParty))
+                    network = Convert.ToInt32(RequiredMethod(
+                        BehaviorTypeName, "SchemeNet", parameterCount: 1).Invoke(null, new object[] { kingdom }));
+                applied = FourberieSchemeBonusAuthority.TryUpgrade(
+                    crime,
+                    GetDictionary("_stringClanDico"),
+                    slot,
+                    kingdom.StringId,
+                    ComputeSchemeBase(),
+                    network,
+                    out failure);
+            }
+            else if (operation == FourberieOperation.DowngradeSchemeBonus)
+            {
+                applied = FourberieSchemeBonusAuthority.TryDowngrade(crime, slot, out failure);
+            }
+            else
+            {
+                applied = FourberieSchemeBonusAuthority.TryReset(crime, slot, out failure);
+            }
+
+            if (!applied) throw new InvalidOperationException(failure);
+        }
+    }
+
+    private Hero ResolveMappedHero(string tag)
+    {
+        IDictionary heroes = GetDictionary("_stringHeroIdDico");
+        string heroId = heroes.Contains(tag) ? heroes[tag] as string : null;
+        return !string.IsNullOrEmpty(heroId) && objectManager.TryGetObject(heroId, out Hero hero)
+            ? hero
+            : null;
+    }
+
+    private int ComputeSchemeBase()
+    {
+        Hero enforcer = ResolveMappedHero("enforcer");
+        if (enforcer == null) return 0;
+        return FourberieSchemeBonusAuthority.ComputeBase(
+            enforcer.GetSkillValue(DefaultSkills.Roguery),
+            enforcer.GetSkillValue(DefaultSkills.Tactics),
+            enforcer.GetTraitLevel(DefaultTraits.Valor),
+            enforcer.GetTraitLevel(DefaultTraits.Mercy),
+            enforcer.GetTraitLevel(DefaultTraits.Honor),
+            enforcer.GetTraitLevel(DefaultTraits.Calculating));
     }
 
     private IEnumerable<(CharacterObject Troop, int Count)> ResolveTroops(

@@ -1,6 +1,6 @@
 # Friend Edition mod-function review
 
-Review baseline: `c6491ae1a` (2026-08-11)
+Review baseline: `0cc5b3af9` (2026-08-11)
 
 Binary ledger: [`generated/workshop-function-inventory.json`](generated/workshop-function-inventory.json)
 
@@ -50,7 +50,7 @@ type's disposition rather than repeating identical prose for tens of thousands o
 | RBM | entry/XML merge; configuration; combat formula/damage/posture; AI/tactics/spawn; tournament roster/prize; UI/input | Retired from the production loadout after the native initialization crash. It is absent from the catalog, deployment package, launcher, and server/client active orders. Its pinned binaries remain only as an audited historical surface; do not revive individual slices during this plan. |
 | ImprovedGarrisons | initialization; campaign behaviors/events; party creation/removal; recruitment/upgrade; finance/food/speed models; settings/log UI; sidecar save managers | Server owns ticks, parties, rosters, costs, food, and persistence; clients render/send intent. Verify no client `OnApplicationTick` mutation and no localized-name/sidecar authority remains. Current compatibility tests cover broad gating but not the full recruit/upgrade/capture/save lifecycle. |
 | DismembermentPlus | mission registration; blow validation; random limb choice; mesh/entity/effects; slow motion; settings/error UI | Cosmetic client presentation only, driven by one accepted authority event. Original `new Random`, GUID, local agent indices, `Agent.Main`, WinForms, and time changes are not deterministic authority. It needs an event/late-agent regression gate before being called synchronized. |
-| Fourberie | submodule/application/mission hooks; behavior registration and `SyncData`; menus/conversations; recruiting/spawning/party ticks; crime/safehouse/fight-club/contracts; fourteen models; mission controllers | Menus may be client presentation, but authoritative creation remains unsafe. `FourberieRecruitHandler` verifies a peer hero and then invokes the original static method with only `int`, so the original still targets `MainHero/MainParty/_agentsParty`; fail these routes closed until explicit player context exists. `InitializeBehaviorsOnlyPrefix` returns `false` after a caught partial-add failure despite its fallback comment. Existing manifest tests are stale: twelve methods intentionally moved from blocked to presentation/behavior categories but the tests still require `UnsupportedPlayerAction`. |
+| Fourberie | submodule/application/mission hooks; behavior registration and `SyncData`; menus/conversations; recruiting/spawning/party ticks; crime/safehouse/fight-club/contracts; fourteen models; mission controllers | Presentation/menu entry points retain their audited client-only classification. The three static create actions are fail-closed because their APIs cannot accept the authenticated peer context and would still target `MainHero/MainParty/_agentsParty`. Behavior types are all preconstructed before registration and campaign start aborts on an incomplete set; unsafe model replacements never receive fallback execution. The corrected 43-test Fourberie suite and full 1,157-case GameInterface run are green. |
 | Diplomacy | loader; campaign behaviors/managers; war/peace/agreement/cooldown/exhaustion; kingdom/clan/influence patches; UI/viewmodels; save types; civil war/rebel functions | Server owns every campaign mutation; client UI renders snapshots and sends intent. Donate-gold routing has an explicit player path, but civil-war, barter, kingdom, influence, and banner-editor patches collide with Coop and Separatism. Diplomacy may supply policy/UI; it is not a second mutation owner. |
 | UnblockableThrust | submodule/config and defend-collision postfix | Keep as a pure rule inside Coop's accepted blow/collision authority. Never allow a parallel damage path. Add combined shield/parry/chamber/mounted coverage; RBM interaction is irrelevant while RBM remains retired. |
 | PlayerSettlement | module load; template/blacklist loading; dynamic object registration; behavior/save schema; build/overwrite/rebuild; placement/map UI; AI/army/siege/null fixes | Loading/read-only preview may remain, but construction/rebuild and campaign-object registration stay blocked. Its patch set overlaps Coop buildings, map click/time, armies, sieges, visuals, town visits, and persistence. Do not build the previously proposed custom settlement system in this plan. |
@@ -122,7 +122,6 @@ The queue is intentionally limited to the approved stabilization plan:
 - **P0:** live server logs `COOP MODULE VERIFICATION FAILED` for `Coop.Core.dll`,
   `GameInterface.dll`, `Common.dll`, and `Coop.Steam.dll` but continues serving; reconcile the boot
   receipt/hash source and fail closed only after the correct deployment is pinned.
-- **P1:** fix Fourberie player-context routing/fallback.
 - **P1:** protect the inherited auto-resolve finalize change with focused paced-win,
   pacer-disconnect, duplicate-finalize, and non-win tests before live certification.
 - **P1:** make launcher updates staged, exact, hash-required, rollback-safe, and unable to enable Join
@@ -132,7 +131,8 @@ The queue is intentionally limited to the approved stabilization plan:
   opt-in diagnostics.
 - **Already closed:** missing `BloodBright`, unsafe keep-running dispatcher handler, public password,
   automatic stable publication, feature-branch release triggers, the exact ten-module/RBM-retired
-  contract, and Separatism transaction, transition, branch, persistence, and collision certification.
+  contract, Fourberie contextless-route/initializer closure, and Separatism transaction,
+  transition, branch, persistence, and collision certification.
 
 No RBM revival, custom settlement implementation, new mod SDK, or campaign-feature redesign is in
 scope for this pass.

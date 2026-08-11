@@ -5,14 +5,16 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
 > **EXECUTION ACTIVE (2026-08-11): containment complete; certification in progress.** The inherited
-> launcher and auto-resolve commits plus containment fixes are pushed through `c6491ae1a` on
+> launcher and auto-resolve commits plus containment fixes are pushed through `0cc5b3af9` on
 > `25vid/workshop-integration`. Public launcher defaults/assets contain no join password; the live
 > password was rotated into only the server launch script and Bryce's private pinned config. Stable
 > releases are manual and development pushes are nightly-only. The all-functions review now covers
 > 41,000 metadata methods across all 11 Workshop modules plus integrated Separatism; its exact-hash
 > ledger and ownership decisions live in `doc/WorkshopFunctionReview.md`. Separatism is certified
-> across 5 unit, 17 synchronized E2E, 92 Diplomacy-collision, and 8 config-authority cases. The
-> remaining bounded repair queue and the full live/release gate remain open below.
+> across 5 unit, 17 synchronized E2E, 92 Diplomacy-collision, and 8 config-authority cases.
+> Fourberie's unsafe contextless create routes now fail closed, behavior initialization preflights
+> atomically, and the full GameInterface baseline is green (1,146 passed, 11 skipped, 0 failed).
+> The remaining bounded repair queue and the full live/release gate remain open below.
 
 ## Known playtest bugs (live)
 
@@ -35,17 +37,11 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 ## Where we are (2026-08-10)
 
 Modded co-op **joins and loads**: server hosts the full campaign, validation +
-mod-config barrier + 34 MB save transfer succeed, client reaches the **world map**
+mod-config barrier + 34 MB save transfer succeed, and the client reaches a playable **world map**
 with all four campaign mods (Diplomacy, ImprovedGarrisons, Fourberie,
-PlayerSettlement) active. Two known issues remain before it's *playable*:
-
-- **RBM** — native `0xc0000005` during co-op campaign-init (its combat-param data).
-  DECISION: **drop RBM from the loadout.** (It's already a `SubModuleOnly` stub
-  server-side; not worth stubbing client-side for a combat-param mod.)
-- **Map-nav UI NRE** — on the map, `MapNavigationHelper.IsNavigationBarEnabled(handler)`
-  NREs every tick (null `MapNavigationHandler` on the client map state), so the HUD
-  never renders and the player is frozen. Coop's robustness patches catch it but the
-  session is unplayable. THIS is the immediate unblock.
+PlayerSettlement) active. RBM is retired from the exact loadout after its native campaign-init
+crash. The map-navigation readiness workaround restored the HUD; narrowing its broad transient
+exception suppression remains in the bounded repair queue.
 
 ## Decisions (locked)
 
@@ -60,8 +56,9 @@ PlayerSettlement) active. Two known issues remain before it's *playable*:
    treadmill we're avoiding. Fork a mod only if we deliberately choose to own it.
 
 ## Program order (RENEGOTIATED 2026-08-10 — PS construction moved LAST)
-1. **Mods integrated** — Diplomacy ✅, ImprovedGarrisons ✅, Fourberie ✅ (menus + create-actions
-   routed: saboteur/bandit recruit + scam spawn). PlayerSettlement loads; CONSTRUCTION deferred.
+1. **Mods integrated** — Diplomacy ✅, ImprovedGarrisons ✅, Fourberie menus/guarded behaviors ✅.
+   Fourberie's contextless saboteur/bandit/scam create-actions intentionally fail closed.
+   PlayerSettlement loads; CONSTRUCTION deferred.
 2. **Launcher** (NOW) — self-updating, one-click `/coopjoin` into grain.silo, module list hidden.
 3. **Discord bot** — build/update alerts to Bryce's Discord (+ server up/down).
 4. **GitHub nightly sync** — merge upstream BannerlordCoop fixes.
@@ -70,32 +67,12 @@ PlayerSettlement) active. Two known issues remain before it's *playable*:
    Settlement create funnel, gated by a player VOTE-TO-PAUSE. Deferred because it needs multiple
    live testers (Bryce has none today). PS's own BuildTown/Overwrite/Rebuild stay blocked.
 
-### Fourberie fork/own — action routing (DECIDED 2026-08-10: fork & own it)
-Approach: **own Fourberie's co-op behavior via deep GameInterface Harmony adapters** — the
-Fourberie DLL stays byte-unmodified (handshake intact); we intercept + reimplement its
-party-creating actions server-authoritatively and per-player. NOT a decompile-fork.
-Root problem (confirmed in the decompile): `FourberieBehavior._agentsParty` is a `static`
-`MobileParty` created **on the client** via `CreateVirtualParty("fb_saboteurs_party",…)`, and
-every action targets `MainParty`/`MainHero`. Client-side party creation floods the object sync
-(`Failed to get TroopRoster using Created_####`).
-Plan (each = Diplomacy-pattern route: client intent → server apply for the requesting player):
-- [ ] Per-player party registry: replace the single static `_agentsParty` with a
-      player→party map; parties created on the SERVER through the MobileParty funnel
-      (`NetworkCreateParty`) so `TroopRoster`s auto-register + broadcast.
-- [x] Route `FourberieBehavior.AgentsEnlistRoutine(int)` (saboteur recruiting). DONE via generic
-      `RoutedCreateAction` kind + `FourberieRecruit{Messages,Interface,Handler}.cs` (compiles, staged).
-- [x] Route `FourbBanditBehavior.FourbRecruitBandit(int)` + `HelperSubInsuScam.SpawnBandits(int)`
-      (same generic routed mechanism; all 3 static `void M(int)` player create-actions covered).
-- [ ] Client-UI link: set client `_agentsParty` from the synced server party (display refinement;
-      no crash without it — server null-guard prevents duplicate parties).
-- [ ] Route bandit-party TICK spawns are already server-gated (ServerTick) — no action needed.
-- [ ] Route safe-house crew / fight-club fighter spawns + contract rewards.
-- [ ] Ownership validation server-side (peer→hero) like `DiplomacyDonateGoldHandler`.
-Reuse (already exists — do NOT rebuild): auto-registry create broadcast
-(`AutoRegistryHandler<TroopRoster>` / `NetworkCreateInstance`), `MobileParty` lifetime
-(`NetworkCreateParty`), `TroopRosterDeltaHandler`, `ServiceModule` auto-DI for
-`IHandler`/`IGameAbstraction`. Template: `WorkshopMods/Diplomacy/DiplomacyDonateGold*`.
-This is the biggest remaining phase (Bryce: "route them all, I'll test afterward").
+### Fourberie create-action boundary (CERTIFIED 2026-08-11)
+The audited create routines accept only an `int` and internally select the process-global
+`MainHero`, `MainParty`, and `_agentsParty`. Authenticating a request's peer does not pass that
+player context into the original routine, so replaying it on the server targets the wrong player.
+All three routes now fail closed on both roles, including legacy network requests. Building a new
+explicit-context/per-player Fourberie API is outside this bounded stabilization pass.
 
 ### Mod integration progress (2026-08-10)
 - **Diplomacy** ✅ working (DiplomacyEvents client init).
@@ -108,12 +85,10 @@ This is the biggest remaining phase (Bryce: "route them all, I'll test afterward
   2. `RegisterEvents` un-gated (runs on both) so behaviors wire client menus.
   3. Menu builders (`AddGameMenus`/`*OnGaMenOpened`/contact/escape/spawn) → `ClientPresentation`.
   → Menus + simple actions confirmed working live.
-  - **OPEN:** actions that CREATE authoritative objects (TroopRosters — recruiting/spawning)
-    hit the Coop object-sync boundary: `AutoSync … Client updated MBObjectBase.IsReady` +
-    `[ObjectManager] Failed to get TroopRoster using Created_####`. Needs per-action routing
-    to the server. This is a Coop-framework limit (affects any object-creating action), not
-    Fourberie-specific. `Fourberie.Main.OnApplicationTick`/`OnMissionBehaviorInitialize` stay
-    blocked (direct MainHero/Mission mutation).
+  - **CLOSED/FAIL-CLOSED:** actions that create authoritative parties/rosters cannot safely carry
+    the authenticated player's context through Fourberie's `static void M(int)` APIs. Saboteur
+    enlistment, bandit recruitment, and scam spawning are blocked; client-side object creation and
+    host-singleton replay are both prevented. `OnMissionBehaviorInitialize` also stays blocked.
 
 ### Playable session (DONE 2026-08-10)
 - [x] Map-nav NRE fixed (`MapNavigationReadinessPatches` — swallow the transient

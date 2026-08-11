@@ -71,8 +71,12 @@ public partial class MainWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         UnfurlBanner();
+        Log.Begin();
 
         _bannerlordExe = GameLocator.FindBannerlordExe(_config.GamePath);
+        Log.Write(_bannerlordExe is null
+            ? $"Bannerlord.exe NOT found (configured gamePath='{_config.GamePath}')"
+            : $"Found Bannerlord.exe: {_bannerlordExe}");
         if (_bannerlordExe is null)
         {
             SetStatus(online: false, "Bannerlord not found — set gamePath in launcher-config.json");
@@ -150,24 +154,45 @@ public partial class MainWindow : Window
         UpdateText.Text = result.Message;
     }
 
-    private void OnJoinClicked(object sender, RoutedEventArgs e)
+    private async void OnJoinClicked(object sender, RoutedEventArgs e)
     {
         if (_bannerlordExe is null) return;
         try
         {
             JoinButton.IsEnabled = false;
             JoinButton.Content = "RIDING OUT…";
-            GameLauncher.Launch(_bannerlordExe, _config);
-            // Bannerlord owns the screen now; step out of the way.
+
+            bool steamUp = GameLauncher.IsSteamRunning();
+            if (!steamUp) Log.Write("WARNING: Steam client does not appear to be running");
+
+            var proc = GameLauncher.Launch(_bannerlordExe, _config);
+
+            // Catch an instant exit (failed Steam init, a crash) so the launcher explains it instead of
+            // just vanishing — the classic "I hit play and nothing happened".
+            bool exitedFast = await Task.Run(() => proc.WaitForExit(9000));
+            if (exitedFast)
+            {
+                Log.Write($"Bannerlord exited within 9s (code 0x{proc.ExitCode:X}) — launch did not take");
+                JoinButton.IsEnabled = true;
+                JoinButton.Content = "MARCH TO WAR";
+                UpdateText.Foreground = Steel;
+                UpdateText.Text = steamUp
+                    ? $"Bannerlord closed immediately — check your game is v1.4.7. Log: {Log.Path}"
+                    : "Bannerlord closed immediately — start Steam first, then try again.";
+                return;
+            }
+
+            Log.Write("Bannerlord still running after 9s — handing off, closing launcher");
             _statusTimer.Stop();
             Close();
         }
         catch (Exception ex)
         {
+            Log.Write($"Launch threw: {ex}");
             JoinButton.IsEnabled = true;
             JoinButton.Content = "MARCH TO WAR";
             UpdateText.Foreground = Steel;
-            UpdateText.Text = $"Couldn't launch Bannerlord — {ex.Message}";
+            UpdateText.Text = $"Couldn't launch — {ex.Message}. Log: {Log.Path}";
         }
     }
 }

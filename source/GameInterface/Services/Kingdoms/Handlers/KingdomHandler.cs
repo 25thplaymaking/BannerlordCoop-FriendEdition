@@ -8,7 +8,6 @@ using GameInterface.Services.Kingdoms;
 using GameInterface.Services.Kingdoms.Messages;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
-using GameInterface.Registry.Auto;
 using Helpers;
 using Serilog;
 using System;

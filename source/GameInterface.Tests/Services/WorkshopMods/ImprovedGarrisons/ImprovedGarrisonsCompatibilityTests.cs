@@ -271,9 +271,6 @@ public sealed class ImprovedGarrisonsCompatibilityTests : IDisposable
     {
         var expected = new[]
         {
-            "ImprovedGarrisons.Main::OnApplicationTick(System.Single)",
-            "ImprovedGarrisons.Behaviours.GarrisonPartyBehavior::RegisterEvents()",
-            "ImprovedGarrisons.Behaviours.GarrisonPartyBehavior::OnGameOpen(TaleWorlds.CampaignSystem.CampaignGameStarter)",
             "ImprovedGarrisons.Behaviours.GarrisonPartyBehavior::OnGameStartDeleteAllIGParties()",
             "ImprovedGarrisons.Behaviours.GarrisonPartyBehavior::OnGameStartSetAllIGParties()",
             "ImprovedGarrisons.Behaviours.GarrisonPartyBehavior::ReturnAllIGParties()",
@@ -290,6 +287,41 @@ public sealed class ImprovedGarrisonsCompatibilityTests : IDisposable
         Assert.False(ImprovedGarrisonsAuthorityPatches.ServerOnlyPrefix());
         ModInformation.IsServer = true;
         Assert.True(ImprovedGarrisonsAuthorityPatches.ServerOnlyPrefix());
+    }
+
+    [Fact]
+    public void ApplicationTick_PreservesClientUiWhileNestedMutationsRemainGuarded()
+    {
+        var tick = Assert.Single(
+            ImprovedGarrisonsCompatibilityManifest.Methods,
+            method => method.Key == "ImprovedGarrisons.Main::OnApplicationTick(System.Single)");
+        var nestedMutation = Assert.Single(
+            ImprovedGarrisonsCompatibilityManifest.Methods,
+            method => method.Key ==
+                      "ImprovedGarrisons.Behaviours.GarrisonPartyBehavior::RemovePartyHelper(TaleWorlds.CampaignSystem.Party.MobileParty)");
+
+        Assert.Equal(ImprovedGarrisonsPatchKind.DeterministicInitialization, tick.Kind);
+        Assert.Equal(ImprovedGarrisonsPatchKind.ServerMutation, nestedMutation.Kind);
+    }
+
+    [Theory]
+    [InlineData("ImprovedGarrisons.Behaviours.GarrisonPartyBehavior::RegisterEvents()")]
+    [InlineData("ImprovedGarrisons.Behaviours.GarrisonPartyBehavior::OnGameOpen(TaleWorlds.CampaignSystem.CampaignGameStarter)")]
+    public void PartyDialogs_RegisterOnClientsWhileConsequencesRemainIndependentlyRouted(string methodKey)
+    {
+        var lifecycle = Assert.Single(
+            ImprovedGarrisonsCompatibilityManifest.Methods,
+            method => method.Key == methodKey);
+        Assert.Equal(ImprovedGarrisonsPatchKind.DeterministicInitialization, lifecycle.Kind);
+
+        Assert.Contains(
+            ImprovedGarrisonsCompatibilityManifest.Methods,
+            method => method.MethodName == "Conversation_improvedgarrison_mobilegarrison_return_on_consequence" &&
+                      method.Kind == ImprovedGarrisonsPatchKind.RoutedOperation);
+        Assert.Contains(
+            ImprovedGarrisonsCompatibilityManifest.Methods,
+            method => method.MethodName == "Conversation_improvedgarrison_mobilegarrison_inspect_on_consequence" &&
+                      method.Kind == ImprovedGarrisonsPatchKind.ClientPresentation);
     }
 
     [Theory]
@@ -342,16 +374,16 @@ public sealed class ImprovedGarrisonsCompatibilityTests : IDisposable
     }
 
     [Fact]
-    public void UnsupportedClientSelection_IsExplicitlyDenied()
+    public void ClientSelectionPresentation_IsAvailableOnlyWithAuthoritativeRoute()
     {
         ModInformation.IsServer = false;
-        var runtime = new RecordingRuntime(route: false);
+        var runtime = new RecordingRuntime(route: true);
         ImprovedGarrisonsPatchRuntime.Current = runtime;
 
-        Assert.False(ImprovedGarrisonsAuthorityPatches.DeniedClientUiPrefix(
+        Assert.True(ImprovedGarrisonsAuthorityPatches.ClientPresentationPrefix(
             typeof(ImprovedGarrisonsCompatibilityTests).GetMethod(
                 nameof(FakeSetting), BindingFlags.Static | BindingFlags.NonPublic)!));
-        Assert.Equal(1, runtime.DeniedCalls);
+        Assert.Equal(0, runtime.DeniedCalls);
     }
 
     [Fact]
@@ -545,9 +577,9 @@ public sealed class ImprovedGarrisonsCompatibilityTests : IDisposable
     public void RequestLedger_SuppressesReplaysAndBoundsMemoryPerPeer()
     {
         var ledger = new ImprovedGarrisonsRequestLedger<string>(2);
-        ledger.Record("peer-a", 10);
-        ledger.Record("peer-a", 11);
-        ledger.Record("peer-a", 12);
+        ledger.Record("peer-a", 10, "setting:a");
+        ledger.Record("peer-a", 11, "setting:b");
+        ledger.Record("peer-a", 12, "setting:c");
 
         Assert.False(ledger.HasSeen("peer-a", 10));
         Assert.True(ledger.HasSeen("peer-a", 11));
@@ -556,26 +588,48 @@ public sealed class ImprovedGarrisonsCompatibilityTests : IDisposable
     }
 
     [Fact]
+    public void RequestLedger_ReplaysOnlyTheExactCommand()
+    {
+        var ledger = new ImprovedGarrisonsRequestLedger<string>(2);
+        ledger.Record("peer-a", 11, "operation:town-a", "accepted");
+
+        Assert.Equal(
+            ImprovedGarrisonsReplayDecision.Replay,
+            ledger.Inspect("peer-a", 11, "operation:town-a", out string cached));
+        Assert.Equal("accepted", cached);
+        Assert.Equal(
+            ImprovedGarrisonsReplayDecision.Conflict,
+            ledger.Inspect<string>("peer-a", 11, "operation:town-b", out _));
+        Assert.Equal(
+            ImprovedGarrisonsReplayDecision.New,
+            ledger.Inspect<string>("peer-a", 12, "operation:town-a", out _));
+    }
+
+    [Fact]
     public void SettingRequest_RequiresIdsRevisionAndBoundedFields()
     {
         var valid = new NetworkRequestImprovedGarrisonsSettingChange(
-            9, 3, "ImprovedGarrisons.Manager", "ToggleTraining", "town_ES3", "true");
+            "9d80f6d4ae2a4f7db912829fd7a3a284", 9, 3, "ImprovedGarrisons.Manager", "ToggleTraining", "town_ES3", "true");
         var missingId = new NetworkRequestImprovedGarrisonsSettingChange(
-            0, 3, "ImprovedGarrisons.Manager", "ToggleTraining", "town_ES3", "true");
+            "9d80f6d4ae2a4f7db912829fd7a3a284", 0, 3, "ImprovedGarrisons.Manager", "ToggleTraining", "town_ES3", "true");
         var oversized = new NetworkRequestImprovedGarrisonsSettingChange(
-            9, 3, new string('m', ImprovedGarrisonsCompatibilityHandler.MaxRequestManagerLength + 1),
+            "9d80f6d4ae2a4f7db912829fd7a3a284", 9, 3, new string('m', ImprovedGarrisonsCompatibilityHandler.MaxRequestManagerLength + 1),
+            "ToggleTraining", "town_ES3", "true");
+        var controlCharacter = new NetworkRequestImprovedGarrisonsSettingChange(
+            "9d80f6d4ae2a4f7db912829fd7a3a284", 9, 3, "ImprovedGarrisons.Manager\n",
             "ToggleTraining", "town_ES3", "true");
 
         Assert.True(ImprovedGarrisonsCompatibilityHandler.IsRequestShapeValid(valid));
         Assert.False(ImprovedGarrisonsCompatibilityHandler.IsRequestShapeValid(missingId));
         Assert.False(ImprovedGarrisonsCompatibilityHandler.IsRequestShapeValid(oversized));
+        Assert.False(ImprovedGarrisonsCompatibilityHandler.IsRequestShapeValid(controlCharacter));
     }
 
     [Fact]
     public void SettingRequest_ProtobufPreservesConcurrencyEnvelope()
     {
         var original = new NetworkRequestImprovedGarrisonsSettingChange(
-            91, 7, "ImprovedGarrisons.Manager", "ToggleTraining", "town_ES3", "true");
+            "9d80f6d4ae2a4f7db912829fd7a3a284", 91, 7, "ImprovedGarrisons.Manager", "ToggleTraining", "town_ES3", "true");
 
         using var stream = new MemoryStream();
         Serializer.Serialize(stream, original);
@@ -583,6 +637,7 @@ public sealed class ImprovedGarrisonsCompatibilityTests : IDisposable
         var copy = Serializer.Deserialize<NetworkRequestImprovedGarrisonsSettingChange>(stream);
 
         Assert.Equal(91, copy.RequestId);
+        Assert.Equal("9d80f6d4ae2a4f7db912829fd7a3a284", copy.SessionId);
         Assert.Equal(7, copy.ExpectedRevision);
         Assert.Equal("ToggleTraining", copy.Method);
         Assert.Equal("town_ES3", copy.TownId);
@@ -718,6 +773,22 @@ public sealed class ImprovedGarrisonsCompatibilityTests : IDisposable
         public bool TryRouteSetting(object manager, MethodBase method, object[] arguments)
         {
             RouteCalls++;
+            return route;
+        }
+
+        public bool TryRouteOperation(object manager, MethodBase method, object[] arguments)
+        {
+            RouteCalls++;
+            return route;
+        }
+
+        public bool TryPreparePresentation(
+            object manager,
+            MethodBase method,
+            object[] arguments,
+            out bool runOriginal)
+        {
+            runOriginal = route;
             return route;
         }
 

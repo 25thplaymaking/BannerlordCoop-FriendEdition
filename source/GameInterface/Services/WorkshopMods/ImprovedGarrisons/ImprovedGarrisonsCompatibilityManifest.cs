@@ -17,7 +17,8 @@ internal enum ImprovedGarrisonsPatchKind
     ServerMutation,
     ServerPersistence,
     RoutedSetting,
-    DeniedClientUi,
+    ClientPresentation,
+    RoutedOperation,
     StablePartyIdentity,
     FinanceRead,
     ClientDefaultConfig,
@@ -291,9 +292,13 @@ internal static class ImprovedGarrisonsCompatibilityManifest
         // These lifecycle entry points perform party deletion, party-manager reconstruction, and
         // queued mutations before reaching the already guarded helpers. Guard the outer methods
         // too so a client can never enter the destructive portion of the original mod.
-        Add(main, "OnApplicationTick", ImprovedGarrisonsPatchKind.ServerLifecycle, "System.Single");
-        Add(partyBehavior, "RegisterEvents", ImprovedGarrisonsPatchKind.ServerLifecycle);
-        Add(partyBehavior, "OnGameOpen", ImprovedGarrisonsPatchKind.ServerLifecycle,
+        // The tick also drives every Improved Garrisons screen and deferred client confirmation.
+        // Let both roles enter it; destructive nested methods remain independently server-guarded.
+        Add(main, "OnApplicationTick", ImprovedGarrisonsPatchKind.DeterministicInitialization, "System.Single");
+        // Event registration and session-open also install the mod's client dialogue/menu surface.
+        // Every registered mutation callback is guarded independently below.
+        Add(partyBehavior, "RegisterEvents", ImprovedGarrisonsPatchKind.DeterministicInitialization);
+        Add(partyBehavior, "OnGameOpen", ImprovedGarrisonsPatchKind.DeterministicInitialization,
             "TaleWorlds.CampaignSystem.CampaignGameStarter");
         Add(partyBehavior, "OnGameStartDeleteAllIGParties", ImprovedGarrisonsPatchKind.ServerLifecycle);
         Add(partyBehavior, "OnGameStartSetAllIGParties", ImprovedGarrisonsPatchKind.ServerLifecycle);
@@ -335,6 +340,8 @@ internal static class ImprovedGarrisonsCompatibilityManifest
         Add(partyManager, "GivePartyFood", ImprovedGarrisonsPatchKind.ServerMutation, MobileParty);
         Add(partyManager, "RecruitMobilePartyToGarrison", ImprovedGarrisonsPatchKind.ServerMutation, MobileParty, Settlement, TroopRoster);
 
+        AddPartyConversationOperations(result, partyBehavior);
+
         Add(recruitment, "CheatSpawnUnitInAllGarrisons", ImprovedGarrisonsPatchKind.ServerMutation, "System.Int32");
         Add(recruitment, "CheatSpawnUnitInGarrison", ImprovedGarrisonsPatchKind.ServerMutation, CharacterObject, "System.Int32", Settlement);
         Add(recruitment, "RecruitPrisonerToGarrison", ImprovedGarrisonsPatchKind.ServerMutation, CharacterObject, "System.Int32", Settlement);
@@ -370,7 +377,7 @@ internal static class ImprovedGarrisonsCompatibilityManifest
 
         AddPersistence(result);
         AddRoutedSettings(result);
-        AddDeniedUi(result);
+        AddManagementOperations(result);
         return result;
     }
 
@@ -426,6 +433,7 @@ internal static class ImprovedGarrisonsCompatibilityManifest
         Add(recruitment, "ToggleRecruiterOnlyElites", "System.Boolean");
         Add(recruitment, "ToggleRecruiterBuyHorses", "System.Boolean");
         Add(recruitment, "TogglePrisonerRecruitmentIgnoresTemplate", "System.Boolean");
+        Add(recruitment, "ToggleRecruiterAutoSpawn", "System.Boolean");
 
         const string training = "ImprovedGarrisons.SaveSystem.SaveData.DataManipulationManager.TrainingSettings";
         Add(training, "SetTownMaxUpgradeTier", "System.Int32");
@@ -433,53 +441,118 @@ internal static class ImprovedGarrisonsCompatibilityManifest
         Add(training, "ToggleTraining", "System.Boolean");
         Add(training, "ToggleFollowTemplate", "System.Boolean");
         Add(training, "ToggleRemoveNonTemplateTroops", "System.Boolean");
+        Add(training, "ToggleAutoSpawn", "System.Boolean");
+
+        const string mobile = "ImprovedGarrisons.SaveSystem.SaveData.DataManipulationManager.MobileGarrisonSettings";
+        Add(mobile, "SetReturnPercentage", "System.Single");
+        Add(mobile, "SetAutoGarrisonThreshold", "System.Int32");
+        Add(mobile, "SetAutoGarrisonSize", "System.Int32");
+        Add(mobile, "TogglePrisonerSell", "System.Boolean");
+        Add(mobile, "ToggleAutoGuards", "System.Boolean");
+        Add(mobile, "ToggleAutoGuardDefend", "System.Boolean");
+        Add(mobile, "TogglePrisonerRecruit", "System.Boolean");
+        Add(mobile, "ToggleUpgrade", "System.Boolean");
+        Add(mobile, "ToggleReplenish", "System.Boolean");
+        Add(mobile, "ToggleDestroyHideout", "System.Boolean");
+        Add(mobile, "ToggleHorseBuy", "System.Boolean");
 
         result.Add(new ImprovedGarrisonsMethodSpec(
             "ImprovedGarrisons.SaveSystem.GarrisonBehavior", "ResetTownSettings",
             ImprovedGarrisonsPatchKind.RoutedSetting, Town));
     }
 
-    private static void AddDeniedUi(List<ImprovedGarrisonsMethodSpec> result)
+    private static void AddManagementOperations(List<ImprovedGarrisonsMethodSpec> result)
     {
-        void Add(string type, string method, params string[] args) => result.Add(
-            new ImprovedGarrisonsMethodSpec(type, method, ImprovedGarrisonsPatchKind.DeniedClientUi, args));
+        void Present(string type, string method, params string[] args) => result.Add(
+            new ImprovedGarrisonsMethodSpec(type, method, ImprovedGarrisonsPatchKind.ClientPresentation, args));
+        void Route(string type, string method, params string[] args) => result.Add(
+            new ImprovedGarrisonsMethodSpec(type, method, ImprovedGarrisonsPatchKind.RoutedOperation, args));
+
+        const string InquiryList = "System.Collections.Generic.List`1";
+        const string TrainingUi = "ImprovedGarrisons.ImprovedGarrisonsUI.SubMenus.TrainingUIVM";
+        const string TrainingTemplate = "ImprovedGarrisons.SaveSystem.SaveData.DataTypes.TrainingTemplate";
 
         const string management = "ImprovedGarrisons.SaveSystem.SaveData.DataManipulationManager.ManagementSettings";
-        Add(management, "PromptTransfer", Town);
-        Add(management, "PromptCopyToSpecificTowns", Town);
-        Add(management, "PromptCopyToAllTowns", Town);
-        Add(management, "PromptCopyToAllCastles", Town);
+        Present(management, "PromptTransfer", Town);
+        Present(management, "PromptGarrisonSelector", "System.String", "System.String", "System.Int32", Town, "System.Action`1");
+        Present(management, "PromptCopyToSpecificTowns", Town);
+        Present(management, "PromptCopyToAllTowns", Town);
+        Present(management, "PromptCopyToAllCastles", Town);
+        Route(management, "Inquirydata_TranferGarrison", InquiryList);
+        Route(management, "Inquirydata_CopySpecific", InquiryList);
+        Route(management, "CopyToAllTowns", Town);
+        Route(management, "CopyToAllCastles", Town);
 
         const string recruitment = "ImprovedGarrisons.SaveSystem.SaveData.DataManipulationManager.RecruitmentSettings";
-        Add(recruitment, "PromptCreateRecruiter", Town);
-        Add(recruitment, "PromptChangeRecruitmentCulture", Town);
-        Add(recruitment, "ToggleRecruiterAutoSpawn", Town, "System.Boolean");
-        Add(recruitment, "ReturnRecruiter", Town);
+        Present(recruitment, "PromptCreateRecruiter", Town);
+        Present(recruitment, "PromptAmountSelectorForRecruiter", Town);
+        Present(recruitment, "PromptChangeRecruitmentCulture", Town);
+        Route(recruitment, "Inquirydata_SetRecruiterCulture", InquiryList);
+        Route(recruitment, "PromptSelectorForRecruiter");
+        Route(recruitment, "InquiryData_CultureToRecruitFrom", InquiryList);
+        Route(recruitment, "ReturnRecruiter", Town);
 
         const string training = "ImprovedGarrisons.SaveSystem.SaveData.DataManipulationManager.TrainingSettings";
-        Add(training, "PromptCurrentTemplateManagement", Town, "ImprovedGarrisons.ImprovedGarrisonsUI.SubMenus.TrainingUIVM");
-        Add(training, "PromptFilterForNewTroopsToAdd", Town, "ImprovedGarrisons.ImprovedGarrisonsUI.SubMenus.TrainingUIVM");
-        Add(training, "RemoveUpgradeTarget", Town, CharacterObject, "ImprovedGarrisons.ImprovedGarrisonsUI.SubMenus.TrainingUIVM");
-        Add(training, "ToggleAutoSpawn", Town, "System.Boolean");
+        Present(training, "PromptCurrentTemplateManagement", Town, TrainingUi);
+        Present(training, "PromptFilterForNewTroopsToAdd", Town, TrainingUi);
+        Present(training, "Inquirydata_SetSpecificUpgradePath", InquiryList);
+        Present(training, "Inquirydata_SelectPathList", InquiryList);
+        Present(training, "SpecifyUpgradePath", "System.Boolean");
+        Route(training, "SetSpecifiedUpgradeTargets", "System.Collections.Generic.List`1");
+        Present(training, "PromptClanSpecificUnitsWithPartyManager", InquiryList);
+        Route(training, "Inquirydata_SetUpgradePath", InquiryList);
+        Route(training, "RemoveUpgradeTarget", Town, CharacterObject, TrainingUi);
 
         const string mobile = "ImprovedGarrisons.SaveSystem.SaveData.DataManipulationManager.MobileGarrisonSettings";
-        Add(mobile, "PromptCreateMobileGarrison", Town);
-        Add(mobile, "PromptMobileGarrisonEscort", Town);
-        Add(mobile, "OrderMobileGarrisonAttackOrDefend", Town);
-        Add(mobile, "OrderMobileGarrisonToPatrol", Town);
-        Add(mobile, "OrderMobileGarrisonReturn", Town);
-        Add(mobile, "SetReturnPercentage", Town, "System.Single");
-        Add(mobile, "SetAutoGarrisonThreshold", Town, "System.Int32");
-        Add(mobile, "SetAutoGarrisonSize", Town, "System.Int32");
-        Add(mobile, "TogglePrisonerSell", Town, "System.Boolean");
-        Add(mobile, "ToggleAutoGuards", Town, "System.Boolean");
-        Add(mobile, "ToggleAutoGuardDefend", Town, "System.Boolean");
-        Add(mobile, "TogglePrisonerRecruit", Town, "System.Boolean");
-        Add(mobile, "ToggleUpgrade", Town, "System.Boolean");
-        Add(mobile, "ToggleReplenish", Town, "System.Boolean");
-        Add(mobile, "ToggleDestroyHideout", Town, "System.Boolean");
-        Add(mobile, "ToggleHorseBuy", Town, "System.Boolean");
-        Add("ImprovedGarrisons.SaveSystem.SaveData.DataManipulationManager.TemplateManager",
-            "PromptTemplateManager", Town, "ImprovedGarrisons.ImprovedGarrisonsUI.SubMenus.TrainingUIVM");
+        Route(mobile, "PromptCreateMobileGarrison", Town);
+        Present(mobile, "PromptMobileGarrisonEscort", Town);
+        Route(mobile, "Inquirydata_MobileGarrisonEscort", InquiryList);
+        Route(mobile, "OrderMobileGarrisonAttackOrDefend", Town);
+        Route(mobile, "OrderMobileGarrisonToPatrol", Town);
+        Route(mobile, "OrderMobileGarrisonReturn", Town);
+
+        const string templates = "ImprovedGarrisons.SaveSystem.SaveData.DataManipulationManager.TemplateManager";
+        Present(templates, "PromptTemplateManager", Town, TrainingUi);
+        Present(templates, "AddNewTemplate", InquiryList);
+        Present(templates, "Inquirydata_TemplateManager", InquiryList);
+        Present(templates, "Inquirydata_AddTemplate", InquiryList);
+        Route(templates, "ApplyTemplate", TrainingTemplate);
+        Present(templates, "InspectTemplate", TrainingTemplate);
+        Route(templates, "RenameCurrentTemplate", "System.String");
+        Route(templates, "RemoveTemplate", TrainingTemplate);
+        Route(templates, "InquiryData_NewTemplate", "System.String");
+    }
+
+    private static void AddPartyConversationOperations(
+        List<ImprovedGarrisonsMethodSpec> result,
+        string partyBehavior)
+    {
+        void Present(string method, params string[] args) => result.Add(
+            new ImprovedGarrisonsMethodSpec(
+                partyBehavior, method, ImprovedGarrisonsPatchKind.ClientPresentation, args));
+        void Route(string method, params string[] args) => result.Add(
+            new ImprovedGarrisonsMethodSpec(
+                partyBehavior, method, ImprovedGarrisonsPatchKind.RoutedOperation, args));
+
+        const string InquiryList = "System.Collections.Generic.List`1";
+        const string MobileGarrison = "ImprovedGarrisons.AI.AITypes.MobileGarrison";
+
+        Route("conversation_fight_on_consequence");
+        Present("Conversation_improvedgarrison_recruiter_changeCulture_on_consequence");
+        Present("Conversation_improvedgarrison_recruit_leave_on_consequence");
+        Present("Conversation_improvedgarrison_transferparty_leave_on_consequence");
+        Present("Conversation_improvedgarrison_recruiter_leave_on_consequence");
+        Route("Conversation_improvedgarrison_mobilegarrison_escort_on_consequence");
+        Present("Conversation_improvedgarrison_mobilegarrison_showloot_on_consequence");
+        Route("Conversation_improvedgarrison_mobilegarrison_patrol_on_consequence");
+        Present("Conversation_improvedgarrison_mobilegarrison_inspect_on_consequence");
+        Present("Conversation_improvedgarrison_recruiter_inspect_on_consequence");
+        Present("Conversation_improvedgarrison_mobilegarrison_fortify_on_consequence");
+        Route("Conversation_improvedgarrison_mobilegarrison_return_on_consequence");
+        Route("Conversation_improvedgarrison_recruiter_return_on_consequence");
+        Present("Conversation_improvedgarrison_mobilegarrison_leave_on_consequence");
+        Present("PromptForitfyGarrisonFilter", MobileGarrison);
+        Present("PromptForitfyGarrison", MobileGarrison);
+        Route("Inquirydata_FortifyGarrison", InquiryList);
     }
 }

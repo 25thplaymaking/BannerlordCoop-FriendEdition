@@ -18,8 +18,10 @@ internal readonly struct NetworkRequestImprovedGarrisonsSettingChange : ICommand
     [ProtoMember(4)] public readonly string Method;
     [ProtoMember(5)] public readonly string TownId;
     [ProtoMember(6)] public readonly string Value;
+    [ProtoMember(7)] public readonly string SessionId;
 
     public NetworkRequestImprovedGarrisonsSettingChange(
+        string sessionId,
         long requestId,
         long expectedRevision,
         string managerType,
@@ -27,6 +29,7 @@ internal readonly struct NetworkRequestImprovedGarrisonsSettingChange : ICommand
         string townId,
         string value)
     {
+        SessionId = sessionId;
         RequestId = requestId;
         ExpectedRevision = expectedRevision;
         ManagerType = managerType;

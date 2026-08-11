@@ -18,6 +18,8 @@ namespace GameInterface.Services.WorkshopMods.ImprovedGarrisons;
 internal interface IImprovedGarrisonsPatchRuntime
 {
     bool TryRouteSetting(object manager, MethodBase method, object[] arguments);
+    bool TryRouteOperation(object manager, MethodBase method, object[] arguments);
+    bool TryPreparePresentation(object manager, MethodBase method, object[] arguments, out bool runOriginal);
     void NotifyDenied(string method);
     void OnAuthoritativeTickCompleted();
     bool TryGetTownSettings(Town town, out object settings);
@@ -103,10 +105,31 @@ internal static class ImprovedGarrisonsAuthorityPatches
         return false;
     }
 
-    public static bool DeniedClientUiPrefix(MethodBase __originalMethod)
+    public static bool ClientPresentationPrefix(
+        MethodBase __originalMethod,
+        object __instance = null,
+        object[] __args = null)
+    {
+        if (!ModInformation.IsClient) return false;
+        var runtime = ImprovedGarrisonsPatchRuntime.Current;
+        if (runtime != null && runtime.TryPreparePresentation(
+                __instance,
+                __originalMethod,
+                __args ?? Array.Empty<object>(),
+                out bool runOriginal))
+            return runOriginal;
+        runtime?.NotifyDenied(__originalMethod?.Name ?? "unavailable action");
+        return false;
+    }
+
+    public static bool RoutedOperationPrefix(object __instance, MethodBase __originalMethod, object[] __args)
     {
         if (ModInformation.IsServer) return true;
-        ImprovedGarrisonsPatchRuntime.Current?.NotifyDenied(__originalMethod?.Name ?? "unsupported action");
+
+        var runtime = ImprovedGarrisonsPatchRuntime.Current;
+        if (runtime != null && runtime.TryRouteOperation(__instance, __originalMethod, __args)) return false;
+
+        runtime?.NotifyDenied(__originalMethod?.Name ?? "unavailable action");
         return false;
     }
 

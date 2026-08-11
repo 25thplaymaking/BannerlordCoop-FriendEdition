@@ -6,15 +6,18 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 
 > **AUTHORITY ROUTING IN PROGRESS (2026-08-11): prior RC superseded; stable held.** The exact function
 > ledger covers 41,050 methods across the ten active Workshop modules, retired RBM, and integrated
-> Separatism. Deterministic IL evidence identifies 10,082 authority candidates; 4,599 exact records
-> are classified and release validation rejects the remaining 5,483 active gameplay records.
+> Separatism. Deterministic IL evidence identifies 10,082 authority candidates; 5,283 exact records
+> are classified and release validation rejects the remaining 4,799 active gameplay records.
 > All six active gameplay adapters now share `IWorkshopModule`, and a trusted host capability snapshot
 > is green in unit/E2E tests. UnblockableThrust's four candidates are owned by the accepted collision
 > authority, and all 17 DismembermentPlus candidates now use a deterministic, deduplicated replicated-
 > cosmetic route without replaying damage. Separatism's 57 candidates are also closed: its recovered
 > fallen-clan option now uses an authenticated, revision-checked, replay-safe server transaction, and
-> settlement rebellion cannot run from a client. This is not a completed-mod claim: Improved Garrisons
-> management, Fourberie entry points, Diplomacy operations, Player Settlement construction, and the
+> settlement rebellion cannot run from a client. Improved Garrisons' 684 candidates are now closed too:
+> management/settings commands carry stable selections, authenticated clan ownership, session/revision
+> concurrency, exact replay results, canonical rollback, and server-created parties while clients retain
+> the menu and roster-selection surface. This is not a completed-suite claim: Fourberie entry points,
+> Diplomacy operations, Player Settlement construction, and the
 > remaining campaign-mod routes still require typed server routes. The previous
 > ten-module archive remains an uninstalled historical RC and cannot be promoted. Stable also retains
 > the rendered install/join and Sea Raider auto-resolve gates after functional closure. Foundation
@@ -95,7 +98,11 @@ authority plan now requires explicit-context/per-player Coop commands before tho
 
 ### Mod integration progress (2026-08-11)
 - **Diplomacy** ✅ working (DiplomacyEvents client init).
-- **ImprovedGarrisons** ⚠️ background authority works; 29 management/UI routes remain open.
+- **ImprovedGarrisons** ✅ all 684 authority candidates are exact-classified. Every management/settings
+  consequence is routed to the server with authenticated clan ownership and stable IDs; party creation,
+  recruiter/mobile orders, templates, culture, roster setup, and hostile encounters now have live routes.
+  Canonical state changes are revision-checked, exact-replay-safe, rollback-verified, and republished;
+  clients retain presentation and see only their clan's valid garrison targets.
 - **PlayerSettlement** ⚠️ loads; construction/rebuild/overwrite and persistence graph remain open.
 - **UnblockableThrust** ✅ all 4 authority candidates are exact-classified under Coop's accepted
   collision owner; incompatible, swing, shield, parry, chamber, remote, foot, and mounted cases are gated.

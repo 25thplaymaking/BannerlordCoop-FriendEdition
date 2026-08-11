@@ -122,6 +122,9 @@ public class GameInterfaceModule : Module
         builder.RegisterType<SeparatismCapabilitySource>()
             .As<IWorkshopCapabilitySource>()
             .InstancePerLifetimeScope();
+        builder.RegisterType<ImprovedGarrisonsCapabilitySource>()
+            .As<IWorkshopCapabilitySource>()
+            .InstancePerLifetimeScope();
         builder.RegisterType<MainPartyBattleRewardsCache>().As<IMainPartyBattleRewardsCache>().InstancePerLifetimeScope();
         builder.RegisterType<PacketManager>().As<IPacketManager>().InstancePerLifetimeScope();
         builder.RegisterType<MapEventInitializationBarrierBinding>().InstancePerLifetimeScope().AutoActivate();

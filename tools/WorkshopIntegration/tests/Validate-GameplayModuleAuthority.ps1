@@ -37,10 +37,19 @@ $allowed = @(
     'ServerCommand',
     'ReplicatedCosmetic',
     'CoopOwnerReplacement',
+    'FrameworkLifecycle',
     # Exact methods embedded in an active binary may be retired when their prerequisite module is
     # absent and the active-module contract proves their behavior/options cannot register.
     'Retired'
 )
+
+$fourberieCanonicalStatePattern = '^shared-state-(mutation|write):Fourberie\.FourberieBehavior\._(' +
+    'townScamTiming|townTributeTiming|townExtoTiming|townRobTiming|townInsuScamTiming|' +
+    'townGreedyTiming|townCarambushTiming|townDomiTiming|lastVisitSetAlley|larcenyDailyTiming|' +
+    'larcenyJobsTiming|InfiltrationAlertTiming|supportedBandits|stringIntDico|stringClanDico|' +
+    'assignedGl|stringHeroIdDico|partnerRecomList|territoryList|partnershipList|crimeValue|' +
+    'campaignTimeDictio|stringHeroDico|getSomeHelp|gangLeader|FourbParty|extoVillage|robCastle|' +
+    'crimeBase|crimeBaseParty|insucaraF|insubandF|catchbandF|agentsParty|banditsFollowers|playerTroopsF)($|[^A-Za-z0-9_])'
 
 foreach ($module in $ModuleId) {
     $records = @($audit.records | Where-Object { [string]$_.moduleId -ceq $module })
@@ -55,7 +64,8 @@ foreach ($module in $ModuleId) {
             @($_.evidence | Where-Object {
                 [string]$_ -match '^campaign-mutation:' -or
                 ([string]$module -ceq 'Fourberie' -and
-                    [string]$_ -match '^calls-authority-sensitive:')
+                    ([string]$_ -match '^calls-authority-sensitive:' -or
+                     [string]$_ -match $fourberieCanonicalStatePattern))
             }).Count -gt 0)
     })
     if ($open.Count -gt 0) {

@@ -122,6 +122,23 @@ try {
     }
     Assert-True $unsafePresentationRejected 'gameplay validator accepted campaign mutation as client presentation'
 
+    $unsafeCanonicalPath = Join-Path $testRoot 'audit-unsafe-canonical-presentation.json'
+    $unsafeCanonicalAudit = Get-Content -LiteralPath $outputPath -Raw | ConvertFrom-Json
+    $unsafeCanonicalRecord = @($unsafeCanonicalAudit.records | Where-Object {
+        [string]$_.metadataToken -ceq '0x06000002'
+    })[0]
+    $unsafeCanonicalRecord.disposition = 'ClientPresentation'
+    $unsafeCanonicalRecord.evidence = @('shared-state-mutation:Fourberie.FourberieBehavior._crimeValue')
+    Write-Json -Path $unsafeCanonicalPath -Value $unsafeCanonicalAudit
+    $unsafeCanonicalRejected = $false
+    try {
+        & $gameplayValidator -RepoRoot $testRoot -AuditPath $unsafeCanonicalPath -ModuleId Fourberie
+    }
+    catch {
+        $unsafeCanonicalRejected = $true
+    }
+    Assert-True $unsafeCanonicalRejected 'gameplay validator accepted canonical state mutation as client presentation'
+
     $missingPath = Join-Path $testRoot 'audit-missing-record.json'
     $missingAudit = Get-Content -LiteralPath $outputPath -Raw | ConvertFrom-Json
     $missingAudit.records = @($missingAudit.records | Select-Object -First 1)

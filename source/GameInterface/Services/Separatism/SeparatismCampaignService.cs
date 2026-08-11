@@ -33,6 +33,7 @@ public interface ISeparatismCampaignService
     void OnGameLoaded();
     void OnDailyTick();
     void OnDailyTickClan(Clan clan);
+    bool TryRecruitFallenClan(Hero actor, Clan targetClan);
 }
 
 /// <summary>
@@ -155,6 +156,63 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
         RunDailyClanTransitions(
             () => TryLordRebellionOrFloatingTitle(clan, options),
             () => TryAnarchyRebellion(clan, options));
+    }
+
+    public bool TryRecruitFallenClan(Hero actor, Clan targetClan)
+    {
+        var options = Options;
+        Kingdom actorKingdom = actor?.Clan?.Kingdom;
+        Hero targetLeader = targetClan?.Leader;
+        if (!CanMutate(options) ||
+            actorKingdom == null ||
+            actorKingdom.Leader != actor ||
+            actorKingdom.RulingClan != actor.Clan ||
+            targetClan == null ||
+            targetLeader == null ||
+            targetClan.Kingdom != null ||
+            targetClan.IsMinorFaction ||
+            targetLeader.MapFaction?.Leader != targetLeader ||
+            FactionManager.IsAtWarAgainstFaction(targetLeader.MapFaction, actor.MapFaction))
+            return false;
+
+        CampaignTime originalFactionChangeTime = targetClan.LastFactionChangeTime;
+        try
+        {
+            MoveClan(targetClan, oldKingdom: null, actorKingdom, rebellion: false);
+            if (targetClan.Kingdom != actorKingdom || !actorKingdom.Clans.Contains(targetClan))
+                throw new InvalidOperationException("The fallen clan did not enter the ruler's kingdom.");
+
+            return true;
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                if (targetClan.Kingdom != null || actorKingdom.Clans.Contains(targetClan))
+                {
+                    membershipState.MoveClanToKingdom(
+                        targetClan.Kingdom,
+                        kingdom: null,
+                        targetClan,
+                        publishCollectionChanges: true,
+                        republishExistingCollections: true);
+                }
+                targetClan.LastFactionChangeTime = originalFactionChangeTime;
+            }
+            catch (Exception rollbackException)
+            {
+                throw new InvalidOperationException(
+                    "Separatism fallen-clan recruitment failed and rollback was incomplete.",
+                    new AggregateException(exception, rollbackException));
+            }
+
+            Logger.Error(
+                exception,
+                "[Separatism] Failed to recruit fallen clan {Clan} into {Kingdom}",
+                targetClan.Name,
+                actorKingdom.Name);
+            return false;
+        }
     }
 
     internal static void RunDailyClanTransitions(

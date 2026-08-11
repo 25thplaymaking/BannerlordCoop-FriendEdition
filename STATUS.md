@@ -5,15 +5,17 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
 > **AUTHORITY ROUTING IN PROGRESS (2026-08-11): prior RC superseded; stable held.** The exact function
-> ledger covers 41,000 methods across the ten active Workshop modules, retired RBM, and integrated
-> Separatism. Deterministic IL evidence identifies 10,079 authority candidates; 4,542 exact records
-> are classified and release validation rejects the remaining 5,537 active gameplay records.
+> ledger covers 41,050 methods across the ten active Workshop modules, retired RBM, and integrated
+> Separatism. Deterministic IL evidence identifies 10,082 authority candidates; 4,599 exact records
+> are classified and release validation rejects the remaining 5,483 active gameplay records.
 > All six active gameplay adapters now share `IWorkshopModule`, and a trusted host capability snapshot
 > is green in unit/E2E tests. UnblockableThrust's four candidates are owned by the accepted collision
 > authority, and all 17 DismembermentPlus candidates now use a deterministic, deduplicated replicated-
-> cosmetic route without replaying damage. This is not a completed-mod claim: Improved Garrisons
+> cosmetic route without replaying damage. Separatism's 57 candidates are also closed: its recovered
+> fallen-clan option now uses an authenticated, revision-checked, replay-safe server transaction, and
+> settlement rebellion cannot run from a client. This is not a completed-mod claim: Improved Garrisons
 > management, Fourberie entry points, Diplomacy operations, Player Settlement construction, and the
-> omitted Separatism conversation still require typed server routes. The previous
+> remaining campaign-mod routes still require typed server routes. The previous
 > ten-module archive remains an uninstalled historical RC and cannot be promoted. Stable also retains
 > the rendered install/join and Sea Raider auto-resolve gates after functional closure. Foundation
 > verification is green: 3,392 passed, 18 skipped, 0 failed; build completed with 0 errors.
@@ -79,7 +81,7 @@ superseded by the authority-routing work; it is not eligible for stable promotio
    treadmill we're avoiding. Fork a mod only if we deliberately choose to own it.
 
 ## Current program order (2026-08-11)
-1. Complete and classify every active mod authority route, including Separatism's omitted conversation.
+1. Complete and classify every remaining active mod authority route.
 2. Pass the exact-method authority audit in release mode with no blocked/unclassified active candidates.
 3. Run rendered all-option client/server coverage, then the existing install/join and Sea Raider checks.
 4. Build a fresh ten-module candidate; stable promotion remains manual.
@@ -100,8 +102,11 @@ authority plan now requires explicit-context/per-player Coop commands before tho
 - **DismembermentPlus** ✅ all 17 authority candidates are exact-classified. The victim-authority peer
   validates the accepted blow once and broadcasts a canonical limb/seed event; peers apply only the
   visual routine, with battle-scoped dedupe, capability gating, and no second `RegisterBlow`.
-- **Separatism** ⚠️ structural server callbacks are present; the recovered fallen-clan conversation is
-  the next typed server command and remains open until its authorization/convergence tests pass.
+- **Separatism** ✅ all 57 authority candidates are exact-classified. The recovered fallen-clan option
+  is restored as capability-gated client presentation; the server re-derives the authenticated ruler,
+  validates stable target IDs plus kingdom/membership revision, replays exact duplicate results, and
+  rolls back failed clan moves. Compatibility policy boundaries are directly tested, and configured
+  settlement rebellion is forced off on clients.
 - **Fourberie** — integrated in increments:
   1. `BehaviorsWithoutModels` kind: `InitializeBehaviorsOnlyPrefix` adds the 8 gameplay
      behaviors, skips the 14 model replacements; `FourberieRuntimeSurface` now rejects only

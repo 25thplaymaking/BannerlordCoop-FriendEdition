@@ -119,6 +119,9 @@ public class GameInterfaceModule : Module
         builder.RegisterType<KingdomDecisionVoteManager>().AsSelf().As<IKingdomDecisionVoteManager>().InstancePerLifetimeScope();
         builder.RegisterType<KingdomMembershipState>().AsSelf().As<IKingdomMembershipState>().InstancePerLifetimeScope();
         builder.RegisterType<SeparatismCampaignService>().As<ISeparatismCampaignService>().InstancePerLifetimeScope();
+        builder.RegisterType<SeparatismCapabilitySource>()
+            .As<IWorkshopCapabilitySource>()
+            .InstancePerLifetimeScope();
         builder.RegisterType<MainPartyBattleRewardsCache>().As<IMainPartyBattleRewardsCache>().InstancePerLifetimeScope();
         builder.RegisterType<PacketManager>().As<IPacketManager>().InstancePerLifetimeScope();
         builder.RegisterType<MapEventInitializationBarrierBinding>().InstancePerLifetimeScope().AutoActivate();

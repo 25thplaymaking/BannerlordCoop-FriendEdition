@@ -11,6 +11,7 @@ using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
 using GameInterface.Services.Players.Data;
 using GameInterface.Services.Separatism;
+using GameInterface.Services.WorkshopMods.Core;
 using Helpers;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Election;
@@ -35,6 +36,125 @@ public sealed class SeparatismCampaignFlowTests : IDisposable
     }
 
     public void Dispose() => TestEnvironment.Dispose();
+
+    [Fact]
+    public void FallenClanRecruitment_UsesTheAuthenticatedRuler_AndSynchronizesEveryPeer()
+    {
+        var fixture = CreateFallenClanRecruitmentFixture();
+        var request = CreateRecruitmentRequest(fixture, requestId: 1);
+
+        Server.SimulateMessage(fixture.Client.NetPeer, request);
+
+        var result = Assert.Single(
+            Server.NetworkSentMessages.GetMessages<NetworkSeparatismRecruitmentResult>());
+        Assert.Equal(SeparatismRecruitmentStatus.Accepted, result.Status);
+        Assert.Equal(request.RequestId, result.RequestId);
+        Assert.Equal(fixture.Context.RebelClanId, result.TargetClanId);
+        Assert.True(result.Revision >= request.ExpectedRevision);
+
+        foreach (var instance in new[] { Server }.Concat(Clients))
+        {
+            instance.Call(() =>
+            {
+                var kingdom = Get<Kingdom>(instance, fixture.Context.SourceKingdomId);
+                var fallenClan = Get<Clan>(instance, fixture.Context.RebelClanId);
+                Assert.Same(kingdom, fallenClan.Kingdom);
+                Assert.Contains(fallenClan, kingdom.Clans);
+            });
+        }
+    }
+
+    [Fact]
+    public void FallenClanRecruitment_ExactDuplicateReplaysTheResultWithoutASecondTransition()
+    {
+        var fixture = CreateFallenClanRecruitmentFixture();
+        var request = CreateRecruitmentRequest(fixture, requestId: 4);
+
+        Server.SimulateMessage(fixture.Client.NetPeer, request);
+        Server.SimulateMessage(fixture.Client.NetPeer, request);
+
+        var results = Server.NetworkSentMessages
+            .GetMessages<NetworkSeparatismRecruitmentResult>()
+            .ToArray();
+        Assert.Equal(2, results.Length);
+        Assert.All(results, result =>
+        {
+            Assert.Equal(SeparatismRecruitmentStatus.Accepted, result.Status);
+            Assert.Equal(results[0].Revision, result.Revision);
+        });
+
+        Server.Call(() =>
+        {
+            var kingdom = Get<Kingdom>(Server, fixture.Context.SourceKingdomId);
+            var fallenClan = Get<Clan>(Server, fixture.Context.RebelClanId);
+            Assert.Single(kingdom.Clans.Where(clan => ReferenceEquals(clan, fallenClan)));
+        });
+    }
+
+    [Fact]
+    public void FallenClanRecruitment_RejectsAStaleMembershipRevisionWithoutMutation()
+    {
+        var fixture = CreateFallenClanRecruitmentFixture();
+        var request = CreateRecruitmentRequest(fixture, requestId: 2);
+        request = new NetworkRequestSeparatismRecruitment(
+            request.SessionId,
+            request.RequestId,
+            request.ExpectedRevision + 1,
+            request.ExpectedKingdomId,
+            request.TargetClanId,
+            request.TargetHeroId);
+
+        Server.SimulateMessage(fixture.Client.NetPeer, request);
+
+        var result = Assert.Single(
+            Server.NetworkSentMessages.GetMessages<NetworkSeparatismRecruitmentResult>());
+        Assert.Equal(SeparatismRecruitmentStatus.StaleState, result.Status);
+        Server.Call(() => Assert.Null(Get<Clan>(Server, fixture.Context.RebelClanId).Kingdom));
+    }
+
+    [Fact]
+    public void FallenClanRecruitment_UnmappedPeerCannotChooseAnActorOrMutateTheTarget()
+    {
+        var fixture = CreateFallenClanRecruitmentFixture(connectPlayer: false);
+        var request = CreateRecruitmentRequest(fixture, requestId: 3);
+
+        Server.SimulateMessage(fixture.Client.NetPeer, request);
+
+        var result = Assert.Single(
+            Server.NetworkSentMessages.GetMessages<NetworkSeparatismRecruitmentResult>());
+        Assert.Equal(SeparatismRecruitmentStatus.Unauthorized, result.Status);
+        Server.Call(() => Assert.Null(Get<Clan>(Server, fixture.Context.RebelClanId).Kingdom));
+    }
+
+    [Fact]
+    public void FallenClanRecruitment_FailedMembershipCommitRestoresTheIndependentClan()
+    {
+        var fixture = CreateFallenClanRecruitmentFixture();
+
+        Server.Call(() =>
+        {
+            var membership = new ThrowOnceAfterMoveMembershipState(
+                Server.Resolve<IKingdomMembershipState>());
+            var service = new SeparatismCampaignService(
+                Server.Resolve<IMessageBroker>(),
+                Server.Resolve<INetwork>(),
+                Server.Resolve<IObjectManager>(),
+                membership,
+                Server.Resolve<IPlayerManager>(),
+                Server.Resolve<IModConfig>());
+            var actor = Get<Hero>(Server, fixture.Context.RulerHeroId);
+            var target = Get<Clan>(Server, fixture.Context.RebelClanId);
+            long originalRevision = target.LastFactionChangeTime.NumTicks;
+
+            Assert.False(service.TryRecruitFallenClan(actor, target));
+            Assert.True(membership.Threw);
+            Assert.Null(target.Kingdom);
+            Assert.Equal(originalRevision, target.LastFactionChangeTime.NumTicks);
+            Assert.DoesNotContain(
+                target,
+                Get<Kingdom>(Server, fixture.Context.SourceKingdomId).Clans);
+        });
+    }
 
     [Fact]
     public void ChaosStart_IsServerAuthoritative_AndSynchronizesTheCreatedKingdom()
@@ -425,6 +545,77 @@ public sealed class SeparatismCampaignFlowTests : IDisposable
         return context;
     }
 
+    private FallenClanRecruitmentFixture CreateFallenClanRecruitmentFixture(bool connectPlayer = true)
+    {
+        var context = CreateChaosContext();
+        var client = Clients.First();
+
+        foreach (var instance in new[] { Server }.Concat(Clients))
+        {
+            instance.Call(() =>
+            {
+                var kingdom = Get<Kingdom>(instance, context.SourceKingdomId);
+                var rulerClan = Get<Clan>(instance, context.RulerClanId);
+                var fallenClan = Get<Clan>(instance, context.RebelClanId);
+
+                kingdom._clans = new MBList<Clan> { rulerClan };
+                fallenClan._kingdom = null;
+                fallenClan._fiefsCache = new MBList<Town>();
+                fallenClan._settlementsCache = new MBList<Settlement>();
+                fallenClan.LastFactionChangeTime = CampaignTime.Zero;
+            });
+        }
+
+        string sessionId = null;
+        Server.Call(() =>
+        {
+            var authority = Server.Resolve<IModConfigAuthority>();
+            var snapshot = authority.InitializeHost(Server.Resolve<IModConfig>().Data);
+            sessionId = snapshot.SessionId;
+
+            var capability = new WorkshopCapability(
+                SeparatismRecruitmentHandler.ModuleId,
+                SeparatismRecruitmentHandler.Operation,
+                enabled: true,
+                reason: string.Empty);
+            Assert.Equal(
+                WorkshopCapabilityApplyResult.Applied,
+                Server.Resolve<IWorkshopCapabilityRegistry>().Apply(
+                    new WorkshopCapabilitySnapshot(sessionId, revision: 0, new[] { capability })));
+
+            if (!connectPlayer) return;
+            var players = Server.Resolve<IPlayerManager>();
+            Assert.True(players.AddPlayer(new Player(
+                "separatism-ruler",
+                context.RulerHeroId,
+                string.Empty,
+                context.RulerClanId,
+                string.Empty)));
+            players.SetPeer("separatism-ruler", client.NetPeer);
+        });
+
+        Assert.False(string.IsNullOrWhiteSpace(sessionId));
+        return new FallenClanRecruitmentFixture(context, client, sessionId);
+    }
+
+    private NetworkRequestSeparatismRecruitment CreateRecruitmentRequest(
+        FallenClanRecruitmentFixture fixture,
+        long requestId)
+    {
+        long revision = 0;
+        Server.Call(() => revision = Get<Clan>(
+            Server,
+            fixture.Context.RebelClanId).LastFactionChangeTime.NumTicks);
+
+        return new NetworkRequestSeparatismRecruitment(
+            fixture.SessionId,
+            requestId,
+            revision,
+            fixture.Context.SourceKingdomId,
+            fixture.Context.RebelClanId,
+            fixture.Context.RebelHeroId);
+    }
+
     private KingdomFixture CreateIndependentKingdom(string name, string cultureId, float x)
     {
         var fixture = new KingdomFixture(
@@ -659,6 +850,11 @@ public sealed class SeparatismCampaignFlowTests : IDisposable
         string SettlementId,
         string TownId);
 
+    private sealed record FallenClanRecruitmentFixture(
+        ChaosContext Context,
+        EnvironmentInstance Client,
+        string SessionId);
+
     private sealed class ThrowOnceAfterMoveMembershipState : IKingdomMembershipState
     {
         private readonly IKingdomMembershipState inner;
@@ -687,7 +883,11 @@ public sealed class SeparatismCampaignFlowTests : IDisposable
                 publishCollectionChanges,
                 republishExistingCollections);
 
-            if (Threw || kingdom?.StringId?.EndsWith("_separatist_kingdom", StringComparison.Ordinal) != true)
+            bool isSeparatistKingdom = kingdom?.StringId?.EndsWith(
+                "_separatist_kingdom",
+                StringComparison.Ordinal) == true;
+            bool isRecruitmentKingdom = kingdom != null && previousKingdom == null;
+            if (Threw || (!isSeparatistKingdom && !isRecruitmentKingdom))
                 return;
 
             Threw = true;

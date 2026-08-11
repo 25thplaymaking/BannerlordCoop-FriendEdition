@@ -17,8 +17,8 @@ closures/state machines, private helpers, and methods with no body. Each record 
 assembly SHA-256, identity, declaring type, return/parameter shape, generic arity, method flags,
 metadata token, and RVA.
 
-The authority ledger reconciles one-for-one with all 41,000 method records. Its development baseline
-contains 10,079 authority candidates: 4,542 exact records are classified and 5,537 active
+The authority ledger reconciles one-for-one with all 41,050 method records. Its development baseline
+contains 10,082 authority candidates: 4,599 exact records are classified and 5,483 active
 gameplay candidates remain unclassified. Release mode rejects every one of those open records; this
 is deliberately not a completion claim.
 
@@ -43,8 +43,8 @@ type's disposition rather than repeating identical prose for tens of thousands o
 | Bannerlord.Diplomacy | 2 | 1,177 | 12,121 | 7,169 | 11,617 |
 | UnblockableThrust | 1 | 3 | 24 | 21 | 24 |
 | PlayerSettlement | 2 | 184 | 1,082 | 512 | 1,072 |
-| Separatism (integrated) | 1 filtered surface | 24 | 160 | 33 | 156 |
-| **Total** | **22** | **4,498** | **41,000** | **24,555** | **38,713** |
+| Separatism (integrated) | 1 filtered surface | 38 | 210 | 49 | 205 |
+| **Total** | **22** | **4,515** | **41,050** | **24,571** | **38,772** |
 
 ## Function-family dispositions
 
@@ -61,13 +61,14 @@ type's disposition rather than repeating identical prose for tens of thousands o
 | Diplomacy | loader; campaign behaviors/managers; war/peace/agreement/cooldown/exhaustion; kingdom/clan/influence patches; UI/viewmodels; save types; civil war/rebel functions | Donate Gold is routed. Peace/NAP/messenger/grant-fief/kingdom and related UI operations still need typed server commands; Separatism remains the sole rebellion mutation owner. Suppression of colliding patches is not a substitute for the player-visible outcome. |
 | UnblockableThrust | submodule/config and defend-collision postfix | Kept as a pure rule inside Coop's accepted collision authority with no parallel damage path. The audited defaults now have combined foot/mounted, shield, parry, and chamber regression coverage; only an authority-owned non-shield blocked thrust crushes through. RBM interaction is irrelevant while RBM remains retired. |
 | PlayerSettlement | module load; template/blacklist loading; dynamic object registration; behavior/save schema; build/overwrite/rebuild; placement/map UI; AI/army/siege/null fixes | The original build/rebuild/overwrite outcome must be restored through Coop's existing object, building, map, siege and persistence owners. The current empty-state-only admission and blocked construction graph are incomplete and fail release validation. No parallel custom settlement subsystem will be invented. |
-| Separatism | campaign-event adapter; chaos/lord/national/anarchy/union decisions; kingdom create/reactivate/destroy; clan move; hostile cleanup; relations/wars/policies; colors/names/text; readiness/territory/random helpers; loyalty thresholds; global friend/enemy and diplomatic-barter prefixes | Core structural behavior is server-gated and rollback tested. The omitted rebellion conversation/player entry point still needs a typed request so the full visible Separatism surface is available without client mutation. |
+| Separatism | campaign-event adapter; chaos/lord/national/anarchy/union decisions; kingdom create/reactivate/destroy; clan move; hostile cleanup; relations/wars/policies; colors/names/text; readiness/territory/random helpers; loyalty thresholds; global friend/enemy and diplomatic-barter prefixes; fallen-clan conversation | All 57 candidates are exact-classified. Structural callbacks are server-gated; the restored option is capability-gated presentation plus an authenticated, revisioned, replay-safe server command with rollback. Configured settlement rebellion is forced off on clients. |
 
 ## Separatism complete functional review
 
-The 160-method raw surface resolves into these gameplay functions:
+The 210-method raw surface resolves into these gameplay functions:
 
-1. `SeparatismCampaignBehavior` registers new-game, load, daily, and daily-clan events and dispatches
+1. `SeparatismCampaignBehavior` registers session-launch, new-game, load, daily, and daily-clan events. It
+   installs the restored fallen-clan option only on clients and dispatches structural campaign work
    only when `ModInformation.IsServer`. `SyncData` is intentionally empty because created kingdoms,
    clan membership, wars, policies, and settlement ownership are native campaign state.
 2. `OnNewGameCreated`/`OnGameLoaded` initialize or reconcile separatist state; `OnDailyTick` removes
@@ -93,16 +94,18 @@ The 160-method raw surface resolves into these gameplay functions:
    caller. The barter prefixes also change join, leave, and defection globally. These remain
    intentional policy hooks; fixed threshold/config tests and 92 Diplomacy collision cases enforce
    the selected one-owner rebellion policy.
-9. The recovered original 1.3.8 source adds the conversation line
-   `player_is_requesting_fallen_to_join`; the integrated port currently omits it. The active plan restores
-   the line as client presentation while routing its clan move through an authenticated server command.
+9. The recovered original 1.3.8 line `player_is_requesting_fallen_to_join` is restored. Its old
+   `persuasion_leave_faction_npc` destination is absent from Bannerlord 1.4.7, so the live option closes
+   the conversation and sends a typed command. The server re-derives the ruler from `NetPeer`, validates
+   capability/session, stable clan/leader IDs, expected kingdom and membership revision, ruler/minor/war
+   rules, commits through `IKingdomMembershipState`, caches duplicate results, and rolls back failure.
 10. Disconnected controlled player clans remain protected because the player registry retains their
     controlled campaign objects; the focused E2E suite proves the disconnected state and load-time
     reconciliation behavior.
 
-Existing evidence: 5 Separatism unit tests, 17 synchronized E2E scenarios, 92 Diplomacy-collision
-cases, and 8 configuration-authority cases pass in isolated focused runs. Those counts certify the
-implemented structural core, not the omitted player conversation or other mods' open commands.
+Existing evidence: 17 Separatism unit test methods (37 cases), 14 synchronized campaign-flow E2E
+scenarios, 92 Diplomacy-collision cases, and 8 configuration-authority cases pass in isolated focused
+runs. The exact validator confirms 57/57 required Separatism routes are classified.
 
 ## Single-owner cross-mod matrix
 
@@ -143,8 +146,9 @@ The earlier stabilization queue remains closed:
 The new foundation adds deterministic IL authority evidence, one exact audit record per method,
 release rejection for blocked/unclassified active candidates, six common gameplay module declarations,
 and a trusted server capability snapshot. UnblockableThrust and DismembermentPlus now have exact
-closure. Per-mod typed routes are still feature work: Improved Garrisons management, Fourberie actions/models/mission entry, Diplomacy
-operations, Player Settlement construction/persistence, and the omitted Separatism conversation.
+closure, and Separatism now has 57/57 exact closure. Per-mod typed routes are still feature work:
+Improved Garrisons management, Fourberie actions/models/mission entry, Diplomacy operations, and
+Player Settlement construction/persistence.
 
 Only after those routes are classified with owners and focused tests may the release validator pass;
 rendered client option coverage and the existing auto-resolve reproduction remain later publication

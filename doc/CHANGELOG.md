@@ -1,5 +1,23 @@
 # Friend Edition Changelog
 
+## 2026-08-11 — Separatism authority closure (development; stable held)
+
+Separatism now has exact authority closure for all 57 required candidates. The recovered
+`player_is_requesting_fallen_to_join` option is restored on clients behind the host capability
+snapshot. Its obsolete vanilla persuasion destination is replaced by a complete typed request/result
+route: the server re-derives the ruler from the authenticated peer, validates the expected kingdom,
+target clan/leader stable IDs, membership revision, peace, ruler, and minor-faction rules, then commits
+one clan transition through the existing Coop membership funnel. Exact duplicate requests replay the
+cached result; stale/conflicting requests are rejected; failed membership commits restore independent
+clan state.
+
+The global friendship/enemy, clan join/leave/defection, settlement-rebellion, and loyalty policies now
+have direct boundary tests. Configured settlement rebellion is explicitly disabled on clients so the
+native behavior cannot become a second campaign owner. The authority ledger is now 4,599 classified
+and 5,483 open of 10,082 candidates across 41,050 methods. Focused unit/E2E, inventory, development
+audit, and exact Separatism validation pass. Stable remains held for the four remaining campaign-mod
+closure slices and rendered/release gates.
+
 ## 2026-08-11 — combat authority routes (development; stable held)
 
 UnblockableThrust and DismembermentPlus now have exact authority closure: 21 required candidates,

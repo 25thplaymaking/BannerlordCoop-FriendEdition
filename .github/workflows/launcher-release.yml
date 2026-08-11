@@ -166,6 +166,8 @@ jobs:
         working-directory: artifact
         env:
           GH_TOKEN: ${{ github.token }}
+          # No checkout in this job, so gh can't infer the repo from a git remote — name it.
+          GH_REPO: ${{ github.repository }}
           # push → both channels for now; dispatch honors the chosen channel.
           CHANNELS: ${{ github.event_name == 'workflow_dispatch' && inputs.channels || 'both' }}
         run: |

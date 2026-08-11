@@ -251,6 +251,9 @@ rolls back canonical Fourberie state and created parties on failure, and returns
       transport outage from an HTTP error returned by the configured update feed. Missing, forbidden,
       or failed manifests keep **MARCH TO WAR** disabled instead of being mislabeled as offline; the
       self-contained publish, XAML guard, and all 17 launcher tests pass.
+- [x] **Nightly test composition repaired (2026-08-11).** The shared Coop.Tests client/server
+      container now registers the same real Workshop capability registry supplied by the production
+      GameInterface module; all 614 Coop.Tests cases build their containers again (613 pass, 1 skipped).
 - [ ] Live test (still open): confirm the launched game auto-joins grain.silo end-to-end with mods.
 
 ### Dedicated server release integrity — LIVE VERIFIED (2026-08-11)

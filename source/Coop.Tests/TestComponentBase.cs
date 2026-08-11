@@ -89,6 +89,9 @@ internal abstract class TestComponentBase
         builder.RegisterType<DisabledWorkshopManifestProvider>()
             .As<IWorkshopManifestProvider>()
             .SingleInstance();
+        builder.RegisterType<WorkshopCapabilityRegistry>()
+            .As<IWorkshopCapabilityRegistry>()
+            .SingleInstance();
 
 
         builder.RegisterType<ObjectManager>().As<IObjectManager>().InstancePerLifetimeScope();

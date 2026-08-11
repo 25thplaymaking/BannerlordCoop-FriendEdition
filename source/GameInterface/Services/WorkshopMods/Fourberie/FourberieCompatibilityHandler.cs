@@ -190,12 +190,16 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                 .Select(pair =>
                 {
                     var prefix = PrefixFor(pair.Key.Kind);
-                    var postfix = pair.Key.Kind == FourberiePatchKind.ServerTick ||
-                                  pair.Key.Kind == FourberiePatchKind.ServerMutation
-                        ? AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.ServerTickPostfix))
-                        : pair.Key.Kind == FourberiePatchKind.ClientRoleRefresh
-                            ? AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.ClientRoleRefreshPostfix))
-                            : null;
+                    MethodInfo postfix = pair.Key.Kind switch
+                    {
+                        FourberiePatchKind.ServerTick or FourberiePatchKind.ServerMutation =>
+                            AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.ServerTickPostfix)),
+                        FourberiePatchKind.ClientRoleRefresh =>
+                            AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.ClientRoleRefreshPostfix)),
+                        FourberiePatchKind.ClientCrimeRoomRead =>
+                            AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.ClientCrimeRoomReadPostfix)),
+                        _ => null,
+                    };
                     return (Original: pair.Value, Prefix: prefix, Postfix: postfix);
                 })
                 .ToArray();
@@ -340,6 +344,15 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.ClientRoleRefresh:
                 method = nameof(FourberieAuthorityPatches.ClientRoleRefreshPrefix);
                 break;
+            case FourberiePatchKind.CorruptionLevelConsequence:
+                method = nameof(FourberieAuthorityPatches.CorruptionLevelConsequencePrefix);
+                break;
+            case FourberiePatchKind.CrimeRoomSliderConsequence:
+                method = nameof(FourberieAuthorityPatches.CrimeRoomSliderConsequencePrefix);
+                break;
+            case FourberiePatchKind.ClientCrimeRoomRead:
+                method = nameof(FourberieAuthorityPatches.ClientCrimeRoomReadPrefix);
+                break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
                 break;
@@ -431,7 +444,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             SendSnapshotOrAbort(peer, onlyIfChanged: false);
             return;
         }
-        if (request.ExpectedRevision != serverRevision)
+        if (!FourberieOperationProtocol.CanApplyAtRevision(
+                request.Operation, request.ExpectedRevision, serverRevision))
         {
             SendOperationResult(peer, request, FourberieOperationStatus.StaleState, config.SessionId);
             SendSnapshotOrAbort(peer, onlyIfChanged: false);
@@ -493,7 +507,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
 
         if (payload.What.Status == FourberieOperationStatus.Accepted)
         {
-            InformationManager.DisplayMessage(new InformationMessage("Fourberie action accepted by the co-op server."));
+            if (!FourberieOperationProtocol.IsAbsoluteSetting(operation))
+                InformationManager.DisplayMessage(new InformationMessage("Fourberie action accepted by the co-op server."));
             if (operation == FourberieOperation.StartInsuranceScam)
             {
                 using (new AllowedThread())

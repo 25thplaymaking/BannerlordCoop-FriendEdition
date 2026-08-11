@@ -31,6 +31,10 @@ internal enum FourberieOperation
     AbortScheme = 20,
     ClearCompletedScheme = 21,
     ChangeSchemeStance = 22,
+    SetCorruptionLevel = 23,
+    SetAutoInvestment = 24,
+    SetLadsDuty = 25,
+    SetSlavesDuty = 26,
 }
 
 internal enum FourberieOperationStatus
@@ -216,6 +220,12 @@ internal static class FourberieOperationProtocol
                 EmptyContext(request) && IsSchemeSlot(request.IntValue),
             FourberieOperation.ChangeSchemeStance =>
                 EmptyContext(request) && (request.IntValue == 1 || request.IntValue == 2),
+            FourberieOperation.SetCorruptionLevel =>
+                EmptyContext(request) && IsCorruptionLevel(request.IntValue),
+            FourberieOperation.SetAutoInvestment =>
+                EmptyContext(request) && request.IntValue <= 5,
+            FourberieOperation.SetLadsDuty or FourberieOperation.SetSlavesDuty =>
+                EmptyContext(request) && request.IntValue <= 100,
             _ => false,
         };
     }
@@ -234,6 +244,15 @@ internal static class FourberieOperationProtocol
                 .Append(troop.Count.ToString(CultureInfo.InvariantCulture));
         return builder.ToString();
     }
+
+    public static bool CanApplyAtRevision(FourberieOperation operation, long expected, long current) =>
+        expected == current || IsAbsoluteSetting(operation) && expected >= 0 && expected < current;
+
+    public static bool IsAbsoluteSetting(FourberieOperation operation) => operation is
+        FourberieOperation.SetCorruptionLevel or
+        FourberieOperation.SetAutoInvestment or
+        FourberieOperation.SetLadsDuty or
+        FourberieOperation.SetSlavesDuty;
 
     private static bool IsStableId(string value, bool allowEmpty)
     {
@@ -257,4 +276,7 @@ internal static class FourberieOperationProtocol
 
     private static bool IsSchemeSelection(int value) =>
         FourberieSchemeAuthority.TryDecodeSelection(value, out _, out _);
+
+    private static bool IsCorruptionLevel(int value) =>
+        value == 1 || value == 2 || value == 3 || value == 10;
 }

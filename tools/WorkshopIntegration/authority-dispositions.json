@@ -2193,6 +2193,55 @@
         "FourberieAuthorityTests.RoleSnapshot_RestoresServerOwnedMappingsAfterClientPresentationRefresh",
         "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
       ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x06000056"
+      ],
+      "disposition": "ClientPresentation",
+      "owner": "FourberieAuthorityPatches corruption selection presentation",
+      "capability": "ClientPresentation",
+      "tests": [
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x06000101",
+        "0x0600015F",
+        "0x06000161",
+        "0x06000683"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieOperationExecutor crime-room settings transaction",
+      "capability": "ExplicitOperations",
+      "tests": [
+        "FourberieCrimeRoomAuthorityTests.SettingAuthority_AcceptsOnlyPinnedValuesAndKeys",
+        "FourberieCrimeRoomAuthorityTests.Protocol_AcceptsOnlyExactCrimeRoomCommandShapes",
+        "FourberieCrimeRoomAuthorityTests.AbsoluteSettings_AcceptOrderedSliderUpdatesWithoutWeakeningOtherCommands",
+        "FourberieCrimeRoomAuthorityTests.SliderPrefix_SubmitsTypedClientIntentAndNeverRunsOriginal",
+        "FourberieCrimeRoomAuthorityTests.CorruptionSelection_MapsOnlyPinnedIdentifiers",
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x06000040",
+        "0x06000100"
+      ],
+      "disposition": "CoopOwnerReplacement",
+      "owner": "FourberieAuthorityPatches client crime-room read preservation",
+      "capability": "CanonicalState",
+      "tests": [
+        "FourberieCrimeRoomAuthorityTests.ClientReadSnapshot_RestoresMissingOrExistingAutoInvestmentState",
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
     }
   ]
 }

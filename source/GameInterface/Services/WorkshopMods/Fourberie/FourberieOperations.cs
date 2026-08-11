@@ -120,6 +120,12 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.ChangeSchemeStance:
                     ApplySchemeOperation(actor, actorParty, request);
                     break;
+                case FourberieOperation.SetCorruptionLevel:
+                case FourberieOperation.SetAutoInvestment:
+                case FourberieOperation.SetLadsDuty:
+                case FourberieOperation.SetSlavesDuty:
+                    ApplyCrimeRoomSetting(request.Operation, request.IntValue);
+                    break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
             }
@@ -333,6 +339,14 @@ internal sealed class FourberieOperationExecutor
         using (new AllowedThread())
             if (!FourberieEnterpriseAuthority.TryDowngrade(
                     GetDictionary("_crimeValue"), businessKey, out string failure))
+                throw new InvalidOperationException(failure);
+    }
+
+    private void ApplyCrimeRoomSetting(FourberieOperation operation, int value)
+    {
+        using (new AllowedThread())
+            if (!FourberieCrimeRoomAuthority.TrySet(
+                    GetDictionary("_crimeValue"), operation, value, out string failure))
                 throw new InvalidOperationException(failure);
     }
 

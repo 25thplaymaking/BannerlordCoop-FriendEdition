@@ -71,6 +71,13 @@ public sealed class FourberieManifestTests
     [InlineData("Fourberie.CriminalVM+<>c__DisplayClass562_0", "<SchemeRoomStanceList>b__0", "SchemeStanceConsequence")]
     [InlineData("Fourberie.CriminalVM", "RefreshValues", "ClientRoleRefresh")]
     [InlineData("Fourberie.CriminalVM", "Close2", "ClientRoleRefresh")]
+    [InlineData("Fourberie.CriminalVM", "CorruptSelect", "ClientPresentation")]
+    [InlineData("Fourberie.CriminalVM+<>c", "<CorruptSelect>b__33_0", "CorruptionLevelConsequence")]
+    [InlineData("Fourberie.CriminalVM", "set_UpgradeSlideBar", "CrimeRoomSliderConsequence")]
+    [InlineData("Fourberie.CriminalVM", "set_LadsDutySlideBar", "CrimeRoomSliderConsequence")]
+    [InlineData("Fourberie.CriminalVM", "set_SlavesDutySlideBar", "CrimeRoomSliderConsequence")]
+    [InlineData("Fourberie.CriminalVM", "get_UpgradeSlideBar", "ClientCrimeRoomRead")]
+    [InlineData("Fourberie.CriminalVM", "UpInvestHint", "ClientCrimeRoomRead")]
     [InlineData("Fourberie.Main", "OnMissionBehaviorInitialize", "MissionInitialization")]
     public void PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners(
         string type,

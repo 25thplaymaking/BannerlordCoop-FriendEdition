@@ -459,6 +459,58 @@ internal static class FourberieAuthorityPatches
         if (ModInformation.IsClient) __state?.Restore(FourberieRoles());
     }
 
+    public static bool CorruptionLevelConsequencePrefix(object[] __args)
+    {
+        if (ModInformation.IsClient)
+        {
+            int level = CorruptionLevelForSelection(SelectedInquiryIdentifier<string>(__args));
+            if (level != 0)
+            {
+                InformationManager.HideInquiry();
+                SubmitBusiness(FourberieOperation.SetCorruptionLevel, level);
+            }
+        }
+        return false;
+    }
+
+    internal static int CorruptionLevelForSelection(string selection) => selection switch
+    {
+        "1" => 1,
+        "2" => 2,
+        "3" => 3,
+        "10" => 10,
+        _ => 0,
+    };
+
+    public static bool CrimeRoomSliderConsequencePrefix(MethodBase __originalMethod, object[] __args)
+    {
+        if (ModInformation.IsClient && __args?.Length > 0 && __args[0] is int value)
+        {
+            FourberieOperation? operation = CrimeRoomSliderOperation(__originalMethod?.Name);
+            if (operation.HasValue) SubmitBusiness(operation.Value, value);
+        }
+        return false;
+    }
+
+    internal static FourberieOperation? CrimeRoomSliderOperation(string methodName) => methodName switch
+    {
+        "set_UpgradeSlideBar" => FourberieOperation.SetAutoInvestment,
+        "set_LadsDutySlideBar" => FourberieOperation.SetLadsDuty,
+        "set_SlavesDutySlideBar" => FourberieOperation.SetSlavesDuty,
+        _ => null,
+    };
+
+    public static void ClientCrimeRoomReadPrefix(ref FourberieCrimeRoomSnapshot __state)
+    {
+        if (ModInformation.IsClient)
+            __state = FourberieCrimeRoomAuthority.CaptureReadState(FourberieCrimeValues());
+    }
+
+    public static void ClientCrimeRoomReadPostfix(FourberieCrimeRoomSnapshot __state)
+    {
+        if (ModInformation.IsClient) __state?.Restore(FourberieCrimeValues());
+    }
+
     internal static FourberieOperation SchemeLifecycleOperation(int slot)
     {
         Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
@@ -653,6 +705,14 @@ internal static class FourberieAuthorityPatches
         return behavior == null
             ? null
             : AccessTools.Field(behavior, "_stringHeroIdDico")?.GetValue(null) as IDictionary;
+    }
+
+    private static IDictionary FourberieCrimeValues()
+    {
+        Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
+        return behavior == null
+            ? null
+            : AccessTools.Field(behavior, "_crimeValue")?.GetValue(null) as IDictionary;
     }
 
     private static bool TryBusinessKey(object[] arguments, out int businessKey)

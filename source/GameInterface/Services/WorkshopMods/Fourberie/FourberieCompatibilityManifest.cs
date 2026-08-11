@@ -47,6 +47,9 @@ internal enum FourberiePatchKind
     SchemeOwnedReplacement,
     SchemeStanceConsequence,
     ClientRoleRefresh,
+    CorruptionLevelConsequence,
+    CrimeRoomSliderConsequence,
+    ClientCrimeRoomRead,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -389,6 +392,19 @@ internal static class FourberieCompatibilityManifest
             "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]");
         Add("Fourberie.CriminalVM", "RefreshValues", FourberiePatchKind.ClientRoleRefresh);
         Add("Fourberie.CriminalVM", "Close2", FourberiePatchKind.ClientRoleRefresh);
+        Add("Fourberie.CriminalVM", "CorruptSelect", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM+<>c", "<CorruptSelect>b__33_0",
+            FourberiePatchKind.CorruptionLevelConsequence,
+            "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]");
+        Add("Fourberie.CriminalVM", "set_UpgradeSlideBar",
+            FourberiePatchKind.CrimeRoomSliderConsequence, "System.Int32");
+        Add("Fourberie.CriminalVM", "set_LadsDutySlideBar",
+            FourberiePatchKind.CrimeRoomSliderConsequence, "System.Int32");
+        Add("Fourberie.CriminalVM", "set_SlavesDutySlideBar",
+            FourberiePatchKind.CrimeRoomSliderConsequence, "System.Int32");
+        AddReturning("Fourberie.CriminalVM", "get_UpgradeSlideBar", "System.Int32",
+            FourberiePatchKind.ClientCrimeRoomRead);
+        Add("Fourberie.CriminalVM", "UpInvestHint", FourberiePatchKind.ClientCrimeRoomRead);
         Add("Fourberie.CriminalVM", "Schemhero1", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM", "Schemhero2", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM+<>c__DisplayClass137_0", "<Schemhero1>b__0",

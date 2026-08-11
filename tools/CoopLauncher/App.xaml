@@ -21,6 +21,7 @@
         <SolidColorBrush x:Key="Gold" Color="{StaticResource GoldColor}" />
         <SolidColorBrush x:Key="GoldBright" Color="{StaticResource GoldBrightColor}" />
         <SolidColorBrush x:Key="Blood" Color="{StaticResource BloodColor}" />
+        <SolidColorBrush x:Key="BloodBright" Color="{StaticResource BloodBrightColor}" />
         <SolidColorBrush x:Key="Steel" Color="{StaticResource SteelColor}" />
 
         <FontFamily x:Key="Display">Constantia</FontFamily>

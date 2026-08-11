@@ -77,6 +77,26 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
    startup crash with no log, drop `coop-diag.on` beside `Bannerlord.exe` to arm the first-chance
    logger (`Coop_firstchance.log`), reproduce, read, then remove the file.
 
+10. **A launcher `{StaticResource}` that isn't defined crashes the launcher at RENDER time and leaves
+    a ghost window — looks exactly like "I clicked and nothing happened."** WPF resolves a
+    `Setter`/`TemplateBinding` `{StaticResource X}` inside a `ControlTemplate` trigger *lazily*: if `X`
+    is undefined it becomes `DependencyProperty.UnsetValue`, and the throw only fires when that visual
+    state actually renders (e.g. hovering the button applies the `IsMouseOver` trigger). The process
+    dies (`0xe0434352`, `InvalidOperationException: '{DependencyProperty.UnsetValue}' is not a valid
+    value for property 'Background'` in `Border.OnRender`) but the already-painted window stays on
+    screen, ignoring every click — no flash, no `launcher.log` line, nothing. Two guards, both now in:
+    (a) `App.OnStartup` installs a `DispatcherUnhandledException` handler that logs the real exception
+    to `launcher.log` and shows it, so a launcher crash can never again be a silent ghost;
+    (b) a dangling-`StaticResource` check (every `{StaticResource K}` in `App.xaml`/`MainWindow.xaml`
+    must have a matching `x:Key`). Diagnose a dead launcher via the Windows event log, not just
+    `launcher.log`: `Get-WinEvent Application | ? Message -match CalradiaCoop` shows the `.NET Runtime`
+    1026 event with the full exception + stack. **Validate launcher UI in its trigger states (hover,
+    disabled), not just the default `--shoot` render** — the default state didn't touch `BloodBright`,
+    so only a hover-state render reproduced it.
+    *(Earned: `WarButton`'s hover trigger set `field.Background="{StaticResource BloodBright}"` but only
+    a `BloodBrightColor` Color existed — no `BloodBright` brush; every hover-to-click crashed the
+    launcher before the click registered.)*
+
 ---
 
 ## Checklist: making a handshake-affecting change
@@ -94,6 +114,8 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
 - [ ] **Client verify:** launch `Play Friend Edition.cmd`, attempt Join, read `Coop_client.log`
       (+ the on-screen "Module validation failed" reasons) — must be clean before "done."
 - [ ] Update the friend pack (`suite-extract-ws8` → rezip) with the SAME change + fixed hashes.
+- [ ] For any launcher (`tools/CoopLauncher`) change: run `python tools/CoopLauncher/check-xaml-resources.py`
+      (no dangling `{StaticResource}`), then verify a **hover-state** render, not just default `--shoot`.
 - [ ] Add a rule above if anything surprised you.
 
 ## Reference: key paths

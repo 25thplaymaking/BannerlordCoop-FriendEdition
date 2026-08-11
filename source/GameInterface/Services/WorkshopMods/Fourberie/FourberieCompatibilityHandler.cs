@@ -5,6 +5,7 @@ using Common.Network;
 using Common.Util;
 using GameInterface.Configuration;
 using GameInterface.Registry.Messages;
+using GameInterface.Services.Barters;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
 using GameInterface.Services.WorkshopMods.Core;
@@ -12,6 +13,7 @@ using HarmonyLib;
 using LiteNetLib;
 using Serilog;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -21,6 +23,7 @@ using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
+using TaleWorlds.Core;
 using TaleWorlds.Library;
 using TaleWorlds.Localization;
 
@@ -50,6 +53,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
     private readonly FourberieRequestLedger<NetPeer> requestLedger = new FourberieRequestLedger<NetPeer>(256);
     private readonly Dictionary<long, FourberieOperation> pendingOperations = new Dictionary<long, FourberieOperation>();
     private readonly Dictionary<long, Clan> pendingOperationClans = new Dictionary<long, Clan>();
+    private NetworkFourberieContractProposal pendingContractProposal;
+    private string shownContractProposalKey;
 
     private Assembly assembly;
     private string configurationFingerprint;
@@ -84,6 +89,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         messageBroker.Subscribe<NetworkRequestFourberieState>(HandleStateRequest);
         messageBroker.Subscribe<NetworkRequestFourberieOperation>(HandleOperationRequest);
         messageBroker.Subscribe<NetworkFourberieOperationResult>(HandleOperationResult);
+        messageBroker.Subscribe<NetworkFourberieContractProposal>(HandleContractProposal);
         messageBroker.Subscribe<NetworkFourberieState>(HandleState);
     }
 
@@ -93,6 +99,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         messageBroker.Unsubscribe<NetworkRequestFourberieState>(HandleStateRequest);
         messageBroker.Unsubscribe<NetworkRequestFourberieOperation>(HandleOperationRequest);
         messageBroker.Unsubscribe<NetworkFourberieOperationResult>(HandleOperationResult);
+        messageBroker.Unsubscribe<NetworkFourberieContractProposal>(HandleContractProposal);
         messageBroker.Unsubscribe<NetworkFourberieState>(HandleState);
         if (ReferenceEquals(FourberiePatchRuntime.Current, this)) FourberiePatchRuntime.Current = null;
     }
@@ -147,6 +154,59 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         if (operation.TargetClan != null) pendingOperationClans[requestId] = operation.TargetClan;
         network.SendAll(request);
         return true;
+    }
+
+    public void RunContractTick()
+    {
+        if (!ModInformation.IsServer || !CanUseGameplayRoute(out _) || CampaignTime.Now.GetHourOfDay % 6 != 0 ||
+            !TryGetContractState(out IDictionary crime, out IDictionary heroes))
+            return;
+
+        bool ready;
+        using (new AllowedThread()) ready = FourberieContractAuthority.AdvanceProposalCooldown(crime);
+        if (!ready)
+        {
+            SendSnapshotOrAbort(peer: null, onlyIfChanged: true);
+            return;
+        }
+        if (!TryFindContractController(heroes, out Hero actor, out MobileParty actorParty, out NetPeer peer) ||
+            actor.IsPrisoner || actorParty.IsCurrentlyAtSea || actorParty.MapEvent != null ||
+            actorParty.CurrentSettlement != null)
+            return;
+
+        Type contractType = assembly.GetType("Fourberie.FourbContractBehavior", true, false);
+        Hero giver;
+        Hero target;
+        using (new BarterPlayerContext(actor, actorParty))
+        {
+            giver = AccessTools.Method(contractType, "GetContractGiver", Type.EmptyTypes)?.Invoke(null, null) as Hero;
+            target = giver == null
+                ? null
+                : AccessTools.Method(contractType, "GetVictimHero", new[] { typeof(Hero) })?.Invoke(null, new object[] { giver }) as Hero;
+        }
+        if (giver?.Clan == null || target?.Clan == null || giver == target) return;
+
+        int proposalType = MBRandom.RandomInt(2);
+        if (!FourberieContractAuthority.TryReward(
+                proposalType,
+                giver.Clan.Gold,
+                MBRandom.RandomInt(
+                    FourberieContractAuthority.MinimumRewardRandom,
+                    FourberieContractAuthority.MaximumRewardRandom + 1),
+                out int reward,
+                out string failure))
+            throw new InvalidOperationException(failure);
+        if (!objectManager.TryGetId(giver, out string giverId) ||
+            !objectManager.TryGetId(target, out string targetId))
+            return;
+
+        using (new AllowedThread())
+            if (!FourberieContractAuthority.TryCommitProposal(
+                    crime, heroes, giverId, targetId, proposalType, reward, out failure))
+                throw new InvalidOperationException(failure);
+
+        SendSnapshotOrAbort(peer: null, onlyIfChanged: true);
+        SendContractProposal(peer, giverId, targetId, proposalType, reward);
     }
 
     private bool TryInstall()
@@ -387,6 +447,12 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.GrudgeSettlementConsequence:
                 method = nameof(FourberieAuthorityPatches.GrudgeSettlementConsequencePrefix);
                 break;
+            case FourberiePatchKind.ContractTickReplacement:
+                method = nameof(FourberieAuthorityPatches.ContractTickReplacementPrefix);
+                break;
+            case FourberiePatchKind.ContractProposalLegacyConsequence:
+                method = nameof(FourberieAuthorityPatches.ContractProposalLegacyConsequencePrefix);
+                break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
                 break;
@@ -422,6 +488,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         requestLedger.Reset();
         pendingOperations.Clear();
         pendingOperationClans.Clear();
+        pendingContractProposal = null;
+        shownContractProposalKey = null;
         operationExecutor?.Reset();
         nextRequestId = 0;
         lock (snapshotSync) revisionGate.Reset();
@@ -633,11 +701,144 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             .ToString());
     }
 
+    private bool TryGetContractState(out IDictionary crime, out IDictionary heroes)
+    {
+        Type behavior = assembly?.GetType("Fourberie.FourberieBehavior", false, false);
+        crime = behavior == null ? null : AccessTools.Field(behavior, "_crimeValue")?.GetValue(null) as IDictionary;
+        heroes = behavior == null ? null : AccessTools.Field(behavior, "_stringHeroIdDico")?.GetValue(null) as IDictionary;
+        return crime != null && heroes != null;
+    }
+
+    private bool TryFindContractController(
+        IDictionary heroes,
+        out Hero actor,
+        out MobileParty actorParty,
+        out NetPeer peer)
+    {
+        actor = null;
+        actorParty = null;
+        peer = null;
+        string enforcerId = heroes?.Contains("enforcer") == true ? heroes["enforcer"] as string : null;
+        if (string.IsNullOrEmpty(enforcerId) || !objectManager.TryGetObject(enforcerId, out Hero enforcer) ||
+            enforcer == null)
+            return false;
+
+        foreach (var player in playerManager.Players.OrderBy(value => value.ControllerId, StringComparer.Ordinal))
+        {
+            if (!objectManager.TryGetObject(player.HeroId, out Hero candidate) || candidate == null ||
+                !objectManager.TryGetObject(player.MobilePartyId, out MobileParty candidateParty) || candidateParty == null ||
+                candidate.PartyBelongedTo != candidateParty || candidateParty.LeaderHero != candidate ||
+                enforcer.Clan != candidate.Clan || enforcer.PartyBelongedTo != candidateParty ||
+                candidateParty.MemberRoster.GetTroopCount(enforcer.CharacterObject) <= 0 ||
+                !playerManager.TryGetPeer(player.ControllerId, out NetPeer candidatePeer))
+                continue;
+            actor = candidate;
+            actorParty = candidateParty;
+            peer = candidatePeer;
+            return true;
+        }
+        return false;
+    }
+
+    private void SendContractProposal(NetPeer peer, string giverId, string targetId, int type, int reward)
+    {
+        if (peer == null || !CanUseGameplayRoute(out var config)) return;
+        network.Send(peer, new NetworkFourberieContractProposal(
+            config.SessionId, serverRevision, giverId, targetId, type, reward));
+    }
+
+    private void TrySendPendingContractProposal(NetPeer requestedPeer)
+    {
+        if (!TryGetContractState(out IDictionary crime, out IDictionary heroes) ||
+            !FourberieContractAuthority.CanRespondToProposal(crime, heroes, out _) ||
+            !TryFindContractController(heroes, out _, out _, out NetPeer ownerPeer) || ownerPeer != requestedPeer)
+            return;
+        string giverId = heroes["contractGiver"] as string;
+        string targetId = heroes["contractTarget"] as string;
+        SendContractProposal(
+            ownerPeer,
+            giverId,
+            targetId,
+            Convert.ToInt32(crime[200]),
+            Convert.ToInt32(crime[201]));
+    }
+
+    private void HandleContractProposal(MessagePayload<NetworkFourberieContractProposal> payload)
+    {
+        if (!compatible || !ModInformation.IsClient || payload.Who is not NetPeer serverPeer ||
+            !FourberieSnapshotOriginGuard.IsTrustedServerTransport(serverPeer, localIsClient: true) ||
+            !FourberieOperationProtocol.IsProposalShapeValid(payload.What))
+            return;
+        pendingContractProposal = payload.What;
+        GameThread.RunSafe(TryShowContractProposal, context: nameof(FourberieCompatibilityHandler));
+    }
+
+    private void TryShowContractProposal()
+    {
+        NetworkFourberieContractProposal proposal = pendingContractProposal;
+        if (proposal == null || proposal.Revision != revisionGate.Revision ||
+            !configAuthority.TryGetCurrent(out var config) ||
+            !string.Equals(config.SessionId, proposal.SessionId, StringComparison.Ordinal) ||
+            !TryGetContractState(out IDictionary crime, out IDictionary heroes) ||
+            !FourberieContractAuthority.CanRespondToProposal(crime, heroes, out _) ||
+            !string.Equals(heroes["contractGiver"] as string, proposal.GiverId, StringComparison.Ordinal) ||
+            !string.Equals(heroes["contractTarget"] as string, proposal.TargetId, StringComparison.Ordinal) ||
+            Convert.ToInt32(crime[200]) != proposal.ContractType || Convert.ToInt32(crime[201]) != proposal.Reward ||
+            !objectManager.TryGetObject(proposal.GiverId, out Hero giver) || giver == null ||
+            !objectManager.TryGetObject(proposal.TargetId, out Hero target) || target?.Clan == null)
+            return;
+
+        string key = proposal.SessionId + "|" + proposal.Revision + "|" + proposal.TargetId;
+        if (string.Equals(shownContractProposalKey, key, StringComparison.Ordinal)) return;
+        shownContractProposalKey = key;
+
+        string work = proposal.ContractType == 0
+            ? new TextObject("{=FoSafHou51}We want you to bring death to the {CLAN} clan of {KING}.")
+                .SetTextVariable("CLAN", target.Clan.Name)
+                .SetTextVariable("KING", target.MapFaction.Name)
+                .ToString()
+            : new TextObject("{=FoSafHou52}We want you to destabilize the {CLAN} clan of {KING}. Fabricate a scandal, blackmail them, or even incite a rebellion.")
+                .SetTextVariable("CLAN", target.Clan.Name)
+                .SetTextVariable("KING", target.MapFaction.Name)
+                .ToString();
+        string body = new TextObject("{=FoSafHou50}A messenger from {KING} has arrived. His realm is seeking some discreet services...")
+            .SetTextVariable("KING", giver.MapFaction.Name)
+            .ToString() + "\n\n" + work + "\n\n" +
+            new TextObject("{=FoSafHou53}We will pay you {PAY}{GOLD_ICON} upon completion.")
+                .SetTextVariable("PAY", proposal.Reward)
+                .ToString();
+
+        InformationManager.ShowInquiry(new InquiryData(
+            new TextObject("{=FoSafHou49}Dirty business").ToString(),
+            body,
+            true,
+            true,
+            new TextObject("{=FoSafHou44}Consider the job done. Get those denars ready.").ToString(),
+            new TextObject("{=FoSafHou45}Nah, I'm not interested.").ToString(),
+            () => SubmitContractProposalResponse(FourberieOperation.AcceptContractProposal),
+            () => SubmitContractProposalResponse(FourberieOperation.DeclineContractProposal),
+            string.Empty,
+            0f,
+            null,
+            null,
+            null),
+            true,
+            false);
+    }
+
+    private void SubmitContractProposalResponse(FourberieOperation operation) =>
+        TrySubmit(new FourberieLocalOperation(
+            operation, null, null, null, 0, Array.Empty<FourberieLocalTroopSelection>()));
+
     private void HandleStateRequest(MessagePayload<NetworkRequestFourberieState> payload)
     {
         if (!compatible || !ModInformation.IsServer || payload.Who is not NetPeer peer) return;
         GameThread.RunSafe(
-            () => SendSnapshotOrAbort(peer, onlyIfChanged: false),
+            () =>
+            {
+                SendSnapshotOrAbort(peer, onlyIfChanged: false);
+                TrySendPendingContractProposal(peer);
+            },
             context: nameof(FourberieCompatibilityHandler));
     }
 
@@ -652,7 +853,11 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         GameThread.RunSafe(
             () =>
             {
-                if (TryApplySnapshot(payload.What, out var failure)) return;
+                if (TryApplySnapshot(payload.What, out var failure))
+                {
+                    TryShowContractProposal();
+                    return;
+                }
 
                 Logger.Fatal(
                     "Disconnecting from the Coop server because Fourberie state could not be accepted: {Failure}",

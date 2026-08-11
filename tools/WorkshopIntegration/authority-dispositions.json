@@ -1518,7 +1518,6 @@
         "0x06000022",
         "0x06000023",
         "0x06000024",
-        "0x06000026",
         "0x06000027",
         "0x06000028",
         "0x0600002D",
@@ -1903,7 +1902,6 @@
         "0x06000621",
         "0x06000623",
         "0x06000624",
-        "0x06000671",
         "0x06000708",
         "0x06000709",
         "0x06000738",
@@ -2434,6 +2432,82 @@
         "FourberieGrudgeAuthorityTests.Protocol_UsesClanTargetOnlyAndBoundsServerQuote",
         "FourberieGrudgeAuthorityTests.Result_CarriesServerQuoteWithoutChangingStatusSemantics",
         "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x06000020",
+        "0x0600002E",
+        "0x0600066F",
+        "0x06000670"
+      ],
+      "disposition": "FrameworkLifecycle",
+      "owner": "FourbContractBehavior registration and generated lifecycle",
+      "capability": "ServerCampaignCallbacks",
+      "tests": [
+        "FourberieContractAuthorityTests.ProposalLifecycle_HasExplicitCoopOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x06000026"
+      ],
+      "disposition": "CoopOwnerReplacement",
+      "owner": "FourberieCompatibilityHandler targeted contract proposal tick",
+      "capability": "CanonicalState",
+      "tests": [
+        "FourberieContractAuthorityTests.ProposalTick_CountsDownBeforeBecomingReady",
+        "FourberieContractAuthorityTests.Proposal_UsesPinnedServerRewardFormula",
+        "FourberieContractAuthorityTests.ProposalCommit_AndAcceptPreserveCompleteCanonicalContract",
+        "FourberieContractAuthorityTests.ProposalMessage_RequiresPinnedServerFields",
+        "FourberieContractAuthorityTests.ProposalLifecycle_HasExplicitCoopOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x0600002A"
+      ],
+      "disposition": "ServerCallback",
+      "owner": "FourberieAuthorityPatches.ServerOnlyPrefix contract completion",
+      "capability": "ServerCampaignCallbacks",
+      "tests": [
+        "FourberieContractAuthorityTests.ProposalLifecycle_HasExplicitCoopOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x0600002C"
+      ],
+      "disposition": "ClientPresentation",
+      "owner": "FourberieAuthorityPatches contract hint presentation",
+      "capability": "ClientPresentation",
+      "tests": [
+        "FourberieContractAuthorityTests.ProposalLifecycle_HasExplicitCoopOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x06000671",
+        "0x06000672"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieOperationExecutor contract proposal response transactions",
+      "capability": "ExplicitOperations",
+      "tests": [
+        "FourberieContractAuthorityTests.ProposalCommit_AndAcceptPreserveCompleteCanonicalContract",
+        "FourberieContractAuthorityTests.ProposalDecline_ClearsProposalAndContractButKeepsOfferPreference",
+        "FourberieContractAuthorityTests.Protocol_AcceptsOnlyEmptyContractCommandShapes",
+        "FourberieContractAuthorityTests.ProposalLifecycle_HasExplicitCoopOwners"
       ]
     }
   ]

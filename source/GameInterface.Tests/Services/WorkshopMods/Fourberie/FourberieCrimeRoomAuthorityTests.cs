@@ -22,6 +22,10 @@ public sealed class FourberieCrimeRoomAuthorityTests
             LastOperation = operation;
             return true;
         }
+
+        public void RunContractTick()
+        {
+        }
     }
 
     private sealed class SliderFixture

@@ -7,8 +7,8 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > **AUTHORITY ROUTING IN PROGRESS (2026-08-11): prior RC superseded; stable held.** The exact function
 > ledger covers 41,050 methods across the ten active Workshop modules, retired RBM, and integrated
 > Separatism. Deterministic IL evidence now includes static shared-state writes and collection mutations,
-> identifying 13,729 authority candidates; 8,060 exact records are classified and release validation
-> rejects the remaining 5,669 active gameplay records.
+> identifying 13,729 authority candidates; 8,067 exact records are classified and release validation
+> rejects the remaining 5,662 active gameplay records.
 > All six active gameplay adapters now share `IWorkshopModule`, and a trusted host capability snapshot
 > is green in unit/E2E tests. UnblockableThrust's four candidates are owned by the accepted collision
 > authority, and all 17 DismembermentPlus candidates now use a deterministic, deduplicated replicated-
@@ -17,7 +17,7 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > settlement rebellion cannot run from a client. Improved Garrisons' 723 candidates are now closed too:
 > management/settings commands carry stable selections, authenticated clan ownership, session/revision
 > concurrency, exact replay results, canonical rollback, server-created parties, and an authenticated building-
-> reserve command while clients retain the menu and roster-selection surface. Fourberie's thirty-five explicit
+> reserve command while clients retain the menu and roster-selection surface. Fourberie's thirty-seven explicit
 > operation families now use authenticated,
 > rollback-safe server commands, while its menus and mission setup remain role-local presentation/lifecycle.
 > Diplomacy's explicit player operations and server callbacks are routed too, including a persisted,
@@ -159,7 +159,10 @@ rolls back canonical Fourberie state and created parties on failure, and returns
       overwrite the missing auto-investment key while rendering the room.
   12. Contract-offer enable/disable and current-contract cancellation now use typed commands. Cancellation
       revalidates both canonical participants, applies the relation penalty to the authenticated controller,
-      and owns the cooldown RNG and contract-state cleanup on the server.
+      and owns the cooldown RNG and contract-state cleanup on the server. The broken headless inquiry in the
+      hourly proposal tick is replaced by server-owned giver/target/reward selection plus a targeted client
+      prompt; accepting or declining that prompt is a replay-safe server command, and reconnecting owners are
+      re-offered a still-pending canonical proposal.
   13. Selecting a territory as the main crime base now sends its stable settlement ID to the server. The
       server verifies it is a current town territory, owns the base/timestamp change, and clears base-specific
       criminal roles before publishing the new canonical state. Removing a secondary territory and confirmed
@@ -171,12 +174,13 @@ rolls back canonical Fourberie state and created parties on failure, and returns
       the server owns the random surcharge and revalidates the clan, live grudge, spy, gold, and quoted amount.
   14. `OnMissionBehaviorInitialize` currently preserves the mod's required peer-local setup, but its
      mission callbacks remain open until their authoritative/controller ownership is proven end to end.
-  15. The strengthened exact secondary pass now closes 942/1,865 required candidates:
-     430 presentation-only helpers, 217 pure model-policy methods, 187 server callbacks, 50 Coop-owner
-     replacements, 49 server-command methods, and 9 unreachable Homesteads/Bellum Civile add-on methods.
+  15. The strengthened exact secondary pass now closes 949/1,865 required candidates:
+     430 presentation-only helpers, 217 pure model-policy methods, 187 server callbacks, 51 Coop-owner
+     replacements, 51 server-command methods, 4 framework-lifecycle methods, and 9 unreachable
+     Homesteads/Bellum Civile add-on methods.
      The validator rejects mutation,
      persistence, randomness, or authority-sensitive calls mislabeled as client presentation.
-  - **OPEN:** 923 exact UI/mission/lifecycle candidates remain, including roughly 300 menu/dialog helpers
+  - **OPEN:** 916 exact UI/mission/lifecycle candidates remain, including roughly 300 menu/dialog helpers
     that reach shared state and therefore require live command or mission-authority owners.
 
 ### Playable session (DONE 2026-08-10)

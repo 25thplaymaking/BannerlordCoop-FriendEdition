@@ -58,6 +58,8 @@ internal enum FourberiePatchKind
     SafehouseAbandonConsequence,
     GrudgeSelectionConsequence,
     GrudgeSettlementConsequence,
+    ContractTickReplacement,
+    ContractProposalLegacyConsequence,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -422,6 +424,14 @@ internal static class FourberieCompatibilityManifest
             FourberiePatchKind.ContractConsequence);
         Add("Fourberie.FourbContractBehavior", "ContractAborted", FourberiePatchKind.ServerOnly,
             "System.Boolean", "System.Int32");
+        Add("Fourberie.FourbContractBehavior", "ContractComplete", FourberiePatchKind.ServerOnly,
+            Clan, "System.Int32");
+        Add("Fourberie.FourbContractBehavior", "fb_contract_hint", FourberiePatchKind.ClientPresentation,
+            "TaleWorlds.Localization.TextObject&");
+        Add("Fourberie.FourbContractBehavior+<>c", "<AddGameMenus>b__5_0",
+            FourberiePatchKind.ContractProposalLegacyConsequence);
+        Add("Fourberie.FourbContractBehavior+<>c", "<AddGameMenus>b__5_1",
+            FourberiePatchKind.ContractProposalLegacyConsequence);
         const string InquiryElements = "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]";
         Add("Fourberie.CriminalVM+<>c", "<KingdomFilter>b__148_1",
             FourberiePatchKind.ClientSchemeFilter, InquiryElements);
@@ -510,7 +520,7 @@ internal static class FourberieCompatibilityManifest
         Add("Fourberie.FourbBanditBehavior", "FOnDailyTickParty", FourberiePatchKind.ServerTick, MobileParty);
         Add("Fourberie.FourbBanditBehavior", "FOnDailyTickSettlement", FourberiePatchKind.ServerTick, Settlement);
 
-        Add("Fourberie.FourbContractBehavior", "HourlyTick", FourberiePatchKind.ServerTick);
+        Add("Fourberie.FourbContractBehavior", "HourlyTick", FourberiePatchKind.ContractTickReplacement);
         Add("Fourberie.FourbContractBehavior", "DailyTickClan", FourberiePatchKind.ServerTick, Clan);
         Add("Fourberie.FourbFightClubBehavior", "PitWeeklyTick", FourberiePatchKind.ServerTick);
         Add("Fourberie.FourbFightClubBehavior", "PitDailyTickHero", FourberiePatchKind.ServerTick, Hero);

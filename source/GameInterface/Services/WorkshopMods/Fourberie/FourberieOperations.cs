@@ -148,6 +148,8 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.EnableContractOffers:
                 case FourberieOperation.DisableContractOffers:
                 case FourberieOperation.AbortContract:
+                case FourberieOperation.AcceptContractProposal:
+                case FourberieOperation.DeclineContractProposal:
                     ApplyContractOperation(actor, actorParty, request.Operation);
                     break;
                 case FourberieOperation.SetMainCrimeBase:
@@ -420,6 +422,20 @@ internal sealed class FourberieOperationExecutor
                 return;
             }
 
+            if (operation == FourberieOperation.AcceptContractProposal ||
+                operation == FourberieOperation.DeclineContractProposal)
+            {
+                EnsureContractController(actor, actorParty, heroes);
+                if (!FourberieContractAuthority.CanRespondToProposal(crime, heroes, out string responseFailure))
+                    throw new InvalidOperationException(responseFailure);
+                int responseCooldown = MBRandom.RandomInt(7, 13);
+                if (operation == FourberieOperation.AcceptContractProposal)
+                    FourberieContractAuthority.CommitAccept(crime, responseCooldown);
+                else
+                    FourberieContractAuthority.CommitDecline(crime, heroes, responseCooldown);
+                return;
+            }
+
             if (!FourberieContractAuthority.TryPlanAbort(
                     crime, heroes, out string giverId, out string abortFailure) ||
                 !objectManager.TryGetObject(giverId, out Hero giver) || giver == null || !giver.IsAlive)
@@ -430,6 +446,16 @@ internal sealed class FourberieOperationExecutor
                 ChangeRelationAction.ApplyPlayerRelation(giver, -5, true, true);
             FourberieContractAuthority.CommitAbort(crime, heroes, cooldown);
         }
+    }
+
+    private void EnsureContractController(Hero actor, MobileParty actorParty, IDictionary heroes)
+    {
+        string enforcerId = heroes?.Contains("enforcer") == true ? heroes["enforcer"] as string : null;
+        if (string.IsNullOrEmpty(enforcerId) ||
+            !objectManager.TryGetObject(enforcerId, out Hero enforcer) || enforcer == null ||
+            enforcer.Clan != actor.Clan || enforcer.PartyBelongedTo != actorParty ||
+            actorParty.MemberRoster.GetTroopCount(enforcer.CharacterObject) <= 0)
+            throw new InvalidOperationException("the authenticated controller no longer owns the Fourberie enforcer");
     }
 
     private void ApplyMainCrimeBase(string settlementId)

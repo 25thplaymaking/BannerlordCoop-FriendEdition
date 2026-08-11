@@ -44,6 +44,8 @@ internal enum FourberieOperation
     AbandonSafehouse = 33,
     RequestGrudgeQuote = 34,
     SettleClanGrudge = 35,
+    AcceptContractProposal = 36,
+    DeclineContractProposal = 37,
 }
 
 internal enum FourberieOperationStatus
@@ -156,6 +158,37 @@ internal sealed class NetworkFourberieOperationResult : ICommand
     }
 }
 
+[ProtoContract(SkipConstructor = true)]
+internal sealed class NetworkFourberieContractProposal : ICommand
+{
+    [ProtoMember(1)] public string SessionId { get; private set; }
+    [ProtoMember(2)] public long Revision { get; private set; }
+    [ProtoMember(3)] public string GiverId { get; private set; }
+    [ProtoMember(4)] public string TargetId { get; private set; }
+    [ProtoMember(5)] public int ContractType { get; private set; }
+    [ProtoMember(6)] public int Reward { get; private set; }
+
+    private NetworkFourberieContractProposal()
+    {
+    }
+
+    public NetworkFourberieContractProposal(
+        string sessionId,
+        long revision,
+        string giverId,
+        string targetId,
+        int contractType,
+        int reward)
+    {
+        SessionId = sessionId;
+        Revision = revision;
+        GiverId = giverId;
+        TargetId = targetId;
+        ContractType = contractType;
+        Reward = reward;
+    }
+}
+
 internal static class FourberieOperationProtocol
 {
     internal const int MaxTroopSelections = 64;
@@ -240,7 +273,8 @@ internal static class FourberieOperationProtocol
             FourberieOperation.SetLadsDuty or FourberieOperation.SetSlavesDuty =>
                 EmptyContext(request) && request.IntValue <= 100,
             FourberieOperation.EnableContractOffers or FourberieOperation.DisableContractOffers or
-                FourberieOperation.AbortContract =>
+                FourberieOperation.AbortContract or FourberieOperation.AcceptContractProposal or
+                FourberieOperation.DeclineContractProposal =>
                 EmptyContext(request) && request.IntValue == 0,
             FourberieOperation.SetMainCrimeBase or FourberieOperation.RemoveTerritory or
                 FourberieOperation.AbandonTownCrimeBase or FourberieOperation.AbandonSafehouse =>
@@ -256,6 +290,12 @@ internal static class FourberieOperationProtocol
             _ => false,
         };
     }
+
+    public static bool IsProposalShapeValid(NetworkFourberieContractProposal proposal) =>
+        proposal != null && IsSessionId(proposal.SessionId) && proposal.Revision >= 0 &&
+        IsStableId(proposal.GiverId, allowEmpty: false) && IsStableId(proposal.TargetId, allowEmpty: false) &&
+        proposal.GiverId != proposal.TargetId && (proposal.ContractType == 0 || proposal.ContractType == 1) &&
+        proposal.Reward > 0 && proposal.Reward <= 200_000;
 
     public static string CommandKey(NetworkRequestFourberieOperation request)
     {
@@ -287,6 +327,9 @@ internal static class FourberieOperationProtocol
         return value.Length <= MaxStableIdLength && value.All(character =>
             !char.IsControl(character) && character != '|' && character != ':');
     }
+
+    private static bool IsSessionId(string value) =>
+        value != null && value.Length == 32 && Guid.TryParseExact(value, "N", out _);
 
     private static bool EmptyTargets(NetworkRequestFourberieOperation request) =>
         string.IsNullOrEmpty(request.TargetId) && string.IsNullOrEmpty(request.SecondaryTargetId);

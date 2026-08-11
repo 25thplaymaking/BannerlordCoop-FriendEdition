@@ -51,6 +51,10 @@ public sealed class FourberieAuthorityTests
             SubmissionCount++;
             return true;
         }
+
+        public void RunContractTick()
+        {
+        }
     }
 
     [Fact]

@@ -22,6 +22,7 @@ internal interface IFourberiePatchRuntime
 {
     void PublishIfChanged();
     bool TrySubmit(FourberieLocalOperation operation);
+    void RunContractTick();
 }
 
 internal static class FourberiePatchRuntime
@@ -626,6 +627,14 @@ internal static class FourberieAuthorityPatches
     }
 
     public static bool GrudgeSettlementConsequencePrefix() => false;
+
+    public static bool ContractTickReplacementPrefix()
+    {
+        if (ModInformation.IsServer) FourberiePatchRuntime.Current?.RunContractTick();
+        return false;
+    }
+
+    public static bool ContractProposalLegacyConsequencePrefix() => false;
 
     internal static FourberieOperation SchemeLifecycleOperation(int slot)
     {

@@ -1,0 +1,16 @@
+{
+  // Frontir — Calradia Co-op launcher. Edit this to retarget without rebuilding.
+  "groupName": "Calradia Co-op",
+
+  "serverHost": "205.209.116.114",
+  "serverPort": 4200,
+  "serverPassword": "8888",
+
+  "moduleToken": "_MODULES_*Bannerlord.Harmony*Bannerlord.ButterLib*Bannerlord.UIExtenderEx*Bannerlord.MBOptionScreen*Native*SandBoxCore*CustomBattle*Sandbox*StoryMode*PlayerSettlement*Coop*ImprovedGarrisons*DismembermentPlus*Fourberie*Bannerlord.Diplomacy*UnblockableThrust*_MODULES_",
+
+  // Empty = auto-detect the Bannerlord install from Steam.
+  "gamePath": "",
+
+  // Client build feed (public GitHub release). Swap client-stable → client-nightly for bleeding edge.
+  "updateManifestUrl": "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/client-stable/launcher.json"
+}

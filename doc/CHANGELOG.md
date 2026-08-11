@@ -1,6 +1,42 @@
 # Friend Edition Changelog
 
-## 2026-08-10 — workshop7 (current): per-role activation
+## 2026-08-10 — workshop8 (current): full modded server is LIVE
+
+**Supersedes workshop7's per-role gating.** The wall workshop7 hit — "the
+headless dedicated build cannot initialise Bannerlord.ButterLib" — is **broken**.
+grain.silo now serves the full modded co-op campaign live (all 11 Workshop mods
+active on both roles), reproduced across service restarts (`phase":"serving"`,
+port 4200, 0 restarts).
+
+### How ButterLib was ported to the .NET Core dedicated server
+The client runs .NET Framework (two same-named assembly versions coexist); the
+server runs .NET Core (unifies by simple name, refuses a second copy). The fix
+is a **server-bin-only** kit (hash-excluded, so the join handshake is unaffected):
+
+- `coophook.dll` (`DOTNET_STARTUP_HOOKS`) resolves each module's deps from its
+  bin and reuses already-loaded assemblies before `LoadFrom`.
+- Cecil-neutralize ButterLib's `ValidateLoadOrder`/`ValidateHarmony` and the
+  WinForms crash-reporter subsystems; stub the WinForms/ImGui renderers.
+- Swap ButterLib's net472 MonoMod for the **net6** build.
+- Rebuild **Coop on Serilog 2.x** so it shares one Serilog with the BUTR mods.
+- Cecil-patch **`DedicatedServer.CoopDriver.EnsureLoaded`** (root-bin copy) to
+  reuse an already-loaded assembly instead of a second `LoadFrom` — this was the
+  final `FileLoadException: Assembly with same name is already loaded` at
+  coop-host start.
+
+Kit sources: `tools/CoopServerModKit/`. Full writeup + how to add a mod / migrate
+to Serilog / wire into the coop framework: `doc/COOP-MOD-INTEGRATION.md`.
+
+### Distributable
+`activationPolicy` flipped to **all-active**; corrected load order so
+**PlayerSettlement activates before Coop** (was after — harmless while inactive,
+crashes when active). New catalog `GameInterface.dll` (all mods
+`featureActiveExpectedOn{Server,Client}: true`) ships in the client pack.
+
+**Test boundary:** server proven live head-lessly; the first real *client* join
+handshake is the remaining proof (needs a Windows Bannerlord client).
+
+## 2026-08-10 — workshop7: per-role activation
 
 **Supersedes workshop6**, whose all-seventeen-active policy crashes clients
 while loading into the server.

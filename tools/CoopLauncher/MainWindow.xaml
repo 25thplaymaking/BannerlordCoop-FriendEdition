@@ -1,0 +1,167 @@
+<Window x:Class="CoopLauncher.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Calradia Co-op" Height="470" Width="740"
+        WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
+        Background="Transparent" WindowStartupLocation="CenterScreen"
+        FontFamily="{StaticResource Utility}" TextOptions.TextFormattingMode="Ideal">
+
+    <Window.Resources>
+        <!-- Thin campaign-map progress rail: gold advance over a leather track. -->
+        <Style x:Key="RailBar" TargetType="ProgressBar">
+            <Setter Property="Height" Value="4" />
+            <Setter Property="Minimum" Value="0" />
+            <Setter Property="Maximum" Value="1" />
+            <Setter Property="Foreground" Value="{StaticResource Gold}" />
+            <Setter Property="Background" Value="{StaticResource LeatherLight}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ProgressBar">
+                        <Border Background="{TemplateBinding Background}">
+                            <Grid>
+                                <Rectangle x:Name="PART_Track" />
+                                <Rectangle x:Name="PART_Indicator" HorizontalAlignment="Left"
+                                           Fill="{TemplateBinding Foreground}" />
+                            </Grid>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <!-- Double frame: gold hairline outside, ink field inside — a forged plaque. -->
+    <Border Background="{StaticResource Ink}" BorderBrush="{StaticResource Gold}" BorderThickness="1.5">
+        <Border BorderBrush="#33C9A24B" BorderThickness="1" Margin="3">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="30" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- ══ Custom title bar (draggable) ══ -->
+                <Grid x:Name="TitleBar" Grid.Row="0" Background="#00000000">
+                    <TextBlock Text="F R O N T I R" VerticalAlignment="Center" Margin="12,0,0,0"
+                               FontSize="11" Foreground="{StaticResource Gold}" FontWeight="SemiBold" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button x:Name="MinButton" Style="{StaticResource ChromeButton}" Content="&#x2013;"
+                                ToolTip="Minimize" />
+                        <Button x:Name="CloseButton" Style="{StaticResource ChromeButton}" Content="&#x2715;"
+                                ToolTip="Close" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- ══ Body ══ -->
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="168" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- ── Signature: the hanging war banner (left alcove) ── -->
+                    <Grid Grid.Column="0">
+                        <Grid.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                <GradientStop Color="{StaticResource LeatherColor}" Offset="0" />
+                                <GradientStop Color="{StaticResource InkColor}" Offset="1" />
+                            </LinearGradientBrush>
+                        </Grid.Background>
+
+                        <!-- right divider between alcove and content -->
+                        <Rectangle Width="1" HorizontalAlignment="Right" Fill="#33C9A24B" />
+
+                        <Canvas x:Name="BannerCanvas" Width="168" RenderTransformOrigin="0.5,0">
+                            <Canvas.RenderTransform>
+                                <ScaleTransform x:Name="BannerScale" ScaleY="1" />
+                            </Canvas.RenderTransform>
+
+                            <!-- Crossbar the banner hangs from -->
+                            <Rectangle Canvas.Left="26" Canvas.Top="14" Width="116" Height="6"
+                                       Fill="{StaticResource Gold}" />
+                            <Ellipse Canvas.Left="28" Canvas.Top="12" Width="10" Height="10" Fill="{StaticResource GoldBright}" />
+                            <Ellipse Canvas.Left="130" Canvas.Top="12" Width="10" Height="10" Fill="{StaticResource GoldBright}" />
+
+                            <!-- Cloth: swallowtail pennant (M top-left → top-right → bottom-right → notch → bottom-left) -->
+                            <Path x:Name="BannerCloth" Canvas.Left="36" Canvas.Top="20"
+                                  Stroke="{StaticResource Gold}" StrokeThickness="1.5"
+                                  Data="M0,0 L96,0 L96,300 L48,272 L0,300 Z">
+                                <Path.Fill>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Color="{StaticResource BloodColor}" Offset="0" />
+                                        <GradientStop Color="#FF3A130E" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Path.Fill>
+                            </Path>
+
+                            <!-- Inner hairline inset -->
+                            <Path Canvas.Left="44" Canvas.Top="28" Stroke="#66E7C56A" StrokeThickness="1"
+                                  Data="M0,0 L80,0 L80,258 L40,236 L0,258 Z" />
+
+                            <!-- Heraldic sigil: crossed swords. Gold when the host is up, steel when it's down. -->
+                            <TextBlock x:Name="Sigil" Canvas.Left="50" Canvas.Top="122" Width="68"
+                                       TextAlignment="Center" FontFamily="Segoe UI Symbol" FontSize="52"
+                                       Text="&#x2694;" Foreground="{StaticResource Steel}" />
+
+                            <!-- Muster year etched toward the tail -->
+                            <TextBlock Canvas.Left="36" Canvas.Top="214" Width="96" TextAlignment="Center"
+                                       FontFamily="{StaticResource Display}" FontSize="15" FontWeight="Bold"
+                                       Foreground="{StaticResource Parchment}" Text="MMXXVI" Opacity="0.7" />
+                        </Canvas>
+                    </Grid>
+
+                    <!-- ── Content ── -->
+                    <Grid Grid.Column="1" Margin="34,20,30,22">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Text="P R I V A T E   M U S T E R"
+                                   FontSize="11" Foreground="{StaticResource Steel}" />
+
+                        <TextBlock x:Name="TitleText" Grid.Row="1" Text="Calradia Co-op"
+                                   FontFamily="{StaticResource Display}" FontSize="40" FontWeight="Bold"
+                                   Foreground="{StaticResource Parchment}" TextWrapping="Wrap"
+                                   Margin="0,2,0,0" LineHeight="42" LineStackingStrategy="BlockLineHeight" />
+
+                        <Rectangle Grid.Row="2" Height="1" Width="130" HorizontalAlignment="Left"
+                                   Fill="{StaticResource Gold}" Opacity="0.55" Margin="0,12,0,0" />
+
+                        <!-- Field dispatch: live host status in a monospaced readout -->
+                        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,14,0,0">
+                            <TextBlock x:Name="StatusGlyph" Text="&#x25CF;" FontFamily="{StaticResource Dispatch}"
+                                       FontSize="13" Foreground="{StaticResource Steel}" VerticalAlignment="Center" />
+                            <TextBlock x:Name="StatusText" Margin="8,0,0,0" VerticalAlignment="Center"
+                                       FontFamily="{StaticResource Dispatch}" FontSize="13"
+                                       Foreground="{StaticResource Steel}" Text="Scouting the host…" />
+                        </StackPanel>
+
+                        <!-- Orientation for a first-time rider: names the loadout, sets expectations -->
+                        <TextBlock Grid.Row="4" VerticalAlignment="Top" Margin="0,20,0,0" TextWrapping="Wrap"
+                                   FontSize="12.5" LineHeight="19" LineStackingStrategy="BlockLineHeight"
+                                   Foreground="{StaticResource Steel}"
+                                   Text="One click loads the campaign mod set — Diplomacy, Improved Garrisons, Fourberie, Player Settlements — and rides straight to the host. No module list, no manual connect." />
+
+                        <!-- Primary action -->
+                        <Button x:Name="JoinButton" Grid.Row="5" Height="56" Style="{StaticResource WarButton}"
+                                Content="MARCH TO WAR" IsEnabled="False" />
+
+                        <!-- Update rail -->
+                        <StackPanel Grid.Row="6" Margin="0,14,0,0">
+                            <ProgressBar x:Name="UpdateBar" Style="{StaticResource RailBar}" Value="0"
+                                         Visibility="Collapsed" />
+                            <TextBlock x:Name="UpdateText" Margin="0,8,0,0" FontFamily="{StaticResource Dispatch}"
+                                       FontSize="11" Foreground="{StaticResource Steel}" TextTrimming="CharacterEllipsis"
+                                       Text="" />
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Border>
+    </Border>
+</Window>

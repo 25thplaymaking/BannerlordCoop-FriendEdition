@@ -1,5 +1,6 @@
 ﻿using Common;
 using Common.Logging;
+using Common.Messaging;
 using Common.Serialization;
 using Coop.Core;
 using Coop.Core.Common.Session;
@@ -18,6 +19,7 @@ using GameInterface.Services.Separatism;
 using GameInterface.Services.Tournaments.UI;
 using GameInterface.Services.UI;
 using GameInterface.Services.UI.CoopOptions;
+using GameInterface.Services.UI.Messages;
 using GameInterface.Services.UI.CrashReporting;
 using GameInterface.Services.WorkshopMods.Frameworks;
 using GameInterface.Utils;
@@ -28,6 +30,8 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Reflection;
 using System.Threading;
 using TaleWorlds.CampaignSystem;
@@ -100,6 +104,15 @@ namespace Coop
 
         private bool isServer = false;
         private bool isAutoConnect = false;
+
+        // /coopjoin <host> <port> [password] — the launcher's one-click direct-connect. Unlike the
+        // DEBUG-only /autoconnect (which just runs StartAsClient with the built-in default), this
+        // publishes a fully-addressed AttemptJoin at the main menu, exactly as the Join button does.
+        private bool isCoopJoin = false;
+        private IPAddress coopJoinAddress = null;
+        private int coopJoinPort = 0;
+        private string coopJoinPassword = string.Empty;
+        private bool _coopJoinFired = false;
         public override void NoHarmonyInit() 
         {
             AssemblyHellscape.CreateAssemblyBindingRedirects();
@@ -118,6 +131,10 @@ namespace Coop
             }
 
             isAutoConnect = args.Any(a => a.Equals("/autoconnect", StringComparison.OrdinalIgnoreCase));
+
+            // Parse from GetCommandLineArgs (quote-aware) rather than the space-split list so a
+            // future quoted password survives intact.
+            TryParseCoopJoin(Environment.GetCommandLineArgs());
 
             // GetFullCommandLineString splits on spaces, which would cut a quoted save
             // name apart; the managed-server arguments need real Windows arg parsing.
@@ -243,8 +260,8 @@ namespace Coop
             }
 
             LogManager.Configuration
-                .Enrich.WithProcessId()
-                //.WriteTo.Debug(outputTemplate: outputTemplate) // Disabled: floods VS Output window causing frame hitching when debugger is attached
+                // WithProcessId (Serilog.Enrichers.Process) pulled a Serilog 4.x-only sink package;
+                // dropped so Coop shares the mod ecosystem's Serilog 2.x on the .NET Core server.
                 .WriteTo.Sink(new SizeLimitedFileSink(
                     filePath,
                     outputTemplate,
@@ -595,6 +612,7 @@ namespace Coop
             Updateables.UpdateAll(frameTime);
 
             TryManagedServerAutoStart();
+            TryCoopJoin();
 
 #if DEBUG
             TryAutoConnect();
@@ -676,6 +694,88 @@ namespace Coop
                 {
                     Logger.Error(ex, "[AutoConnect] Exception during auto-start");
                 }
+            }
+        }
+
+        /// <summary>
+        /// Reads <c>/coopjoin &lt;host&gt; &lt;port&gt; [password]</c> from the process command line and
+        /// arms a one-shot direct-connect. Host may be an IPv4 literal or a DNS name. The password is
+        /// optional and is never written to the log. Malformed arguments are logged and ignored (the
+        /// client simply boots to the menu) rather than throwing during module init.
+        /// </summary>
+        private void TryParseCoopJoin(string[] argv)
+        {
+            for (int i = 0; i < argv.Length; i++)
+            {
+                if (!argv[i].Equals("/coopjoin", StringComparison.OrdinalIgnoreCase)) continue;
+
+                if (i + 2 >= argv.Length)
+                {
+                    Logger.Warning("[CoopJoin] /coopjoin requires <host> <port> [password] — ignoring");
+                    return;
+                }
+
+                string host = argv[i + 1];
+                if (!int.TryParse(argv[i + 2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var port)
+                    || port < IPEndPoint.MinPort || port > IPEndPoint.MaxPort)
+                {
+                    Logger.Warning("[CoopJoin] Invalid port '{Port}' in /coopjoin — ignoring", argv[i + 2]);
+                    return;
+                }
+
+                // A following token that itself starts with '/' is the next switch, not the password.
+                string password = (i + 3 < argv.Length && !argv[i + 3].StartsWith("/"))
+                    ? argv[i + 3] : string.Empty;
+
+                IPAddress ip;
+                if (!IPAddress.TryParse(host, out ip))
+                {
+                    try
+                    {
+                        ip = Dns.GetHostAddresses(host)
+                            .FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warning(ex, "[CoopJoin] Could not resolve host '{Host}' — ignoring", host);
+                        return;
+                    }
+                }
+
+                if (ip == null)
+                {
+                    Logger.Warning("[CoopJoin] No IPv4 address found for host '{Host}' — ignoring", host);
+                    return;
+                }
+
+                coopJoinAddress = ip;
+                coopJoinPort = port;
+                coopJoinPassword = password;
+                isCoopJoin = true;
+                // Password is group-private: log target host/port only, never the token.
+                Logger.Information("[CoopJoin] Auto-join armed for {Host}:{Port}", host, port);
+                return;
+            }
+        }
+
+        private void TryCoopJoin()
+        {
+            if (!isCoopJoin || _coopJoinFired || isServer) return;
+            // A managed/hosted server owns its own startup; never also fire a client join.
+            if (ManagedServerConfig.HasAutoLoadSave) return;
+            if (!(GameStateManager.Current?.ActiveState is InitialState)) return;
+
+            _coopJoinFired = true;
+            try
+            {
+                Logger.Information("[CoopJoin] Main menu reached — publishing AttemptJoin");
+                // Same message the Join button publishes; its handler runs StartAsClient internally.
+                MessageBroker.Instance.Publish(this,
+                    new AttemptJoin(coopJoinAddress, coopJoinPort, coopJoinPassword, false));
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "[CoopJoin] Exception publishing AttemptJoin");
             }
         }
 

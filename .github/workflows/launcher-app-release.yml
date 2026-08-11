@@ -1,0 +1,64 @@
+name: Launcher App Release
+
+# Builds the Calradia Co-op launcher itself (the WPF app, tools/CoopLauncher) as a self-contained
+# single-file Windows .exe and publishes it to a rolling `launcher-app` release in this repo, so a
+# friend can download and run it with no .NET install. The app then auto-updates the game client from
+# the Launcher Client Release feed (see launcher-release.yml).
+
+on:
+  push:
+    branches: [development, 25vid/workshop-integration]
+    paths:
+      - 'tools/CoopLauncher/**'
+      - '.github/workflows/launcher-app-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: launcher-app-release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish single-file launcher
+        shell: bash
+        run: |
+          set -eu
+          dotnet publish tools/CoopLauncher/CoopLauncher.csproj -c Release -p:NuGetAudit=false
+          out="tools/CoopLauncher/bin/Release/net8.0-windows/win-x64/publish"
+          test -s "$out/CalradiaCoop.exe"
+          test -s "$out/launcher-config.json"
+          mkdir -p dist
+          cp "$out/CalradiaCoop.exe" dist/
+          cp "$out/launcher-config.json" dist/
+          # Distribution bundle: the .exe reads launcher-config.json from beside it.
+          powershell -Command "Compress-Archive -Path dist/CalradiaCoop.exe,dist/launcher-config.json -DestinationPath dist/CalradiaCoop-Launcher.zip -Force"
+
+      - name: Publish to the rolling launcher-app release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          if ! gh release view launcher-app >/dev/null 2>&1; then
+            gh release create launcher-app \
+              --title "Calradia Co-op — launcher app" \
+              --notes "One-click launcher. Download CalradiaCoop-Launcher.zip, extract, run CalradiaCoop.exe. It auto-updates the game client and rides straight into the co-op host."
+          fi
+          gh release upload launcher-app \
+            dist/CalradiaCoop.exe dist/launcher-config.json dist/CalradiaCoop-Launcher.zip --clobber

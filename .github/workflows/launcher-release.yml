@@ -1,0 +1,200 @@
+name: Launcher Client Release
+
+# Builds the CLIENT mod payload (Serilog 4.x — the .NET-Framework client runtime) and publishes it,
+# plus a manifest the Calradia Co-op launcher consumes (tools/CoopLauncher). The launcher pulls the
+# manifest on startup, updates Modules\Coop in place, and launches straight into the co-op host.
+#
+# Feed (fixed rolling tag `client-nightly`, public repo → no auth):
+#   manifest: https://github.com/<owner>/<repo>/releases/download/client-nightly/launcher.json
+#   payload:  https://github.com/<owner>/<repo>/releases/download/client-nightly/Coop-client.zip
+
+on:
+  push:
+    branches: [development, 25vid/workshop-integration]
+    paths:
+      - 'source/**'
+      - 'deploy/**'
+      - 'UIMovies/**'
+      - '.github/workflows/launcher-release.yml'
+  workflow_dispatch:
+    inputs:
+      channels:
+        description: Which channel(s) to publish this build to
+        type: choice
+        default: both
+        options: [nightly, stable, both]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: launcher-client-release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: garrettluskey/bannerlordcoop:latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Trust checkout directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Link Bannerlord assemblies
+        run: ln -s /home/mb2 mb2
+
+      - name: Restore .NET Framework build inputs
+        run: |
+          set -eu
+          reference_package="$RUNNER_TEMP/net472.nupkg"
+          reference_root="$RUNNER_TEMP/net472"
+          mkdir -p "$reference_root" source/packages
+          wget -q \
+            https://api.nuget.org/v3-flatcontainer/microsoft.netframework.referenceassemblies.net472/1.0.3/microsoft.netframework.referenceassemblies.net472.1.0.3.nupkg \
+            -O "$reference_package"
+          echo "ffa0a5570a39f911399164d0581ffddef99b5e3dfbaa5f220e5ce22969bcf57c  $reference_package" | sha256sum -c -
+          unzip -q "$reference_package" -d "$reference_root"
+
+          sed -n 's/.*id="\([^"]*\)" version="\([^"]*\)".*/\1 \2/p' source/Coop/packages.config |
+            while read -r package_id package_version; do
+              lower_id=$(printf '%s' "$package_id" | tr '[:upper:]' '[:lower:]')
+              destination="source/packages/$package_id.$package_version"
+              package_file="$RUNNER_TEMP/$lower_id.$package_version.nupkg"
+              mkdir -p "$destination"
+              wget -q \
+                "https://api.nuget.org/v3-flatcontainer/$lower_id/$package_version/$lower_id.$package_version.nupkg" \
+                -O "$package_file"
+              unzip -q "$package_file" -d "$destination"
+            done
+
+      - name: Select the client Serilog (4.x)
+        # The client runs on .NET Framework and needs Serilog 4.x; a 2.x GameInterface/Coop throws
+        # MissingMethodException on LogManager.GetLogger(). packages.config already pins 4.2.0, so this
+        # only has to redirect the two csproj references the repo keeps on 2.x for the server build.
+        run: |
+          set -eu
+          sed -i 's#<PackageReference Include="Serilog" Version="2.12.0" />#<PackageReference Include="Serilog" Version="4.2.0" />#' \
+            source/Common/Common.csproj
+          sed -i -e 's/Serilog\.2\.12\.0/Serilog.4.2.0/g' -e 's/Serilog, Version=2\.0\.0\.0/Serilog, Version=4.2.0.0/g' \
+            source/Coop/Coop.csproj
+          grep -q 'Serilog" Version="4.2.0"' source/Common/Common.csproj
+          grep -q 'Serilog.4.2.0' source/Coop/Coop.csproj
+
+      - name: Build client module (Release, Serilog 4.x)
+        working-directory: source
+        run: |
+          dotnet build Coop/Coop.csproj \
+            -c Release \
+            -p:CustomAfterMicrosoftCommonTargets="$RUNNER_TEMP/net472/build/Microsoft.NETFramework.ReferenceAssemblies.net472.targets" \
+            -p:SourceRevisionId="$GITHUB_SHA" \
+            -p:IncludeSourceRevisionInInformationalVersion=true \
+            -p:ModName= \
+            -p:NuGetAudit=false \
+            --consoleLoggerParameters:ErrorsOnly
+
+      - name: Package client payload (zip)
+        run: |
+          set -eu
+          apk add --no-cache 7zip >/dev/null
+          module=release-stage/Coop
+          binary="$module/bin/Win64_Shipping_Client"
+          mkdir -p "$binary" "$module/GUI/Prefabs"
+
+          # Ship Coop's own assemblies (incl. Serilog 4.x); never the game's own DLLs.
+          for file in source/Coop/bin/Release/*.dll; do
+            name=${file##*/}
+            case "$name" in
+              TaleWorlds.*|SandBox.*|StoryMode.*) continue ;;
+            esac
+            cp "$file" "$binary/"
+          done
+          cp source/Coop/bin/Release/Coop.CrashReporter.exe "$binary/"
+          for required in Coop.dll Common.dll Coop.Core.dll Coop.Steam.dll GameInterface.dll Missions.dll Coop.CrashReporter.exe Serilog.dll; do
+            test -s "$binary/$required"
+          done
+          # Confirm the shipped Serilog really is 4.x, not a stray 2.x copy.
+          strings "$binary/Serilog.dll" | grep -q '4\.2\.0\.0' || { echo "shipped Serilog is not 4.x" >&2; exit 1; }
+
+          cp 'deploy/Server Instructions.md' deploy/mod-config.default.json "$module/"
+          cp -R UIMovies/. "$module/GUI/Prefabs/"
+
+          coop_version=$(sed -n 's/.*<CoopVersion>\([^<]*\)<\/CoopVersion>.*/\1/p' source/Directory.Build.props)
+          game_version=$(sed -n 's/.*<GameVersion>\([^<]*\)<\/GameVersion>.*/\1/p' source/Coop/Coop.csproj)
+          test -n "$coop_version"; test -n "$game_version"
+          # shellcheck disable=SC2016
+          sed \
+            -e 's/${name}/Coop/g' \
+            -e 's/${main_class}/CoopMod/g' \
+            -e "s/\${version}/v$coop_version/g" \
+            -e "s/\${game_version}/$game_version/g" \
+            deploy/SubModule.xml > "$module/SubModule.xml"
+
+          mkdir -p artifact
+          # Zip root entry is `Coop/…`, so the launcher extracts it over the Modules folder.
+          (cd release-stage && 7z a -tzip -mx=7 "../artifact/Coop-client.zip" Coop >/dev/null)
+          git log -1 --pretty=%s | tr -d '\r\n' > artifact/notes.txt
+
+      - name: Upload client payload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: coop-client
+          path: artifact/*
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download client payload
+        uses: actions/download-artifact@v7
+        with:
+          name: coop-client
+          path: artifact
+
+      - name: Publish to the selected channel release(s)
+        working-directory: artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # push → both channels for now; dispatch honors the chosen channel.
+          CHANNELS: ${{ github.event_name == 'workflow_dispatch' && inputs.channels || 'both' }}
+        run: |
+          set -eu
+          version=$(date -u +%Y.%m.%d.%H%M)
+          sha=$(sha256sum Coop-client.zip | cut -d' ' -f1)
+          notes=$(tr '"' "'" < notes.txt)
+
+          case "$CHANNELS" in
+            nightly) tags="client-nightly" ;;
+            stable)  tags="client-stable" ;;
+            *)       tags="client-nightly client-stable" ;;
+          esac
+
+          for tag in $tags; do
+            zipurl="https://github.com/${GITHUB_REPOSITORY}/releases/download/$tag/Coop-client.zip"
+            jq -n --arg v "$version" --arg u "$zipurl" --arg s "$sha" --arg n "$notes" \
+              '{version:$v, clientZipUrl:$u, sha256:$s, notes:$n}' > launcher.json
+            echo "== $tag =="; cat launcher.json
+
+            # client-stable is the default channel the shipped launcher follows → mark it "latest".
+            latest_flag=""
+            [ "$tag" = "client-stable" ] && latest_flag="--latest"
+
+            if ! gh release view "$tag" >/dev/null 2>&1; then
+              gh release create "$tag" \
+                --title "Calradia Co-op — ${tag#client-} client feed" \
+                --notes "Rolling ${tag#client-} client build the launcher auto-updates from. Assets overwritten each build." \
+                $latest_flag
+            fi
+            gh release upload "$tag" Coop-client.zip launcher.json --clobber
+          done

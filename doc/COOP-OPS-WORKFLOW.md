@@ -64,6 +64,19 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
    files; the runtime handshake hashes only Workshop mods, not Coop's own assemblies) — so swapping
    it is safe, but keep its `coop.files`/`SHA256SUMS` record in sync for hygiene.
 
+8. **Nothing in `NoHarmonyInit` before `SetupLogging()` may touch the static `Logger`** — it's null
+   until `SetupLogging` runs, so a `Logger.X(...)` call there throws NRE, which aborts mod init and
+   crashes the whole game with `0xe0434352` on launch. Put boot-time arg parsing AFTER `SetupLogging`
+   and null-guard (`Logger?.`) any logging that could run early. *(Earned: `TryParseCoopJoin` logged
+   "auto-join armed" before logging existed → every launcher start (which always passes `/coopjoin`)
+   crashed; the plain `.cmd` had no `/coopjoin` so skipped the path and masked it.)*
+
+9. **"The launcher opened" is NOT "the game launched."** Verify a launcher change by confirming the
+   GAME reaches the main menu and (for `/coopjoin`) logs `[CoopJoin] Main menu reached — publishing
+   AttemptJoin` in `Coop_client.log` — not just that `CalradiaCoop.exe` showed a window. For a
+   startup crash with no log, drop `coop-diag.on` beside `Bannerlord.exe` to arm the first-chance
+   logger (`Coop_firstchance.log`), reproduce, read, then remove the file.
+
 ---
 
 ## Checklist: making a handshake-affecting change

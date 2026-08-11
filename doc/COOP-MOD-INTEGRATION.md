@@ -82,11 +82,12 @@ Sources are preserved in **`tools/CoopServerModKit/`** so agents can rebuild the
      those); Serilog resolves from Coop's bin first so the whole process shares one Serilog.
    * First‑chance/unhandled exception capture to `/tmp/coop-fce.log`.
 
-2. **ButterLib + Harmony Cecil patch** (`tools/CoopServerModKit/butterlib-patcher/`, Mono.Cecil):
+2. **ButterLib Cecil patch** (`tools/CoopServerModKit/butterlib-patcher/`, Mono.Cecil):
    neutralizes method bodies to `ret` so head‑less ButterLib doesn't abort or pop WinForms:
-   `ButterLibSubModule::ValidateLoadOrder`, `SubModule::ValidateHarmony`, and the
-   `Enable()` of `ExceptionHandler / CrashUploader / DelayedSubModule / SubModuleWrappers2`
-   (also any method named `ValidateHarmony`/`ValidateLoadOrder`).
+   `ButterLibSubModule::ValidateLoadOrder` and the
+   `Enable()` of `ExceptionHandler / CrashUploader / DelayedSubModule / SubModuleWrappers2`.
+   The patcher accepts only the pinned ButterLib v2.11.1 SHA-256 and exactly those five concrete
+   type/method/signature matches; it no longer patches same-named methods elsewhere.
 
 3. **Renderer stubs** — `BUTR.CrashReport.Renderer.WinForms/ImGui` re‑implemented as
    netstandard2.0 stubs (same public entry types minus the `Form`/ImGui bases) so the crash‑report
@@ -104,7 +105,18 @@ Sources are preserved in **`tools/CoopServerModKit/`** so agents can rebuild the
    *"Assembly with same name is already loaded"*.
    **Gotcha:** the copy that actually loads is the one in the **root** `bin/Win64_Shipping_Server/`,
    not the module's `Modules/DedicatedServer.Windows/bin/…` copy. Patch the **root‑bin** DLL.
-   (`DedicatedServer.Core.dll` md5 `cbd6f34…` = patched.)
+   The patcher accepts only the pinned dedicated-server input and exactly one
+   `EnsureLoaded(System.String):System.Reflection.Assembly`. The old permanent
+   `/tmp/ensure.log` probe is removed.
+
+6. **Dedicated-server release pairing**
+   (`tools/DedicatedServerCompatibilityPatcher/`). After the Coop server bin is final, this tool
+   rewrites the server's four expected Coop DLL hashes, restores the code-4 abort that an older
+   compatibility patch disabled, and emits `SERVER-COOP-PAIRING.json`. A later DLL drift therefore
+   blocks boot instead of merely logging `COOP MODULE VERIFICATION FAILED` and continuing.
+
+`coophook.dll` always records unhandled exceptions. High-volume first-chance diagnostics are opt-in
+with `COOP_SERVER_KIT_DIAGNOSTICS=1` and capped at 400 KB.
 
 ### Reproduce a patched DLL
 ```bash

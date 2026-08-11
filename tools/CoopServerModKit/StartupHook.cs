@@ -9,6 +9,7 @@ using System.Reflection;
 //     campaign mods) resolve their bundled dependencies WITHOUT polluting the shared root bin,
 //     which would collide with Coop's own dependency versions.
 //  2. Capture any unhandled exception to /tmp/coop-fce.log before the TaleWorlds watchdog kills it.
+//     High-volume first-chance diagnostics are opt-in via COOP_SERVER_KIT_DIAGNOSTICS=1 and capped.
 internal sealed class StartupHook
 {
     private const string LogPath = "/tmp/coop-fce.log";
@@ -22,21 +23,27 @@ internal sealed class StartupHook
 
         AppDomain.CurrentDomain.AssemblyResolve += ResolveFromModuleBins;
 
-        AppDomain.CurrentDomain.FirstChanceException += (s, e) =>
+        if (string.Equals(
+            Environment.GetEnvironmentVariable("COOP_SERVER_KIT_DIAGNOSTICS"),
+            "1",
+            StringComparison.Ordinal))
         {
-            try
+            AppDomain.CurrentDomain.FirstChanceException += (s, e) =>
             {
-                var ex = e.Exception;
-                var st = ex.StackTrace ?? "";
-                // Skip the resolver's own probe misses (huge volume, benign).
-                if (ex is FileNotFoundException && st.IndexOf("ResolveFromModuleBins", StringComparison.Ordinal) >= 0) return;
-                if (new FileInfo(LogPath).Length > 400000) return;
-                File.AppendAllText(LogPath,
-                    "\n=== FIRST-CHANCE " + DateTime.Now.ToString("HH:mm:ss.fff") + " ===\n" +
-                    ex.GetType().FullName + ": " + ex.Message + "\n" + st + "\n");
-            }
-            catch { }
-        };
+                try
+                {
+                    var ex = e.Exception;
+                    var st = ex.StackTrace ?? "";
+                    // Skip the resolver's own probe misses (huge volume, benign).
+                    if (ex is FileNotFoundException && st.IndexOf("ResolveFromModuleBins", StringComparison.Ordinal) >= 0) return;
+                    if (new FileInfo(LogPath).Length >= 400000) return;
+                    File.AppendAllText(LogPath,
+                        "\n=== FIRST-CHANCE " + DateTime.Now.ToString("HH:mm:ss.fff") + " ===\n" +
+                        ex.GetType().FullName + ": " + ex.Message + "\n" + st + "\n");
+                }
+                catch { }
+            };
+        }
         AppDomain.CurrentDomain.UnhandledException += (s, e) =>
         {
             try { File.AppendAllText(LogPath, "\n=== UNHANDLED ===\n" + (e.ExceptionObject?.ToString() ?? "?") + "\n"); } catch { }

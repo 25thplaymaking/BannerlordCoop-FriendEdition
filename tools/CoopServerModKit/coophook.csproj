@@ -4,5 +4,9 @@
     <AssemblyName>coophook</AssemblyName>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="StartupHook.cs" />
+  </ItemGroup>
 </Project>

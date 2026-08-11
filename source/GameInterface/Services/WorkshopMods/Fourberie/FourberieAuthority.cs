@@ -241,6 +241,37 @@ internal static class FourberieAuthorityPatches
         return false;
     }
 
+    public static bool BusinessStartConsequencePrefix(MethodBase __originalMethod)
+    {
+        if (!ModInformation.IsClient) return false;
+
+        string typeName = __originalMethod?.DeclaringType?.FullName;
+        int businessKey = typeName switch
+        {
+            "Fourberie.CriminalVM+<>c" => 11,
+            "Fourberie.CriminalVM+<>c__DisplayClass16_0" => 21,
+            "Fourberie.CriminalVM+<>c__DisplayClass28_0" => 31,
+            _ => 0,
+        };
+        if (businessKey != 0)
+            SubmitBusiness(FourberieOperation.StartCriminalBusiness, businessKey);
+        return false;
+    }
+
+    public static bool BusinessUpgradeConsequencePrefix(object[] __args)
+    {
+        if (ModInformation.IsClient && TryBusinessKey(__args, out int businessKey))
+            SubmitBusiness(FourberieOperation.UpgradeCriminalBusiness, businessKey);
+        return false;
+    }
+
+    public static bool BusinessDowngradeConsequencePrefix(object[] __args)
+    {
+        if (ModInformation.IsClient && TryBusinessKey(__args, out int businessKey))
+            SubmitBusiness(FourberieOperation.DowngradeCriminalBusiness, businessKey);
+        return false;
+    }
+
     public static bool MissionInitializationPrefix() => true;
 
     public static bool SeparatismLoyaltyCompositionPrefix(MethodBase __originalMethod, ref int __result)
@@ -383,6 +414,24 @@ internal static class FourberieAuthorityPatches
             null,
             0,
             Selections(roster))) == true;
+    }
+
+    private static void SubmitBusiness(FourberieOperation operation, int businessKey) =>
+        FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+            operation,
+            null,
+            null,
+            null,
+            businessKey,
+            Array.Empty<FourberieLocalTroopSelection>()));
+
+    private static bool TryBusinessKey(object[] arguments, out int businessKey)
+    {
+        businessKey = arguments != null && arguments.Length > 1 && arguments[1] is int value
+            ? value
+            : 0;
+        return businessKey == 11 || businessKey == 12 || businessKey == 21 ||
+               businessKey == 22 || businessKey == 31 || businessKey == 32;
     }
 
     private static FourberieLocalTroopSelection[] Selections(TroopRoster roster)

@@ -44,6 +44,11 @@ public sealed class FourberieManifestTests
     [InlineData("Fourberie.FourbBanditBehavior", "FourbRecruitBandit", "ClientOperationPresentation")]
     [InlineData("Fourberie.FourbBanditBehavior", "RecruitLadsOnDoneClicked", "RecruitBanditsConsequence")]
     [InlineData("Fourberie.HelperSubInsuScam+<>c__DisplayClass0_0", "<Menu>b__4", "InsuranceScamConsequence")]
+    [InlineData("Fourberie.CriminalVM+<>c", "<UpSmugglers>b__12_0", "BusinessStartConsequence")]
+    [InlineData("Fourberie.CriminalVM+<>c__DisplayClass16_0", "<UpWorkers>b__0", "BusinessStartConsequence")]
+    [InlineData("Fourberie.CriminalVM+<>c__DisplayClass28_0", "<UpServants>b__0", "BusinessStartConsequence")]
+    [InlineData("Fourberie.FourberieBehavior", "BizUpgrades", "BusinessUpgradeConsequence")]
+    [InlineData("Fourberie.FourberieBehavior", "BizDowngrades", "BusinessDowngradeConsequence")]
     [InlineData("Fourberie.Main", "OnMissionBehaviorInitialize", "MissionInitialization")]
     public void PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners(
         string type,

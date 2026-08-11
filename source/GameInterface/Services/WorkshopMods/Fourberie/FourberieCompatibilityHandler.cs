@@ -281,6 +281,15 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.InsuranceScamConsequence:
                 method = nameof(FourberieAuthorityPatches.InsuranceScamConsequencePrefix);
                 break;
+            case FourberiePatchKind.BusinessStartConsequence:
+                method = nameof(FourberieAuthorityPatches.BusinessStartConsequencePrefix);
+                break;
+            case FourberiePatchKind.BusinessUpgradeConsequence:
+                method = nameof(FourberieAuthorityPatches.BusinessUpgradeConsequencePrefix);
+                break;
+            case FourberiePatchKind.BusinessDowngradeConsequence:
+                method = nameof(FourberieAuthorityPatches.BusinessDowngradeConsequencePrefix);
+                break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
                 break;
@@ -609,12 +618,29 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             }
 
             transaction.Commit();
+            RefreshClientLayout();
             Logger.Debug(
                 "Atomically applied Fourberie state revision {Revision} ({Fingerprint})",
                 snapshot.Revision,
                 snapshot.StateFingerprint);
             rejection = null;
             return true;
+        }
+    }
+
+    private void RefreshClientLayout()
+    {
+        if (!ModInformation.IsClient) return;
+        try
+        {
+            Type behavior = assembly.GetType("Fourberie.FourberieBehavior", throwOnError: false, ignoreCase: false);
+            object layer = behavior == null ? null : AccessTools.Field(behavior, "_layer")?.GetValue(null);
+            if (layer != null)
+                AccessTools.Method(layer.GetType(), "UpdateLayout", Type.EmptyTypes)?.Invoke(layer, null);
+        }
+        catch (Exception exception)
+        {
+            Logger.Warning(exception, "Fourberie state applied, but the open criminal-enterprise view could not refresh");
         }
     }
 

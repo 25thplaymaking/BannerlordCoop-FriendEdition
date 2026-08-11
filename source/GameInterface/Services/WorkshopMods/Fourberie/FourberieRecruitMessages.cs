@@ -13,6 +13,9 @@ internal enum FourberieOperation
     EnlistAgentsFromLads = 2,
     RecruitBandits = 3,
     StartInsuranceScam = 4,
+    StartCriminalBusiness = 5,
+    UpgradeCriminalBusiness = 6,
+    DowngradeCriminalBusiness = 7,
 }
 
 internal enum FourberieOperationStatus
@@ -149,10 +152,34 @@ internal static class FourberieOperationProtocol
             if (total > MaxSelectedTroops) return false;
         }
 
-        return request.Troops
+        if (request.Troops
             .Select(troop => troop.TroopId)
             .Distinct(StringComparer.Ordinal)
-            .Count() == request.Troops.Length;
+            .Count() != request.Troops.Length)
+            return false;
+
+        int selected = request.Troops.Sum(troop => troop.Count);
+        return request.Operation switch
+        {
+            FourberieOperation.EnlistAgentsFromParty =>
+                EmptyTargets(request) && request.IntValue == 0 && request.Troops.Length > 0,
+            FourberieOperation.EnlistAgentsFromLads =>
+                !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
+                request.IntValue == 0 && request.Troops.Length > 0,
+            FourberieOperation.RecruitBandits =>
+                !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
+                request.IntValue > 0 && selected > 0 && selected <= request.IntValue,
+            FourberieOperation.StartInsuranceScam =>
+                !string.IsNullOrEmpty(request.SettlementId) &&
+                !string.IsNullOrEmpty(request.TargetId) &&
+                !string.IsNullOrEmpty(request.SecondaryTargetId) &&
+                request.IntValue == 0 && request.Troops.Length == 0,
+            FourberieOperation.StartCriminalBusiness =>
+                EmptyContext(request) && (request.IntValue == 11 || request.IntValue == 21 || request.IntValue == 31),
+            FourberieOperation.UpgradeCriminalBusiness or FourberieOperation.DowngradeCriminalBusiness =>
+                EmptyContext(request) && IsBusinessKey(request.IntValue),
+            _ => false,
+        };
     }
 
     public static string CommandKey(NetworkRequestFourberieOperation request)
@@ -176,4 +203,13 @@ internal static class FourberieOperationProtocol
         return value.Length <= MaxStableIdLength && value.All(character =>
             !char.IsControl(character) && character != '|' && character != ':');
     }
+
+    private static bool EmptyTargets(NetworkRequestFourberieOperation request) =>
+        string.IsNullOrEmpty(request.TargetId) && string.IsNullOrEmpty(request.SecondaryTargetId);
+
+    private static bool EmptyContext(NetworkRequestFourberieOperation request) =>
+        string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) && request.Troops.Length == 0;
+
+    private static bool IsBusinessKey(int key) =>
+        key == 11 || key == 12 || key == 21 || key == 22 || key == 31 || key == 32;
 }

@@ -55,6 +55,7 @@ internal sealed class FourberieOperationExecutor
         Dictionary<CharacterObject, int> actorCounts = null;
         MobileParty previousCaravan = GetStaticField("_insucaraF") as MobileParty;
         MobileParty previousBandits = GetStaticField("_insubandF") as MobileParty;
+        int previousActorGold = actor.Gold;
 
         try
         {
@@ -78,6 +79,15 @@ internal sealed class FourberieOperationExecutor
                     break;
                 case FourberieOperation.StartInsuranceScam:
                     ApplyInsuranceScam(actor, actorParty, request);
+                    break;
+                case FourberieOperation.StartCriminalBusiness:
+                    ApplyBusinessStart(actor, request.IntValue);
+                    break;
+                case FourberieOperation.UpgradeCriminalBusiness:
+                    ApplyBusinessUpgrade(request.IntValue);
+                    break;
+                case FourberieOperation.DowngradeCriminalBusiness:
+                    ApplyBusinessDowngrade(request.IntValue);
                     break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
@@ -103,6 +113,8 @@ internal sealed class FourberieOperationExecutor
 
             if (!FourberieCanonicalState.TryApply(assembly, objectManager, rollbackState, out var stateFailure))
                 rollbackErrors.Add("canonical state: " + stateFailure);
+            try { RestoreGold(actor, previousActorGold); }
+            catch (Exception rollback) { rollbackErrors.Add("actor gold: " + rollback.Message); }
 
             if (rollbackErrors.Count > 0)
                 throw new InvalidOperationException(
@@ -243,6 +255,38 @@ internal sealed class FourberieOperationExecutor
         }
     }
 
+    private void ApplyBusinessStart(Hero actor, int businessKey)
+    {
+        IDictionary crime = GetDictionary("_crimeValue");
+        using (new AllowedThread())
+        {
+            if (!FourberieEnterpriseAuthority.TryStart(
+                    crime, businessKey, actor.Gold, out int goldCost, out string failure))
+                throw new InvalidOperationException(failure);
+            if (goldCost > 0)
+                GiveGoldAction.ApplyBetweenCharacters(actor, null, goldCost, false);
+        }
+    }
+
+    private void ApplyBusinessUpgrade(int businessKey)
+    {
+        IDictionary crime = GetDictionary("_crimeValue");
+        int partnerships = CountStaticCollection("_partnershipList");
+        int territories = CountStaticCollection("_territoryList");
+        using (new AllowedThread())
+            if (!FourberieEnterpriseAuthority.TryUpgrade(
+                    crime, businessKey, partnerships, territories, out string failure))
+                throw new InvalidOperationException(failure);
+    }
+
+    private void ApplyBusinessDowngrade(int businessKey)
+    {
+        using (new AllowedThread())
+            if (!FourberieEnterpriseAuthority.TryDowngrade(
+                    GetDictionary("_crimeValue"), businessKey, out string failure))
+                throw new InvalidOperationException(failure);
+    }
+
     private IEnumerable<(CharacterObject Troop, int Count)> ResolveTroops(
         IEnumerable<FourberieTroopSelection> selections)
     {
@@ -300,6 +344,17 @@ internal sealed class FourberieOperationExecutor
                 roster.AddToCounts(pair.Key, pair.Value - roster.GetTroopCount(pair.Key), false, 0, 0, true, -1);
     }
 
+    private static void RestoreGold(Hero actor, int previousGold)
+    {
+        int difference = previousGold - actor.Gold;
+        if (difference == 0) return;
+        using (new AllowedThread())
+        {
+            if (difference > 0) GiveGoldAction.ApplyBetweenCharacters(null, actor, difference, false);
+            else GiveGoldAction.ApplyBetweenCharacters(actor, null, -difference, false);
+        }
+    }
+
     private static void TryDestroyCreated(
         MobileParty candidate,
         MobileParty previous,
@@ -336,6 +391,14 @@ internal sealed class FourberieOperationExecutor
     private IDictionary GetDictionary(string fieldName) =>
         GetStaticField(fieldName) as IDictionary ??
         throw new InvalidOperationException("Fourberie field " + fieldName + " is not a dictionary");
+
+    private int CountStaticCollection(string fieldName)
+    {
+        object value = GetStaticField(fieldName);
+        if (value is ICollection collection) return collection.Count;
+        if (value is IEnumerable enumerable) return enumerable.Cast<object>().Count();
+        throw new InvalidOperationException("Fourberie field " + fieldName + " is not a collection");
+    }
 
     private static int ReadInt(IDictionary dictionary, object key) =>
         dictionary.Contains(key) ? Convert.ToInt32(dictionary[key]) : 0;

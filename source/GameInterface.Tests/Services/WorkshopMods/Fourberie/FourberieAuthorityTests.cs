@@ -1,6 +1,7 @@
-using GameInterface.Services.WorkshopMods.Fourberie;
 using Common;
+using GameInterface.Services.WorkshopMods.Fourberie;
 using System;
+using System.Collections;
 using TaleWorlds.CampaignSystem;
 using Xunit;
 
@@ -33,6 +34,23 @@ public sealed class FourberieAuthorityTests
     {
         public override void RegisterEvents() { }
         public override void SyncData(IDataStore dataStore) { }
+    }
+
+    private sealed class CaptureRuntime : IFourberiePatchRuntime
+    {
+        public FourberieLocalOperation LastOperation { get; private set; }
+        public int SubmissionCount { get; private set; }
+
+        public void PublishIfChanged()
+        {
+        }
+
+        public bool TrySubmit(FourberieLocalOperation operation)
+        {
+            LastOperation = operation;
+            SubmissionCount++;
+            return true;
+        }
     }
 
     [Fact]
@@ -114,7 +132,7 @@ public sealed class FourberieAuthorityTests
             FourberieOperation.EnlistAgentsFromParty,
             "town_a",
             string.Empty,
-            12,
+            0,
             new[] { new FourberieTroopSelection("troop_a", 2) });
 
         Assert.True(FourberieOperationProtocol.IsRequestShapeValid(valid));
@@ -136,6 +154,164 @@ public sealed class FourberieAuthorityTests
             valid.TargetId,
             valid.IntValue,
             new FourberieTroopSelection[FourberieOperationProtocol.MaxTroopSelections + 1])));
+    }
+
+    [Theory]
+    [InlineData((int)FourberieOperation.StartCriminalBusiness, 11, true)]
+    [InlineData((int)FourberieOperation.StartCriminalBusiness, 12, false)]
+    [InlineData((int)FourberieOperation.UpgradeCriminalBusiness, 32, true)]
+    [InlineData((int)FourberieOperation.UpgradeCriminalBusiness, 33, false)]
+    [InlineData((int)FourberieOperation.DowngradeCriminalBusiness, 21, true)]
+    public void OperationProtocol_RequiresExactCriminalBusinessShapes(
+        int operationValue,
+        int businessKey,
+        bool expected)
+    {
+        var request = new NetworkRequestFourberieOperation(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            7,
+            3,
+            (FourberieOperation)operationValue,
+            string.Empty,
+            string.Empty,
+            businessKey,
+            Array.Empty<FourberieTroopSelection>());
+
+        Assert.Equal(expected, FourberieOperationProtocol.IsRequestShapeValid(request));
+        Assert.False(FourberieOperationProtocol.IsRequestShapeValid(new NetworkRequestFourberieOperation(
+            request.SessionId,
+            request.RequestId,
+            request.ExpectedRevision,
+            request.Operation,
+            "town_a",
+            request.TargetId,
+            request.IntValue,
+            request.Troops)));
+    }
+
+    [Theory]
+    [InlineData(11, 1, 0)]
+    [InlineData(21, 2, 10_000)]
+    [InlineData(31, 3, 15_000)]
+    public void EnterpriseStart_UsesPinnedMarkerStateAndServerCost(int businessKey, int markerKey, int cost)
+    {
+        IDictionary state = new Hashtable { [60] = 4 };
+
+        Assert.True(FourberieEnterpriseAuthority.TryStart(
+            state, businessKey, cost, out var charged, out var failure), failure);
+
+        Assert.Equal(cost, charged);
+        Assert.Equal(0, state[markerKey]);
+        Assert.Equal(1, state[businessKey]);
+        Assert.Equal(5, state[60]);
+    }
+
+    [Fact]
+    public void EnterpriseStart_RejectsDuplicateOrUnaffordableRequestsWithoutMutation()
+    {
+        IDictionary duplicate = new Hashtable { [60] = 4, [2] = 0, [21] = 1 };
+        IDictionary unaffordable = new Hashtable { [60] = 4 };
+
+        Assert.False(FourberieEnterpriseAuthority.TryStart(
+            duplicate, 21, 20_000, out _, out _));
+        Assert.False(FourberieEnterpriseAuthority.TryStart(
+            unaffordable, 31, 14_999, out _, out _));
+
+        Assert.Equal(4, duplicate[60]);
+        Assert.Equal(1, duplicate[21]);
+        Assert.Equal(4, unaffordable[60]);
+        Assert.False(unaffordable.Contains(31));
+    }
+
+    [Theory]
+    [InlineData(11, 5, 2, 1, 1, 6)]
+    [InlineData(12, 99, 2, 0, 0, 100)]
+    [InlineData(21, 3, 2, 0, 0, 4)]
+    [InlineData(22, 99, 2, 0, 0, 100)]
+    [InlineData(31, 5, 2, 0, 0, 6)]
+    [InlineData(32, 199, 2, 0, 0, 200)]
+    public void EnterpriseUpgrade_SpendsOnlyServerPoolAndHonorsPinnedLimit(
+        int businessKey,
+        int current,
+        int pool,
+        int partnerships,
+        int territories,
+        int expected)
+    {
+        int markerKey = businessKey / 10;
+        IDictionary state = new Hashtable
+        {
+            [6] = pool,
+            [markerKey] = 0,
+            [businessKey] = current,
+            [22] = businessKey == 21 ? 20 : businessKey == 22 ? current : 0,
+            [32] = businessKey == 31 ? 30 : businessKey == 32 ? current : 0,
+        };
+
+        Assert.True(FourberieEnterpriseAuthority.TryUpgrade(
+            state, businessKey, partnerships, territories, out var failure), failure);
+
+        Assert.Equal(pool - 1, state[6]);
+        Assert.Equal(expected, state[businessKey]);
+        Assert.False(FourberieEnterpriseAuthority.TryUpgrade(
+            state, businessKey, partnerships, territories, out _));
+    }
+
+    [Fact]
+    public void EnterpriseUpgrade_CreatesFirstSecondaryLevelAfterPrimaryBusinessStarts()
+    {
+        IDictionary state = new Hashtable { [1] = 0, [6] = 2, [11] = 1 };
+
+        Assert.True(FourberieEnterpriseAuthority.TryUpgrade(
+            state, 12, 0, 0, out var failure), failure);
+
+        Assert.Equal(1, state[12]);
+        Assert.Equal(1, state[6]);
+    }
+
+    [Fact]
+    public void EnterpriseDowngrade_ReturnsOnePointToServerPoolAndRejectsZeroLevel()
+    {
+        IDictionary state = new Hashtable { [1] = 0, [6] = 2, [11] = 1 };
+
+        Assert.True(FourberieEnterpriseAuthority.TryDowngrade(state, 11, out var failure), failure);
+        Assert.Equal(3, state[6]);
+        Assert.Equal(0, state[11]);
+        Assert.False(FourberieEnterpriseAuthority.TryDowngrade(state, 11, out _));
+    }
+
+    [Fact]
+    public void EnterpriseMutationPrefixes_SubmitTypedClientIntentAndNeverRunOriginal()
+    {
+        bool previousServer = ModInformation.IsServer;
+        IFourberiePatchRuntime previousRuntime = FourberiePatchRuntime.Current;
+        var runtime = new CaptureRuntime();
+        try
+        {
+            ModInformation.IsServer = false;
+            FourberiePatchRuntime.Current = runtime;
+
+            Assert.False(FourberieAuthorityPatches.BusinessUpgradeConsequencePrefix(
+                new object[] { 6, 22, 100 }));
+            Assert.Equal(FourberieOperation.UpgradeCriminalBusiness, runtime.LastOperation.Operation);
+            Assert.Equal(22, runtime.LastOperation.IntValue);
+            Assert.Empty(runtime.LastOperation.Troops);
+
+            Assert.False(FourberieAuthorityPatches.BusinessDowngradeConsequencePrefix(
+                new object[] { 6, 31 }));
+            Assert.Equal(FourberieOperation.DowngradeCriminalBusiness, runtime.LastOperation.Operation);
+            Assert.Equal(31, runtime.LastOperation.IntValue);
+
+            ModInformation.IsServer = true;
+            Assert.False(FourberieAuthorityPatches.BusinessUpgradeConsequencePrefix(
+                new object[] { 6, 11, 3 }));
+            Assert.Equal(2, runtime.SubmissionCount);
+        }
+        finally
+        {
+            FourberiePatchRuntime.Current = previousRuntime;
+            ModInformation.IsServer = previousServer;
+        }
     }
 
     [Fact]

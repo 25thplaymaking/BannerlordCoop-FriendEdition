@@ -28,6 +28,9 @@ internal enum FourberiePatchKind
     EnlistLadsConsequence,
     RecruitBanditsConsequence,
     InsuranceScamConsequence,
+    BusinessStartConsequence,
+    BusinessUpgradeConsequence,
+    BusinessDowngradeConsequence,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -328,6 +331,18 @@ internal static class FourberieCompatibilityManifest
         Add("Fourberie.HelperSubInsuScam", "SpawnBandits", FourberiePatchKind.ServerOnly, "System.Int32");
         Add("Fourberie.HelperSubInsuScam+<>c__DisplayClass0_0", "<Menu>b__4",
             FourberiePatchKind.InsuranceScamConsequence);
+        Add("Fourberie.CriminalVM+<>c", "<UpSmugglers>b__12_0",
+            FourberiePatchKind.BusinessStartConsequence);
+        Add("Fourberie.CriminalVM+<>c__DisplayClass16_0", "<UpWorkers>b__0",
+            FourberiePatchKind.BusinessStartConsequence);
+        Add("Fourberie.CriminalVM+<>c__DisplayClass28_0", "<UpServants>b__0",
+            FourberiePatchKind.BusinessStartConsequence);
+        Add("Fourberie.FourberieBehavior", "BizUpgrades",
+            FourberiePatchKind.BusinessUpgradeConsequence,
+            "System.Int32", "System.Int32", "System.Int32");
+        Add("Fourberie.FourberieBehavior", "BizDowngrades",
+            FourberiePatchKind.BusinessDowngradeConsequence,
+            "System.Int32", "System.Int32");
 
         // These periodic entry points contain the random and persistent campaign decisions found
         // in the 1.4.7.5 audit. They are separately guarded so a duplicate listener cannot execute

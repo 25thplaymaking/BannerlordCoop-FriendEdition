@@ -1,6 +1,28 @@
 # Friend Edition Changelog
 
-## 2026-08-10 — workshop8 (current): full modded server is LIVE
+## 2026-08-11 — ten-module stabilization release candidate (stable held)
+
+The production contract now contains exactly ten Workshop modules; RBM is retired after its native
+campaign-initialization crash. Catalog, deployment manifest, launcher token, and client/server order
+agree. Separatism is included as Friend Edition source behavior, not an eleventh Workshop payload.
+
+The bounded stabilization pass closes the inherited defects found after workshop8:
+
+- the dedicated host now pins the exact four live Coop assemblies and aborts on mismatch;
+- ButterLib and loader patchers require exact input hashes plus type/method/signature/count matches;
+- launcher updates are SHA-required, staged, traversal-safe, transactional, and fail Join closed;
+- auto-resolve completion has one authoritative conclusion and releases undecided claims;
+- map readiness suppresses only the known transient null path, and UDP host probing is tested;
+- Fourberie contextless create routes and Dismemberment's unsynchronized cosmetic path fail closed;
+- Separatism, Improved Garrisons, Diplomacy collisions, combat rules, configuration authority, and
+  the complete managed mod function surface have focused certification records.
+
+Live server integrity is verified: exact release pins pass, the host reaches `phase:"serving"`, UDP
+4200 is bound on IPv4 and IPv6, and all entries in `deployment-sha256.txt` verify. Stable publication
+remains manual and held until full CI, a freshly built ten-module package, and a rendered client
+install/update/join plus auto-resolve check complete.
+
+## 2026-08-10 — workshop8 (historical): full modded server brought live
 
 **Supersedes workshop7's per-role gating.** The wall workshop7 hit — "the
 headless dedicated build cannot initialise Bannerlord.ButterLib" — is **broken**.

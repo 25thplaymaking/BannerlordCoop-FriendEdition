@@ -19,12 +19,12 @@ else {
 
 $moduleMetadata = [ordered]@{
     'Bannerlord.Harmony' = [ordered]@{ category = 'framework'; deployment = 'active canonical patch provider' }
-    'Bannerlord.ButterLib' = [ordered]@{ category = 'framework'; deployment = 'active client framework; dedicated fork under certification' }
+    'Bannerlord.ButterLib' = [ordered]@{ category = 'framework'; deployment = 'active client framework; exact-pinned dedicated runtime certified live' }
     'Bannerlord.UIExtenderEx' = [ordered]@{ category = 'framework'; deployment = 'active client presentation framework' }
     'Bannerlord.MBOptionScreen' = [ordered]@{ category = 'framework'; deployment = 'active client settings framework' }
     'RBM' = [ordered]@{ category = 'combat'; deployment = 'retired from the Friend Edition loadout' }
     'ImprovedGarrisons' = [ordered]@{ category = 'campaign'; deployment = 'active server-authoritative adapter' }
-    'DismembermentPlus' = [ordered]@{ category = 'combat-presentation'; deployment = 'active client presentation adapter' }
+    'DismembermentPlus' = [ordered]@{ category = 'combat-presentation'; deployment = 'module active; execution fails closed in live Coop pending stable cosmetic event' }
     'Fourberie' = [ordered]@{ category = 'campaign-and-mission'; deployment = 'active guarded subset; unsafe creation routes fail closed' }
     'Bannerlord.Diplomacy' = [ordered]@{ category = 'campaign-and-ui'; deployment = 'active server-authoritative adapter' }
     'UnblockableThrust' = [ordered]@{ category = 'combat-rule'; deployment = 'active mission adapter' }

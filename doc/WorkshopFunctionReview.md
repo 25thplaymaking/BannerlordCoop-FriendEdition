@@ -1,6 +1,6 @@
 # Friend Edition mod-function review
 
-Review baseline: `54cb75900` (2026-08-11)
+Review baseline: `ae5ef9d04` (2026-08-11)
 
 Binary ledger: [`generated/workshop-function-inventory.json`](generated/workshop-function-inventory.json)
 
@@ -44,9 +44,9 @@ type's disposition rather than repeating identical prose for tens of thousands o
 | Surface | Function families reviewed | Current disposition and errors found |
 |---|---|---|
 | Harmony | wrapper boot, patch processors, owner queries/unpatch, load order, debug/log UI | Keep the exact pinned wrapper as the sole provider. Owner-specific unpatch is valid; blanket cleanup and wrapper debug UI remain forbidden in production paths. Existing package tests enforce one runtime. |
-| ButterLib | version loader; DI/services; submodule wrappers; delayed lifecycle; save/object extension injection; crash reporting; settings/filesystem; distance/geopolitics; UI helpers | Client framework and dedicated fork must remain separate runtime builds. Original lifecycle/save/crash/UI functions are not authority owners. The server-kit patcher currently identifies the implementation too broadly and must require an exact fingerprint/signature/count before patching. |
+| ButterLib | version loader; DI/services; submodule wrappers; delayed lifecycle; save/object extension injection; crash reporting; settings/filesystem; distance/geopolitics; UI helpers | Client framework and dedicated fork remain separate runtime builds. Original lifecycle/save/crash/UI functions are not authority owners. The server patcher now requires the exact pinned ButterLib input and exactly five concrete type/method/signature matches; the real pinned input reproduces the deployed server DLL byte-for-byte. |
 | UIExtenderEx | submodule lifecycle; extension registration; VM mixins; prefab/widget/brush factories; movie loading; command execution; caches | Client presentation only. No campaign authority or server UI load. Global registries/caches must be torn down per process/mission. Its original USER32/exit paths cannot execute headlessly. |
-| MCM | loader/API/UI adapter; global/per-campaign/per-save providers; local serialization and migration; settings screens/save/exit | Presentation only. Gameplay configuration must come from Coop's server snapshot, never peer-local MCM files. The active ten-module contract now agrees across catalog, deployment manifest, launcher, and both role orders; the full runtime gate must still prove the framework cohort on the pinned binaries. |
+| MCM | loader/API/UI adapter; global/per-campaign/per-save providers; local serialization and migration; settings screens/save/exit | Presentation only. Gameplay configuration comes from Coop's server snapshot, never peer-local MCM files. The active ten-module contract agrees across catalog, deployment manifest, launcher, and both role orders; the dedicated host has proved the pinned framework cohort live. |
 | RBM | entry/XML merge; configuration; combat formula/damage/posture; AI/tactics/spawn; tournament roster/prize; UI/input | Retired from the production loadout after the native initialization crash. It is absent from the catalog, deployment package, launcher, and server/client active orders. Its pinned binaries remain only as an audited historical surface; do not revive individual slices during this plan. |
 | ImprovedGarrisons | initialization; campaign behaviors/events; party creation/removal; recruitment/upgrade; finance/food/speed models; settings/log UI; sidecar save managers | Server owns ticks, parties, rosters, costs, food, and persistence; clients render/send intent. `OnApplicationTick`, recruit, upgrade, capture, and save/load paths are pinned to server authority. Canonical traffic uses registered town IDs; localized names remain only as the mod's process-local dictionary bridge. The 44-test compatibility suite is green. |
 | DismembermentPlus | mission registration; blow validation; random limb choice; mesh/entity/effects; slow motion; settings/error UI | Original `new Random`, GUID, local agent indices, `Agent.Main`, WinForms, and time changes are not deterministic authority. Presentation remains available only outside live Coop. Every live Coop role, including a late-joining client with no replayable accepted event, fails closed until a stable hit/limb/seed event exists. |
@@ -117,23 +117,25 @@ intentional because those test classes share static campaign/config state and ar
 
 ## Confirmed repair queue from the function review
 
-The queue is intentionally limited to the approved stabilization plan:
+Every source/configuration item in the approved stabilization queue is closed:
 
-- **P0:** live server logs `COOP MODULE VERIFICATION FAILED` for `Coop.Core.dll`,
-  `GameInterface.dll`, `Common.dll`, and `Coop.Steam.dll` but continues serving; reconcile the boot
-  receipt/hash source and fail closed only after the correct deployment is pinned.
-- **P1:** protect the inherited auto-resolve finalize change with focused paced-win,
-  pacer-disconnect, duplicate-finalize, and non-win tests before live certification.
-- **P1:** make launcher updates staged, exact, hash-required, rollback-safe, and unable to enable Join
-  after a failed required update.
-- **P2:** narrow map-readiness exception suppression; guard null mod options; fix the launcher's TCP
-  status probe for a UDP-only Coop listener; harden server-kit patch fingerprints/counts and bound
-  opt-in diagnostics.
-- **Already closed:** missing `BloodBright`, unsafe keep-running dispatcher handler, public password,
-  automatic stable publication, feature-branch release triggers, the exact ten-module/RBM-retired
-  contract, Fourberie contextless-route/initializer closure, Separatism transaction/transition/
-  persistence certification, Improved Garrisons lifecycle coverage, Dismemberment fail-closed late-join
-  boundary, and Unblockable shield/parry/chamber/mounted collision coverage.
+- the live server is paired to the current four Coop hashes and aborts on mismatch;
+- auto-resolve completion covers paced wins, duplicate completion, undecided release, and the shared
+  client/server completion boundary;
+- launcher updates are staged, exact, hash-required, rollback-safe, traversal-safe, and keep Join
+  disabled after a required-update failure;
+- map readiness suppresses only the audited transient null path; the UDP probe has reply/silence tests;
+- null mod options are safe; configuration-authority tests pass; the active ButterLib assembly policy
+  records the closed live coactivation gate;
+- server-kit transforms require exact hashes and method fingerprints, produce reproducible output,
+  restore the fail-closed abort, and bound opt-in diagnostics;
+- credential/release containment, the exact ten-module/RBM-retired contract, Fourberie and Separatism
+  transaction boundaries, Improved Garrisons lifecycle, Dismemberment late-join fail-closed behavior,
+  and Unblockable shield/parry/chamber/mounted rules are certified.
+
+The remaining release gates are operational verification, not additional feature work: refresh this
+ledger, run the full CI/package suite, build a fresh ten-module candidate, and complete the rendered
+client install/update/join plus auto-resolve check before manually promoting stable.
 
 No RBM revival, custom settlement implementation, new mod SDK, or campaign-feature redesign is in
 scope for this pass.

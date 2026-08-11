@@ -4,12 +4,12 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
-> **EXECUTION ACTIVE (2026-08-11): containment complete; certification in progress.** The inherited
-> launcher and auto-resolve commits plus containment/certification fixes are pushed through `54cb75900` on
-> `25vid/workshop-integration`. Public launcher defaults/assets contain no join password; the live
+> **EXECUTION ACTIVE (2026-08-11): bounded repairs complete; final release gates in progress.** The
+> inherited launcher/auto-resolve work and the approved containment/certification repairs are pushed
+> through `ae5ef9d04` on `25vid/workshop-integration`. Public launcher defaults/assets contain no join password; the live
 > password was rotated into only the server launch script and Bryce's private pinned config. Stable
 > releases are manual and development pushes are nightly-only. The all-functions review now covers
-> 41,000 metadata methods across all 11 Workshop modules plus integrated Separatism; its exact-hash
+> 41,000 metadata methods across the ten active Workshop modules, retired RBM, and integrated Separatism; its exact-hash
 > ledger and ownership decisions live in `doc/WorkshopFunctionReview.md`. Separatism is certified
 > across 5 unit, 17 synchronized E2E, 92 Diplomacy-collision, and 8 config-authority cases.
 > Fourberie's unsafe contextless create routes now fail closed, behavior initialization preflights
@@ -17,11 +17,15 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > Improved Garrisons recruit/upgrade/capture/save authority and the active combat-mod boundaries are
 > now covered by 44 focused IG tests and 70 combat tests. Dismemberment remains intentionally disabled
 > in live Coop; Unblockable Thrust's shield/parry/chamber and foot/mounted defaults are certified.
-> The remaining bounded repair queue and the full live/release gate remain open below.
+> Launcher updates are transactional and SHA-required; auto-resolve completion, UDP probing, and
+> narrow map readiness are covered. The dedicated server now verifies the exact four-assembly Coop
+> pair and fails closed; the live host reached `serving`, bound UDP 4200 on IPv4/IPv6, and its complete
+> deployment ledger verifies. Remaining work is the full CI/package gate and rendered-client release proof.
 
 ## Known playtest bugs (live)
 
-- **[open] Auto-resolve vs bandit party loops the encounter menu.** (2026-08-11, Bryce, Sea Raiders.)
+- **[candidate fixed; live validation pending] Auto-resolve vs bandit party loops the encounter menu.**
+  (2026-08-11, Bryce, Sea Raiders.)
   Choosing **"Send your troops to attack"** (auto-resolve) instead of **"Attack!"** (manual) against a
   bandit party leaves the encounter menu looping until you pay off / surrender. Mechanism (from
   `Coop_client.log` MapEvent_Created_1155): the auto-resolve is server-gated (`BattleSimulationStartPatch`
@@ -30,21 +34,20 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
   `DestroyPartyActionPatch … Client attempted to apply DestroyPartyAction for party Sea Raiders`. The
   beaten party is never destroyed/synced, so the encounter re-evaluates as "enemy present" and re-opens the
   menu; pay-off/surrender are separate terminal paths, which is why paying escaped it.
-  **Fix direction:** apply the auto-resolve OUTCOME authoritatively — server (or an authoritative client
-  replay window) must run the loser `DestroyPartyAction` + event resolution and broadcast, the same way the
-  manual battle path resolves cleanly (`MapEvent_Created_897/905` closed with no loop). Needs a focused pass
-  + **live co-op verification** before shipping to the feed.
-  **Workaround for now:** fight bandit encounters with **"Attack!"** (manual battle) — it syncs and resolves
-  cleanly; avoid "Send your troops to attack".
+  **Candidate fix:** the server-authoritative completion boundary now always closes client playback,
+  publishes one conclusion for a decided battle, and releases the arbiter claim for an undecided result.
+  Focused completion and related map-event tests pass. A rendered client must still reproduce the original
+  Sea Raider path before this can be called live-fixed.
+  **Current-live workaround:** use **"Attack!"** (manual battle) until the candidate is packaged and verified.
 
-## Where we are (2026-08-10)
+## Where we are (2026-08-11)
 
 Modded co-op **joins and loads**: server hosts the full campaign, validation +
 mod-config barrier + 34 MB save transfer succeed, and the client reaches a playable **world map**
 with all four campaign mods (Diplomacy, ImprovedGarrisons, Fourberie,
 PlayerSettlement) active. RBM is retired from the exact loadout after its native campaign-init
-crash. The map-navigation readiness workaround restored the HUD; narrowing its broad transient
-exception suppression remains in the bounded repair queue.
+crash. Map navigation now suppresses only the audited transient null-readiness path and propagates
+unrelated faults. The current ten-module candidate still needs a fresh package and rendered join proof.
 
 ## Decisions (locked)
 
@@ -94,8 +97,8 @@ explicit-context/per-player Fourberie API is outside this bounded stabilization 
     host-singleton replay are both prevented. `OnMissionBehaviorInitialize` also stays blocked.
 
 ### Playable session (DONE 2026-08-10)
-- [x] Map-nav NRE fixed (`MapNavigationReadinessPatches` — swallow the transient
-      map-load throw so the tick completes; self-heals when the map wires up).
+- [x] Map-nav NRE fixed and narrowed (`MapNavigationReadinessPatches` suppresses only the transient
+      null-readiness path; unrelated exceptions propagate).
 - [x] Diplomacy client init (`DiplomacyClientInitializationPatch` — create DiplomacyEvents
       before the map builds; resolve the type at runtime, NOT a static field, because Coop
       loads before Diplomacy).
@@ -104,16 +107,15 @@ explicit-context/per-player Fourberie API is outside this bounded stabilization 
 - Client GameInterface builds against Serilog **4.x** (flip Common.csproj to 4.2.0, build,
   restore to 2.12.0). Deploy to `…/Modules/Coop/bin/Win64_Shipping_Client/GameInterface.dll`.
 
-### P1 — Playable session (was IN PROGRESS)
-- [ ] Fix map-nav UI NRE (null `MapNavigationHandler` / `HandleIfBlockerStatesDisabled`
-      on the co-op client map). Proper init preferred over catch-and-limp.
+### P1 — Playable session (source fixes complete; rendered candidate proof open)
+- [x] Narrow the map-nav UI NRE boundary to the known null-readiness failure.
 - [x] Drop RBM from server token + client token + catalog expectation + pack. The exact ten-module
       contract is now enforced across catalog, manifest, launcher, and both peer-role orders.
-- [ ] Remove the base-game build-version check (keep hash validation).
+- [x] Keep exact Workshop/module validation without imposing a base-game build-version gate.
 - [ ] Verify: client reaches map AND is playable (HUD, move, open menus) with the
       four campaign mods. Re-cut the pack.
 
-### P2 — Launcher (one-click into grain.silo) — DONE (2026-08-10, testing deferred)
+### P2 — Launcher (one-click into grain.silo) — source certified; rendered auto-join open
 - [x] **`/coopjoin <host> <port> [pw]` boot arg** in `CoopMod.cs`: at `InitialState` the client
       publishes the same `AttemptJoin` the Join button does → auto-connects. Guarded off on the
       server / managed-host paths. Client `Coop.dll` rebuilt (Serilog 4.x) + deployed to
@@ -121,13 +123,13 @@ explicit-context/per-player Fourberie API is outside this bounded stabilization 
 - [x] **Frontir "Calradia Co-op" launcher** (`tools/CoopLauncher`, WPF net8.0-windows):
       Bannerlord-themed (hanging war-banner signature; sigil = live host status), one-click
       "March to War" runs `Bannerlord.exe /singleplayer <token> /coopjoin 205.209.116.114 4200 <private-password>`.
-      Steam auto-detect for the game path; TCP host probe; self-contained single-file publish
+      Steam auto-detect for the game path; UDP host probe; self-contained single-file publish
       (`CalradiaCoop.exe`, no .NET install for friends). Replaces `Play Friend Edition.cmd`.
 - [x] Module token lives in `launcher-config.json` (edit, no rebuild); the loadout is the full
       set minus RBM, in handshake order.
 - [x] **Self-update feed is wired:** `ModUpdater` pulls the SHA-256-verified client zip from the
-      rolling `client-stable` manifest. Transactional updater hardening remains part of the active
-      launcher certification phase.
+      rolling `client-stable` manifest. Required updates use an exact SHA-256, same-volume staging,
+      exact replacement, rollback, and zip-traversal defense; failure keeps Join disabled.
 - [x] **Hover-crash fixed (2026-08-10, confirmed by Bryce).** `WarButton` hover trigger referenced an
       undefined `BloodBright` brush → render-time `UnsetValue` crash (`0xe0434352`) that killed the
       process on first hover and left a ghost window (clicks did nothing, no `launcher.log`). Fix: add
@@ -138,6 +140,13 @@ explicit-context/per-player Fourberie API is outside this bounded stabilization 
       public `launcher-app` assets with password-free builds; made launcher-app publication manual;
       and limited automatic client publication to nightly builds from `development`.
 - [ ] Live test (still open): confirm the launched game auto-joins grain.silo end-to-end with mods.
+
+### Dedicated server release integrity — LIVE VERIFIED (2026-08-11)
+- [x] ButterLib and dedicated-loader transforms pin exact inputs and exact method signatures/counts.
+- [x] The release-pairing transform pins the final four Coop DLLs and restores the code-4 boot abort.
+- [x] Both physical server core locations, `coophook.dll`, and `SERVER-COOP-PAIRING.json` are deployed.
+- [x] Boot logs report `Coop module verified against release pins` before `phase":"serving"`; UDP
+      4200 is bound on IPv4/IPv6, `NRestarts=0`, and every deployment-ledger entry verifies.
 
 ### P3 — Packaging consolidation
 - [ ] Fold the co-op adapters + non-framework mod data into `Modules/Coop` where safe.

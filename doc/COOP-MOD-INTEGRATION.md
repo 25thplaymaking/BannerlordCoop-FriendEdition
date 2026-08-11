@@ -1,8 +1,8 @@
 # Coop Mod Integration — Findings & Framework
 
-**Status:** grain.silo dedicated co-op server is **LIVE and SERVING the full modded campaign**
-(ButterLib + RBM + ImprovedGarrisons + DismembermentPlus + Fourberie + Diplomacy +
-UnblockableThrust + PlayerSettlement, plus the UI frameworks). This document is the reusable
+**Status:** grain.silo dedicated co-op server is **LIVE and SERVING the exact ten-module Workshop
+contract** (Harmony, ButterLib, UIExtenderEx, MCM, ImprovedGarrisons, DismembermentPlus,
+Fourberie, Diplomacy, UnblockableThrust, and PlayerSettlement). RBM is retired. This document is the reusable
 "one system" other agents should extend instead of re-deriving the port each time.
 
 Audience: agents working on Bannerlord Coop (this repo) and on the grain.silo server
@@ -80,7 +80,8 @@ Sources are preserved in **`tools/CoopServerModKit/`** so agents can rebuild the
      **Reuses an already‑loaded assembly by simple name before `LoadFrom`** (Core's same‑name rule).
      Excludes `TaleWorlds.*/SandBox*/StoryMode*/Coop*/GameInterface/Missions/Common` (engine owns
      those); Serilog resolves from Coop's bin first so the whole process shares one Serilog.
-   * First‑chance/unhandled exception capture to `/tmp/coop-fce.log`.
+   * Unhandled exception capture remains enabled. High-volume first-chance capture is opt-in with
+     `COOP_SERVER_KIT_DIAGNOSTICS=1`, writes at most 400 KB, and is off in production.
 
 2. **ButterLib Cecil patch** (`tools/CoopServerModKit/butterlib-patcher/`, Mono.Cecil):
    neutralizes method bodies to `ret` so head‑less ButterLib doesn't abort or pop WinForms:
@@ -103,8 +104,9 @@ Sources are preserved in **`tools/CoopServerModKit/`** so agents can rebuild the
    loader, not our hook — with ButterLib active the shared assemblies (e.g. `GameInterface`) are
    already loaded when it runs, and the un‑patched second `LoadFrom` throws
    *"Assembly with same name is already loaded"*.
-   **Gotcha:** the copy that actually loads is the one in the **root** `bin/Win64_Shipping_Server/`,
-   not the module's `Modules/DedicatedServer.Windows/bin/…` copy. Patch the **root‑bin** DLL.
+   **Gotcha:** the copy observed loading is the one in the **root** `bin/Win64_Shipping_Server/`.
+   The release pair must nevertheless be installed into both that location and
+   `Modules/DedicatedServer.Windows/bin/Win64_Shipping_Server/`; deployment verifies they are identical.
    The patcher accepts only the pinned dedicated-server input and exactly one
    `EnsureLoaded(System.String):System.Reflection.Assembly`. The old permanent
    `/tmp/ensure.log` probe is removed.
@@ -113,7 +115,9 @@ Sources are preserved in **`tools/CoopServerModKit/`** so agents can rebuild the
    (`tools/DedicatedServerCompatibilityPatcher/`). After the Coop server bin is final, this tool
    rewrites the server's four expected Coop DLL hashes, restores the code-4 abort that an older
    compatibility patch disabled, and emits `SERVER-COOP-PAIRING.json`. A later DLL drift therefore
-   blocks boot instead of merely logging `COOP MODULE VERIFICATION FAILED` and continuing.
+   blocks boot instead of merely logging `COOP MODULE VERIFICATION FAILED` and continuing. The current
+   live pair was rebuilt reproducibly, deployed to both physical server locations, and proved at boot
+   with `[DedicatedServer] Coop module verified against release pins` before `phase:"serving"`.
 
 `coophook.dll` always records unhandled exceptions. High-volume first-chance diagnostics are opt-in
 with `COOP_SERVER_KIT_DIAGNOSTICS=1` and capped at 400 KB.
@@ -193,8 +197,11 @@ inactive.
 
 ## 6. Client distributable (Friend Edition)
 
-* Latest: `private-distributions/BannerlordCoop-FriendEdition-2026-08-10-workshop8-WorkshopSuite.zip`
-  (all 17 modules **ACTIVE**, PlayerSettlement before Coop, new catalog `GameInterface.dll`).
+* **Current release-candidate contract:** the exact ten Workshop modules above, with RBM absent and
+  PlayerSettlement before Coop. Stable publication is held until final CI, package validation, and
+  rendered-client gates complete.
+* `private-distributions/BannerlordCoop-FriendEdition-2026-08-10-workshop8-WorkshopSuite.zip` is a
+  historical pre-retirement package. It is not the current contract and must not be promoted.
 * The installer (`Setup-ManagedSuiteClient.ps1`) drives activation from
   `MANIFEST.json.activationPolicy.client.activeModuleOrder` and writes `LauncherData.xml`. It throws
   if `activeModuleOrder` is empty **or** `activateAllManagedModules` is true — so keep
@@ -209,12 +216,13 @@ inactive.
 
 ## 7. Verified vs unverified (report honestly)
 
-* **Verified live:** the dedicated server boots the full modded campaign, reaches
-  `phase":"serving"`, binds 4200, 0 restarts. Reproduced across several service restarts.
-* **Not yet verified end‑to‑end:** an actual rendered client completing the join handshake against
-  the modded server. That needs a Windows Bannerlord client (owner/friend machine) and cannot be
-  done head‑lessly here. The distributable is built and internally consistent (activation policy,
-  load order, receipt, hashes), but the first real join is the remaining proof.
+* **Verified live:** the dedicated server validates its exact four-assembly release pair, boots the
+  full ten-module campaign, reaches `phase":"serving"`, binds 4200 on IPv4 and IPv6, and remains at
+  zero restarts. The on-disk deployment ledger verifies cleanly.
+* **Prior rendered proof:** the earlier modded client reached a playable world map. That does not
+  certify the current release candidate after RBM retirement and the stabilization fixes.
+* **Still required:** build and validate the new distributable, then complete one rendered client
+  install/update/join and exercise the fixed auto-resolve path before promoting the stable feed.
 
 ## 8. Rollback to vanilla
 Point `engine_root` at `engine-seven` and restore the vanilla token in `run-seven-mods.sh`

@@ -97,6 +97,12 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
     a `BloodBrightColor` Color existed — no `BloodBright` brush; every hover-to-click crashed the
     launcher before the click registered.)*
 
+11. **DedicatedServer.Core and the Coop server bin are one fail-closed release pair.** Rebuild the
+    loader patch first, then run `DedicatedServerCompatibilityPatcher` against the final four Coop
+    DLLs. Deploy its exact output to both physical `Win64_Shipping_Server` core locations and keep
+    `SERVER-COOP-PAIRING.json` beside `deployment-sha256.txt`. A `COOP MODULE VERIFICATION FAILED`
+    line is a failed boot, never an acceptable warning.
+
 ---
 
 ## Checklist: making a handshake-affecting change
@@ -113,7 +119,8 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
       the client's for every active mod.
 - [ ] **Client verify:** launch `Play Friend Edition.cmd`, attempt Join, read `Coop_client.log`
       (+ the on-screen "Module validation failed" reasons) — must be clean before "done."
-- [ ] Update the friend pack (`suite-extract-ws8` → rezip) with the SAME change + fixed hashes.
+- [ ] Build a fresh release-candidate pack from the ten-module manifest; never mutate or promote the
+      historical `workshop8` archive as if it represented the current RBM-retired contract.
 - [ ] For any launcher (`tools/CoopLauncher`) change: run `python tools/CoopLauncher/check-xaml-resources.py`
       (no dangling `{StaticResource}`), then verify a **hover-state** render, not just default `--shoot`.
 - [ ] Add a rule above if anything surprised you.
@@ -127,4 +134,4 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
 - **Distribution launcher:** `tools/CoopLauncher` (`CalradiaCoop.exe`) — one-click, auto-joins via the
   `/coopjoin <host> <port> <pw>` boot arg (`CoopMod.TryParseCoopJoin`/`TryCoopJoin`). Replaces the old
   `Desktop\Play Friend Edition.cmd` for friends. See `tools/CoopLauncher/README.md`.
-- Pack: `~/bannerlord-coop/private-distributions/…workshop8….zip`; extract `~/bannerlord-coop/upload-here/suite-extract-ws8`.
+- Pack: create a new versioned release-candidate directory and archive; `workshop8` is historical only.

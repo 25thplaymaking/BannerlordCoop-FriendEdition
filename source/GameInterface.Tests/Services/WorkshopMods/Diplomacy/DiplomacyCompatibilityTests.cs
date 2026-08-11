@@ -74,18 +74,44 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
     [InlineData("Diplomacy.CampaignBehaviors.MaintainInfluenceBehavior", "RegisterEvents")]
     [InlineData("Diplomacy.CampaignBehaviors.MaintainInfluenceBehavior", "ReduceCorruption")]
     [InlineData("Diplomacy.CampaignBehaviors.WarExhaustionBehavior", "OnDailyTick")]
-    public void SingletonPlayerAutomatedMutations_AreBlockedEvenOnServer(string typeName, string methodName)
+    public void AutomatedDiplomacyMutations_AreServerCallbacks(string typeName, string methodName)
     {
         ModInformation.IsServer = true;
-        Assert.True(DiplomacyCompatibilityPolicy.IsUnsafeAutomatedPlayerMutation(typeName, methodName));
+        Assert.True(DiplomacyCompatibilityPolicy.ShouldRunSharedMutation(typeName, methodName));
+        ModInformation.IsServer = false;
         Assert.False(DiplomacyCompatibilityPolicy.ShouldRunSharedMutation(typeName, methodName));
     }
 
-    [Fact]
-    public void SingletonDependentKingdomActions_AreBlockedEvenForServerAiToAi()
+    [Theory]
+    [InlineData(true, true, false, false, true)]
+    [InlineData(true, false, true, false, true)]
+    [InlineData(true, false, false, true, true)]
+    [InlineData(true, false, false, false, false)]
+    [InlineData(false, true, false, true, false)]
+    public void KingdomActions_RequireAnExplicitOrDerivedServerActorContext(
+        bool isServer,
+        bool explicitOperation,
+        bool automatedOperation,
+        bool hasProposingLeader,
+        bool expected)
     {
-        ModInformation.IsServer = true;
-        Assert.False(DiplomacyPlayerKingdomActionGuardPatch.ShouldAllowKingdomAction());
+        Assert.Equal(expected, DiplomacyPlayerKingdomActionGuardPatch.ShouldAllowKingdomAction(
+            isServer, explicitOperation, automatedOperation, hasProposingLeader));
+    }
+
+    [Theory]
+    [InlineData(true, true, false, true)]
+    [InlineData(true, false, true, true)]
+    [InlineData(true, false, false, false)]
+    [InlineData(false, true, true, false)]
+    public void PeaceResolution_BypassesLocalInquiryOnlyInsideAuthoritativeScope(
+        bool isServer,
+        bool explicitOperation,
+        bool automatedOperation,
+        bool expected)
+    {
+        Assert.Equal(expected, DiplomacyPeaceInquiryAuthorityPatch.ShouldAcceptWithoutInquiry(
+            isServer, explicitOperation, automatedOperation));
     }
 
     [Fact]
@@ -129,6 +155,21 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
     public void EveryAuditedRebellionEntryPoint_IsInCollisionCatalog(string typeName, string methodName)
     {
         Assert.True(DiplomacyCompatibilityPolicy.IsCivilWarEntryPoint(typeName, methodName));
+    }
+
+    [Fact]
+    public void DiplomacyCivilWarUiExtensions_AreRetiredWithTheDuplicateRebellionEngine()
+    {
+        Assert.Equal(new[]
+        {
+            "Diplomacy.ViewModelMixin.KingdomManagementPrefabExtension",
+            "Diplomacy.ViewModelMixin.KingdomManagementScalingPatch",
+            "Diplomacy.ViewModelMixin.KingdomManagementVMMixin",
+        }, DiplomacyCivilWarUiRetirement.UiTypeNames);
+        Assert.All(DiplomacyCivilWarUiRetirement.UiTypeNames,
+            typeName => Assert.True(DiplomacyCivilWarUiRetirement.ShouldDisableUiType(typeName)));
+        Assert.False(DiplomacyCivilWarUiRetirement.ShouldDisableUiType(
+            "Diplomacy.ViewModelMixin.KingdomWarItemVMMixin"));
     }
 
     [Theory]

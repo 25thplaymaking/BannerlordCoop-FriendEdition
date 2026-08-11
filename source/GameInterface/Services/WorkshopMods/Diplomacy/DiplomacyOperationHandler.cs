@@ -501,6 +501,30 @@ internal static class DiplomacyExplicitOperationScope
     }
 }
 
+internal static class DiplomacyAutomatedOperationScope
+{
+    [ThreadStatic] private static int depth;
+    public static bool IsAllowed => depth > 0;
+
+    public static IDisposable Enter()
+    {
+        depth++;
+        return new Scope();
+    }
+
+    private sealed class Scope : IDisposable
+    {
+        private bool disposed;
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            depth = Math.Max(0, depth - 1);
+        }
+    }
+}
+
 internal sealed class DiplomacyOperationExecutor
 {
     private readonly IObjectManager objectManager;

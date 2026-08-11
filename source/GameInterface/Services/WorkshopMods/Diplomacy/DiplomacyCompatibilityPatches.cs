@@ -469,14 +469,23 @@ internal static class DiplomacyPlayerKingdomActionGuardPatch
     private static bool Prepare() => TargetMethods().Any();
 
     [HarmonyPrefix]
-    private static bool Prefix(MethodBase __originalMethod, object[] __args, ref BarterPlayerContext __state)
+    private static bool Prefix(
+        MethodBase __originalMethod,
+        object[] __args,
+        ref DiplomacyAutomatedKingdomActionContext __state)
     {
+        bool explicitOperation = DiplomacyExplicitOperationScope.IsAllowed;
+        bool automatedOperation = DiplomacyAutomatedOperationScope.IsAllowed;
         if (!ModInformation.IsServer) return false;
-        if (DiplomacyExplicitOperationScope.IsAllowed) return true;
+        if (explicitOperation || automatedOperation) return true;
 
         var proposing = __args?.OfType<Kingdom>().FirstOrDefault();
         var actor = proposing?.Leader;
-        if (actor == null || actor.Clan?.Kingdom != proposing)
+        if (!ShouldAllowKingdomAction(
+                isServer: true,
+                explicitOperation,
+                automatedOperation,
+                hasProposingLeader: actor != null && actor.Clan?.Kingdom == proposing))
         {
             string method = $"{__originalMethod?.DeclaringType?.FullName}.{__originalMethod?.Name}";
             if (LoggedMethods.Add(method))
@@ -484,18 +493,94 @@ internal static class DiplomacyPlayerKingdomActionGuardPatch
             return false;
         }
 
-        __state = new BarterPlayerContext(actor, actor.PartyBelongedTo);
+        __state = new DiplomacyAutomatedKingdomActionContext(actor);
         return true;
     }
 
     [HarmonyFinalizer]
-    private static Exception Finalizer(Exception __exception, BarterPlayerContext __state)
+    private static Exception Finalizer(Exception __exception, DiplomacyAutomatedKingdomActionContext __state)
     {
         __state?.Dispose();
         return __exception;
     }
 
-    internal static bool ShouldAllowKingdomAction() => false;
+    internal static bool ShouldAllowKingdomAction(
+        bool isServer,
+        bool explicitOperation,
+        bool automatedOperation,
+        bool hasProposingLeader) =>
+        isServer && (explicitOperation || automatedOperation || hasProposingLeader);
+}
+
+internal sealed class DiplomacyAutomatedKingdomActionContext : IDisposable
+{
+    private readonly BarterPlayerContext playerContext;
+    private readonly IDisposable operationScope;
+
+    public DiplomacyAutomatedKingdomActionContext(Hero actor)
+    {
+        playerContext = new BarterPlayerContext(actor, actor?.PartyBelongedTo);
+        operationScope = DiplomacyAutomatedOperationScope.Enter();
+    }
+
+    public void Dispose()
+    {
+        operationScope.Dispose();
+        playerContext.Dispose();
+    }
+}
+
+/// <summary>
+/// Headless authoritative peace must never wait on a process-local inquiry. The outer guarded
+/// action computes the pinned mod's exact costs, tribute, returned fiefs, and elimination result;
+/// this sink commits those values directly only while an authenticated command or derived server
+/// callback scope is active.
+/// </summary>
+[HarmonyPatch]
+[HarmonyPatchCategory(WorkshopPatchCategories.Diplomacy)]
+internal static class DiplomacyPeaceInquiryAuthorityPatch
+{
+    private static IEnumerable<MethodBase> TargetMethods()
+    {
+        var type = DiplomacyCompatibilityPolicy.ResolveType(
+            "Diplomacy.DiplomaticAction.WarPeace.KingdomPeaceAction");
+        var method = type == null
+            ? null
+            : AccessTools.Method(type, "ApplyPeaceInternal");
+        if (method != null) yield return method;
+    }
+
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
+
+    [HarmonyPrefix]
+    private static bool Prefix(object[] __args)
+    {
+        if (!ShouldAcceptWithoutInquiry(
+                ModInformation.IsServer,
+                DiplomacyExplicitOperationScope.IsAllowed,
+                DiplomacyAutomatedOperationScope.IsAllowed))
+            return false;
+        if (__args == null || __args.Length != 9)
+            throw new InvalidOperationException("Diplomacy ApplyPeaceInternal shape changed after compatibility validation.");
+
+        Type type = DiplomacyCompatibilityPolicy.ResolveType(
+            "Diplomacy.DiplomaticAction.WarPeace.KingdomPeaceAction") ??
+                    throw new TypeLoadException("Diplomacy KingdomPeaceAction is unavailable.");
+        MethodInfo accept = type.GetMethods(BindingFlags.Static | BindingFlags.NonPublic)
+            .Single(method => method.Name == "AcceptPeace" && method.GetParameters().Length == 6);
+        accept.Invoke(null, new[]
+        {
+            __args[0], __args[1], __args[4], __args[5], __args[6], __args[8],
+        });
+        return false;
+    }
+
+    internal static bool ShouldAcceptWithoutInquiry(
+        bool isServer,
+        bool explicitOperation,
+        bool automatedOperation) =>
+        isServer && (explicitOperation || automatedOperation);
 }
 
 /// <summary>Expiration notifications are local UI and must not execute on a headless server.</summary>

@@ -123,7 +123,12 @@ internal static class DiplomacyCompatibilityPolicy
                 ("ApplyInternal", 3),
             },
             ["Diplomacy.DiplomaticAction.NonAggressionPactAgreement"] = new[] { ("NotifyExpired", 0) },
-            ["Diplomacy.DiplomaticAction.WarPeace.KingdomPeaceAction"] = new[] { ("ApplyPeace", 6) },
+            ["Diplomacy.DiplomaticAction.WarPeace.KingdomPeaceAction"] = new[]
+            {
+                ("ApplyPeace", 6),
+                ("ApplyPeaceInternal", 9),
+                ("AcceptPeace", 6),
+            },
         };
 
     private static readonly string[] RequiredTypes =
@@ -135,6 +140,9 @@ internal static class DiplomacyCompatibilityPolicy
         "Diplomacy.DiplomaticAction.NonAggressionPactAgreement",
         "Diplomacy.WarExhaustion.WarExhaustionManager",
         "Diplomacy.WarExhaustion.WarExhaustionRecord",
+        "Diplomacy.ViewModelMixin.KingdomManagementPrefabExtension",
+        "Diplomacy.ViewModelMixin.KingdomManagementScalingPatch",
+        "Diplomacy.ViewModelMixin.KingdomManagementVMMixin",
     };
 
     private static readonly IReadOnlyDictionary<string, string[]> SharedMutationMethods =
@@ -215,21 +223,6 @@ internal static class DiplomacyCompatibilityPolicy
             ["Diplomacy.ViewModel.RebelFactionItemVM"] = new[] { "OnJoin", "OnLeave", "OnStartRebellion" },
         };
 
-    private static readonly HashSet<string> UnsafeAutomatedPlayerMutationMethods =
-        new(StringComparer.Ordinal)
-        {
-            // The proposing clan can be remote-player controlled and the selected target can be a
-            // player kingdom; Diplomacy only understands the vanilla singleton player.
-            "Diplomacy.CampaignBehaviors.DiplomaticAgreementBehavior.ConsiderDiplomaticAgreements",
-            // The buyer selection excludes only Clan.PlayerClan, so an AI seller can transfer a
-            // fief to a different connected player's clan without authorization.
-            "Diplomacy.CampaignBehaviors.MaintainInfluenceBehavior.RegisterEvents",
-            "Diplomacy.CampaignBehaviors.MaintainInfluenceBehavior.ReduceCorruption",
-            // Processing can force peace through singleton-player inquiries. Event accumulation
-            // remains server-authoritative, but automatic daily resolution is disabled.
-            "Diplomacy.CampaignBehaviors.WarExhaustionBehavior.OnDailyTick",
-        };
-
     /// <summary>
     /// The Friend Edition Separatism service is the sole rebellion authority whenever enabled.
     /// Diplomacy's civil-war behavior creates its own rebel kingdoms and would otherwise race the
@@ -240,11 +233,7 @@ internal static class DiplomacyCompatibilityPolicy
     internal static bool ShouldRunSharedMutation() => ModInformation.IsServer;
 
     internal static bool ShouldRunSharedMutation(string typeName, string methodName) =>
-        ModInformation.IsServer &&
-        !UnsafeAutomatedPlayerMutationMethods.Contains($"{typeName}.{methodName}");
-
-    internal static bool IsUnsafeAutomatedPlayerMutation(string typeName, string methodName) =>
-        UnsafeAutomatedPlayerMutationMethods.Contains($"{typeName}.{methodName}");
+        ModInformation.IsServer;
 
     // Diplomacy's CivilWarBehavior reads Friend Edition configuration while behaviors are being
     // registered, before the host config is guaranteed to be loaded. More importantly, its

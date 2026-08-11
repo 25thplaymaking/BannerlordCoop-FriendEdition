@@ -240,7 +240,7 @@ internal class BattleSimulationRunHandler : IHandler
                     activeSimulations.Remove(mapEventId);
                 }
 
-                network.SendAll(new NetworkBattleSimulationFinished(mapEventId));
+                CompleteSimulation(mapEventId, sim.MapEvent);
                 mapEventLogger.DebugMapEvent(sim.MapEvent, "Stopped hostile-action battle simulation because an unsupported hostile-action player party joined");
                 return;
             }
@@ -387,12 +387,7 @@ internal class BattleSimulationRunHandler : IHandler
             if (hasLoot)
                 network.SendAll(lootMessage);
 
-            network.SendAll(new NetworkBattleSimulationFinished(mapEventId));
-
-            // Finalize the map event authoritatively (destroy the defeated party + close encounters) — the
-            // auto-resolve set the victory state internally, so this never fired on its own and the beaten
-            // party lingered, looping the encounter menu.
-            PublishSimulationConcluded(mapEventId, sim.MapEvent);
+            CompleteSimulation(mapEventId, sim.MapEvent);
         }
     }
 
@@ -731,11 +726,7 @@ internal class BattleSimulationRunHandler : IHandler
 
                 // Tell the spectators the simulation is over, otherwise they stay stuck in the spectator window now
                 // that the pacing client (which would have driven it to completion) is gone.
-                network.SendAll(new NetworkBattleSimulationFinished(entry.Key));
-
-                // Same authoritative finalize as the paced path, so a battle resolved after the pacer dropped
-                // still destroys the loser and closes any remaining encounter.
-                PublishSimulationConcluded(entry.Key, sim.MapEvent);
+                CompleteSimulation(entry.Key, sim.MapEvent);
             }
         }, blocking: true, context: nameof(Handle_PlayerDisconnected));
 
@@ -747,26 +738,32 @@ internal class BattleSimulationRunHandler : IHandler
     }
 
     /// <summary>
-    /// [Server, main thread] End the simulation session: commit XP and release the simulation troop
-    /// allocations (mirroring <c>MapEvent.SimulateBattleRoundEndSession</c>), then restore the observer
-    /// that was swapped out when the simulation began.
+    /// [Server] Close client playback, then publish <see cref="MapEventConcluded"/> for a decided auto-resolve
+    /// so the shared finalize path runs — <see cref="BattleFinalizeHandler"/> destroys the defeated party and
+    /// closes every involved player's encounter, exactly as a manual battle's victory <c>BattleState</c> does.
+    /// Manual battles reach this via <c>NetworkChangeBattleState</c>; the server-run simulation sets the state internally and never
+    /// travels that route, so without this the beaten party survives and the encounter menu loops. An undecided
+    /// stop releases the simulation claim so the battle can be retried. The finalize handler dedupes per event,
+    /// so this is safe alongside any other finalize.
     /// </summary>
-    /// <summary>
-    /// [Server] Publish <see cref="MapEventConcluded"/> for a decided auto-resolve so the shared finalize
-    /// path runs — <see cref="BattleFinalizeHandler"/> destroys the defeated party and closes every involved
-    /// player's encounter, exactly as a manual battle's victory <c>BattleState</c> does. Manual battles reach
-    /// this via <c>NetworkChangeBattleState</c>; the server-run simulation sets the state internally and never
-    /// travels that route, so without this the beaten party survives and the encounter menu loops. The finalize
-    /// handler dedupes per event, so this is safe alongside any other finalize.
-    /// </summary>
-    private void PublishSimulationConcluded(string mapEventId, MapEvent mapEvent)
+    internal void CompleteSimulation(string mapEventId, MapEvent mapEvent)
     {
-        if (mapEvent == null || !mapEvent.HasWinner) return;
+        network.SendAll(new NetworkBattleSimulationFinished(mapEventId));
+
+        if (mapEvent == null || !mapEvent.HasWinner)
+        {
+            ServerBattleModeArbiter.Release(mapEventId);
+            return;
+        }
 
         var playerPartyIds = MapEventPlayerPartyCollector.CollectPartyIds(mapEvent, objectManager);
         messageBroker.Publish(this, new MapEventConcluded(mapEventId, playerPartyIds));
     }
 
+    /// <summary>
+    /// [Server, main thread] End the simulation session: commit XP and release the simulation troop
+    /// allocations exactly like <c>MapEvent.SimulateBattleRoundEndSession</c>, then restore the observer.
+    /// </summary>
     private static void EndSimulationSession(ActiveSimulation sim)
     {
         foreach (var side in sim.MapEvent._sides)

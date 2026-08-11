@@ -56,6 +56,19 @@ Assert-True (@($productionManifest.activationPolicy.client.stagedInactiveModuleI
 Assert-True ((@($productionManifest.activationPolicy.server.exactActiveModuleOrder) -join ',') -ceq ($approvedActiveOrder -join ',')) 'server active order must match the approved ten-module loadout'
 Assert-True (@($productionManifest.activationPolicy.server.guardedModuleIds).Count -eq 0) 'server suite must not retain stale guarded Workshop entries'
 Assert-True ((@($productionManifest.activationPolicy.server.neverActivateModuleIds) -join ',') -ceq 'BirthAndDeath') 'only optional TaleWorlds BirthAndDeath remains excluded'
+$vectorsPin = @($productionManifest.coopModule.requiredAssemblyPins | Where-Object {
+    [string]$_.path -ceq 'bin/Win64_Shipping_Client/System.Numerics.Vectors.dll'
+})
+Assert-True ($vectorsPin.Count -eq 1) 'production suite must retain the exact Coop System.Numerics.Vectors pin'
+Assert-True ($null -eq $vectorsPin[0].PSObject.Properties['stagedInactiveConflictModuleIds']) 'active ButterLib must not be described as a staged-inactive assembly conflict'
+Assert-True ((@($vectorsPin[0].coactiveAlternateProviderModuleIds) -join ',') -ceq 'Bannerlord.ButterLib') 'the Coop vectors pin must identify active ButterLib as its verified alternate provider'
+$vectorsAllowance = @($productionManifest.sideBySideAssemblyAllowances | Where-Object {
+    [string]$_.assemblyName -ceq 'System.Numerics.Vectors'
+})
+Assert-True ($vectorsAllowance.Count -eq 1) 'production suite must contain one System.Numerics.Vectors allowance'
+Assert-True ($null -eq $vectorsAllowance[0].PSObject.Properties['stagedInactiveModuleIds']) 'the vectors allowance must not retain staged-inactive modules'
+Assert-True ((@($vectorsAllowance[0].coactiveModuleIds) -join ',') -ceq 'Bannerlord.ButterLib') 'the vectors allowance must identify coactive ButterLib'
+Assert-True ([string]$vectorsAllowance[0].coactivationPolicy -ceq 'verified-framework-load-context-e2e') 'the vectors allowance must record the closed live load-context gate'
 $launcherConfig = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\CoopLauncher\launcher-config.json') -Raw | ConvertFrom-Json
 $launcherOrder = @(([string]$launcherConfig.moduleToken).Split('*') | Where-Object { $_ -and $_ -notin @('_MODULES_') })
 Assert-True (($launcherOrder -join ',') -ceq ($approvedActiveOrder -join ',')) 'launcher token must match the approved ten-module loadout'

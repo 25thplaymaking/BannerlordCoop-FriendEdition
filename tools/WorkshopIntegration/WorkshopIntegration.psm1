@@ -837,12 +837,14 @@ function Invoke-ManagedAssemblyAudit {
         }
         $activeProviderProperty = $allowance[0].PSObject.Properties['activeProviderModuleId']
         $stagedInactiveProperty = $allowance[0].PSObject.Properties['stagedInactiveModuleIds']
+        $coactiveProperty = $allowance[0].PSObject.Properties['coactiveModuleIds']
         $coactivationProperty = $allowance[0].PSObject.Properties['coactivationPolicy']
         $sideBySideProofs.Add([ordered]@{
             platform = [string]$group.Group[0].platform; assemblyName = [string]$group.Group[0].identity.name
             moduleIds = $moduleIds; identities = $identities; reason = [string]$allowance[0].reason
             activeProviderModuleId = if ($null -ne $activeProviderProperty) { [string]$activeProviderProperty.Value } else { $null }
             stagedInactiveModuleIds = if ($null -ne $stagedInactiveProperty) { @($stagedInactiveProperty.Value) } else { @() }
+            coactiveModuleIds = if ($null -ne $coactiveProperty) { @($coactiveProperty.Value) } else { @() }
             coactivationPolicy = if ($null -ne $coactivationProperty) { [string]$coactivationProperty.Value } else { $null }
         })
     }
@@ -953,26 +955,38 @@ function Invoke-ManagedAssemblyAudit {
                 referenceFullName = [string]$matchingReference[0].fullName
             })
         }
-        $conflictIds = @($pin.stagedInactiveConflictModuleIds | ForEach-Object { [string]$_ })
+        $stagedConflictProperty = $pin.PSObject.Properties['stagedInactiveConflictModuleIds']
+        $coactiveAlternateProperty = $pin.PSObject.Properties['coactiveAlternateProviderModuleIds']
+        $conflictIds = if ($null -ne $stagedConflictProperty) { @($stagedConflictProperty.Value | ForEach-Object { [string]$_ }) } else { @() }
+        $coactiveIds = if ($null -ne $coactiveAlternateProperty) { @($coactiveAlternateProperty.Value | ForEach-Object { [string]$_ }) } else { @() }
+        if ($conflictIds.Count -gt 0 -and $coactiveIds.Count -gt 0) {
+            throw "Required Coop assembly pin cannot define both staged-inactive conflicts and verified coactive alternate providers: $($pin.path)"
+        }
         $configuredInactive = @($Manifest.activationPolicy.client.stagedInactiveModuleIds | ForEach-Object { [string]$_ })
+        $configuredActive = @($Manifest.activationPolicy.client.activeModuleOrder | ForEach-Object { [string]$_ })
         if (@($conflictIds | Where-Object { [string]$_ -notin $configuredInactive }).Count -gt 0 -or
-            @($conflictIds | Where-Object { [string]$_ -in @($Manifest.activationPolicy.client.activeModuleOrder) }).Count -gt 0) {
+            @($conflictIds | Where-Object { [string]$_ -in $configuredActive }).Count -gt 0) {
             throw "Required Coop assembly pin has a conflict provider that is not staged-inactive: $($conflictIds -join ', ')."
         }
-        $conflictProviders = @($includedManaged | Where-Object {
-            [string]$_.moduleId -in $conflictIds -and
+        if (@($coactiveIds | Where-Object { [string]$_ -notin $configuredActive -or [string]$_ -in $configuredInactive }).Count -gt 0) {
+            throw "Required Coop assembly pin has an alternate provider that is not active: $($coactiveIds -join ', ')."
+        }
+        $alternateIds = @($conflictIds) + @($coactiveIds)
+        $alternateProviders = @($includedManaged | Where-Object {
+            [string]$_.moduleId -in $alternateIds -and
             [string]$_.identity.name -ceq [string]$providerMetadata[0].identity.name
         })
-        foreach ($conflictId in $conflictIds) {
-            if (@($conflictProviders | Where-Object { [string]$_.moduleId -ceq $conflictId }).Count -eq 0) {
-                throw "Configured staged-inactive conflict module '$conflictId' has no audited '$($providerMetadata[0].identity.name)' payload."
+        foreach ($alternateId in $alternateIds) {
+            if (@($alternateProviders | Where-Object { [string]$_.moduleId -ceq $alternateId }).Count -eq 0) {
+                throw "Configured alternate provider module '$alternateId' has no audited '$($providerMetadata[0].identity.name)' payload."
             }
         }
+        $expectedCoactivationPolicy = if ($coactiveIds.Count -gt 0) { 'verified-framework-load-context-e2e' } else { 'forbidden-until-framework-load-context-e2e' }
         $allowance = @($Manifest.sideBySideAssemblyAllowances | Where-Object {
             [string]$_.assemblyName -ceq [string]$providerMetadata[0].identity.name
         })
         if ($allowance.Count -ne 1 -or [string]$allowance[0].activeProviderModuleId -cne [string]$Coop.Descriptor.ModuleId -or
-            [string]$allowance[0].coactivationPolicy -cne 'forbidden-until-framework-load-context-e2e') {
+            [string]$allowance[0].coactivationPolicy -cne $expectedCoactivationPolicy) {
             throw "Required Coop assembly '$($providerMetadata[0].identity.name)' lacks an explicit active-provider/coactivation policy."
         }
         $installedProviders = @($inventory | Where-Object {
@@ -986,11 +1000,14 @@ function Invoke-ManagedAssemblyAudit {
             assemblyFullName = [string]$pin.assemblyFullName
             exactConsumerReferences = $consumerProofs.ToArray()
             installedProviderIdentities = @($installedProviders.identity.fullName | Sort-Object -Unique)
-            stagedInactiveConflictProviders = @($conflictProviders | ForEach-Object {
+            stagedInactiveConflictProviders = @($alternateProviders | Where-Object { [string]$_.moduleId -in $conflictIds } | ForEach-Object {
+                [ordered]@{ moduleId = [string]$_.moduleId; assemblyFullName = [string]$_.identity.fullName; sha256 = [string]$_.sha256 }
+            })
+            coactiveAlternateProviders = @($alternateProviders | Where-Object { [string]$_.moduleId -in $coactiveIds } | ForEach-Object {
                 [ordered]@{ moduleId = [string]$_.moduleId; assemblyFullName = [string]$_.identity.fullName; sha256 = [string]$_.sha256 }
             })
             activeProviderModuleId = [string]$Coop.Descriptor.ModuleId
-            coactivationPolicy = 'forbidden-until-framework-load-context-e2e'
+            coactivationPolicy = $expectedCoactivationPolicy
             reason = [string]$pin.reason
             buildTimeVerified = $true
         })

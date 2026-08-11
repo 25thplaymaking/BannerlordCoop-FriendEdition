@@ -149,10 +149,10 @@
             "referenceFullName": "System.Numerics.Vectors, Version=4.1.3.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
           }
         ],
-        "stagedInactiveConflictModuleIds": [
+        "coactiveAlternateProviderModuleIds": [
           "Bannerlord.ButterLib"
         ],
-        "reason": "Coop's active System.Memory has an exact strong-named 4.1.5 reference. The installed game provides 4.1.3 and staged-inactive ButterLib provides 4.1.4, so excluding this pin would leave no exact active provider and rely on an unproven downgrade. ButterLib must not be co-activated until its framework/load-context gate passes."
+        "reason": "Coop's active System.Memory has an exact strong-named 4.1.5 reference, so the pinned Coop payload remains the canonical provider. ButterLib's 4.1.4 reference is redirected to 4.1.5 on the client and reuses the loaded canonical provider on the .NET Core server; the full active loadout has passed the live framework/load-context gate."
       }
     ]
   },
@@ -195,9 +195,9 @@
       "assemblyName": "System.Numerics.Vectors",
       "moduleIds": ["Bannerlord.ButterLib", "Coop"],
       "activeProviderModuleId": "Coop",
-      "stagedInactiveModuleIds": ["Bannerlord.ButterLib"],
-      "coactivationPolicy": "forbidden-until-framework-load-context-e2e",
-      "reason": "Coop's active System.Memory requires exact strong-named Vectors 4.1.5. ButterLib's 4.1.4 payload is staged-inactive, not an active second provider; co-activation remains forbidden until the framework/load-context E2E gate proves resolution."
+      "coactiveModuleIds": ["Bannerlord.ButterLib"],
+      "coactivationPolicy": "verified-framework-load-context-e2e",
+      "reason": "Coop's exact 4.1.5 payload is canonical. The client binding redirect and the server startup-hook/load-context policy converge ButterLib's 4.1.4 reference on that provider; the full active loadout is verified live."
     },
     {
       "assemblyName": "System.Reflection.Metadata",

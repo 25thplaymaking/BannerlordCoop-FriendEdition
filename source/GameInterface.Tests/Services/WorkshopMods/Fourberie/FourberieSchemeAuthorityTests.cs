@@ -104,6 +104,38 @@ public sealed class FourberieSchemeAuthorityTests
             FourberieAuthorityPatches.SchemeLifecycleOperation(new Hashtable { [841] = 1 }, 8));
     }
 
+    [Fact]
+    public void StanceChange_AbortsBothSlotsAndKeepsUnrelatedState()
+    {
+        IDictionary crime = new Hashtable
+        {
+            [500] = 1,
+            [7] = 3,
+            [74] = 1,
+            [740] = 5,
+            [8] = 7,
+            [84] = 1,
+            [841] = 1,
+            [310] = 4,
+        };
+
+        Assert.True(FourberieSchemeAuthority.TryChangeStance(
+            crime, stance: 2, out var changed, out var failure), failure);
+        Assert.True(changed);
+        Assert.Equal(2, crime[500]);
+        Assert.Equal(4, crime[310]);
+        Assert.False(crime.Contains(7));
+        Assert.False(crime.Contains(8));
+        Assert.False(crime.Contains(740));
+        Assert.False(crime.Contains(841));
+
+        Assert.True(FourberieSchemeAuthority.TryChangeStance(
+            crime, stance: 2, out changed, out failure), failure);
+        Assert.False(changed);
+        Assert.False(FourberieSchemeAuthority.TryChangeStance(
+            crime, stance: 3, out _, out _));
+    }
+
     [Theory]
     [InlineData((int)FourberieOperation.SelectSchemeVictim, "hero_a", 7, true)]
     [InlineData((int)FourberieOperation.SelectSchemeVictim, "", 7, false)]
@@ -112,6 +144,8 @@ public sealed class FourberieSchemeAuthorityTests
     [InlineData((int)FourberieOperation.StartScheme, "", 8, true)]
     [InlineData((int)FourberieOperation.AbortScheme, "", 7, true)]
     [InlineData((int)FourberieOperation.ClearCompletedScheme, "", 9, false)]
+    [InlineData((int)FourberieOperation.ChangeSchemeStance, "", 2, true)]
+    [InlineData((int)FourberieOperation.ChangeSchemeStance, "", 3, false)]
     public void Protocol_AcceptsOnlyExactSchemeCommandShapes(
         int operation,
         string targetId,

@@ -45,6 +45,7 @@ internal enum FourberiePatchKind
     SchemeTypeConsequence,
     SchemeLifecycleConsequence,
     SchemeOwnedReplacement,
+    SchemeStanceConsequence,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -411,6 +412,10 @@ internal static class FourberieCompatibilityManifest
             FourberiePatchKind.SchemeOwnedReplacement, "System.Int32");
         Add("Fourberie.CriminalVM+<>c__DisplayClass77_0", "<SchemeAllButtonRoutine>b__0",
             FourberiePatchKind.SchemeOwnedReplacement);
+        Add("Fourberie.CriminalVM", "SchemeRoomStanceList", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM+<>c__DisplayClass562_0", "<SchemeRoomStanceList>b__0",
+            FourberiePatchKind.SchemeStanceConsequence,
+            "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]");
 
         // These periodic entry points contain the random and persistent campaign decisions found
         // in the 1.4.7.5 audit. They are separately guarded so a duplicate listener cannot execute

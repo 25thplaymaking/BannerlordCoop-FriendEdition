@@ -332,6 +332,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.SchemeOwnedReplacement:
                 method = nameof(FourberieAuthorityPatches.SchemeOwnedReplacementPrefix);
                 break;
+            case FourberiePatchKind.SchemeStanceConsequence:
+                method = nameof(FourberieAuthorityPatches.SchemeStanceConsequencePrefix);
+                break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
                 break;

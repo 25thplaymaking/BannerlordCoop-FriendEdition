@@ -148,9 +148,29 @@ internal static class FourberieSchemeAuthority
             return false;
         }
 
-        crime.Remove(slot);
-        for (int suffix = 1; suffix <= 4; suffix++) crime.Remove(slot * 10 + suffix);
-        for (int suffix = 10; suffix <= 50; suffix += 10) crime.Remove(slot * 100 + suffix);
+        ClearSlot(crime, slot);
+        return true;
+    }
+
+    public static bool TryChangeStance(
+        IDictionary crime,
+        int stance,
+        out bool changed,
+        out string failure)
+    {
+        changed = false;
+        failure = null;
+        if (crime == null || (stance != 1 && stance != 2))
+        {
+            failure = "scheme stance is outside the pinned Fourberie range";
+            return false;
+        }
+        if (Read(crime, 500) == stance) return true;
+
+        crime[500] = stance;
+        ClearSlot(crime, 7);
+        ClearSlot(crime, 8);
+        changed = true;
         return true;
     }
 
@@ -189,5 +209,13 @@ internal static class FourberieSchemeAuthority
     {
         dictionary.Remove(key);
         dictionary[key] = value;
+    }
+
+    private static void ClearSlot(IDictionary crime, int slot)
+    {
+        crime.Remove(slot);
+        for (int suffix = 1; suffix <= 4; suffix++) crime.Remove(slot * 10 + suffix);
+        for (int suffix = 10; suffix <= 50; suffix += 10) crime.Remove(slot * 100 + suffix);
+        crime.Remove(slot * 100 + 41);
     }
 }

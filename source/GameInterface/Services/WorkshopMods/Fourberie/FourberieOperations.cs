@@ -117,6 +117,7 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.StartScheme:
                 case FourberieOperation.AbortScheme:
                 case FourberieOperation.ClearCompletedScheme:
+                case FourberieOperation.ChangeSchemeStance:
                     ApplySchemeOperation(actor, actorParty, request);
                     break;
                 default:
@@ -548,6 +549,23 @@ internal sealed class FourberieOperationExecutor
 
         using (new AllowedThread())
         {
+            if (request.Operation == FourberieOperation.ChangeSchemeStance)
+            {
+                if (!FourberieSchemeAuthority.TryChangeStance(
+                        crime, request.IntValue, out bool changed, out string failure))
+                    throw new InvalidOperationException(failure);
+                if (changed)
+                {
+                    heroes.Remove("victim7");
+                    heroes.Remove("victim8");
+                    times.Remove(7);
+                    times.Remove(8);
+                    SetStaticField("_clanval", null);
+                    SetStaticField("_clanval2", null);
+                }
+                return;
+            }
+
             if (request.Operation == FourberieOperation.SelectSchemeVictim)
             {
                 ApplySchemeVictimSelection(heroes, crime, request);

@@ -30,6 +30,7 @@ internal enum FourberieOperation
     StartScheme = 19,
     AbortScheme = 20,
     ClearCompletedScheme = 21,
+    ChangeSchemeStance = 22,
 }
 
 internal enum FourberieOperationStatus
@@ -213,6 +214,8 @@ internal static class FourberieOperationProtocol
             FourberieOperation.StartScheme or FourberieOperation.AbortScheme or
                 FourberieOperation.ClearCompletedScheme =>
                 EmptyContext(request) && IsSchemeSlot(request.IntValue),
+            FourberieOperation.ChangeSchemeStance =>
+                EmptyContext(request) && (request.IntValue == 1 || request.IntValue == 2),
             _ => false,
         };
     }

@@ -434,6 +434,20 @@ internal static class FourberieAuthorityPatches
 
     public static bool SchemeOwnedReplacementPrefix() => false;
 
+    public static bool SchemeStanceConsequencePrefix(object[] __args)
+    {
+        if (!ModInformation.IsClient) return false;
+        string selected = SelectedInquiryIdentifier<string>(__args);
+        if (!int.TryParse(selected, out int stance) || (stance != 1 && stance != 2)) return false;
+
+        Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
+        AccessTools.Field(behavior, "_clanval")?.SetValue(null, null);
+        AccessTools.Field(behavior, "_clanval2")?.SetValue(null, null);
+        InformationManager.HideInquiry();
+        SubmitBusiness(FourberieOperation.ChangeSchemeStance, stance);
+        return false;
+    }
+
     internal static FourberieOperation SchemeLifecycleOperation(int slot)
     {
         Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");

@@ -6,12 +6,14 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 
 > **AUTHORITY ROUTING IN PROGRESS (2026-08-11): prior RC superseded; stable held.** The exact function
 > ledger covers 41,000 methods across the ten active Workshop modules, retired RBM, and integrated
-> Separatism. Deterministic IL evidence identifies 10,079 authority candidates; 4,521 framework/retired
-> records are classified and release validation rejects the remaining 5,558 active gameplay records.
+> Separatism. Deterministic IL evidence identifies 10,079 authority candidates; 4,542 exact records
+> are classified and release validation rejects the remaining 5,537 active gameplay records.
 > All six active gameplay adapters now share `IWorkshopModule`, and a trusted host capability snapshot
-> is green in unit/E2E tests. This is a foundation, not a completed-mod claim: Improved Garrisons
-> management, Dismemberment cosmetics, Fourberie entry points, Diplomacy operations, Player Settlement
-> construction, and the omitted Separatism conversation still require typed server routes. The previous
+> is green in unit/E2E tests. UnblockableThrust's four candidates are owned by the accepted collision
+> authority, and all 17 DismembermentPlus candidates now use a deterministic, deduplicated replicated-
+> cosmetic route without replaying damage. This is not a completed-mod claim: Improved Garrisons
+> management, Fourberie entry points, Diplomacy operations, Player Settlement construction, and the
+> omitted Separatism conversation still require typed server routes. The previous
 > ten-module archive remains an uninstalled historical RC and cannot be promoted. Stable also retains
 > the rendered install/join and Sea Raider auto-resolve gates after functional closure. Foundation
 > verification is green: 3,392 passed, 18 skipped, 0 failed; build completed with 0 errors.
@@ -89,10 +91,17 @@ player context into the original routine, so replaying it on the server targets 
 All three routes currently fail closed on both roles, including legacy network requests. The active
 authority plan now requires explicit-context/per-player Coop commands before those options can ship.
 
-### Mod integration progress (2026-08-10)
+### Mod integration progress (2026-08-11)
 - **Diplomacy** ✅ working (DiplomacyEvents client init).
 - **ImprovedGarrisons** ⚠️ background authority works; 29 management/UI routes remain open.
 - **PlayerSettlement** ⚠️ loads; construction/rebuild/overwrite and persistence graph remain open.
+- **UnblockableThrust** ✅ all 4 authority candidates are exact-classified under Coop's accepted
+  collision owner; incompatible, swing, shield, parry, chamber, remote, foot, and mounted cases are gated.
+- **DismembermentPlus** ✅ all 17 authority candidates are exact-classified. The victim-authority peer
+  validates the accepted blow once and broadcasts a canonical limb/seed event; peers apply only the
+  visual routine, with battle-scoped dedupe, capability gating, and no second `RegisterBlow`.
+- **Separatism** ⚠️ structural server callbacks are present; the recovered fallen-clan conversation is
+  the next typed server command and remains open until its authorization/convergence tests pass.
 - **Fourberie** — integrated in increments:
   1. `BehaviorsWithoutModels` kind: `InitializeBehaviorsOnlyPrefix` adds the 8 gameplay
      behaviors, skips the 14 model replacements; `FourberieRuntimeSurface` now rejects only

@@ -220,6 +220,13 @@ public class MissionModule : Module
         builder.RegisterType<CombatHitPresentationHandler>()
             .As<ICombatHitPresentationHandler>()
             .InstancePerDependency();
+        builder.RegisterType<DismembermentPresentationHandler>()
+            .As<IDismembermentPresentationHandler>()
+            .InstancePerLifetimeScope()
+            .AutoActivate();
+        builder.RegisterType<DismembermentCapabilitySource>()
+            .As<IWorkshopCapabilitySource>()
+            .InstancePerLifetimeScope();
         //builder.RegisterType<AgentDamageHandler>().As<IAgentDamageHandler>().InstancePerDependency();
         builder.RegisterType<AgentDeathHandler>().As<IAgentDeathHandler>().InstancePerDependency();
     }

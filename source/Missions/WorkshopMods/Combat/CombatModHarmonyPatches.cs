@@ -1,5 +1,6 @@
 using Common;
 using Common.Logging;
+using GameInterface;
 using GameInterface.Services.MapEvents;
 using GameInterface.Services.WorkshopMods.Core;
 using HarmonyLib;
@@ -292,9 +293,8 @@ internal static class RbmGameInitializationFinishedPatch
 }
 
 /// <summary>
-/// DismembermentPlus remains available for non-Coop client missions.  It is not attached during a live
-/// Coop battle because routed blows only reach the victim-authority peer; without a synchronized limb
-/// event that would produce divergent presentation.  It is never attached on the campaign server.
+/// DismembermentPlus's mission logic exists on each client so replicated severed-body presentation can
+/// be applied everywhere. It is never attached on the campaign server.
 /// </summary>
 [HarmonyPatch]
 [HarmonyPatchCategory(WorkshopPatchCategories.DismembermentPlus)]
@@ -350,14 +350,31 @@ internal static class DismembermentRegisterBlowPatch
     private static bool Prepare() => TargetMethods().Any();
 
     [HarmonyPrefix]
-    private static bool Prefix()
+    private static bool Prefix(
+        object __instance,
+        Agent attacker,
+        Agent victim,
+        Blow blow,
+        ref AttackCollisionData collisionData)
     {
-        return CombatModAuthorityPolicy.AllowDismembermentPresentation(
-            CombatModCompatibilityGuard.IsInitialized
-                && CombatModCompatibilityGuard.IsFamilyCompatible(
-                    CombatModFamily.DismembermentPlus2087),
-            ModInformation.IsServer,
-            BattleSpawnGate.IsCoopBattleActive);
+        bool compatible = CombatModCompatibilityGuard.IsInitialized
+            && CombatModCompatibilityGuard.IsFamilyCompatible(
+                CombatModFamily.DismembermentPlus2087);
+        if (!BattleSpawnGate.IsCoopBattleActive)
+            return CombatModAuthorityPolicy.AllowDismembermentPresentation(
+                compatible,
+                ModInformation.IsServer,
+                isCoopBattleActive: false);
+
+        // The original method creates Random/Guid state locally. In Coop, suppress that complete
+        // path and let the accepted victim-authority blow produce one deterministic cosmetic event.
+        if (compatible &&
+            !ModInformation.IsServer &&
+            ContainerProvider.TryResolve<IDismembermentPresentationHandler>(out var handler))
+        {
+            handler.ProcessAcceptedBlow(__instance, attacker, victim, blow, collisionData);
+        }
+        return false;
     }
 
     [HarmonyFinalizer]

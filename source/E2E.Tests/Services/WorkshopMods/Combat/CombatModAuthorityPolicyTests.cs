@@ -64,6 +64,26 @@ public sealed class CombatModAuthorityPolicyTests
     }
 
     [Theory]
+    [InlineData(false, (int)StrikeType.Thrust, CombatCollisionResult.Blocked)]
+    [InlineData(true, (int)StrikeType.Swing, CombatCollisionResult.Blocked)]
+    [InlineData(true, (int)StrikeType.Thrust, CombatCollisionResult.StrikeAgent)]
+    public void UnblockableThrust_LeavesUnauditedOrInapplicableCollisionsUnchanged(
+        bool moduleCompatible,
+        int strikeType,
+        CombatCollisionResult collisionResult)
+    {
+        Assert.False(UnblockableThrustAuthorityPatch.ResolveCrushThrough(
+            moduleCompatible,
+            isCoopBattleActive: true,
+            sourceIsLocallyControlled: true,
+            alreadyCrushedThrough: false,
+            strikeType,
+            collisionResult: (int)collisionResult,
+            blockedWithShield: false,
+            attackerIsMounted: false));
+    }
+
+    [Theory]
     [InlineData(false, CombatCollisionResult.Blocked, false, true)]
     [InlineData(true, CombatCollisionResult.Blocked, false, true)]
     [InlineData(false, CombatCollisionResult.Blocked, true, false)]
@@ -97,9 +117,9 @@ public sealed class CombatModAuthorityPolicyTests
     }
 
     [Fact]
-    public void DismembermentPresentation_IsBlockedInLiveCoopUntilItCanConverge()
+    public void DismembermentPresentation_InitializesOnEveryCompatibleClient()
     {
-        Assert.False(CombatModAuthorityPolicy.AllowDismembermentPresentation(
+        Assert.True(CombatModAuthorityPolicy.AllowDismembermentPresentation(
             moduleCompatible: true,
             isServer: false,
             isCoopBattleActive: true));
@@ -108,12 +128,27 @@ public sealed class CombatModAuthorityPolicyTests
             isServer: true,
             isCoopBattleActive: true));
 
-        // A client that joins after mission initialization has no accepted dismemberment event to
-        // replay. Keeping the same gate closed prevents a late agent from acquiring local-only state.
         Assert.False(CombatModAuthorityPolicy.AllowDismembermentPresentation(
-            moduleCompatible: true,
+            moduleCompatible: false,
             isServer: false,
             isCoopBattleActive: true));
+    }
+
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    public void DismembermentAcceptedBlow_RequiresPublishedRouteAndVictimAuthority(
+        bool routeEnabled,
+        bool victimIsLocallyAuthoritative,
+        bool expected)
+    {
+        Assert.Equal(expected, CombatModAuthorityPolicy.AllowDismembermentAcceptedBlow(
+            moduleCompatible: true,
+            isServer: false,
+            isCoopBattleActive: true,
+            routeEnabled,
+            victimIsLocallyAuthoritative));
     }
 
     [Fact]
@@ -131,6 +166,23 @@ public sealed class CombatModAuthorityPolicyTests
             moduleCompatible: false,
             isServer: false,
             isCoopBattleActive: false));
+    }
+
+    [Theory]
+    [InlineData(true, true, true, true)]
+    [InlineData(false, true, true, false)]
+    [InlineData(true, false, true, false)]
+    [InlineData(true, true, false, false)]
+    public void DismembermentCapability_RequiresReadyGuardCompatibleBinaryAndEnabledOption(
+        bool guardInitialized,
+        bool moduleCompatible,
+        bool moduleEnabled,
+        bool expected)
+    {
+        Assert.Equal(expected, CombatModAuthorityPolicy.AllowDismembermentCapability(
+            guardInitialized,
+            moduleCompatible,
+            moduleEnabled));
     }
 
     [Fact]

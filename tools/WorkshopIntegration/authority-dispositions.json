@@ -10,5 +10,83 @@
     "FrameworkLifecycle",
     "Retired"
   ],
-  "rules": []
+  "rules": [
+    {
+      "moduleId": "UnblockableThrust",
+      "assemblySha256": "ff73b80a598bce31e8d620fae84e21c7f633f767f03e5f192e05169425dc83df",
+      "metadataTokens": [
+        "0x06000014",
+        "0x06000015",
+        "0x06000016",
+        "0x06000017"
+      ],
+      "disposition": "CoopOwnerReplacement",
+      "owner": "Missions.WorkshopMods.Combat.UnblockableThrustAuthorityPatch.ResolveCrushThrough",
+      "capability": "AuthoritativeCrushThrough",
+      "tests": [
+        "CombatModAuthorityPolicyTests.UnblockableThrust_RemoteClientCannotChangeCollisionDecision",
+        "CombatModAuthorityPolicyTests.UnblockableThrust_LocalCollisionAuthorityAppliesExactlyOneDecision",
+        "CombatModAuthorityPolicyTests.UnblockableThrust_AuditedDefaultsCoverFootMountedShieldParryAndChamber",
+        "CombatModAuthorityPolicyTests.UnblockableThrust_LeavesUnauditedOrInapplicableCollisionsUnchanged"
+      ]
+    },
+    {
+      "moduleId": "DismembermentPlus",
+      "assemblySha256": "fc16d8c5f455710b7960848c8f27a3db0551e1a028bb128bf7ce1c6a95f79dd1",
+      "metadataTokens": [
+        "0x06000001",
+        "0x06000002",
+        "0x06000003",
+        "0x06000004",
+        "0x060000A1",
+        "0x060000A2",
+        "0x06000100"
+      ],
+      "disposition": "ClientPresentation",
+      "owner": "Missions.WorkshopMods.Combat.DismembermentMissionInitializerPatch",
+      "capability": "ReplicatedPresentation",
+      "tests": [
+        "CombatModAuthorityPolicyTests.DismembermentPresentation_InitializesOnEveryCompatibleClient",
+        "DismembermentPresentationTests.Event_RoundTripsTheExactSelectedOutcomeWithoutASecondDamageCommand"
+      ]
+    },
+    {
+      "moduleId": "DismembermentPlus",
+      "assemblySha256": "fc16d8c5f455710b7960848c8f27a3db0551e1a028bb128bf7ce1c6a95f79dd1",
+      "metadataTokens": [
+        "0x060000FA",
+        "0x060000FC"
+      ],
+      "disposition": "ClientPresentation",
+      "owner": "Missions.WorkshopMods.Combat.DismembermentSlowMotionPatch",
+      "capability": "ReplicatedPresentation",
+      "tests": [
+        "CombatModAuthorityPolicyTests.DismembermentPresentation_RemainsClientOnlyOutsideCoop",
+        "CombatModAuthorityPolicyTests.DismembermentAcceptedBlow_RequiresPublishedRouteAndVictimAuthority"
+      ]
+    },
+    {
+      "moduleId": "DismembermentPlus",
+      "assemblySha256": "fc16d8c5f455710b7960848c8f27a3db0551e1a028bb128bf7ce1c6a95f79dd1",
+      "metadataTokens": [
+        "0x06000006",
+        "0x0600009C",
+        "0x060000FB",
+        "0x060000FD",
+        "0x060000FE",
+        "0x060000FF",
+        "0x0600011D",
+        "0x0600011E"
+      ],
+      "disposition": "ReplicatedCosmetic",
+      "owner": "Missions.WorkshopMods.Combat.DismembermentPresentationHandler",
+      "capability": "ReplicatedPresentation",
+      "tests": [
+        "DismembermentPresentationTests.EventValidation_RequiresCurrentBattleVictimAuthorityAndBoundedIdentity",
+        "DismembermentPresentationTests.Ledger_AppliesOnceAndRejectsDuplicateStaleAndConflictingSequence",
+        "DismembermentPresentationTests.Seed_IsStableForTheAcceptedBlowAndChangesWithSequence",
+        "DismembermentPresentationTests.Event_RoundTripsTheExactSelectedOutcomeWithoutASecondDamageCommand"
+      ]
+    }
+  ]
 }

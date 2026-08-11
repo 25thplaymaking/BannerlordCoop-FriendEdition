@@ -1,6 +1,8 @@
 using E2E.Tests.Environment;
+using Common.Tests.Utils;
 using GameInterface.Services.WorkshopMods.Core;
 using Missions;
+using Missions.WorkshopMods.Combat;
 using System.Reflection;
 using Xunit.Abstractions;
 
@@ -38,5 +40,19 @@ public sealed class AbsentModuleSafetyTests : IDisposable
             new[] { "DismembermentPlus", "UnblockableThrust" },
             modules.Select(module => module.ModuleId));
         Assert.DoesNotContain(modules, module => module.ModuleId == "RBM");
+    }
+
+    [Fact]
+    public void DismembermentHandler_IsOneEagerSessionCoordinator()
+    {
+        var client = TestEnvironment.Clients.First();
+        var broker = client.Resolve<TestMessageBroker>();
+
+        Assert.Equal(1, broker.GetSubscriberCountForType<DismembermentPresentationEvent>());
+        IDismembermentPresentationHandler first = client.Resolve<IDismembermentPresentationHandler>();
+        IDismembermentPresentationHandler second = client.Resolve<IDismembermentPresentationHandler>();
+
+        Assert.Same(first, second);
+        Assert.Equal(1, broker.GetSubscriberCountForType<DismembermentPresentationEvent>());
     }
 }

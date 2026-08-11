@@ -18,7 +18,7 @@ assembly SHA-256, identity, declaring type, return/parameter shape, generic arit
 metadata token, and RVA.
 
 The authority ledger reconciles one-for-one with all 41,000 method records. Its development baseline
-contains 10,079 authority candidates: 4,521 framework/retired records are classified and 5,558 active
+contains 10,079 authority candidates: 4,542 exact records are classified and 5,537 active
 gameplay candidates remain unclassified. Release mode rejects every one of those open records; this
 is deliberately not a completion claim.
 
@@ -56,7 +56,7 @@ type's disposition rather than repeating identical prose for tens of thousands o
 | MCM | loader/API/UI adapter; global/per-campaign/per-save providers; local serialization and migration; settings screens/save/exit | Presentation only. Gameplay configuration comes from Coop's server snapshot, never peer-local MCM files. The active ten-module contract agrees across catalog, deployment manifest, launcher, and both role orders; the dedicated host has proved the pinned framework cohort live. |
 | RBM | entry/XML merge; configuration; combat formula/damage/posture; AI/tactics/spawn; tournament roster/prize; UI/input | Retired from the production loadout after the native initialization crash. It is absent from the catalog, deployment package, launcher, and server/client active orders. Its pinned binaries remain only as an audited historical surface; do not revive individual slices during this plan. |
 | ImprovedGarrisons | initialization; campaign behaviors/events; party creation/removal; recruitment/upgrade; finance/food/speed models; settings/log UI; sidecar save managers | Background ticks/state have server ownership and the existing snapshot is retained. Twenty-nine denied management/template/mobile-party entry points still need typed player-context commands; their options are not release-complete merely because the module loads. |
-| DismembermentPlus | mission registration; blow validation; random limb choice; mesh/entity/effects; slow motion; settings/error UI | Original `new Random`, GUID, local agent indices, `Agent.Main`, WinForms, and time changes are not deterministic authority. Live Coop remains disabled until an accepted-blow cosmetic event carries stable agent identity, limb and seed to every rendered peer. |
+| DismembermentPlus | mission registration; blow validation; random limb choice; mesh/entity/effects; slow motion; settings/error UI | All 17 candidates are exact-classified. Live Coop suppresses the original local-random `RegisterBlow` path; the victim-authority peer validates once, derives a canonical event ID/seed, applies the original visual routine, and broadcasts a capability-gated cosmetic event. Receivers re-derive authority/identity, reject malformed/duplicate/stale/conflicting events, and never replay damage. Slow motion stays disabled in Coop. |
 | Fourberie | submodule/application/mission hooks; behavior registration and `SyncData`; menus/conversations; recruiting/spawning/party ticks; crime/safehouse/fight-club/contracts; fourteen models; mission controllers | Menus are presentation only. The three create routines, mission initialization, remaining menu actions, and suppressed model outcomes require explicit-context Coop owners. Existing fail-closed guards are safety evidence, not completed gameplay. |
 | Diplomacy | loader; campaign behaviors/managers; war/peace/agreement/cooldown/exhaustion; kingdom/clan/influence patches; UI/viewmodels; save types; civil war/rebel functions | Donate Gold is routed. Peace/NAP/messenger/grant-fief/kingdom and related UI operations still need typed server commands; Separatism remains the sole rebellion mutation owner. Suppression of colliding patches is not a substitute for the player-visible outcome. |
 | UnblockableThrust | submodule/config and defend-collision postfix | Kept as a pure rule inside Coop's accepted collision authority with no parallel damage path. The audited defaults now have combined foot/mounted, shield, parry, and chamber regression coverage; only an authority-owned non-shield blocked thrust crushes through. RBM interaction is irrelevant while RBM remains retired. |
@@ -94,8 +94,8 @@ The 160-method raw surface resolves into these gameplay functions:
    intentional policy hooks; fixed threshold/config tests and 92 Diplomacy collision cases enforce
    the selected one-owner rebellion policy.
 9. The recovered original 1.3.8 source adds the conversation line
-   `player_is_requesting_fallen_to_join`; the integrated port omits it. This plan will preserve the
-   omission and document it as unsupported UI rather than importing another client-driven clan move.
+   `player_is_requesting_fallen_to_join`; the integrated port currently omits it. The active plan restores
+   the line as client presentation while routing its clan move through an authenticated server command.
 10. Disconnected controlled player clans remain protected because the player registry retains their
     controlled campaign objects; the focused E2E suite proves the disconnected state and load-time
     reconciliation behavior.
@@ -116,7 +116,7 @@ implemented structural core, not the omitted player conversation or other mods' 
 | War/peace/policies/relations/influence | Separatism, Diplomacy, Fourberie models/actions | Coop kingdom/diplomacy services | Mod formulas are policy inputs; one committed server transaction/delta. |
 | Campaign party creation/rosters | Fourberie, ImprovedGarrisons, PlayerSettlement, Coop mobile-party services | Coop server object/party registries | No `MainParty/MainHero` authority; stable player/object ID and idempotent request. |
 | Damage/healing/finance models | Fourberie models, Unblockable rule, retired RBM, Coop damage/health/finance | Coop battle/server model | One explicit composition; no Harmony-order winner. |
-| Blow/collision/dismemberment | Unblockable, Dismemberment, retired RBM, Coop mission authority | Coop accepted blow transaction | Pure thrust flag; add a replicated cosmetic limb/seed event; clients never apply damage twice. |
+| Blow/collision/dismemberment | Unblockable, Dismemberment, retired RBM, Coop mission authority | Coop accepted blow transaction | Pure thrust flag plus canonical replicated cosmetic limb/seed event; clients never apply damage twice. All 21 active candidates are exact-classified. |
 | Tournament roster/prize/reward | retired RBM and Coop tournament services | Coop tournament transaction | RBM remains absent; one frozen roster/prize/reward. |
 | Map click/camera/time/buildings | PlayerSettlement and Coop map/building patches | Coop client dispatcher + server building tick | Route placement/build/rebuild/overwrite through stable IDs and server transactions. |
 | Army/siege/settlement visuals | PlayerSettlementFixes and Coop army/siege/visual services | Coop services | Port only proven null/custom-object handling into existing owners. |
@@ -137,13 +137,13 @@ The earlier stabilization queue remains closed:
 - server-kit transforms require exact hashes and method fingerprints, produce reproducible output,
   restore the fail-closed abort, and bound opt-in diagnostics;
 - credential/release containment, the exact ten-module/RBM-retired contract, Fourberie and Separatism
-  transaction boundaries, Improved Garrisons lifecycle, Dismemberment fail-closed behavior, and
+  transaction boundaries, Improved Garrisons lifecycle, Dismemberment replicated presentation, and
   Unblockable shield/parry/chamber/mounted rules have regression coverage.
 
 The new foundation adds deterministic IL authority evidence, one exact audit record per method,
 release rejection for blocked/unclassified active candidates, six common gameplay module declarations,
-and a trusted server capability snapshot. Per-mod typed routes are still feature work: Improved
-Garrisons management, Dismemberment cosmetics, Fourberie actions/models/mission entry, Diplomacy
+and a trusted server capability snapshot. UnblockableThrust and DismembermentPlus now have exact
+closure. Per-mod typed routes are still feature work: Improved Garrisons management, Fourberie actions/models/mission entry, Diplomacy
 operations, Player Settlement construction/persistence, and the omitted Separatism conversation.
 
 Only after those routes are classified with owners and focused tests may the release validator pass;

@@ -1,11 +1,28 @@
 # Friend Edition Changelog
 
+## 2026-08-11 — combat authority routes (development; stable held)
+
+UnblockableThrust and DismembermentPlus now have exact authority closure: 21 required candidates,
+21 classified, none blocked or open. UnblockableThrust remains a pure collision decision inside
+Coop's accepted collision owner. DismembermentPlus replaces its peer-local random `RegisterBlow`
+path with a canonical, capability-gated replicated cosmetic event selected by the victim-authority
+peer; receivers re-derive the battle/agent authority, reject malformed, duplicate, stale, or
+conflicting events, and call only the original visual routine without replaying damage. One eager
+coordinator owns the session subscription while both dedupe and source sequences are bounded and
+battle-scoped; failed presentation does not consume an event, and slow motion remains disabled in Coop.
+
+The authority ledger is now 4,542 classified and 5,537 open of 10,079 candidates. Focused combat,
+module-lifetime, capability-convergence, absent-module, and mismatch suites pass, as do the
+development audit and exact gameplay-module validator. Stable remains held for Separatism and the
+remaining campaign-mod routes plus the existing rendered/release gates.
+
 ## 2026-08-11 — mod authority-routing foundation (development; stable held)
 
 The earlier ten-module RC is superseded for functional-completeness work. The generated review still
 covers 41,000 exact methods, now with deterministic IL called-member evidence and direct/transitive
 authority signals. A reconciled authority ledger identifies 10,079 candidates: 4,521 framework or
-retired records are classified, while release validation rejects 5,558 open active-gameplay records.
+retired records were classified at this foundation milestone, while release validation rejected
+5,558 open active-gameplay records.
 
 All six active gameplay adapters now use the common `IWorkshopModule` catalog/fingerprint/config
 path; retired RBM is no longer declared by the mission composition root. A server-owned, canonical,

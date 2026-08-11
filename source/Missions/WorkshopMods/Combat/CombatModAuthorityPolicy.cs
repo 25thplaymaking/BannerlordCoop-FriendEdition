@@ -25,19 +25,37 @@ internal static class CombatModAuthorityPolicy
         return !isServer;
     }
 
-    /// <summary>
-    /// DismembermentPlus currently derives the severed limb from a local RegisterBlow callback.
-    /// Coop routes that callback only to the victim-authority peer, so allowing it in a live Coop
-    /// battle would show different bodies on different clients.  Keep the presentation disabled
-    /// until a stable hit id, selected limb and seed are carried by a deduplicated network event.
-    /// </summary>
+    /// <summary>DismembermentPlus's mission behavior is presentation-only and never loads headless.</summary>
     internal static bool AllowDismembermentPresentation(
         bool moduleCompatible,
         bool isServer,
         bool isCoopBattleActive)
     {
-        return moduleCompatible && !isServer && !isCoopBattleActive;
+        return moduleCompatible && !isServer;
     }
+
+    /// <summary>
+    /// In Coop the original randomized RegisterBlow implementation is replaced. Only the peer that
+    /// owns the accepted victim blow may select an outcome, and only while the server-published
+    /// replicated-presentation capability is enabled.
+    /// </summary>
+    internal static bool AllowDismembermentAcceptedBlow(
+        bool moduleCompatible,
+        bool isServer,
+        bool isCoopBattleActive,
+        bool routeEnabled,
+        bool victimIsLocallyAuthoritative)
+    {
+        if (!moduleCompatible || isServer) return false;
+        if (!isCoopBattleActive) return true;
+        return routeEnabled && victimIsLocallyAuthoritative;
+    }
+
+    internal static bool AllowDismembermentCapability(
+        bool guardInitialized,
+        bool moduleCompatible,
+        bool moduleEnabled) =>
+        guardInitialized && moduleCompatible && moduleEnabled;
 
     internal static bool AllowRbmMissionBehaviorInitialization(
         bool moduleCompatible,

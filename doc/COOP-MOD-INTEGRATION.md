@@ -198,8 +198,8 @@ inactive.
 ## 6. Client distributable (Friend Edition)
 
 * **Current release-candidate contract:** the exact ten Workshop modules above, with RBM absent and
-  PlayerSettlement before Coop. Stable publication is held until final CI, package validation, and
-  rendered-client gates complete.
+  PlayerSettlement before Coop. The `6e3aaa7d9` package and local CI/tooling gates are complete;
+  stable publication is held until the rendered-client gates complete.
 * `private-distributions/BannerlordCoop-FriendEdition-2026-08-10-workshop8-WorkshopSuite.zip` is a
   historical pre-retirement package. It is not the current contract and must not be promoted.
 * The installer (`Setup-ManagedSuiteClient.ps1`) drives activation from
@@ -209,8 +209,10 @@ inactive.
 * The installer only hash‑verifies its own two files, and the runtime handshake only hashes the
   **Workshop** mods (via the receipt) — **not** Coop's `GameInterface.dll` — so swapping the catalog
   DLL is safe; we still re‑bump its `coop.files`/`SHA256SUMS` record for hygiene.
-* Steam Workshop sources were deleted; the **only** archive of audited mod bytes is the server's
-  `engine-mods/Modules` + the suite staging dirs. Protect them; build packs from there.
+* Steam Workshop sources were deleted. For the current RC, every retained already-sanitized module
+  tree was required to match the prior audited receipt exactly on Workshop ID, Steam manifest,
+  content digest, and configuration digest before packaging. Protect the server's `engine-mods/Modules`
+  and suite staging dirs; do not treat an unaudited installed tree as equivalent.
 
 ---
 
@@ -221,8 +223,10 @@ inactive.
   zero restarts. The on-disk deployment ledger verifies cleanly.
 * **Prior rendered proof:** the earlier modded client reached a playable world map. That does not
   certify the current release candidate after RBM retirement and the stabilization fixes.
-* **Still required:** build and validate the new distributable, then complete one rendered client
-  install/update/join and exercise the fixed auto-resolve path before promoting the stable feed.
+* **Verified RC:** the new distributable validates 845 files, passes the managed-client dry run, and
+  has archive SHA-256 `9e355ef696872f9477faa7c255503cec517eb691bda7bc1bb4506afc8f7d7bc0`.
+* **Still required:** complete one rendered client install/update/join and exercise the fixed
+  auto-resolve path before promoting the stable feed.
 
 ## 8. Rollback to vanilla
 Point `engine_root` at `engine-seven` and restore the vanilla token in `run-seven-mods.sh`

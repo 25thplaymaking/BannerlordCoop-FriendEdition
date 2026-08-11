@@ -119,7 +119,7 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
       the client's for every active mod.
 - [ ] **Client verify:** launch `Play Friend Edition.cmd`, attempt Join, read `Coop_client.log`
       (+ the on-screen "Module validation failed" reasons) — must be clean before "done."
-- [ ] Build a fresh release-candidate pack from the ten-module manifest; never mutate or promote the
+- [x] Build a fresh release-candidate pack from the ten-module manifest; never mutate or promote the
       historical `workshop8` archive as if it represented the current RBM-retired contract.
 - [ ] For any launcher (`tools/CoopLauncher`) change: run `python tools/CoopLauncher/check-xaml-resources.py`
       (no dangling `{StaticResource}`), then verify a **hover-state** render, not just default `--shoot`.
@@ -134,4 +134,6 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
 - **Distribution launcher:** `tools/CoopLauncher` (`CalradiaCoop.exe`) — one-click, auto-joins via the
   `/coopjoin <host> <port> <pw>` boot arg (`CoopMod.TryParseCoopJoin`/`TryCoopJoin`). Replaces the old
   `Desktop\Play Friend Edition.cmd` for friends. See `tools/CoopLauncher/README.md`.
-- Pack: create a new versioned release-candidate directory and archive; `workshop8` is historical only.
+- Pack: current non-stable RC is `work/release-candidate/FriendEdition-2026-08-11-6e3aaa7d9`
+  with archive SHA-256 `9e355ef696872f9477faa7c255503cec517eb691bda7bc1bb4506afc8f7d7bc0`;
+  its adjacent provenance receipt records the historical-input bridge. `workshop8` is historical only.

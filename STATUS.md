@@ -4,9 +4,9 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
-> **EXECUTION ACTIVE (2026-08-11): bounded repairs complete; final release gates in progress.** The
+> **RELEASE CANDIDATE READY (2026-08-11): bounded repairs and non-stable packaging complete.** The
 > inherited launcher/auto-resolve work and the approved containment/certification repairs are pushed
-> through `ae5ef9d04` on `25vid/workshop-integration`. Public launcher defaults/assets contain no join password; the live
+> through `6e3aaa7d9` on `25vid/workshop-integration`. Public launcher defaults/assets contain no join password; the live
 > password was rotated into only the server launch script and Bryce's private pinned config. Stable
 > releases are manual and development pushes are nightly-only. The all-functions review now covers
 > 41,000 metadata methods across the ten active Workshop modules, retired RBM, and integrated Separatism; its exact-hash
@@ -20,7 +20,9 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > Launcher updates are transactional and SHA-required; auto-resolve completion, UDP probing, and
 > narrow map readiness are covered. The dedicated server now verifies the exact four-assembly Coop
 > pair and fails closed; the live host reached `serving`, bound UDP 4200 on IPv4/IPv6, and its complete
-> deployment ledger verifies. Remaining work is the full CI/package gate and rendered-client release proof.
+> deployment ledger verifies. The full local build/test/tooling gate is green (3,383 passed, 18 skipped,
+> 0 failed), and the fresh ten-module RC independently verifies 845 files. Stable remains held only for
+> the rendered client install/update/join and Sea Raider auto-resolve proof.
 
 ## Known playtest bugs (live)
 
@@ -38,7 +40,7 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
   publishes one conclusion for a decided battle, and releases the arbiter claim for an undecided result.
   Focused completion and related map-event tests pass. A rendered client must still reproduce the original
   Sea Raider path before this can be called live-fixed.
-  **Current-live workaround:** use **"Attack!"** (manual battle) until the candidate is packaged and verified.
+  **Current-live workaround:** use **"Attack!"** (manual battle) until the candidate is rendered and promoted.
 
 ## Where we are (2026-08-11)
 
@@ -47,7 +49,28 @@ mod-config barrier + 34 MB save transfer succeed, and the client reaches a playa
 with all four campaign mods (Diplomacy, ImprovedGarrisons, Fourberie,
 PlayerSettlement) active. RBM is retired from the exact loadout after its native campaign-init
 crash. Map navigation now suppresses only the audited transient null-readiness path and propagates
-unrelated faults. The current ten-module candidate still needs a fresh package and rendered join proof.
+unrelated faults. The current ten-module release candidate is packaged and hash-verified; it still needs
+rendered join/playability and auto-resolve proof before stable promotion.
+
+### Current non-stable release candidate (2026-08-11)
+
+- Commit: `6e3aaa7d9df629bef8c3fdfd4ba93cb4c01bc5db`.
+- Archive: `work/release-candidate/BannerlordCoop-FriendEdition-2026-08-11-6e3aaa7d9-RC.zip`
+  (776,037,986 bytes; SHA-256 `9e355ef696872f9477faa7c255503cec517eb691bda7bc1bb4506afc8f7d7bc0`).
+- Package proof: 10 Workshop modules plus Coop, 845 verified files, 404 DLL payloads inspected,
+  249 active managed assemblies, 53 closure proofs, 8 approved strong-name side-by-side cases, and
+  zero unresolved same-identity duplicates. The managed-client dry run validates the exact 16-module
+  activation order with RBM absent.
+- Source provenance: the original Steam snapshots had been deleted, so the builder used the retained
+  already-sanitized module trees only after all ten matched the historical audited receipt on Workshop
+  ID, Steam manifest ID, content hash, and configuration hash. The production manifest remains strict;
+  the temporary input manifest relaxed only the already-consumed exclusion counts for DismembermentPlus
+  and PlayerSettlement. See the adjacent `-PROVENANCE.json` receipt.
+- Full local gate: Common 101/0, CrashReporter 3/0, Coop.Tests 613 passed + 1 skipped,
+  GameInterface 1,153 + 11 skipped, Integration 146 + 2 skipped, E2E 1,367 + 4 skipped;
+  3,383 passed, 18 skipped, 0 failed overall. Build, release safety, XAML, launcher (16),
+  server-kit (6), packaging, function-inventory, and native hook gates are green.
+- Publication state: RC only. It was not installed, deployed, uploaded, or promoted to stable.
 
 ## Decisions (locked)
 
@@ -112,8 +135,9 @@ explicit-context/per-player Fourberie API is outside this bounded stabilization 
 - [x] Drop RBM from server token + client token + catalog expectation + pack. The exact ten-module
       contract is now enforced across catalog, manifest, launcher, and both peer-role orders.
 - [x] Keep exact Workshop/module validation without imposing a base-game build-version gate.
+- [x] Build and independently validate a fresh RBM-free ten-module release-candidate pack.
 - [ ] Verify: client reaches map AND is playable (HUD, move, open menus) with the
-      four campaign mods. Re-cut the pack.
+      four campaign mods, then reproduce the fixed Sea Raider auto-resolve path.
 
 ### P2 — Launcher (one-click into grain.silo) — source certified; rendered auto-join open
 - [x] **`/coopjoin <host> <port> [pw]` boot arg** in `CoopMod.cs`: at `InitialState` the client

@@ -19,8 +19,20 @@ The bounded stabilization pass closes the inherited defects found after workshop
 
 Live server integrity is verified: exact release pins pass, the host reaches `phase:"serving"`, UDP
 4200 is bound on IPv4 and IPv6, and all entries in `deployment-sha256.txt` verify. Stable publication
-remains manual and held until full CI, a freshly built ten-module package, and a rendered client
-install/update/join plus auto-resolve check complete.
+remains manual.
+
+The local release gate is now complete: 3,383 tests passed, 18 were skipped, and none failed. A fresh
+ten-module release candidate was built from commit `6e3aaa7d9`, independently verified across 845
+files, and passed the managed-client dry run. Its archive SHA-256 is
+`9e355ef696872f9477faa7c255503cec517eb691bda7bc1bb4506afc8f7d7bc0`. Because Claude's earlier
+cleanup removed the original Steam snapshots, the retained sanitized inputs were accepted only after
+each of the ten modules exactly matched the historical audited receipt on Workshop ID, Steam manifest,
+content hash, and configuration hash. RBM is the only historical receipt entry omitted. The builder's
+production manifest remains strict; the RC has a separate provenance receipt documenting the bounded
+input accommodation.
+
+The RC has not been installed, deployed, uploaded, or promoted. Stable is held for one rendered client
+install/update/join and the original Sea Raider auto-resolve reproduction.
 
 ## 2026-08-10 — workshop8 (historical): full modded server brought live
 

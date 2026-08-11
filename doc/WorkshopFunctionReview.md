@@ -1,6 +1,6 @@
 # Friend Edition mod-function review
 
-Review baseline: `5123d94f4` (2026-08-11)
+Review baseline: `c6491ae1a` (2026-08-11)
 
 Binary ledger: [`generated/workshop-function-inventory.json`](generated/workshop-function-inventory.json)
 
@@ -46,8 +46,8 @@ type's disposition rather than repeating identical prose for tens of thousands o
 | Harmony | wrapper boot, patch processors, owner queries/unpatch, load order, debug/log UI | Keep the exact pinned wrapper as the sole provider. Owner-specific unpatch is valid; blanket cleanup and wrapper debug UI remain forbidden in production paths. Existing package tests enforce one runtime. |
 | ButterLib | version loader; DI/services; submodule wrappers; delayed lifecycle; save/object extension injection; crash reporting; settings/filesystem; distance/geopolitics; UI helpers | Client framework and dedicated fork must remain separate runtime builds. Original lifecycle/save/crash/UI functions are not authority owners. The server-kit patcher currently identifies the implementation too broadly and must require an exact fingerprint/signature/count before patching. |
 | UIExtenderEx | submodule lifecycle; extension registration; VM mixins; prefab/widget/brush factories; movie loading; command execution; caches | Client presentation only. No campaign authority or server UI load. Global registries/caches must be torn down per process/mission. Its original USER32/exit paths cannot execute headlessly. |
-| MCM | loader/API/UI adapter; global/per-campaign/per-save providers; local serialization and migration; settings screens/save/exit | Presentation only. Gameplay configuration must come from Coop's server snapshot, never peer-local MCM files. The current catalog says every framework is active on the server while comments still say it cannot run there; catalog, manifest, and actual load roles must be reconciled. |
-| RBM | entry/XML merge; configuration; combat formula/damage/posture; AI/tactics/spawn; tournament roster/prize; UI/input | Retired from the production loadout after the native initialization crash. The catalog and `deploy/workshop-mods.json` still require/activate it, while launcher/server tokens omit it. Remove that contradiction; do not revive individual slices during this plan. |
+| MCM | loader/API/UI adapter; global/per-campaign/per-save providers; local serialization and migration; settings screens/save/exit | Presentation only. Gameplay configuration must come from Coop's server snapshot, never peer-local MCM files. The active ten-module contract now agrees across catalog, deployment manifest, launcher, and both role orders; the full runtime gate must still prove the framework cohort on the pinned binaries. |
+| RBM | entry/XML merge; configuration; combat formula/damage/posture; AI/tactics/spawn; tournament roster/prize; UI/input | Retired from the production loadout after the native initialization crash. It is absent from the catalog, deployment package, launcher, and server/client active orders. Its pinned binaries remain only as an audited historical surface; do not revive individual slices during this plan. |
 | ImprovedGarrisons | initialization; campaign behaviors/events; party creation/removal; recruitment/upgrade; finance/food/speed models; settings/log UI; sidecar save managers | Server owns ticks, parties, rosters, costs, food, and persistence; clients render/send intent. Verify no client `OnApplicationTick` mutation and no localized-name/sidecar authority remains. Current compatibility tests cover broad gating but not the full recruit/upgrade/capture/save lifecycle. |
 | DismembermentPlus | mission registration; blow validation; random limb choice; mesh/entity/effects; slow motion; settings/error UI | Cosmetic client presentation only, driven by one accepted authority event. Original `new Random`, GUID, local agent indices, `Agent.Main`, WinForms, and time changes are not deterministic authority. It needs an event/late-agent regression gate before being called synchronized. |
 | Fourberie | submodule/application/mission hooks; behavior registration and `SyncData`; menus/conversations; recruiting/spawning/party ticks; crime/safehouse/fight-club/contracts; fourteen models; mission controllers | Menus may be client presentation, but authoritative creation remains unsafe. `FourberieRecruitHandler` verifies a peer hero and then invokes the original static method with only `int`, so the original still targets `MainHero/MainParty/_agentsParty`; fail these routes closed until explicit player context exists. `InitializeBehaviorsOnlyPrefix` returns `false` after a caught partial-add failure despite its fallback comment. Existing manifest tests are stale: twelve methods intentionally moved from blocked to presentation/behavior categories but the tests still require `UnsupportedPlayerAction`. |
@@ -122,8 +122,7 @@ The queue is intentionally limited to the approved stabilization plan:
 - **P0:** live server logs `COOP MODULE VERIFICATION FAILED` for `Coop.Core.dll`,
   `GameInterface.dll`, `Common.dll`, and `Coop.Steam.dll` but continues serving; reconcile the boot
   receipt/hash source and fail closed only after the correct deployment is pinned.
-- **P1:** align catalog/manifest/tokens with the ten-module suite and retired RBM; fix Fourberie
-  player-context routing/fallback.
+- **P1:** fix Fourberie player-context routing/fallback.
 - **P1:** protect the inherited auto-resolve finalize change with focused paced-win,
   pacer-disconnect, duplicate-finalize, and non-win tests before live certification.
 - **P1:** make launcher updates staged, exact, hash-required, rollback-safe, and unable to enable Join
@@ -132,8 +131,8 @@ The queue is intentionally limited to the approved stabilization plan:
   status probe for a UDP-only Coop listener; harden server-kit patch fingerprints/counts and bound
   opt-in diagnostics.
 - **Already closed:** missing `BloodBright`, unsafe keep-running dispatcher handler, public password,
-  automatic stable publication, feature-branch release triggers, and Separatism transaction,
-  transition, branch, persistence, and collision certification.
+  automatic stable publication, feature-branch release triggers, the exact ten-module/RBM-retired
+  contract, and Separatism transaction, transition, branch, persistence, and collision certification.
 
 No RBM revival, custom settlement implementation, new mod SDK, or campaign-feature redesign is in
 scope for this pass.

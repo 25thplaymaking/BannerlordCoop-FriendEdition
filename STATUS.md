@@ -5,7 +5,7 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
 > **EXECUTION ACTIVE (2026-08-11): containment complete; certification in progress.** The inherited
-> launcher and auto-resolve commits plus containment fixes are pushed through `5123d94f4` on
+> launcher and auto-resolve commits plus containment fixes are pushed through `c6491ae1a` on
 > `25vid/workshop-integration`. Public launcher defaults/assets contain no join password; the live
 > password was rotated into only the server launch script and Bryce's private pinned config. Stable
 > releases are manual and development pushes are nightly-only. The all-functions review now covers
@@ -129,7 +129,8 @@ This is the biggest remaining phase (Bryce: "route them all, I'll test afterward
 ### P1 — Playable session (was IN PROGRESS)
 - [ ] Fix map-nav UI NRE (null `MapNavigationHandler` / `HandleIfBlockerStatesDisabled`
       on the co-op client map). Proper init preferred over catch-and-limp.
-- [ ] Drop RBM from server token + client token + catalog expectation + pack.
+- [x] Drop RBM from server token + client token + catalog expectation + pack. The exact ten-module
+      contract is now enforced across catalog, manifest, launcher, and both peer-role orders.
 - [ ] Remove the base-game build-version check (keep hash validation).
 - [ ] Verify: client reaches map AND is playable (HUD, move, open menus) with the
       four campaign mods. Re-cut the pack.

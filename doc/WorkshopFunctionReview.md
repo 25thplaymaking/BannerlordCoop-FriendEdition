@@ -1,6 +1,6 @@
 # Friend Edition mod-function review
 
-Review baseline: `e0ee48bc2` (2026-08-11)
+Review baseline: `5123d94f4` (2026-08-11)
 
 Binary ledger: [`generated/workshop-function-inventory.json`](generated/workshop-function-inventory.json)
 
@@ -36,8 +36,8 @@ type's disposition rather than repeating identical prose for tens of thousands o
 | Bannerlord.Diplomacy | 2 | 1,177 | 12,121 | 7,169 | 11,617 |
 | UnblockableThrust | 1 | 3 | 24 | 21 | 24 |
 | PlayerSettlement | 2 | 184 | 1,082 | 512 | 1,072 |
-| Separatism (integrated) | 1 filtered surface | 23 | 156 | 32 | 152 |
-| **Total** | **22** | **4,497** | **40,996** | **24,554** | **38,709** |
+| Separatism (integrated) | 1 filtered surface | 24 | 160 | 33 | 156 |
+| **Total** | **22** | **4,498** | **41,000** | **24,555** | **38,713** |
 
 ## Function-family dispositions
 
@@ -54,41 +54,48 @@ type's disposition rather than repeating identical prose for tens of thousands o
 | Diplomacy | loader; campaign behaviors/managers; war/peace/agreement/cooldown/exhaustion; kingdom/clan/influence patches; UI/viewmodels; save types; civil war/rebel functions | Server owns every campaign mutation; client UI renders snapshots and sends intent. Donate-gold routing has an explicit player path, but civil-war, barter, kingdom, influence, and banner-editor patches collide with Coop and Separatism. Diplomacy may supply policy/UI; it is not a second mutation owner. |
 | UnblockableThrust | submodule/config and defend-collision postfix | Keep as a pure rule inside Coop's accepted blow/collision authority. Never allow a parallel damage path. Add combined shield/parry/chamber/mounted coverage; RBM interaction is irrelevant while RBM remains retired. |
 | PlayerSettlement | module load; template/blacklist loading; dynamic object registration; behavior/save schema; build/overwrite/rebuild; placement/map UI; AI/army/siege/null fixes | Loading/read-only preview may remain, but construction/rebuild and campaign-object registration stay blocked. Its patch set overlaps Coop buildings, map click/time, armies, sieges, visuals, town visits, and persistence. Do not build the previously proposed custom settlement system in this plan. |
-| Separatism | campaign-event adapter; chaos/lord/national/anarchy/union decisions; kingdom create/reactivate/destroy; clan move; hostile cleanup; relations/wars/policies; colors/names/text; readiness/territory/random helpers; loyalty thresholds; global friend/enemy and diplomatic-barter prefixes | Integrated and server-gated, but not yet certified. Required fixes/tests are detailed below. Separatism is the selected rebellion coordinator; Diplomacy civil-war initiation must defer to it. |
+| Separatism | campaign-event adapter; chaos/lord/national/anarchy/union decisions; kingdom create/reactivate/destroy; clan move; hostile cleanup; relations/wars/policies; colors/names/text; readiness/territory/random helpers; loyalty thresholds; global friend/enemy and diplomatic-barter prefixes | Integrated, server-gated, and certified at `5123d94f4`. Kingdom creation rolls back partial mutations, a clan takes at most one structural path per daily tick, union membership survives source-title destruction, null config is safe, and Diplomacy civil-war initiation defers to Separatism. |
 
 ## Separatism complete functional review
 
-The 156-method raw surface resolves into these gameplay functions:
+The 160-method raw surface resolves into these gameplay functions:
 
 1. `SeparatismCampaignBehavior` registers new-game, load, daily, and daily-clan events and dispatches
    only when `ModInformation.IsServer`. `SyncData` is intentionally empty because created kingdoms,
    clan membership, wars, policies, and settlement ownership are native campaign state.
 2. `OnNewGameCreated`/`OnGameLoaded` initialize or reconcile separatist state; `OnDailyTick` removes
-   empty kingdoms; `OnDailyTickClan` currently evaluates lord/floating-title and anarchy paths in one
-   tick, so a clan can undergo two structural attempts without a transition guard.
+   empty kingdoms. `OnDailyTickClan` stops after the first successful structural path, preventing a
+   second anarchy attempt in the same clan tick.
 3. `TryLordRebellionOrFloatingTitle`, `TryNationalRebellion`, `TryAnarchyRebellion`, and `TryUnion`
    cover all four configured separation/union modes. Chance defaults of `1.0` match Separatism 1.3.8
    and are a deliberate gameplay choice, not a porting typo.
 4. `TryCreateRebelKingdom` creates/reactivates the kingdom, assigns banner/colors/name/title, moves
-   the clan, changes relations, copies policies, inherits wars, and logs. A broad catch spans these
-   mutations without compensating rollback; failure can leave a registered partial kingdom or a
-   moved clan.
+   the clan, changes relations, copies policies, inherits wars, and logs. Its transaction restores
+   clan membership and presentation, removes or re-eliminates partial kingdoms, and fails closed if
+   compensation itself cannot complete.
 5. `MoveClan`, `FinishStaleHostileActions`, `ApplyRebellionRelations`, `CopyPolicies`, `InheritWars`,
-   `RemoveEmptyKingdoms`, and `DestroyKingdom` mutate native authoritative campaign state. Each needs
-   idempotent/save-reload assertions around the normal Coop replication path.
+   `RemoveEmptyKingdoms`, and `DestroyKingdom` mutate native authoritative campaign state. Focused
+   E2E coverage proves server/client convergence for chaos, lord, national, anarchy, union, load
+   reconciliation, disconnected player-clan protection, rollback, and idempotent cleanup.
 6. Readiness/territory/fief weighting, color selection/difference, naming, intro text, and random
    helpers are deterministic inputs except `Roll`/`TakeRandom`; those are safe only because the
    behavior is server-only, but tests need fixed chance/fixtures rather than peer-local randomness.
-7. The loyalty model wires both documented start and recovery thresholds. It dereferences the global
-   mod snapshot and needs disabled/null snapshot coverage alongside the `ModConfigAuthority` null fix.
+7. The loyalty model wires both documented start and recovery thresholds. Disabled and null snapshot
+   coverage now proves vanilla fallback without dereferencing absent mod options.
 8. `Hero.IsFriend`/`IsEnemy` are globally replaced while enabled, altering every mod and vanilla
-   caller. The barter prefixes also change join, leave, and defection globally. These are intentional
-   policy hooks but require one-owner cross-mod tests with Diplomacy and Fourberie.
+   caller. The barter prefixes also change join, leave, and defection globally. These remain
+   intentional policy hooks; fixed threshold/config tests and 92 Diplomacy collision cases enforce
+   the selected one-owner rebellion policy.
 9. The recovered original 1.3.8 source adds the conversation line
    `player_is_requesting_fallen_to_join`; the integrated port omits it. This plan will preserve the
    omission and document it as unsupported UI rather than importing another client-driven clan move.
 10. Disconnected controlled player clans remain protected because the player registry retains their
-    controlled campaign objects; add a reconnect/save test so this stays proven rather than assumed.
+    controlled campaign objects; the focused E2E suite proves the disconnected state and load-time
+    reconciliation behavior.
+
+Certification evidence: 5 Separatism unit tests, 17 synchronized E2E scenarios, 92 Diplomacy
+collision cases, and 8 configuration-authority cases pass in isolated focused runs. The isolation is
+intentional because those test classes share static campaign/config state and are not parallel-safe.
 
 ## Single-owner cross-mod matrix
 
@@ -116,8 +123,7 @@ The queue is intentionally limited to the approved stabilization plan:
   `GameInterface.dll`, `Common.dll`, and `Coop.Steam.dll` but continues serving; reconcile the boot
   receipt/hash source and fail closed only after the correct deployment is pinned.
 - **P1:** align catalog/manifest/tokens with the ten-module suite and retired RBM; fix Fourberie
-  player-context routing/fallback; make Separatism creation transactional and one-transition-per-tick;
-  assign Separatism/Diplomacy rebellion ownership; add the missing Separatism branch/save/cross-mod tests.
+  player-context routing/fallback.
 - **P1:** protect the inherited auto-resolve finalize change with focused paced-win,
   pacer-disconnect, duplicate-finalize, and non-win tests before live certification.
 - **P1:** make launcher updates staged, exact, hash-required, rollback-safe, and unable to enable Join
@@ -126,7 +132,8 @@ The queue is intentionally limited to the approved stabilization plan:
   status probe for a UDP-only Coop listener; harden server-kit patch fingerprints/counts and bound
   opt-in diagnostics.
 - **Already closed:** missing `BloodBright`, unsafe keep-running dispatcher handler, public password,
-  automatic stable publication, and feature-branch release triggers.
+  automatic stable publication, feature-branch release triggers, and Separatism transaction,
+  transition, branch, persistence, and collision certification.
 
 No RBM revival, custom settlement implementation, new mod SDK, or campaign-feature redesign is in
 scope for this pass.

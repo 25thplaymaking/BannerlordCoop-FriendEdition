@@ -5,13 +5,14 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
 > **EXECUTION ACTIVE (2026-08-11): containment complete; certification in progress.** The inherited
-> launcher and auto-resolve commits plus containment fixes are pushed through `e0ee48bc2` on
+> launcher and auto-resolve commits plus containment fixes are pushed through `5123d94f4` on
 > `25vid/workshop-integration`. Public launcher defaults/assets contain no join password; the live
 > password was rotated into only the server launch script and Bryce's private pinned config. Stable
 > releases are manual and development pushes are nightly-only. The all-functions review now covers
-> 40,996 metadata methods across all 11 Workshop modules plus integrated Separatism; its exact-hash
-> ledger and ownership decisions live in `doc/WorkshopFunctionReview.md`. Separatism certification,
-> the bounded repair queue, and the full live/release gate remain open below.
+> 41,000 metadata methods across all 11 Workshop modules plus integrated Separatism; its exact-hash
+> ledger and ownership decisions live in `doc/WorkshopFunctionReview.md`. Separatism is certified
+> across 5 unit, 17 synchronized E2E, 92 Diplomacy-collision, and 8 config-authority cases. The
+> remaining bounded repair queue and the full live/release gate remain open below.
 
 ## Known playtest bugs (live)
 

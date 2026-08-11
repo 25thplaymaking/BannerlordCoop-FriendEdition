@@ -89,154 +89,154 @@
       ]
     },
     {
-      "moduleId": "Separatism",
-      "assemblySha256": "d0d0c413d21f4818d3f7b3a61c165c2c37538205df596609f53484665e6a9f12",
-      "metadataTokens": [
-        "0x060011EF",
-        "0x060011F0",
-        "0x060011F1",
-        "0x060011F2",
-        "0x060011E4",
-        "0x060011E5",
-        "0x060011E6",
-        "0x060011E7",
-        "0x060011E8",
-        "0x060011E9",
-        "0x060011ED",
-        "0x060011EE",
-        "0x060041A2",
-        "0x060041A3",
-        "0x060041A4",
-        "0x060041A5",
-        "0x060041A6",
-        "0x060041A7",
-        "0x060041A8",
-        "0x060011F6",
-        "0x060011F7",
-        "0x060011F8",
-        "0x060011F9",
-        "0x060011FD",
-        "0x060011FE",
-        "0x060011FF",
-        "0x06001200",
-        "0x06001201",
-        "0x06001204",
-        "0x06001205",
-        "0x06001207",
-        "0x06001208",
-        "0x06001209",
-        "0x0600120A",
-        "0x0600120B",
-        "0x0600120C",
-        "0x0600120D",
-        "0x0600120E",
-        "0x06001223",
-        "0x060041D5",
-        "0x060041D6",
-        "0x060041D8"
-      ],
-      "disposition": "ServerCallback",
-      "owner": "GameInterface.Services.Separatism.SeparatismCampaignBehavior.Run",
-      "capability": "ServerCampaignCallbacks",
-      "tests": [
-        "SeparatismCampaignFlowTests.ChaosStart_IsServerAuthoritative_AndSynchronizesTheCreatedKingdom",
-        "SeparatismCampaignFlowTests.LordRebellion_IsServerOwned_AndCommitsExactlyOneKingdomTransition",
-        "SeparatismCampaignFlowTests.NationalRebellion_UsesTheHostCulturePolicy_AndSynchronizesTheResult",
-        "SeparatismCampaignFlowTests.AnarchyRebellion_TransfersOnlyTheNeglectedFief_ToOneServerCreatedKingdom",
-        "SeparatismCampaignFlowTests.Union_MovesTheSoleRulingClanToTheNearbyAlly_AndEliminatesItsOldKingdom",
-        "SeparatismCampaignFlowTests.ChaosStart_FailedMembershipCommit_RestoresTheOriginalClanAndDormantKingdom"
-      ]
-    },
-    {
-      "moduleId": "Separatism",
-      "assemblySha256": "d0d0c413d21f4818d3f7b3a61c165c2c37538205df596609f53484665e6a9f12",
-      "metadataTokens": [
-        "0x060011EA",
-        "0x060011EB"
-      ],
-      "disposition": "ClientPresentation",
-      "owner": "GameInterface.Services.Separatism.SeparatismCampaignBehavior.OnSessionLaunched",
-      "capability": "RecruitFallenClan",
-      "tests": [
-        "SeparatismRecruitmentTests.FallenClanOffer_RequiresTheCapabilityAndEveryOriginalCondition",
-        "SeparatismRecruitmentTests.Capability_IsDisabledUnlessBothTheOptionAndRouteAreReady",
-        "SeparatismRecruitmentTests.Capability_IsEnabledWhenTheOptionAndRouteAreReady"
-      ]
-    },
-    {
-      "moduleId": "Separatism",
-      "assemblySha256": "d0d0c413d21f4818d3f7b3a61c165c2c37538205df596609f53484665e6a9f12",
-      "metadataTokens": [
-        "0x060011EC"
-      ],
-      "disposition": "ServerCommand",
-      "owner": "GameInterface.Services.Separatism.SeparatismRecruitmentHandler",
-      "capability": "RecruitFallenClan",
-      "tests": [
-        "SeparatismRecruitmentTests.RecruitmentRequest_RoundTripsEveryAuthorityPrecondition",
-        "SeparatismRecruitmentTests.RequestLedger_ReplaysExactDuplicates_AndRejectsConflictsOrOlderWork",
-        "SeparatismCampaignFlowTests.FallenClanRecruitment_UsesTheAuthenticatedRuler_AndSynchronizesEveryPeer",
-        "SeparatismCampaignFlowTests.FallenClanRecruitment_ExactDuplicateReplaysTheResultWithoutASecondTransition",
-        "SeparatismCampaignFlowTests.FallenClanRecruitment_RejectsAStaleMembershipRevisionWithoutMutation",
-        "SeparatismCampaignFlowTests.FallenClanRecruitment_UnmappedPeerCannotChooseAnActorOrMutateTheTarget",
-        "SeparatismCampaignFlowTests.FallenClanRecruitment_FailedMembershipCommitRestoresTheIndependentClan"
-      ]
-    },
-    {
-      "moduleId": "Separatism",
-      "assemblySha256": "d0d0c413d21f4818d3f7b3a61c165c2c37538205df596609f53484665e6a9f12",
-      "metadataTokens": [
-        "0x06001224",
-        "0x06001225",
-        "0x06001227",
-        "0x06001228",
-        "0x06001229",
-        "0x060041FA",
-        "0x060041FB",
-        "0x060041FC"
-      ],
-      "disposition": "PurePolicy",
-      "owner": "GameInterface.Services.Separatism.SeparatismCompatibilityPolicy",
-      "capability": "ServerCampaignCallbacks",
-      "tests": [
-        "SeparatismCompatibilityPolicyTests.FriendThreshold_IsStrictlyGreaterThanConfiguredRelation",
-        "SeparatismCompatibilityPolicyTests.EnemyThreshold_IsStrictlyLessThanConfiguredRelation",
-        "SeparatismCompatibilityPolicyTests.ClanJoin_IsSuppressedOnlyForAnEnabledEnemyLeaderPair",
-        "SeparatismCompatibilityPolicyTests.ClanLeave_UsesTheRecoveredRulerFiefAndRelationRules",
-        "SeparatismCompatibilityPolicyTests.Defection_BlocksRulersSameKingdomAndHostileOrDistantDestinations",
-        "SeparatismCompatibilityPolicyTests.Defection_FinalRule_AllowsWeakOrHostileSourceKingdoms"
-      ]
-    },
-    {
-      "moduleId": "Separatism",
-      "assemblySha256": "d0d0c413d21f4818d3f7b3a61c165c2c37538205df596609f53484665e6a9f12",
-      "metadataTokens": [
-        "0x06001226"
-      ],
-      "disposition": "CoopOwnerReplacement",
-      "owner": "GameInterface.Services.Separatism.SeparatismCompatibilityPatches.SettlementRebellionPrefix",
-      "capability": "ServerCampaignCallbacks",
-      "tests": [
-        "SeparatismCompatibilityPolicyTests.SettlementRebellion_IsEnabledOnlyByTheAuthoritativeServerOption",
-        "DiplomacyCompatibilityTests.DiplomacyCivilWar_IsBlockedOnBothPeers_WhenFriendSeparatismIsEnabled"
-      ]
-    },
-    {
-      "moduleId": "Separatism",
-      "assemblySha256": "d0d0c413d21f4818d3f7b3a61c165c2c37538205df596609f53484665e6a9f12",
-      "metadataTokens": [
-        "0x0600124A",
-        "0x0600124B",
-        "0x0600124C"
-      ],
-      "disposition": "PurePolicy",
-      "owner": "GameInterface.Services.Separatism.SeparatismSettlementLoyaltyModel",
-      "capability": "ServerCampaignCallbacks",
-      "tests": [
-        "SeparatismLoyaltyModelTests.EnabledModel_UsesTheHostStartAndRecoveryThresholds",
-        "SeparatismLoyaltyModelTests.DisabledModel_PreservesTheNativeThresholds"
-      ]
-    },
+    "moduleId": "Separatism",
+    "assemblySha256": "756ba9f5c0ebdfbcd1824ea9ba20cda9fe62b2072d58f0ffda013358eb701c92",
+    "metadataTokens": [
+      "0x0600136A",
+      "0x0600136B",
+      "0x0600136C",
+      "0x0600136D",
+      "0x0600135F",
+      "0x06001360",
+      "0x06001361",
+      "0x06001362",
+      "0x06001363",
+      "0x06001364",
+      "0x06001368",
+      "0x06001369",
+      "0x060043FF",
+      "0x06004400",
+      "0x06004401",
+      "0x06004402",
+      "0x06004403",
+      "0x06004404",
+      "0x06004405",
+      "0x06001371",
+      "0x06001372",
+      "0x06001373",
+      "0x06001374",
+      "0x06001378",
+      "0x06001379",
+      "0x0600137A",
+      "0x0600137B",
+      "0x0600137C",
+      "0x0600137F",
+      "0x06001380",
+      "0x06001382",
+      "0x06001383",
+      "0x06001384",
+      "0x06001385",
+      "0x06001386",
+      "0x06001387",
+      "0x06001388",
+      "0x06001389",
+      "0x0600139E",
+      "0x06004432",
+      "0x06004433",
+      "0x06004435"
+    ],
+    "disposition": "ServerCallback",
+    "owner": "GameInterface.Services.Separatism.SeparatismCampaignBehavior.Run",
+    "capability": "ServerCampaignCallbacks",
+    "tests": [
+      "SeparatismCampaignFlowTests.ChaosStart_IsServerAuthoritative_AndSynchronizesTheCreatedKingdom",
+      "SeparatismCampaignFlowTests.LordRebellion_IsServerOwned_AndCommitsExactlyOneKingdomTransition",
+      "SeparatismCampaignFlowTests.NationalRebellion_UsesTheHostCulturePolicy_AndSynchronizesTheResult",
+      "SeparatismCampaignFlowTests.AnarchyRebellion_TransfersOnlyTheNeglectedFief_ToOneServerCreatedKingdom",
+      "SeparatismCampaignFlowTests.Union_MovesTheSoleRulingClanToTheNearbyAlly_AndEliminatesItsOldKingdom",
+      "SeparatismCampaignFlowTests.ChaosStart_FailedMembershipCommit_RestoresTheOriginalClanAndDormantKingdom"
+    ]
+  },
+  {
+    "moduleId": "Separatism",
+    "assemblySha256": "756ba9f5c0ebdfbcd1824ea9ba20cda9fe62b2072d58f0ffda013358eb701c92",
+    "metadataTokens": [
+      "0x06001365",
+      "0x06001366"
+    ],
+    "disposition": "ClientPresentation",
+    "owner": "GameInterface.Services.Separatism.SeparatismCampaignBehavior.OnSessionLaunched",
+    "capability": "RecruitFallenClan",
+    "tests": [
+      "SeparatismRecruitmentTests.FallenClanOffer_RequiresTheCapabilityAndEveryOriginalCondition",
+      "SeparatismRecruitmentTests.Capability_IsDisabledUnlessBothTheOptionAndRouteAreReady",
+      "SeparatismRecruitmentTests.Capability_IsEnabledWhenTheOptionAndRouteAreReady"
+    ]
+  },
+  {
+    "moduleId": "Separatism",
+    "assemblySha256": "756ba9f5c0ebdfbcd1824ea9ba20cda9fe62b2072d58f0ffda013358eb701c92",
+    "metadataTokens": [
+      "0x06001367"
+    ],
+    "disposition": "ServerCommand",
+    "owner": "GameInterface.Services.Separatism.SeparatismRecruitmentHandler",
+    "capability": "RecruitFallenClan",
+    "tests": [
+      "SeparatismRecruitmentTests.RecruitmentRequest_RoundTripsEveryAuthorityPrecondition",
+      "SeparatismRecruitmentTests.RequestLedger_ReplaysExactDuplicates_AndRejectsConflictsOrOlderWork",
+      "SeparatismCampaignFlowTests.FallenClanRecruitment_UsesTheAuthenticatedRuler_AndSynchronizesEveryPeer",
+      "SeparatismCampaignFlowTests.FallenClanRecruitment_ExactDuplicateReplaysTheResultWithoutASecondTransition",
+      "SeparatismCampaignFlowTests.FallenClanRecruitment_RejectsAStaleMembershipRevisionWithoutMutation",
+      "SeparatismCampaignFlowTests.FallenClanRecruitment_UnmappedPeerCannotChooseAnActorOrMutateTheTarget",
+      "SeparatismCampaignFlowTests.FallenClanRecruitment_FailedMembershipCommitRestoresTheIndependentClan"
+    ]
+  },
+  {
+    "moduleId": "Separatism",
+    "assemblySha256": "756ba9f5c0ebdfbcd1824ea9ba20cda9fe62b2072d58f0ffda013358eb701c92",
+    "metadataTokens": [
+      "0x0600139F",
+      "0x060013A0",
+      "0x060013A2",
+      "0x060013A3",
+      "0x060013A4",
+      "0x06004457",
+      "0x06004458",
+      "0x06004459"
+    ],
+    "disposition": "PurePolicy",
+    "owner": "GameInterface.Services.Separatism.SeparatismCompatibilityPolicy",
+    "capability": "ServerCampaignCallbacks",
+    "tests": [
+      "SeparatismCompatibilityPolicyTests.FriendThreshold_IsStrictlyGreaterThanConfiguredRelation",
+      "SeparatismCompatibilityPolicyTests.EnemyThreshold_IsStrictlyLessThanConfiguredRelation",
+      "SeparatismCompatibilityPolicyTests.ClanJoin_IsSuppressedOnlyForAnEnabledEnemyLeaderPair",
+      "SeparatismCompatibilityPolicyTests.ClanLeave_UsesTheRecoveredRulerFiefAndRelationRules",
+      "SeparatismCompatibilityPolicyTests.Defection_BlocksRulersSameKingdomAndHostileOrDistantDestinations",
+      "SeparatismCompatibilityPolicyTests.Defection_FinalRule_AllowsWeakOrHostileSourceKingdoms"
+    ]
+  },
+  {
+    "moduleId": "Separatism",
+    "assemblySha256": "756ba9f5c0ebdfbcd1824ea9ba20cda9fe62b2072d58f0ffda013358eb701c92",
+    "metadataTokens": [
+      "0x060013A1"
+    ],
+    "disposition": "CoopOwnerReplacement",
+    "owner": "GameInterface.Services.Separatism.SeparatismCompatibilityPatches.SettlementRebellionPrefix",
+    "capability": "ServerCampaignCallbacks",
+    "tests": [
+      "SeparatismCompatibilityPolicyTests.SettlementRebellion_IsEnabledOnlyByTheAuthoritativeServerOption",
+      "DiplomacyCompatibilityTests.DiplomacyCivilWar_IsBlockedOnBothPeers_WhenFriendSeparatismIsEnabled"
+    ]
+  },
+  {
+    "moduleId": "Separatism",
+    "assemblySha256": "756ba9f5c0ebdfbcd1824ea9ba20cda9fe62b2072d58f0ffda013358eb701c92",
+    "metadataTokens": [
+      "0x060013C5",
+      "0x060013C6",
+      "0x060013C7"
+    ],
+    "disposition": "PurePolicy",
+    "owner": "GameInterface.Services.Separatism.SeparatismSettlementLoyaltyModel",
+    "capability": "ServerCampaignCallbacks",
+    "tests": [
+      "SeparatismLoyaltyModelTests.EnabledModel_UsesTheHostStartAndRecoveryThresholds",
+      "SeparatismLoyaltyModelTests.DisabledModel_PreservesTheNativeThresholds"
+    ]
+  },
     {
       "moduleId": "ImprovedGarrisons",
       "assemblySha256": "fedab4041748951282634101871a9c41219bf3f2fa90d4e9cd6a4cbec082ce15",
@@ -985,6 +985,101 @@
         "ImprovedGarrisonsCompatibilityTests.RecruitUpgradeCaptureAndSaveLifecycle_IsPinnedToServerAuthority",
         "ImprovedGarrisonsCompatibilityTests.DestructiveLifecyclePaths_ArePinnedAndClientsCannotEnterThem",
         "ImprovedGarrisonsCompatibilityTests.PartyDialogs_RegisterOnClientsWhileConsequencesRemainIndependentlyRouted"
+      ]
+    },
+    {
+      "moduleId": "ImprovedGarrisons",
+      "assemblySha256": "fedab4041748951282634101871a9c41219bf3f2fa90d4e9cd6a4cbec082ce15",
+      "metadataTokens": [
+        "0x06000023",
+        "0x06000045",
+        "0x06000049",
+        "0x0600004C",
+        "0x0600004F",
+        "0x06000051",
+        "0x06000055",
+        "0x06000057",
+        "0x0600005B",
+        "0x0600005E",
+        "0x06000061",
+        "0x06000063",
+        "0x06000067",
+        "0x0600006A",
+        "0x0600006D",
+        "0x0600006F",
+        "0x06000073",
+        "0x06000074",
+        "0x06000079",
+        "0x060000A0",
+        "0x060000D7",
+        "0x060000DC",
+        "0x06000278",
+        "0x06000317",
+        "0x06000318",
+        "0x0600031F",
+        "0x06000598",
+        "0x060007C2"
+      ],
+      "disposition": "ClientPresentation",
+      "owner": "Improved Garrisons process-local UI, tutorial, and sprite lifecycle",
+      "capability": "Management",
+      "tests": [
+        "ImprovedGarrisonsManagementOperationTests.CompleteManagementSurface_HasNoDeniedOperations",
+        "ImprovedGarrisonsCompatibilityTests.ApplicationTick_PreservesClientUiWhileNestedMutationsRemainGuarded"
+      ]
+    },
+    {
+      "moduleId": "ImprovedGarrisons",
+      "assemblySha256": "fedab4041748951282634101871a9c41219bf3f2fa90d4e9cd6a4cbec082ce15",
+      "metadataTokens": [
+        "0x06000002",
+        "0x06000004",
+        "0x06000006",
+        "0x06000008",
+        "0x0600000A",
+        "0x0600000C",
+        "0x0600000E",
+        "0x06000010",
+        "0x06000012",
+        "0x0600001F",
+        "0x06000020",
+        "0x06000021"
+      ],
+      "disposition": "FrameworkLifecycle",
+      "owner": "ImprovedGarrisons.Main process-local service wiring and deferred-action queues",
+      "capability": "ClientUiServerMutationSplit",
+      "tests": [
+        "ImprovedGarrisonsCompatibilityTests.ApplicationTick_PreservesClientUiWhileNestedMutationsRemainGuarded",
+        "ImprovedGarrisonsCompatibilityTests.RecruitUpgradeCaptureAndSaveLifecycle_IsPinnedToServerAuthority"
+      ]
+    },
+    {
+      "moduleId": "ImprovedGarrisons",
+      "assemblySha256": "fedab4041748951282634101871a9c41219bf3f2fa90d4e9cd6a4cbec082ce15",
+      "metadataTokens": [
+        "0x060007C1"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "ImprovedGarrisonsCompatibilityHandler authenticated building-reserve operation",
+      "capability": "Management",
+      "tests": [
+        "ImprovedGarrisonsManagementOperationTests.BuildingReserveOperation_RequiresOnlyAPositiveServerCheckedAmount",
+        "ImprovedGarrisonsManagementOperationTests.BuildingReserveAuthority_DerivesTheExactAffordableState",
+        "ImprovedGarrisonsManagementOperationTests.CompleteManagementSurface_HasNoDeniedOperations"
+      ]
+    },
+    {
+      "moduleId": "ImprovedGarrisons",
+      "assemblySha256": "fedab4041748951282634101871a9c41219bf3f2fa90d4e9cd6a4cbec082ce15",
+      "metadataTokens": [
+        "0x060007C9"
+      ],
+      "disposition": "CoopOwnerReplacement",
+      "owner": "ImprovedGarrisonsAuthorityPatches.RoutedOperationPrefix replaces the deferred single-player reserve mutation",
+      "capability": "Management",
+      "tests": [
+        "ImprovedGarrisonsManagementOperationTests.BuildingReserveOperation_RequiresOnlyAPositiveServerCheckedAmount",
+        "ImprovedGarrisonsManagementOperationTests.CompleteManagementSurface_HasNoDeniedOperations"
       ]
     },
     {

@@ -2,12 +2,14 @@ using Common;
 using Common.Logging;
 using Common.Messaging;
 using Common.Network;
+using Common.Util;
 using GameInterface.Configuration;
 using GameInterface.Registry.Messages;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
 using GameInterface.Services.WorkshopMods.Core;
 using HarmonyLib;
+using Helpers;
 using LiteNetLib;
 using Serilog;
 using System;
@@ -19,6 +21,7 @@ using System.Reflection;
 using System.Text;
 using System.Threading;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
@@ -314,7 +317,13 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
         string value = string.Empty;
         ImprovedGarrisonsTroopSelection[] troops = Array.Empty<ImprovedGarrisonsTroopSelection>();
 
-        if (type.EndsWith(".ManagementSettings", StringComparison.Ordinal))
+        if (type.EndsWith(".BuildingVM+<>c", StringComparison.Ordinal) &&
+            name == "<PromptReserveWindow>b__48_0")
+        {
+            operation = ImprovedGarrisonsOperation.BoostBuildingReserve;
+            value = arguments.FirstOrDefault() as string;
+        }
+        else if (type.EndsWith(".ManagementSettings", StringComparison.Ordinal))
         {
             if (name == "Inquirydata_TranferGarrison")
             {
@@ -521,6 +530,11 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
         if (town != null) return true;
         object behavior = TryGetMemberValue(manager, "garrisonBehavior");
         town = TryGetMemberValue(behavior, "CurrentTownForSettings") as Town;
+        if (town != null) return true;
+        object mainBehavior = GetStaticMember(
+            assembly?.GetType("ImprovedGarrisons.Main", false),
+            "GarrisonBehavior");
+        town = TryGetMemberValue(mainBehavior, "CurrentTownForSettings") as Town;
         return town != null;
     }
 
@@ -1184,7 +1198,7 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
             return;
         }
 
-        if (!ValidateNativeOperation(request, town, clan, ownedTownIds, out var nativeFailure))
+        if (!ValidateNativeOperation(peer, request, town, clan, ownedTownIds, out var nativeFailure))
         {
             Logger.Warning(
                 "Rejected Improved Garrisons management request {RequestId}: {Failure}",
@@ -1205,7 +1219,7 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
                 throw new InvalidOperationException("canonical operation could not be applied: " + applyFailure);
 
             if (IsNativeOperation(request.Operation) &&
-                !TryExecuteNativeOperation(request, town, out partyId, out var executionFailure))
+                !TryExecuteNativeOperation(peer, request, town, out partyId, out var executionFailure))
                 throw new InvalidOperationException(executionFailure);
         }
         catch (Exception ex)
@@ -1295,9 +1309,11 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
         operation == ImprovedGarrisonsOperation.SetMobileGarrisonEscort ||
         operation == ImprovedGarrisonsOperation.OrderMobileGarrisonPatrol ||
         operation == ImprovedGarrisonsOperation.OrderMobileGarrisonReturn ||
-        operation == ImprovedGarrisonsOperation.FortifyMobileGarrison;
+        operation == ImprovedGarrisonsOperation.FortifyMobileGarrison ||
+        operation == ImprovedGarrisonsOperation.BoostBuildingReserve;
 
     private bool ValidateNativeOperation(
+        NetPeer peer,
         NetworkRequestImprovedGarrisonsOperation request,
         Town town,
         Clan clan,
@@ -1306,6 +1322,24 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
     {
         failure = null;
         if (!IsNativeOperation(request.Operation)) return true;
+        if (request.Operation == ImprovedGarrisonsOperation.BoostBuildingReserve)
+        {
+            if (!playerManager.TryGetPlayer(peer, out var player) ||
+                !objectManager.TryGetObject(player.HeroId, out Hero actor) ||
+                actor?.Clan != clan ||
+                !int.TryParse(request.Value, NumberStyles.None, CultureInfo.InvariantCulture, out int increase) ||
+                !ImprovedGarrisonsBuildingAuthority.TryPlan(
+                    town.BoostBuildingProcess,
+                    actor.Gold,
+                    increase,
+                    out _,
+                    out _))
+            {
+                failure = "the building-reserve increase is unaffordable, stale, or invalid";
+                return false;
+            }
+            return true;
+        }
         if ((request.Operation == ImprovedGarrisonsOperation.CreateTransferParty ||
              request.Operation == ImprovedGarrisonsOperation.CreateRecruiter ||
              request.Operation == ImprovedGarrisonsOperation.CreateMobileGarrison) &&
@@ -1361,6 +1395,7 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
     }
 
     private bool TryExecuteNativeOperation(
+        NetPeer peer,
         NetworkRequestImprovedGarrisonsOperation request,
         Town town,
         out string partyId,
@@ -1381,6 +1416,8 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
             object result;
             switch (request.Operation)
             {
+                case ImprovedGarrisonsOperation.BoostBuildingReserve:
+                    return TryBoostBuildingReserve(peer, request, town, out failure);
                 case ImprovedGarrisonsOperation.CreateTransferParty:
                     if (!objectManager.TryGetObject(request.TargetIds[0], out Town targetTown))
                     {
@@ -1496,6 +1533,81 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
         if (type == null) return null;
         return type.GetProperty(name, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(null) ??
                type.GetField(name, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(null);
+    }
+
+    private bool TryBoostBuildingReserve(
+        NetPeer peer,
+        NetworkRequestImprovedGarrisonsOperation request,
+        Town town,
+        out string failure)
+    {
+        failure = null;
+        if (!playerManager.TryGetPlayer(peer, out var player) ||
+            !objectManager.TryGetObject(player.HeroId, out Hero actor) ||
+            actor?.Clan != town.OwnerClan ||
+            !int.TryParse(request.Value, NumberStyles.None, CultureInfo.InvariantCulture, out int increase) ||
+            !ImprovedGarrisonsBuildingAuthority.TryPlan(
+                town.BoostBuildingProcess,
+                actor.Gold,
+                increase,
+                out int newReserve,
+                out int newGold))
+        {
+            failure = "the building-reserve actor or amount is no longer valid";
+            return false;
+        }
+
+        Hero host = Hero.MainHero;
+        int previousReserve = town.BoostBuildingProcess;
+        int previousActorGold = actor.Gold;
+        int previousHostGold = host?.Gold ?? 0;
+        try
+        {
+            using (new AllowedThread())
+            {
+                BuildingHelper.BoostBuildingProcessWithGold(newReserve, town);
+                if (!ReferenceEquals(actor, host))
+                {
+                    RestoreGold(host, previousHostGold);
+                    GiveGoldAction.ApplyBetweenCharacters(actor, null, increase, false);
+                }
+            }
+
+            if (town.BoostBuildingProcess != newReserve || actor.Gold != newGold ||
+                (!ReferenceEquals(actor, host) && host?.Gold != previousHostGold))
+                throw new InvalidOperationException("building-reserve mutation did not reach the planned state");
+            return true;
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                using (new AllowedThread())
+                {
+                    BuildingHelper.BoostBuildingProcessWithGold(previousReserve, town);
+                    RestoreGold(host, previousHostGold);
+                    RestoreGold(actor, previousActorGold);
+                }
+            }
+            catch (Exception rollbackException)
+            {
+                DenyPeerOrAbortSession(
+                    peer: null,
+                    "building-reserve request " + request.RequestId +
+                    " failed and native rollback failed: " + rollbackException.Message);
+            }
+
+            failure = exception.GetType().Name + ": " + exception.Message;
+            return false;
+        }
+    }
+
+    private static void RestoreGold(Hero hero, int expectedGold)
+    {
+        if (hero == null) return;
+        int difference = expectedGold - hero.Gold;
+        if (difference > 0) GiveGoldAction.ApplyBetweenCharacters(null, hero, difference, false);
+        else if (difference < 0) GiveGoldAction.ApplyBetweenCharacters(hero, null, -difference, false);
     }
 
     private void SendOperationResult(

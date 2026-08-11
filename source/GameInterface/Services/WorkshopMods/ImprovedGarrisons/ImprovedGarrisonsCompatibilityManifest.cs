@@ -472,6 +472,14 @@ internal static class ImprovedGarrisonsCompatibilityManifest
         const string TrainingUi = "ImprovedGarrisons.ImprovedGarrisonsUI.SubMenus.TrainingUIVM";
         const string TrainingTemplate = "ImprovedGarrisons.SaveSystem.SaveData.DataTypes.TrainingTemplate";
 
+        const string BuildingUi =
+            "ImprovedGarrisons.ImprovedGarrisonsUI.SubMenus.ManagementUtils.BuildingVM";
+        Present(BuildingUi, "PromptReserveWindow");
+        Route(
+            BuildingUi + "+<>c",
+            "<PromptReserveWindow>b__48_0",
+            "System.String");
+
         const string management = "ImprovedGarrisons.SaveSystem.SaveData.DataManipulationManager.ManagementSettings";
         Present(management, "PromptTransfer", Town);
         Present(management, "PromptGarrisonSelector", "System.String", "System.String", "System.Int32", Town, "System.Action`1");

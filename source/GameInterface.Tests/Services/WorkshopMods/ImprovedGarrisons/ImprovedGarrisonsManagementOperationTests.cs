@@ -31,6 +31,11 @@ public sealed class ImprovedGarrisonsManagementOperationTests
             ImprovedGarrisonsCompatibilityManifest.Methods,
             method => method.MethodName == "OrderMobileGarrisonAttackOrDefend" &&
                       method.Kind == ImprovedGarrisonsPatchKind.RoutedOperation);
+        Assert.Contains(
+            ImprovedGarrisonsCompatibilityManifest.Methods,
+            method => method.TypeName.EndsWith("BuildingVM+<>c") &&
+                      method.MethodName == "<PromptReserveWindow>b__48_0" &&
+                      method.Kind == ImprovedGarrisonsPatchKind.RoutedOperation);
     }
 
     [Fact]
@@ -84,6 +89,51 @@ public sealed class ImprovedGarrisonsManagementOperationTests
         Assert.False(ImprovedGarrisonsOperationProtocol.IsRequestShapeValid(duplicateTargets));
         Assert.False(ImprovedGarrisonsOperationProtocol.IsRequestShapeValid(duplicateTroops));
         Assert.False(ImprovedGarrisonsOperationProtocol.IsRequestShapeValid(invalidCount));
+    }
+
+    [Fact]
+    public void BuildingReserveOperation_RequiresOnlyAPositiveServerCheckedAmount()
+    {
+        var valid = new NetworkRequestImprovedGarrisonsOperation(
+            "9d80f6d4ae2a4f7db912829fd7a3a284",
+            4,
+            0,
+            ImprovedGarrisonsOperation.BoostBuildingReserve,
+            "town-a",
+            null,
+            "2500",
+            null);
+
+        Assert.True(ImprovedGarrisonsOperationProtocol.IsRequestShapeValid(valid));
+        Assert.False(ImprovedGarrisonsOperationProtocol.IsRequestShapeValid(new(
+            valid.SessionId, 5, valid.ExpectedRevision, valid.Operation, valid.TownId,
+            new[] { "unexpected" }, valid.Value, valid.Troops)));
+        Assert.False(ImprovedGarrisonsOperationProtocol.IsRequestShapeValid(new(
+            valid.SessionId, 6, valid.ExpectedRevision, valid.Operation, valid.TownId,
+            null, "0", valid.Troops)));
+    }
+
+    [Theory]
+    [InlineData(500, 5000, 2500, 3000, 2500)]
+    [InlineData(int.MaxValue - 2, int.MaxValue, 3, 0, 0)]
+    [InlineData(0, 100, 101, 0, 0)]
+    public void BuildingReserveAuthority_DerivesTheExactAffordableState(
+        int currentReserve,
+        int actorGold,
+        int requestedIncrease,
+        int expectedReserve,
+        int expectedGold)
+    {
+        bool accepted = ImprovedGarrisonsBuildingAuthority.TryPlan(
+            currentReserve,
+            actorGold,
+            requestedIncrease,
+            out int reserve,
+            out int gold);
+
+        Assert.Equal(expectedReserve != 0, accepted);
+        Assert.Equal(expectedReserve, reserve);
+        Assert.Equal(expectedGold, gold);
     }
 
     [Fact]

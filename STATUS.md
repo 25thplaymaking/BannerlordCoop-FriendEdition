@@ -6,17 +6,19 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 
 > **AUTHORITY ROUTING IN PROGRESS (2026-08-11): prior RC superseded; stable held.** The exact function
 > ledger covers 41,050 methods across the ten active Workshop modules, retired RBM, and integrated
-> Separatism. Deterministic IL evidence identifies 10,082 authority candidates; 6,170 exact records
-> are classified and release validation rejects the remaining 3,912 active gameplay records.
+> Separatism. Deterministic IL evidence now includes static shared-state writes and collection mutations,
+> identifying 13,729 authority candidates; 8,008 exact records are classified and release validation
+> rejects the remaining 5,721 active gameplay records.
 > All six active gameplay adapters now share `IWorkshopModule`, and a trusted host capability snapshot
 > is green in unit/E2E tests. UnblockableThrust's four candidates are owned by the accepted collision
 > authority, and all 17 DismembermentPlus candidates now use a deterministic, deduplicated replicated-
 > cosmetic route without replaying damage. Separatism's 57 candidates are also closed: its recovered
 > fallen-clan option now uses an authenticated, revision-checked, replay-safe server transaction, and
-> settlement rebellion cannot run from a client. Improved Garrisons' 684 candidates are now closed too:
+> settlement rebellion cannot run from a client. Improved Garrisons' 723 candidates are now closed too:
 > management/settings commands carry stable selections, authenticated clan ownership, session/revision
-> concurrency, exact replay results, canonical rollback, and server-created parties while clients retain
-> the menu and roster-selection surface. Fourberie's sixteen explicit operation families now use authenticated,
+> concurrency, exact replay results, canonical rollback, server-created parties, and an authenticated building-
+> reserve command while clients retain the menu and roster-selection surface. Fourberie's sixteen explicit
+> operation families now use authenticated,
 > rollback-safe server commands, while its menus and mission setup remain role-local presentation/lifecycle.
 > Diplomacy's explicit player operations and server callbacks are routed too, including a persisted,
 > controller-scoped server messenger queue with server-owned travel, arrival costs, and accident RNG.
@@ -106,9 +108,10 @@ rolls back canonical Fourberie state and created parties on failure, and returns
   the server owns persistence, travel timing, arrival expenses, wanderer activation, accident RNG, and
   reconnect prompts while the client owns only inquiries and dialogue presentation. Exact classification
   of the remaining Diplomacy ledger is still open.
-- **ImprovedGarrisons** ✅ all 684 authority candidates are exact-classified. Every management/settings
+- **ImprovedGarrisons** ✅ all 723 authority candidates are exact-classified. Every management/settings
   consequence is routed to the server with authenticated clan ownership and stable IDs; party creation,
-  recruiter/mobile orders, templates, culture, roster setup, and hostile encounters now have live routes.
+  recruiter/mobile orders, templates, culture, roster setup, hostile encounters, and building reserves now
+  have live routes.
   Canonical state changes are revision-checked, exact-replay-safe, rollback-verified, and republished;
   clients retain presentation and see only their clan's valid garrison targets.
 - **PlayerSettlement** ⚠️ loads; construction/rebuild/overwrite and persistence graph remain open.
@@ -146,13 +149,12 @@ rolls back canonical Fourberie state and created parties on failure, and returns
      selected hero, verifies party/clan membership and role eligibility, and owns the shared role mapping.
   10. `OnMissionBehaviorInitialize` currently preserves the mod's required peer-local setup, but its
      mission callbacks remain open until their authoritative/controller ownership is proven end to end.
-  11. The exact secondary pass now closes 887/1,759 required candidates (890 total exact classifications):
+  11. The strengthened exact secondary pass now closes 890/1,865 required candidates:
      416 presentation-only helpers, 217 pure model-policy methods, 186 server callbacks, 34 Coop-owner
      replacements, 28 server-command methods, and 9 unreachable Homesteads/Bellum Civile add-on methods.
-     Three command records are classified defensively even though the IL ledger does not require them.
      The validator rejects mutation,
      persistence, randomness, or authority-sensitive calls mislabeled as client presentation.
-  - **OPEN:** 872 exact UI/mission/lifecycle candidates remain, including roughly 300 menu/dialog helpers
+  - **OPEN:** 975 exact UI/mission/lifecycle candidates remain, including roughly 300 menu/dialog helpers
     that reach shared state and therefore require live command or mission-authority owners.
 
 ### Playable session (DONE 2026-08-10)

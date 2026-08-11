@@ -55,12 +55,32 @@ namespace TaleWorlds.CampaignSystem.Actions
     }
 }
 
+public sealed class AuthorityFixtureSingleton { }
+
 public static class AuthorityFixture
 {
+    public static readonly System.Collections.Generic.Dictionary<int, int> Shared = new();
+    public static int Counter;
+    private static AuthorityFixtureSingleton _instance;
+    public static AuthorityFixtureSingleton Instance
+    {
+        get => _instance ??= new AuthorityFixtureSingleton();
+        set => _instance = value;
+    }
+
     public static int Pure(int value) => value + 1;
     public static object ReadsMainHero() => TaleWorlds.CampaignSystem.Hero.MainHero;
     public static void MutatesRelation() => TaleWorlds.CampaignSystem.Actions.ChangeRelationAction.ApplyRelationChangeBetweenHeroes(null, null, 1);
     public static void CallsMutationHelper() => MutatesRelation();
+    public static void MutatesSharedDictionary() => Shared.Add(1, 2);
+    public static int ReadsSharedDictionary() => Shared.Count;
+    public static void WritesSharedField() => Counter = 1;
+    public static void MutatesLocalDictionary()
+    {
+        var local = new System.Collections.Generic.Dictionary<int, int>();
+        local.Add(1, 2);
+    }
+    public static int UsesCachedLambda() => System.Linq.Enumerable.Count(new[] { 1 }, value => value > 0);
 }
 '@
 
@@ -89,16 +109,31 @@ public static class AuthorityFixture
     $main = @($inspection.methods | Where-Object { $_.declaringType -ceq 'AuthorityFixture' -and $_.name -ceq 'ReadsMainHero' })[0]
     $mutation = @($inspection.methods | Where-Object { $_.declaringType -ceq 'AuthorityFixture' -and $_.name -ceq 'MutatesRelation' })[0]
     $caller = @($inspection.methods | Where-Object { $_.declaringType -ceq 'AuthorityFixture' -and $_.name -ceq 'CallsMutationHelper' })[0]
+    $sharedMutation = @($inspection.methods | Where-Object { $_.declaringType -ceq 'AuthorityFixture' -and $_.name -ceq 'MutatesSharedDictionary' })[0]
+    $sharedRead = @($inspection.methods | Where-Object { $_.declaringType -ceq 'AuthorityFixture' -and $_.name -ceq 'ReadsSharedDictionary' })[0]
+    $sharedWrite = @($inspection.methods | Where-Object { $_.declaringType -ceq 'AuthorityFixture' -and $_.name -ceq 'WritesSharedField' })[0]
+    $localMutation = @($inspection.methods | Where-Object { $_.declaringType -ceq 'AuthorityFixture' -and $_.name -ceq 'MutatesLocalDictionary' })[0]
+    $cachedLambda = @($inspection.methods | Where-Object { $_.declaringType -ceq 'AuthorityFixture' -and $_.name -ceq 'UsesCachedLambda' })[0]
+    $singleton = @($inspection.methods | Where-Object { $_.declaringType -ceq 'AuthorityFixture' -and $_.name -ceq 'get_Instance' })[0]
+    $singletonSetter = @($inspection.methods | Where-Object { $_.declaringType -ceq 'AuthorityFixture' -and $_.name -ceq 'set_Instance' })[0]
 
     Assert-True (@($pure.authorityEvidence.directSignals).Count -eq 0) 'pure method was flagged'
     Assert-Contains @($main.authorityEvidence.directSignals) 'global-player:TaleWorlds.CampaignSystem.Hero.get_MainHero' 'MainHero read was not classified'
     Assert-Contains @($mutation.authorityEvidence.directSignals) 'campaign-mutation:TaleWorlds.CampaignSystem.Actions.ChangeRelationAction.ApplyRelationChangeBetweenHeroes' 'campaign mutation was not classified'
     Assert-Contains @($caller.authorityEvidence.transitiveSignals) 'calls-authority-sensitive:AuthorityFixture.MutatesRelation' 'authority-sensitive helper call was not propagated'
+    Assert-Contains @($sharedMutation.authorityEvidence.directSignals) 'shared-state-mutation:AuthorityFixture.Shared' 'shared dictionary mutation was not classified'
+    Assert-True (@($sharedRead.authorityEvidence.directSignals).Count -eq 0) 'shared dictionary read was flagged as a mutation'
+    Assert-Contains @($sharedWrite.authorityEvidence.directSignals) 'shared-state-write:AuthorityFixture.Counter' 'static field write was not classified'
+    Assert-True (@($localMutation.authorityEvidence.directSignals).Count -eq 0) 'local dictionary mutation was flagged as shared state'
+    Assert-True (@($cachedLambda.authorityEvidence.directSignals).Count -eq 0) 'compiler delegate cache was flagged as shared state'
+    Assert-True (@($singleton.authorityEvidence.directSignals).Count -eq 0) 'lazy singleton cache was flagged as shared state'
+    Assert-True (@($singletonSetter.authorityEvidence.directSignals).Count -eq 0) 'singleton cache setter was flagged as shared state'
 
     Write-Host 'PASS: pure methods remain unflagged'
     Write-Host 'PASS: global player access is classified'
     Write-Host 'PASS: campaign mutation is classified'
     Write-Host 'PASS: authority sensitivity propagates through mod-owned calls'
+    Write-Host 'PASS: shared collection and static-field mutation are classified without flagging local collections'
 }
 finally {
     if (Test-Path -LiteralPath $testRoot) {

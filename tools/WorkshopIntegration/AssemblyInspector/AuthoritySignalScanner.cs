@@ -29,6 +29,8 @@ internal static class AuthoritySignalScanner
         {
             int token = MetadataTokens.GetToken(methodHandle);
             MethodDefinition method = metadata.GetMethodDefinition(methodHandle);
+            string methodName = metadata.GetString(method.Name);
+            bool isStaticConstructor = methodName == ".cctor";
             var scan = new MethodScan();
             scans.Add(token, scan);
 
@@ -54,8 +56,34 @@ internal static class AuthoritySignalScanner
                         scan.DirectSignals.Add(signal);
                 }
 
+                if (resolvedOperand.Kind == HandleKind.FieldDefinition)
+                {
+                    FieldDefinitionHandle fieldHandle = (FieldDefinitionHandle)resolvedOperand;
+                    FieldDefinition field = metadata.GetFieldDefinition(fieldHandle);
+                    if ((field.Attributes & FieldAttributes.Static) != 0 &&
+                        !IsCompilerCacheField(metadata, field))
+                    {
+                        if (opCode == OpCodes.Stsfld && !isStaticConstructor && member is not null &&
+                            !IsSingletonCacheWrite(methodName, metadata.GetString(field.Name)))
+                            scan.DirectSignals.Add($"shared-state-write:{member}");
+
+                        string fieldType = field.DecodeSignature(typeProvider, null);
+                        if (IsMutableCollectionType(fieldType) && member is not null)
+                            scan.MutableStaticFields.Add(member);
+                    }
+                }
+
+                if (IsCall(opCode) && member is not null && IsCollectionMutation(member))
+                    scan.HasCollectionMutation = true;
+
                 if (IsCall(opCode) && resolvedOperand.Kind == HandleKind.MethodDefinition)
                     scan.Callees.Add(MetadataTokens.GetToken((MethodDefinitionHandle)resolvedOperand));
+            }
+
+            if (scan.HasCollectionMutation)
+            {
+                foreach (string field in scan.MutableStaticFields)
+                    scan.DirectSignals.Add($"shared-state-mutation:{field}");
             }
         }
 
@@ -153,6 +181,42 @@ internal static class AuthoritySignalScanner
 
     private static bool IsCall(OpCode opCode)
         => opCode == OpCodes.Call || opCode == OpCodes.Callvirt || opCode == OpCodes.Newobj;
+
+    private static bool IsMutableCollectionType(string type)
+        => type.StartsWith("System.Collections.Generic.Dictionary`", StringComparison.Ordinal) ||
+           type.StartsWith("System.Collections.Generic.HashSet`", StringComparison.Ordinal) ||
+           type.StartsWith("System.Collections.Generic.List`", StringComparison.Ordinal) ||
+           type.StartsWith("System.Collections.Concurrent.ConcurrentDictionary`", StringComparison.Ordinal) ||
+           type.StartsWith("System.Collections.IDictionary", StringComparison.Ordinal) ||
+           type.StartsWith("System.Collections.IList", StringComparison.Ordinal);
+
+    private static bool IsCompilerCacheField(MetadataReader metadata, FieldDefinition field)
+    {
+        string fieldName = metadata.GetString(field.Name);
+        if (fieldName.StartsWith("<>9", StringComparison.Ordinal) ||
+            fieldName.StartsWith("<>f__am$cache", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        TypeDefinition declaringType = metadata.GetTypeDefinition(field.GetDeclaringType());
+        return metadata.GetString(declaringType.Name).StartsWith("<>O", StringComparison.Ordinal);
+    }
+
+    private static bool IsSingletonCacheWrite(string methodName, string fieldName)
+        => (methodName == "get_Instance" || methodName == "set_Instance") &&
+           (fieldName.Equals("_instance", StringComparison.OrdinalIgnoreCase) ||
+            fieldName.Equals("instance", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsCollectionMutation(string member)
+    {
+        int separator = member.LastIndexOf('.');
+        string method = separator < 0 ? member : member[(separator + 1)..];
+        return method is "Add" or "AddRange" or "Clear" or "Dequeue" or "Enqueue" or
+            "ExceptWith" or "GetOrAdd" or "IntersectWith" or "Pop" or "Push" or
+            "Remove" or "RemoveAll" or "RemoveAt" or "SymmetricExceptWith" or
+            "TryAdd" or "TryRemove" or "UnionWith" or "set_Item";
+    }
 
     private static string? ResolveMemberName(
         MetadataReader metadata,
@@ -259,5 +323,7 @@ internal static class AuthoritySignalScanner
         internal HashSet<string> TransitiveSignals { get; } = new(StringComparer.Ordinal);
         internal HashSet<string> CalledMembers { get; } = new(StringComparer.Ordinal);
         internal HashSet<int> Callees { get; } = [];
+        internal HashSet<string> MutableStaticFields { get; } = new(StringComparer.Ordinal);
+        internal bool HasCollectionMutation { get; set; }
     }
 }

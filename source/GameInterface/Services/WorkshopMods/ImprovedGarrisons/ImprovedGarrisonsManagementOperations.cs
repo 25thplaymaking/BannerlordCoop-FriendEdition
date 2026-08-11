@@ -30,6 +30,7 @@ internal enum ImprovedGarrisonsOperation
     OrderMobileGarrisonReturn = 16,
     FortifyMobileGarrison = 17,
     StartHostileEncounter = 18,
+    BoostBuildingReserve = 19,
 }
 
 [ProtoContract(SkipConstructor = true)]
@@ -218,6 +219,10 @@ internal static class ImprovedGarrisonsOperationProtocol
                 return targets.Length == 0 && troops.Length == 0 && request.Value.Length == 0;
             case ImprovedGarrisonsOperation.StartHostileEncounter:
                 return targets.Length == 1 && troops.Length == 0 && request.Value.Length == 0;
+            case ImprovedGarrisonsOperation.BoostBuildingReserve:
+                return targets.Length == 0 && troops.Length == 0 &&
+                       int.TryParse(request.Value, NumberStyles.None, CultureInfo.InvariantCulture, out int reserve) &&
+                       reserve > 0;
             case ImprovedGarrisonsOperation.ReplaceTownTemplate:
                 return targets.Length == 0 && request.Value.Length > 0;
             case ImprovedGarrisonsOperation.SetUpgradePaths:
@@ -240,6 +245,27 @@ internal static class ImprovedGarrisonsOperationProtocol
     private static bool IsText(string value, int minimum, int maximum) =>
         value != null && value.Length >= minimum && value.Length <= maximum &&
         value.All(character => !char.IsControl(character));
+}
+
+internal static class ImprovedGarrisonsBuildingAuthority
+{
+    public static bool TryPlan(
+        int currentReserve,
+        int actorGold,
+        int requestedIncrease,
+        out int newReserve,
+        out int newGold)
+    {
+        newReserve = 0;
+        newGold = 0;
+        if (currentReserve < 0 || actorGold < requestedIncrease || requestedIncrease <= 0 ||
+            currentReserve > int.MaxValue - requestedIncrease)
+            return false;
+
+        newReserve = currentReserve + requestedIncrease;
+        newGold = actorGold - requestedIncrease;
+        return true;
+    }
 }
 
 internal static class ImprovedGarrisonsCanonicalOperations

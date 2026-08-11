@@ -33,6 +33,20 @@ foreach ($assembly in @($inventory.assemblies)) {
     Assert-Inventory (@($assembly.methods).Count -gt 0) "$($assembly.moduleId)/$($assembly.relativePath) has no method surface"
     $tokens = @($assembly.methods.metadataToken)
     Assert-Inventory (@($tokens | Sort-Object -Unique).Count -eq $tokens.Count) "$($assembly.moduleId)/$($assembly.relativePath) has duplicate method tokens"
+    foreach ($method in @($assembly.methods)) {
+        Assert-Inventory ($null -ne $method.PSObject.Properties['authorityEvidence']) "$($assembly.moduleId)/$($method.metadataToken) has no authority evidence"
+        foreach ($property in @('directSignals', 'transitiveSignals', 'calledMembers')) {
+            Assert-Inventory ($null -ne $method.authorityEvidence.PSObject.Properties[$property]) "$($assembly.moduleId)/$($method.metadataToken) has no $property evidence"
+            [string[]]$values = @($method.authorityEvidence.$property)
+            $unique = New-Object Collections.Generic.HashSet[string] ([StringComparer]::Ordinal)
+            foreach ($value in $values) {
+                Assert-Inventory ($unique.Add($value)) "$($assembly.moduleId)/$($method.metadataToken) has duplicate $property evidence"
+            }
+            [string[]]$ordinal = @($values)
+            [Array]::Sort($ordinal, [StringComparer]::Ordinal)
+            Assert-Inventory (($values -join '|') -ceq ($ordinal -join '|')) "$($assembly.moduleId)/$($method.metadataToken) has nondeterministic $property evidence"
+        }
+    }
 }
 
 $separatism = @($inventory.assemblies | Where-Object { [string]$_.moduleId -ceq 'Separatism' })

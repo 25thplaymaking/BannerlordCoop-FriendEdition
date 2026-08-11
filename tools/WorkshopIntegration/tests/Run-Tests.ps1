@@ -445,6 +445,10 @@ finally {
 
 & (Join-Path $PSScriptRoot 'Run-AuthorityInspectorTests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Authority inspector regression tests failed.' }
+& (Join-Path $PSScriptRoot 'Run-AuthorityAuditGeneratorTests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Authority audit generator regression tests failed.' }
+& (Join-Path $PSScriptRoot 'Validate-AuthorityAudit.ps1') -SelfTest
+if ($LASTEXITCODE -ne 0) { throw 'Authority audit validator self-tests failed.' }
 
 # Every failure path above throws. Without this, the exit code of the last native child process
 # leaks as the script's own — including the rejection tests' verifier, which is SUPPOSED to exit 1.

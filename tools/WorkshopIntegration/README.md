@@ -67,3 +67,27 @@ Run the self-contained fixture test with:
 ```powershell
 .\tools\WorkshopIntegration\tests\Run-Tests.ps1
 ```
+
+## Function authority audit
+
+The managed function inventory includes deterministic direct calls, global-player reads, campaign
+mutations, persistence/randomness signals, and sensitivity propagated through same-assembly helper
+calls. Regenerate and validate it with:
+
+```powershell
+.\tools\WorkshopIntegration\Generate-FunctionInventory.ps1
+.\tools\WorkshopIntegration\Generate-AuthorityAudit.ps1
+.\tools\WorkshopIntegration\tests\Validate-FunctionInventory.ps1
+.\tools\WorkshopIntegration\tests\Validate-AuthorityAudit.ps1
+```
+
+Normal validation reports classified and unclassified active candidates for ongoing development.
+Release validation is the publication gate and rejects any active authority candidate that is
+unclassified, blocked, lacks a Coop owner, or lacks a focused route test:
+
+```powershell
+.\tools\WorkshopIntegration\tests\Validate-AuthorityAudit.ps1 -Release
+```
+
+Disposition rules are exact `(moduleId, assemblySha256, metadataToken)` joins in
+`authority-dispositions.json`; stale or duplicate method keys fail generation.

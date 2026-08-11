@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "allowedDispositions": [
+    "ClientPresentation",
+    "PurePolicy",
+    "ServerCallback",
+    "ServerCommand",
+    "ReplicatedCosmetic",
+    "CoopOwnerReplacement",
+    "FrameworkLifecycle",
+    "Retired"
+  ],
+  "rules": []
+}

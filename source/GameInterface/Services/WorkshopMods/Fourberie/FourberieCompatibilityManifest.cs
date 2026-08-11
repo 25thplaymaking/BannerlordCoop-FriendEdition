@@ -56,6 +56,7 @@ internal enum FourberiePatchKind
     TerritorySelectionConsequence,
     TerritoryAbandonConsequence,
     SafehouseAbandonConsequence,
+    SafehouseEstablishmentConsequence,
     SafehouseTraderConsequence,
     GrudgeSelectionConsequence,
     GrudgeSettlementConsequence,
@@ -469,6 +470,8 @@ internal static class FourberieCompatibilityManifest
         Add("Fourberie.CriminalVM", "AbandonSafeClick", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM+<>c__DisplayClass544_0", "<AbandonSafeClick>b__0",
             FourberiePatchKind.SafehouseAbandonConsequence);
+        Add("Fourberie.FourbSafeHouseBehavior", "<AddDialogsSafeHouse>b__9_1",
+            FourberiePatchKind.SafehouseEstablishmentConsequence);
         Add("Fourberie.FourbSafeHouseBehavior+<>c", "<AddDialogsSafeHouse>b__9_18",
             FourberiePatchKind.SafehouseTraderConsequence);
         Add("Fourberie.FourbSafeHouseBehavior+<>c", "<AddDialogsSafeHouse>b__9_20",

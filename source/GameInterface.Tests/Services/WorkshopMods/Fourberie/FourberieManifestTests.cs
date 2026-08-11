@@ -102,6 +102,7 @@ public sealed class FourberieManifestTests
     [InlineData("Fourberie.CriminalVM+<>c__DisplayClass157_0", "<ListTributeF>b__2", "TerritoryAbandonConsequence")]
     [InlineData("Fourberie.CriminalVM", "AbandonSafeClick", "ClientPresentation")]
     [InlineData("Fourberie.CriminalVM+<>c__DisplayClass544_0", "<AbandonSafeClick>b__0", "SafehouseAbandonConsequence")]
+    [InlineData("Fourberie.FourbSafeHouseBehavior", "<AddDialogsSafeHouse>b__9_1", "SafehouseEstablishmentConsequence")]
     [InlineData("Fourberie.FourbSafeHouseBehavior+<>c", "<AddDialogsSafeHouse>b__9_18", "SafehouseTraderConsequence")]
     [InlineData("Fourberie.FourbSafeHouseBehavior+<>c", "<AddDialogsSafeHouse>b__9_20", "SafehouseTraderConsequence")]
     [InlineData("Fourberie.FourbSafeHouseBehavior+<>c", "<AddDialogsSafeHouse>b__9_22", "SafehouseTraderConsequence")]

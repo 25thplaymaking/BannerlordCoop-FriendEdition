@@ -441,6 +441,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.SafehouseAbandonConsequence:
                 method = nameof(FourberieAuthorityPatches.SafehouseAbandonConsequencePrefix);
                 break;
+            case FourberiePatchKind.SafehouseEstablishmentConsequence:
+                method = nameof(FourberieAuthorityPatches.SafehouseEstablishmentConsequencePrefix);
+                break;
             case FourberiePatchKind.SafehouseTraderConsequence:
                 method = nameof(FourberieAuthorityPatches.SafehouseTraderConsequencePrefix);
                 break;
@@ -644,6 +647,13 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                 if (behavior != null)
                     AccessTools.Method(behavior, "DeleteVMLayer", Type.EmptyTypes)?.Invoke(null, null);
                 GameMenu.SwitchToMenu("hideout_fourberie");
+            }
+            if (operation == FourberieOperation.EstablishSafehouse)
+            {
+                GameMenu.SwitchToMenu("hideout_fourberie");
+                Type behavior = assembly.GetType("Fourberie.FourberieBehavior", false, false);
+                if (behavior != null)
+                    AccessTools.Method(behavior, "SafeHouseVM", Type.EmptyTypes)?.Invoke(null, null);
             }
         }
         else

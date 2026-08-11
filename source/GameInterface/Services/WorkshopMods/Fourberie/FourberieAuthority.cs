@@ -612,6 +612,17 @@ internal static class FourberieAuthorityPatches
         return false;
     }
 
+    public static bool SafehouseEstablishmentConsequencePrefix(MethodBase __originalMethod)
+    {
+        if (ModInformation.IsClient)
+        {
+            AccessTools.Field(__originalMethod?.DeclaringType, "_dialogActive")?.SetValue(null, 0);
+            Settlement settlement = Settlement.CurrentSettlement;
+            if (settlement != null) SubmitSettlement(FourberieOperation.EstablishSafehouse, settlement);
+        }
+        return false;
+    }
+
     public static bool SafehouseTraderConsequencePrefix(MethodBase __originalMethod)
     {
         if (ModInformation.IsClient)

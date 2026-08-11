@@ -7,8 +7,8 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > **AUTHORITY ROUTING IN PROGRESS (2026-08-11): prior RC superseded; stable held.** The exact function
 > ledger covers 41,050 methods across the ten active Workshop modules, retired RBM, and integrated
 > Separatism. Deterministic IL evidence now includes static shared-state writes and collection mutations,
-> identifying 13,729 authority candidates; 8,072 exact records are classified and release validation
-> rejects the remaining 5,657 active gameplay records.
+> identifying 13,729 authority candidates; 8,073 exact records are classified and release validation
+> rejects the remaining 5,656 active gameplay records.
 > All six active gameplay adapters now share `IWorkshopModule`, and a trusted host capability snapshot
 > is green in unit/E2E tests. UnblockableThrust's four candidates are owned by the accepted collision
 > authority, and all 17 DismembermentPlus candidates now use a deterministic, deduplicated replicated-
@@ -17,7 +17,7 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > settlement rebellion cannot run from a client. Improved Garrisons' 723 candidates are now closed too:
 > management/settings commands carry stable selections, authenticated clan ownership, session/revision
 > concurrency, exact replay results, canonical rollback, server-created parties, and an authenticated building-
-> reserve command while clients retain the menu and roster-selection surface. Fourberie's forty-one explicit
+> reserve command while clients retain the menu and roster-selection surface. Fourberie's forty-two explicit
 > operation families now use authenticated,
 > rollback-safe server commands, while its menus and mission setup remain role-local presentation/lifecycle.
 > Diplomacy's explicit player operations and server callbacks are routed too, including a persisted,
@@ -174,16 +174,18 @@ rolls back canonical Fourberie state and created parties on failure, and returns
       the server owns the random surcharge and revalidates the clan, live grudge, spy, gold, and quoted amount.
       All four crooked-trader choices now send only the current safehouse identity; the server revalidates the
       pinned non-town base and cooldown, derives slave quantity and payout, and owns gold and canonical state.
+      Safehouse establishment is also server-owned: hideout location, bandit relation, existing base/party state,
+      default duties, relic RNG, and retained-party reuse or creation are revalidated before the client opens its management view.
   14. `OnMissionBehaviorInitialize` currently preserves the mod's required peer-local setup, but its
      mission callbacks remain open until their authoritative/controller ownership is proven end to end.
-  15. The exact secondary pass currently assigns metadata to 954/1,865 required candidates:
+  15. The exact secondary pass currently assigns metadata to 955/1,865 required candidates:
      431 presentation-only helpers, 217 pure model-policy methods, 187 server callbacks, 51 Coop-owner
-     replacements, 55 server-command methods, 4 framework-lifecycle methods, and 9 unreachable
+     replacements, 56 server-command methods, 4 framework-lifecycle methods, and 9 unreachable
      Homesteads/Bellum Civile add-on methods.
      The strict gameplay gate also rejects campaign mutation, canonical Fourberie-state writes, and
-     authority-sensitive calls mislabeled as client presentation. That gate currently passes 874 and
-     rejects 991: 911 unclassified methods plus 80 unsafe presentation classifications.
-  - **OPEN:** 991 exact UI/mission/lifecycle routes remain, including roughly 300 menu/dialog helpers
+     authority-sensitive calls mislabeled as client presentation. That gate currently passes 875 and
+     rejects 990: 910 unclassified methods plus 80 unsafe presentation classifications.
+  - **OPEN:** 990 exact UI/mission/lifecycle routes remain, including roughly 300 menu/dialog helpers
     that reach shared state and therefore require live command or mission-authority owners. This strict
     count, not the lower metadata-only count, is the completion baseline for subsequent increments.
 

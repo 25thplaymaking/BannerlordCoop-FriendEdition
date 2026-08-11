@@ -2422,6 +2422,23 @@
       "moduleId": "Fourberie",
       "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
       "metadataTokens": [
+        "0x060004C3"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieOperationExecutor safehouse establishment transaction",
+      "capability": "ExplicitOperations",
+      "tests": [
+        "FourberieSafehouseEstablishmentAuthorityTests.Access_RequiresCurrentHideoutRelationAndNoExistingSafehouse",
+        "FourberieSafehouseEstablishmentAuthorityTests.FirstBaseCommit_InitializesSafehouseAndClearsOnlyBaseUpgrades",
+        "FourberieSafehouseEstablishmentAuthorityTests.TownMigration_PreservesPartyStateSchemeAndExistingRelicChoice",
+        "FourberieSafehouseEstablishmentAuthorityTests.Protocol_RequiresOnlyTheSelectedHideout",
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
         "0x060008E2",
         "0x060008E4",
         "0x060008E6",

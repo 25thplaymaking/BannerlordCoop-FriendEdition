@@ -176,6 +176,9 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.RobCrookedTrader:
                     ApplySafehouseTrader(actor, actorParty, request);
                     break;
+                case FourberieOperation.EstablishSafehouse:
+                    ApplySafehouseEstablishment(actor, actorParty, request.SettlementId);
+                    break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
             }
@@ -237,6 +240,59 @@ internal sealed class FourberieOperationExecutor
     }
 
     public void Reset() => grudgeQuotes.Clear();
+
+    private void ApplySafehouseEstablishment(
+        Hero actor,
+        MobileParty actorParty,
+        string settlementId)
+    {
+        if (!TryResolveCurrentSettlement(actorParty, settlementId, out Settlement settlement) ||
+            settlement.Culture == null)
+            throw new InvalidOperationException("the controller is no longer at the selected safehouse site");
+
+        Settlement previousBase = GetStaticField("_crimeBase") as Settlement;
+        MobileParty baseParty = GetStaticField("_crimeBaseParty") as MobileParty;
+        bool firstBase = previousBase == null;
+        if (!FourberieSafehouseEstablishmentAuthority.CanEstablish(
+                settlementId,
+                settlement.StringId,
+                settlement.IsHideout,
+                ReadInt(GetDictionary("_stringIntDico"), settlement.Culture.StringId),
+                previousBase?.StringId,
+                previousBase?.IsHideout == true,
+                out string failure))
+            throw new InvalidOperationException(failure);
+        if (!firstBase && previousBase?.IsTown != true)
+            throw new InvalidOperationException("the existing Fourberie base cannot be migrated to a safehouse");
+        if (!firstBase && baseParty?.IsActive != true)
+            throw new InvalidOperationException("the Fourberie base-party state is inconsistent");
+
+        using (new BarterPlayerContext(actor, actorParty))
+        using (new AllowedThread())
+        {
+            SetStaticField("_crimeBase", settlement);
+            // Full base abandonment intentionally retains the virtual party. Reuse that canonical
+            // roster when present; only create a party for a genuinely fresh or inactive base.
+            if (firstBase && baseParty?.IsActive != true)
+            {
+                baseParty = RequiredMethod(BehaviorTypeName, "CreateVirtualParty", parameterCount: 2)
+                    .Invoke(null, new object[]
+                    {
+                        "fb_crimebase_party",
+                        new TextObject("{=FoSafHou23}Your lads"),
+                    }) as MobileParty;
+                if (baseParty == null)
+                    throw new InvalidOperationException("Fourberie did not create the safehouse party");
+                SetStaticField("_crimeBaseParty", baseParty);
+            }
+
+            FourberieSafehouseEstablishmentAuthority.Commit(
+                GetDictionary("_crimeValue"),
+                GetDictionary("_stringHeroIdDico"),
+                firstBase,
+                MBRandom.RandomInt(1, 5));
+        }
+    }
 
     private void ApplySafehouseTrader(
         Hero actor,

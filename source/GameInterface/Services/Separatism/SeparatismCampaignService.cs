@@ -73,7 +73,7 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
         {
             // The new-game follow-up can precede CampaignReady. Read the host file directly here
             // so chaos-start honors the configured value even before the normal config broadcast.
-            var data = modConfig.Data.ModOptions?.Separatism;
+            var data = modConfig.Data?.ModOptions?.Separatism;
             return data == null ? ModConfigProvider.ModOptions.Separatism : new SeparatismOptions(data);
         }
     }
@@ -152,24 +152,32 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
         var options = Options;
         if (!CanMutate(options) || clan == null) return;
 
-        TryLordRebellionOrFloatingTitle(clan, options);
-        TryAnarchyRebellion(clan, options);
+        RunDailyClanTransitions(
+            () => TryLordRebellionOrFloatingTitle(clan, options),
+            () => TryAnarchyRebellion(clan, options));
+    }
+
+    internal static void RunDailyClanTransitions(
+        Func<bool> tryLordOrFloatingTitle,
+        Action tryAnarchy)
+    {
+        if (!tryLordOrFloatingTitle()) tryAnarchy();
     }
 
     private static bool CanMutate(SeparatismOptions options) =>
         ModInformation.IsServer && options.Enabled && Campaign.Current?.CampaignObjectManager != null;
 
-    private void TryLordRebellionOrFloatingTitle(Clan clan, SeparatismOptions options)
+    private bool TryLordRebellionOrFloatingTitle(Clan clan, SeparatismOptions options)
     {
-        if (clan.Kingdom == null || !IsReady(clan)) return;
+        if (clan.Kingdom == null || !IsReady(clan)) return false;
 
         var kingdom = clan.Kingdom;
         var ruler = kingdom.Leader;
-        if (ruler == null || clan.Leader == null) return;
+        if (ruler == null || clan.Leader == null) return false;
 
         if (clan.Leader != ruler)
         {
-            if (!options.LordRebellionsEnabled || clan.Leader.HasGoodRelationWith(ruler)) return;
+            if (!options.LordRebellionsEnabled || clan.Leader.HasGoodRelationWith(ruler)) return false;
 
             int kingdomFiefs = GetFiefWeight(kingdom);
             int nonMercenaryClans = Math.Max(1, kingdom.Clans.Count(item => !item.IsUnderMercenaryService));
@@ -177,36 +185,36 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
             bool hasEnoughFiefs = kingdomFiefs > 0 &&
                 ((options.AverageAmountOfKingdomFiefsIsEnoughToRebel && clanFiefs >= (float)kingdomFiefs / nonMercenaryClans)
                  || clanFiefs >= options.MinimalAmountOfKingdomFiefsToRebel);
-            if (!hasEnoughFiefs || !Roll(options.DailyLordRebellionChance)) return;
+            if (!hasEnoughFiefs || !Roll(options.DailyLordRebellionChance)) return false;
 
             var capital = clan.Settlements
                 .Where(settlement => settlement?.Town != null)
                 .OrderByDescending(settlement => settlement.Town.Prosperity)
                 .FirstOrDefault();
-            if (capital == null) return;
+            if (capital == null) return false;
 
             var oldClans = kingdom.Clans.ToArray();
-            if (!TryCreateRebelKingdom(clan, capital, BuildLordRebellionIntro(clan, kingdom), kingdom, rebellion: true, out var rebelKingdom)) return;
+            if (!TryCreateRebelKingdom(clan, capital, BuildLordRebellionIntro(clan, kingdom), kingdom, rebellion: true, out var rebelKingdom)) return false;
 
             CopyPolicies(kingdom, rebelKingdom);
             ApplyRebellionRelations(clan, kingdom, oldClans, options);
             InheritWars(rebelKingdom, kingdom, options);
             DeclareWarAction.ApplyByRebellion(kingdom, rebelKingdom);
             LogOutcome("Lord rebellion", clan, rebelKingdom);
-            return;
+            return true;
         }
 
-        if (kingdom.Clans.Count(item => item?.Leader?.IsAlive == true) != 1) return;
+        if (kingdom.Clans.Count(item => item?.Leader?.IsAlive == true) != 1) return false;
 
         if (!clan.Settlements.Any())
         {
             MoveClan(clan, kingdom, null, rebellion: false);
             DestroyKingdom(kingdom);
             Logger.Information("[Separatism] {Kingdom} was abandoned by {Clan}", kingdom.Name, clan.Name);
-            return;
+            return true;
         }
 
-        if (options.AllowUnions && TryUnion(clan, options)) return;
+        if (options.AllowUnions && TryUnion(clan, options)) return true;
 
         var supporter = Clan.All
             .Where(candidate => IsReadyToGoAndEmpty(candidate)
@@ -217,12 +225,13 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
                                     || !candidate.Leader.HasGoodRelationWith(candidate.Kingdom.Leader)))
             .OrderByDescending(candidate => candidate.CurrentTotalStrength)
             .FirstOrDefault();
-        if (supporter == null) return;
+        if (supporter == null) return false;
 
         var previous = supporter.Kingdom;
         MoveClan(supporter, previous, kingdom, rebellion: false);
         ChangeRelation(supporter.Leader, clan.Leader, options.RelationChangeRulerWithSupporter);
         Logger.Information("[Separatism] {Clan} joined {Kingdom} as a supporting clan", supporter.Name, kingdom.Name);
+        return true;
     }
 
     private void TryNationalRebellion(SeparatismOptions options)
@@ -363,6 +372,10 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
                 }
 
                 MoveClan(clan, kingdom, ally, rebellion: false);
+                if (kingdom.RulingClan == clan)
+                {
+                    kingdom._rulingClan = null;
+                }
                 ChangeRelation(clan.Leader, ally.Leader, options.RelationChangeUnitedRulers);
                 InheritWars(ally, kingdom, options);
                 DestroyKingdom(kingdom);
@@ -391,7 +404,10 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
 
         var options = Options;
         var colors = GetRebelColors(rulingClan, options);
-        var banner = rulingClan.Banner == null ? new Banner() : new Banner(rulingClan.Banner);
+        var originalClanBanner = rulingClan.Banner;
+        uint originalClanColor = rulingClan.Color;
+        uint originalClanColor2 = rulingClan.Color2;
+        var banner = originalClanBanner == null ? new Banner() : new Banner(originalClanBanner);
         banner.ChangePrimaryColor(colors.primary);
         banner.ChangeIconColors(colors.secondary);
 
@@ -399,14 +415,37 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
             ? "separatist_kingdom"
             : rulingClan.StringId + "_separatist_kingdom";
 
+        Kingdom existingKingdom = Kingdom.All.FirstOrDefault(candidate => candidate?.StringId == baseId)
+                                   ?? MBObjectManager.Instance?.GetObject<Kingdom>(baseId);
+        if (existingKingdom != null && !existingKingdom.IsEliminated)
+        {
+            Logger.Error(
+                "[Separatism] Refusing to overwrite active kingdom {KingdomId} for {Clan}",
+                baseId,
+                rulingClan.Name);
+            return false;
+        }
+
+        bool kingdomPreExisted = existingKingdom != null;
+        kingdom = existingKingdom ?? Kingdom.CreateKingdom(baseId);
+        bool kingdomWasRegistered = objectManager.TryGetId(kingdom, out _);
+        bool kingdomWasEliminated = kingdom.IsEliminated;
+        var originalKingdomName = kingdom.Name;
+        var originalKingdomInformalName = kingdom.InformalName;
+        var originalKingdomCulture = kingdom.Culture;
+        var originalKingdomBanner = kingdom.Banner;
+        uint originalKingdomColor = kingdom.Color;
+        uint originalKingdomColor2 = kingdom.Color2;
+        var originalKingdomEncyclopediaText = kingdom.EncyclopediaText;
+        var originalKingdomEncyclopediaTitle = kingdom.EncyclopediaTitle;
+        var originalKingdomEncyclopediaRulerTitle = kingdom.EncyclopediaRulerTitle;
+        var originalRulingClan = kingdom.RulingClan;
+
         try
         {
             // A clan can found, lose and later re-found its separatist kingdom. Reuse the native
             // object when it still exists instead of attempting to register the same MBObject id
             // twice (the original Separatism implementation follows the same rule).
-            kingdom = Kingdom.All.FirstOrDefault(candidate => candidate?.StringId == baseId)
-                      ?? MBObjectManager.Instance?.GetObject<Kingdom>(baseId)
-                      ?? Kingdom.CreateKingdom(baseId);
             if (kingdom.IsEliminated)
             {
                 // DestroyKingdomAction keeps the native object registered and only deactivates it.
@@ -417,15 +456,12 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
 
             if (!options.KeepRebelBannerColors)
             {
-                rulingClan.Banner ??= new Banner();
-                rulingClan.Banner.ChangePrimaryColor(colors.primary);
-                rulingClan.Banner.ChangeIconColors(colors.secondary);
+                rulingClan.Banner = new Banner(banner);
                 rulingClan.Color = colors.primary;
                 rulingClan.Color2 = colors.secondary;
                 banner = new Banner(rulingClan.Banner);
             }
 
-            rulingClan.SetInitialHomeSettlement(capital);
             kingdom.InitializeKingdom(
                 kingdomName,
                 kingdomName,
@@ -465,6 +501,7 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
             kingdom._rulingClan = rulingClan;
 
             MoveClan(rulingClan, oldKingdom, kingdom, rebellion);
+            rulingClan.SetInitialHomeSettlement(capital);
 
             objectManager.TryGetId(rulingClan.Culture, out var cultureId);
             messageBroker.Publish(this, new PlayerKingdomCreated(
@@ -477,7 +514,68 @@ internal sealed class SeparatismCampaignService : ISeparatismCampaignService
         }
         catch (Exception ex)
         {
+            var rollbackFailures = new List<string>();
+            try
+            {
+                if (rulingClan.Kingdom != oldKingdom)
+                {
+                    membershipState.MoveClanToKingdom(
+                        rulingClan.Kingdom,
+                        oldKingdom,
+                        rulingClan,
+                        publishCollectionChanges: true);
+                }
+
+                rulingClan.Banner = originalClanBanner;
+                rulingClan.Color = originalClanColor;
+                rulingClan.Color2 = originalClanColor2;
+            }
+            catch (Exception rollbackException)
+            {
+                rollbackFailures.Add("clan restore failed: " + rollbackException.Message);
+            }
+
+            try
+            {
+                if (!kingdomPreExisted || kingdomWasEliminated)
+                {
+                    if (!kingdom.IsEliminated) DestroyKingdomAction.Apply(kingdom);
+                }
+
+                if (kingdomPreExisted)
+                {
+                    kingdom.Name = originalKingdomName;
+                    kingdom.InformalName = originalKingdomInformalName;
+                    kingdom.Culture = originalKingdomCulture;
+                    kingdom.Banner = originalKingdomBanner;
+                    kingdom.Color = originalKingdomColor;
+                    kingdom.Color2 = originalKingdomColor2;
+                    kingdom.EncyclopediaText = originalKingdomEncyclopediaText;
+                    kingdom.EncyclopediaTitle = originalKingdomEncyclopediaTitle;
+                    kingdom.EncyclopediaRulerTitle = originalKingdomEncyclopediaRulerTitle;
+                    kingdom._rulingClan = originalRulingClan;
+                }
+
+                if (!kingdomWasRegistered && objectManager.Contains(kingdom))
+                {
+                    objectManager.Remove(kingdom);
+                }
+            }
+            catch (Exception rollbackException)
+            {
+                rollbackFailures.Add("kingdom restore failed: " + rollbackException.Message);
+            }
+
+            if (rollbackFailures.Count != 0)
+            {
+                throw new InvalidOperationException(
+                    "Separatism kingdom creation failed and rollback was incomplete: " +
+                    string.Join("; ", rollbackFailures),
+                    ex);
+            }
+
             Logger.Error(ex, "[Separatism] Failed to create rebel kingdom for {Clan}", rulingClan.Name);
+            kingdom = null;
             return false;
         }
     }

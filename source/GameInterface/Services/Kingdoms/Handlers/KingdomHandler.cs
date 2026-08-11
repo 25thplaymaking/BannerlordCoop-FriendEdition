@@ -525,7 +525,10 @@ public class KingdomHandler : IHandler
             if (!objectManager.TryGetObjectWithLogging<Kingdom>(payload.What.KingdomId, out var kingdom)) return;
 
             Clan rulingClan = kingdom.RulingClan;
-            ChangeKingdomAction.ApplyByLeaveKingdom(rulingClan, true);
+            if (rulingClan?.Kingdom == kingdom)
+            {
+                ChangeKingdomAction.ApplyByLeaveKingdom(rulingClan, true);
+            }
             foreach (Kingdom kingdom2 in Kingdom.All)
             {
                 if (kingdom2.IsAtWarWith(kingdom))

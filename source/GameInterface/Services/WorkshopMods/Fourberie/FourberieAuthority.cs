@@ -511,6 +511,24 @@ internal static class FourberieAuthorityPatches
         if (ModInformation.IsClient) __state?.Restore(FourberieCrimeValues());
     }
 
+    public static bool ContractConsequencePrefix(MethodBase __originalMethod)
+    {
+        if (ModInformation.IsClient)
+        {
+            FourberieOperation? operation = ContractOperationForMethod(__originalMethod?.Name);
+            if (operation.HasValue) SubmitBusiness(operation.Value, 0);
+        }
+        return false;
+    }
+
+    internal static FourberieOperation? ContractOperationForMethod(string methodName) => methodName switch
+    {
+        "<FContractCom>b__151_0" => FourberieOperation.EnableContractOffers,
+        "<FContractCom>b__151_3" => FourberieOperation.DisableContractOffers,
+        "<FContractCom>b__151_5" => FourberieOperation.AbortContract,
+        _ => null,
+    };
+
     internal static FourberieOperation SchemeLifecycleOperation(int slot)
     {
         Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");

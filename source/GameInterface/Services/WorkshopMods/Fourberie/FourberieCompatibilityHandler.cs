@@ -353,6 +353,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.ClientCrimeRoomRead:
                 method = nameof(FourberieAuthorityPatches.ClientCrimeRoomReadPrefix);
                 break;
+            case FourberiePatchKind.ContractConsequence:
+                method = nameof(FourberieAuthorityPatches.ContractConsequencePrefix);
+                break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
                 break;

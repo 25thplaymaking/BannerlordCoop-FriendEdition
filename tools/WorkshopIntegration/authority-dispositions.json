@@ -2242,6 +2242,52 @@
         "FourberieCrimeRoomAuthorityTests.ClientReadSnapshot_RestoresMissingOrExistingAutoInvestmentState",
         "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
       ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x060000B2"
+      ],
+      "disposition": "ClientPresentation",
+      "owner": "FourberieAuthorityPatches contract menu presentation",
+      "capability": "ClientPresentation",
+      "tests": [
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x0600069F",
+        "0x060006A2",
+        "0x060006A4"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieOperationExecutor contract control transaction",
+      "capability": "ExplicitOperations",
+      "tests": [
+        "FourberieContractAuthorityTests.OfferToggle_EnablesAndDisablesOnlyWhenNoContractIsActive",
+        "FourberieContractAuthorityTests.AbortPlan_RequiresBothCanonicalParticipantsAndRunningMarker",
+        "FourberieContractAuthorityTests.AbortCommit_ClearsOnlyContractStateAndSetsServerCooldown",
+        "FourberieContractAuthorityTests.Protocol_AcceptsOnlyEmptyContractCommandShapes",
+        "FourberieContractAuthorityTests.ConsequenceMap_RoutesOnlyStateChangingCallbacks",
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x06000029"
+      ],
+      "disposition": "ServerCallback",
+      "owner": "FourberieAuthorityPatches.ServerOnlyPrefix contract lifecycle",
+      "capability": "ServerCampaignCallbacks",
+      "tests": [
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
     }
   ]
 }

@@ -126,6 +126,11 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.SetSlavesDuty:
                     ApplyCrimeRoomSetting(request.Operation, request.IntValue);
                     break;
+                case FourberieOperation.EnableContractOffers:
+                case FourberieOperation.DisableContractOffers:
+                case FourberieOperation.AbortContract:
+                    ApplyContractOperation(actor, actorParty, request.Operation);
+                    break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
             }
@@ -348,6 +353,39 @@ internal sealed class FourberieOperationExecutor
             if (!FourberieCrimeRoomAuthority.TrySet(
                     GetDictionary("_crimeValue"), operation, value, out string failure))
                 throw new InvalidOperationException(failure);
+    }
+
+    private void ApplyContractOperation(
+        Hero actor,
+        MobileParty actorParty,
+        FourberieOperation operation)
+    {
+        IDictionary crime = GetDictionary("_crimeValue");
+        IDictionary heroes = GetDictionary("_stringHeroIdDico");
+        using (new AllowedThread())
+        {
+            if (operation == FourberieOperation.EnableContractOffers ||
+                operation == FourberieOperation.DisableContractOffers)
+            {
+                if (!FourberieContractAuthority.TrySetOffers(
+                        crime,
+                        heroes,
+                        operation == FourberieOperation.EnableContractOffers,
+                        out string failure))
+                    throw new InvalidOperationException(failure);
+                return;
+            }
+
+            if (!FourberieContractAuthority.TryPlanAbort(
+                    crime, heroes, out string giverId, out string abortFailure) ||
+                !objectManager.TryGetObject(giverId, out Hero giver) || giver == null || !giver.IsAlive)
+                throw new InvalidOperationException(abortFailure ?? "the Fourberie contract giver is unavailable");
+
+            int cooldown = MBRandom.RandomInt(7, 13);
+            using (new BarterPlayerContext(actor, actorParty))
+                ChangeRelationAction.ApplyPlayerRelation(giver, -5, true, true);
+            FourberieContractAuthority.CommitAbort(crime, heroes, cooldown);
+        }
     }
 
     private void ApplySchemeBonus(

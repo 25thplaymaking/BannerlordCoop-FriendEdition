@@ -50,6 +50,7 @@ internal enum FourberiePatchKind
     CorruptionLevelConsequence,
     CrimeRoomSliderConsequence,
     ClientCrimeRoomRead,
+    ContractConsequence,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -405,6 +406,15 @@ internal static class FourberieCompatibilityManifest
         AddReturning("Fourberie.CriminalVM", "get_UpgradeSlideBar", "System.Int32",
             FourberiePatchKind.ClientCrimeRoomRead);
         Add("Fourberie.CriminalVM", "UpInvestHint", FourberiePatchKind.ClientCrimeRoomRead);
+        Add("Fourberie.CriminalVM", "FContractCom", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM+<>c", "<FContractCom>b__151_0",
+            FourberiePatchKind.ContractConsequence);
+        Add("Fourberie.CriminalVM+<>c", "<FContractCom>b__151_3",
+            FourberiePatchKind.ContractConsequence);
+        Add("Fourberie.CriminalVM+<>c", "<FContractCom>b__151_5",
+            FourberiePatchKind.ContractConsequence);
+        Add("Fourberie.FourbContractBehavior", "ContractAborted", FourberiePatchKind.ServerOnly,
+            "System.Boolean", "System.Int32");
         Add("Fourberie.CriminalVM", "Schemhero1", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM", "Schemhero2", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM+<>c__DisplayClass137_0", "<Schemhero1>b__0",

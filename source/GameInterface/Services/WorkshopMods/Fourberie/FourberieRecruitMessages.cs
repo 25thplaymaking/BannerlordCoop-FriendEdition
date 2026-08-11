@@ -35,6 +35,9 @@ internal enum FourberieOperation
     SetAutoInvestment = 24,
     SetLadsDuty = 25,
     SetSlavesDuty = 26,
+    EnableContractOffers = 27,
+    DisableContractOffers = 28,
+    AbortContract = 29,
 }
 
 internal enum FourberieOperationStatus
@@ -226,6 +229,9 @@ internal static class FourberieOperationProtocol
                 EmptyContext(request) && request.IntValue <= 5,
             FourberieOperation.SetLadsDuty or FourberieOperation.SetSlavesDuty =>
                 EmptyContext(request) && request.IntValue <= 100,
+            FourberieOperation.EnableContractOffers or FourberieOperation.DisableContractOffers or
+                FourberieOperation.AbortContract =>
+                EmptyContext(request) && request.IntValue == 0,
             _ => false,
         };
     }

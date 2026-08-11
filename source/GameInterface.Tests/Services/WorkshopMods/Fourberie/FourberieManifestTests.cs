@@ -100,6 +100,8 @@ public sealed class FourberieManifestTests
     [InlineData("Fourberie.CriminalVM", "ListTributeF", "ClientPresentation")]
     [InlineData("Fourberie.CriminalVM+<>c", "<ListTributeF>b__157_0", "TerritorySelectionConsequence")]
     [InlineData("Fourberie.CriminalVM+<>c__DisplayClass157_0", "<ListTributeF>b__2", "TerritoryAbandonConsequence")]
+    [InlineData("Fourberie.CriminalVM", "AbandonSafeClick", "ClientPresentation")]
+    [InlineData("Fourberie.CriminalVM+<>c__DisplayClass544_0", "<AbandonSafeClick>b__0", "SafehouseAbandonConsequence")]
     [InlineData("Fourberie.Main", "OnMissionBehaviorInitialize", "MissionInitialization")]
     public void PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners(
         string type,

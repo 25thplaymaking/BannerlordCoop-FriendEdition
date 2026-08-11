@@ -598,6 +598,16 @@ internal static class FourberieAuthorityPatches
         return false;
     }
 
+    public static bool SafehouseAbandonConsequencePrefix(object __instance)
+    {
+        if (ModInformation.IsClient && __instance != null)
+        {
+            Settlement settlement = AccessTools.Field(__instance.GetType(), "setCur")?.GetValue(__instance) as Settlement;
+            if (settlement != null) SubmitSettlement(FourberieOperation.AbandonSafehouse, settlement);
+        }
+        return false;
+    }
+
     internal static FourberieOperation SchemeLifecycleOperation(int slot)
     {
         Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");

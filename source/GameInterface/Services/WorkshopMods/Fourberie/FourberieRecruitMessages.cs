@@ -41,6 +41,7 @@ internal enum FourberieOperation
     SetMainCrimeBase = 30,
     RemoveTerritory = 31,
     AbandonTownCrimeBase = 32,
+    AbandonSafehouse = 33,
 }
 
 internal enum FourberieOperationStatus
@@ -236,7 +237,7 @@ internal static class FourberieOperationProtocol
                 FourberieOperation.AbortContract =>
                 EmptyContext(request) && request.IntValue == 0,
             FourberieOperation.SetMainCrimeBase or FourberieOperation.RemoveTerritory or
-                FourberieOperation.AbandonTownCrimeBase =>
+                FourberieOperation.AbandonTownCrimeBase or FourberieOperation.AbandonSafehouse =>
                 !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
                 request.IntValue == 0 && request.Troops.Length == 0,
             _ => false,

@@ -65,12 +65,39 @@ internal static class FourberieTerritoryAuthority
         IDictionary times)
     {
         territories.Remove(settlementId);
-        foreach (int key in BaseCrimeKeys) crime.Remove(key);
-        heroes.Remove("paymaster");
-        heroes.Remove("enforcer");
-        times.Remove(500);
-        FourberieSchemeAuthority.ClearSlotState(crime, heroes, times, 7);
-        FourberieSchemeAuthority.ClearSlotState(crime, heroes, times, 8);
+        ClearBaseState(crime, heroes, times);
+    }
+
+    public static bool CanAbandonSafehouse(
+        string settlementId,
+        string currentBaseId,
+        string currentSettlementId,
+        bool isTown,
+        out string failure)
+    {
+        if (isTown || string.IsNullOrEmpty(settlementId) ||
+            !string.Equals(settlementId, currentBaseId, StringComparison.Ordinal) ||
+            !string.Equals(settlementId, currentSettlementId, StringComparison.Ordinal))
+        {
+            failure = "the selected Fourberie safehouse abandonment is stale or invalid";
+            return false;
+        }
+
+        failure = null;
+        return true;
+    }
+
+    public static int SafehouseSlaveStrength(IDictionary crime) =>
+        crime?.Contains(1500) == true ? Math.Max(0, Convert.ToInt32(crime[1500])) : 0;
+
+    public static void CommitAbandonSafehouse(
+        IDictionary crime,
+        IDictionary heroes,
+        IDictionary times)
+    {
+        if (crime.Contains(557) && Convert.ToInt32(crime[557]) < 10) crime.Remove(557);
+        crime.Remove(1500);
+        ClearBaseState(crime, heroes, times);
     }
 
     private static bool CanRemove(
@@ -91,5 +118,15 @@ internal static class FourberieTerritoryAuthority
 
         failure = null;
         return true;
+    }
+
+    private static void ClearBaseState(IDictionary crime, IDictionary heroes, IDictionary times)
+    {
+        foreach (int key in BaseCrimeKeys) crime.Remove(key);
+        heroes.Remove("paymaster");
+        heroes.Remove("enforcer");
+        times.Remove(500);
+        FourberieSchemeAuthority.ClearSlotState(crime, heroes, times, 7);
+        FourberieSchemeAuthority.ClearSlotState(crime, heroes, times, 8);
     }
 }

@@ -119,8 +119,65 @@ public sealed class FourberieTerritoryAuthorityTests
     }
 
     [Theory]
+    [InlineData("hideout_a", "hideout_a", "hideout_a", false, true)]
+    [InlineData("hideout_a", "hideout_a", "hideout_b", false, false)]
+    [InlineData("hideout_a", "hideout_b", "hideout_a", false, false)]
+    [InlineData("town_a", "town_a", "town_a", true, false)]
+    public void SafehouseAbandonment_RequiresControllerAtPinnedNonTownBase(
+        string requested,
+        string currentBase,
+        string currentSettlement,
+        bool isTown,
+        bool expected)
+    {
+        Assert.Equal(expected, FourberieTerritoryAuthority.CanAbandonSafehouse(
+            requested, currentBase, currentSettlement, isTown, out _));
+    }
+
+    [Theory]
+    [InlineData(9, false)]
+    [InlineData(10, true)]
+    public void SafehouseAbandonment_ClearsSlavesBaseAndOnlyLowBarracksMarker(
+        int barracksLevel,
+        bool markerRemains)
+    {
+        IDictionary crime = new Hashtable
+        {
+            [1] = 0, [61] = 3, [500] = 2,
+            [557] = barracksLevel, [1500] = 125,
+            [7] = 4, [740] = 3, [8] = 6, [841] = 1,
+            [310] = 5,
+        };
+        IDictionary heroes = new Hashtable
+        {
+            ["paymaster"] = "hero_paymaster",
+            ["victim7"] = "hero_victim_7",
+        };
+        IDictionary times = new Hashtable { [500] = "base", [7] = "scheme7", [8] = "scheme8" };
+
+        Assert.Equal(125, FourberieTerritoryAuthority.SafehouseSlaveStrength(crime));
+        FourberieTerritoryAuthority.CommitAbandonSafehouse(crime, heroes, times);
+
+        Assert.Equal(markerRemains, crime.Contains(557));
+        Assert.False(crime.Contains(1500));
+        Assert.False(crime.Contains(1));
+        Assert.False(crime.Contains(61));
+        Assert.False(crime.Contains(500));
+        Assert.False(crime.Contains(7));
+        Assert.False(crime.Contains(740));
+        Assert.False(crime.Contains(841));
+        Assert.Equal(5, crime[310]);
+        Assert.False(heroes.Contains("paymaster"));
+        Assert.False(heroes.Contains("victim7"));
+        Assert.False(times.Contains(500));
+        Assert.False(times.Contains(7));
+        Assert.False(times.Contains(8));
+    }
+
+    [Theory]
     [InlineData((int)FourberieOperation.RemoveTerritory)]
     [InlineData((int)FourberieOperation.AbandonTownCrimeBase)]
+    [InlineData((int)FourberieOperation.AbandonSafehouse)]
     public void Protocol_RequiresSettlementOnlyForTerritoryRemoval(int operation)
     {
         var request = new NetworkRequestFourberieOperation(

@@ -138,6 +138,9 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.AbandonTownCrimeBase:
                     ApplyTerritoryRemoval(request.SettlementId, request.Operation);
                     break;
+                case FourberieOperation.AbandonSafehouse:
+                    ApplySafehouseAbandonment(actor, actorParty, request.SettlementId);
+                    break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
             }
@@ -442,6 +445,50 @@ internal sealed class FourberieOperationExecutor
                 territories,
                 settlementId,
                 GetDictionary("_crimeValue"),
+                GetDictionary("_stringHeroIdDico"),
+                GetDictionary("_campaignTimeDictio"));
+            SetStaticField("_crimeBase", null);
+        }
+    }
+
+    private void ApplySafehouseAbandonment(Hero actor, MobileParty actorParty, string settlementId)
+    {
+        if (!TryResolveCurrentSettlement(actorParty, settlementId, out Settlement settlement) ||
+            settlement.Culture == null)
+            throw new InvalidOperationException("the selected Fourberie safehouse is no longer current");
+
+        Settlement currentBase = GetStaticField("_crimeBase") as Settlement;
+        if (!FourberieTerritoryAuthority.CanAbandonSafehouse(
+                settlementId,
+                currentBase?.StringId,
+                actorParty.CurrentSettlement?.StringId,
+                settlement.IsTown,
+                out string failure))
+            throw new InvalidOperationException(failure);
+
+        IDictionary crime = GetDictionary("_crimeValue");
+        int slaveStrength = FourberieTerritoryAuthority.SafehouseSlaveStrength(crime);
+        MethodInfo diplomacy = RequiredMethod(
+            "Fourberie.FourbBanditBehavior",
+            "BanditsDiploLogic",
+            parameterCount: 8);
+
+        using (new BarterPlayerContext(actor, actorParty))
+        using (new AllowedThread())
+        {
+            diplomacy.Invoke(null, new object[]
+            {
+                settlement.Culture.StringId,
+                settlement.Culture.Name?.ToString() ?? settlement.Culture.StringId,
+                slaveStrength,
+                true,
+                0,
+                true,
+                false,
+                null,
+            });
+            FourberieTerritoryAuthority.CommitAbandonSafehouse(
+                crime,
                 GetDictionary("_stringHeroIdDico"),
                 GetDictionary("_campaignTimeDictio"));
             SetStaticField("_crimeBase", null);

@@ -55,6 +55,7 @@ internal enum FourberiePatchKind
     MainBaseConsequence,
     TerritorySelectionConsequence,
     TerritoryAbandonConsequence,
+    SafehouseAbandonConsequence,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -452,6 +453,9 @@ internal static class FourberieCompatibilityManifest
             FourberiePatchKind.TerritorySelectionConsequence, InquiryElements);
         Add("Fourberie.CriminalVM+<>c__DisplayClass157_0", "<ListTributeF>b__2",
             FourberiePatchKind.TerritoryAbandonConsequence);
+        Add("Fourberie.CriminalVM", "AbandonSafeClick", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM+<>c__DisplayClass544_0", "<AbandonSafeClick>b__0",
+            FourberiePatchKind.SafehouseAbandonConsequence);
         Add("Fourberie.CriminalVM", "Schemhero1", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM", "Schemhero2", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM+<>c__DisplayClass137_0", "<Schemhero1>b__0",

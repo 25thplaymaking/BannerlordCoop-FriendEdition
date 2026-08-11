@@ -2372,6 +2372,35 @@
         "FourberieTerritoryAuthorityTests.Protocol_RequiresSettlementOnlyForTerritoryRemoval",
         "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
       ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x06000187"
+      ],
+      "disposition": "ClientPresentation",
+      "owner": "FourberieAuthorityPatches safehouse-abandonment confirmation presentation",
+      "capability": "ClientPresentation",
+      "tests": [
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x060006FD"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieOperationExecutor safehouse abandonment transaction",
+      "capability": "ExplicitOperations",
+      "tests": [
+        "FourberieTerritoryAuthorityTests.SafehouseAbandonment_RequiresControllerAtPinnedNonTownBase",
+        "FourberieTerritoryAuthorityTests.SafehouseAbandonment_ClearsSlavesBaseAndOnlyLowBarracksMarker",
+        "FourberieTerritoryAuthorityTests.Protocol_RequiresSettlementOnlyForTerritoryRemoval",
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
     }
   ]
 }

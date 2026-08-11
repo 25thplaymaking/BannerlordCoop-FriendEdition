@@ -97,6 +97,9 @@ public sealed class FourberieManifestTests
     [InlineData("Fourberie.CriminalVM", "<ListKingDiploF>b__552_2", "ClientSchemeFilter")]
     [InlineData("Fourberie.CriminalVM", "TerritoryMakeMainBase", "ClientPresentation")]
     [InlineData("Fourberie.CriminalVM+<>c", "<TerritoryMakeMainBase>b__160_0", "MainBaseConsequence")]
+    [InlineData("Fourberie.CriminalVM", "ListTributeF", "ClientPresentation")]
+    [InlineData("Fourberie.CriminalVM+<>c", "<ListTributeF>b__157_0", "TerritorySelectionConsequence")]
+    [InlineData("Fourberie.CriminalVM+<>c__DisplayClass157_0", "<ListTributeF>b__2", "TerritoryAbandonConsequence")]
     [InlineData("Fourberie.Main", "OnMissionBehaviorInitialize", "MissionInitialization")]
     public void PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners(
         string type,

@@ -2342,6 +2342,36 @@
         "FourberieTerritoryAuthorityTests.Protocol_RequiresOneStableSettlementAndNoOtherContext",
         "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
       ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x060000B8"
+      ],
+      "disposition": "ClientPresentation",
+      "owner": "FourberieAuthorityPatches territory-list presentation",
+      "capability": "ClientPresentation",
+      "tests": [
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x060006AC",
+        "0x060006F3"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieOperationExecutor territory removal transaction",
+      "capability": "ExplicitOperations",
+      "tests": [
+        "FourberieTerritoryAuthorityTests.NonBaseRemoval_RequiresAListedDifferentTerritory",
+        "FourberieTerritoryAuthorityTests.BaseAbandonment_ClearsPinnedBaseAndSchemeState",
+        "FourberieTerritoryAuthorityTests.Protocol_RequiresSettlementOnlyForTerritoryRemoval",
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
     }
   ]
 }

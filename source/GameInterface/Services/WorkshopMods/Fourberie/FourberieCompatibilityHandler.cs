@@ -18,7 +18,9 @@ using System.Reflection;
 using System.Threading;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Encounters;
+using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.Party;
+using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Library;
 
 namespace GameInterface.Services.WorkshopMods.Fourberie;
@@ -364,6 +366,12 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.MainBaseConsequence:
                 method = nameof(FourberieAuthorityPatches.MainBaseConsequencePrefix);
                 break;
+            case FourberiePatchKind.TerritorySelectionConsequence:
+                method = nameof(FourberieAuthorityPatches.TerritorySelectionConsequencePrefix);
+                break;
+            case FourberiePatchKind.TerritoryAbandonConsequence:
+                method = nameof(FourberieAuthorityPatches.TerritoryAbandonConsequencePrefix);
+                break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
                 break;
@@ -527,6 +535,13 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                     PlayerEncounter.LeaveSettlement();
                     PlayerEncounter.Finish(true);
                 }
+            }
+            if (operation == FourberieOperation.AbandonTownCrimeBase)
+            {
+                Type behavior = assembly.GetType("Fourberie.FourberieBehavior", false, false);
+                if (behavior != null)
+                    AccessTools.Method(behavior, "DeleteVMLayer", Type.EmptyTypes)?.Invoke(null, null);
+                if (Settlement.CurrentSettlement?.IsTown == true) GameMenu.SwitchToMenu("town");
             }
         }
         else

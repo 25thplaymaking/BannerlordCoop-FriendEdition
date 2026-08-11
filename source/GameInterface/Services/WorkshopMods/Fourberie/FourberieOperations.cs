@@ -134,6 +134,10 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.SetMainCrimeBase:
                     ApplyMainCrimeBase(request.SettlementId);
                     break;
+                case FourberieOperation.RemoveTerritory:
+                case FourberieOperation.AbandonTownCrimeBase:
+                    ApplyTerritoryRemoval(request.SettlementId, request.Operation);
+                    break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
             }
@@ -409,6 +413,38 @@ internal sealed class FourberieOperationExecutor
                 GetDictionary("_campaignTimeDictio"),
                 GetDictionary("_stringHeroIdDico"),
                 CampaignTime.Now);
+        }
+    }
+
+    private void ApplyTerritoryRemoval(string settlementId, FourberieOperation operation)
+    {
+        if (!objectManager.TryGetObject(settlementId, out Settlement settlement) || settlement == null ||
+            GetStaticField("_territoryList") is not IList territories)
+            throw new InvalidOperationException("the selected Fourberie territory is unavailable");
+        Settlement currentBase = GetStaticField("_crimeBase") as Settlement;
+        string currentBaseId = currentBase?.StringId;
+
+        using (new AllowedThread())
+        {
+            if (operation == FourberieOperation.RemoveTerritory)
+            {
+                if (!FourberieTerritoryAuthority.CanRemoveNonBase(
+                        territories, settlementId, currentBaseId, out string failure))
+                    throw new InvalidOperationException(failure);
+                FourberieTerritoryAuthority.CommitRemove(territories, settlementId);
+                return;
+            }
+
+            if (!FourberieTerritoryAuthority.CanAbandonBase(
+                    territories, settlementId, currentBaseId, out string abandonFailure))
+                throw new InvalidOperationException(abandonFailure);
+            FourberieTerritoryAuthority.CommitAbandonBase(
+                territories,
+                settlementId,
+                GetDictionary("_crimeValue"),
+                GetDictionary("_stringHeroIdDico"),
+                GetDictionary("_campaignTimeDictio"));
+            SetStaticField("_crimeBase", null);
         }
     }
 

@@ -262,6 +262,19 @@ internal static class FourberieSchemeAuthority
 
     public static bool IsSlot(int slot) => slot == 7 || slot == 8;
 
+    public static void ClearSlotState(
+        IDictionary crime,
+        IDictionary heroes,
+        IDictionary times,
+        int slot)
+    {
+        if (crime == null || heroes == null || times == null || !IsSlot(slot))
+            throw new ArgumentOutOfRangeException(nameof(slot));
+        ClearSlot(crime, slot);
+        heroes.Remove("victim" + slot);
+        times.Remove(slot);
+    }
+
     public static bool TryDecodeSelection(int value, out int slot, out int scheme)
     {
         slot = value / 10;

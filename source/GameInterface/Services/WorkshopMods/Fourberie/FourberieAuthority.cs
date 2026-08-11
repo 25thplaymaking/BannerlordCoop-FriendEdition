@@ -160,6 +160,7 @@ internal static class FourberieAuthorityPatches
 {
     private static readonly FourberieTickLedger TickLedger = new FourberieTickLedger();
     private static int agentEnlistSource;
+    private static Settlement pendingTerritoryAbandonment;
     private static Settlement banditRecruitmentSettlement;
     private static int banditRecruitmentMaximum;
 
@@ -567,6 +568,36 @@ internal static class FourberieAuthorityPatches
         return false;
     }
 
+    public static bool TerritorySelectionConsequencePrefix(object[] __args)
+    {
+        if (!ModInformation.IsClient) return false;
+        Settlement selected = SelectedInquiryIdentifier<Settlement>(__args);
+        if (selected == null) return false;
+
+        Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
+        Settlement currentBase = behavior == null
+            ? null
+            : AccessTools.Field(behavior, "_crimeBase")?.GetValue(null) as Settlement;
+        if (selected == currentBase)
+        {
+            pendingTerritoryAbandonment = selected;
+            return true;
+        }
+
+        pendingTerritoryAbandonment = null;
+        InformationManager.HideInquiry();
+        SubmitSettlement(FourberieOperation.RemoveTerritory, selected);
+        return false;
+    }
+
+    public static bool TerritoryAbandonConsequencePrefix()
+    {
+        if (ModInformation.IsClient && pendingTerritoryAbandonment != null)
+            SubmitSettlement(FourberieOperation.AbandonTownCrimeBase, pendingTerritoryAbandonment);
+        pendingTerritoryAbandonment = null;
+        return false;
+    }
+
     internal static FourberieOperation SchemeLifecycleOperation(int slot)
     {
         Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
@@ -712,7 +743,11 @@ internal static class FourberieAuthorityPatches
         if (ModInformation.IsServer) FourberiePatchRuntime.Current?.PublishIfChanged();
     }
 
-    internal static void ResetTickLedger() => TickLedger.Reset();
+    internal static void ResetTickLedger()
+    {
+        TickLedger.Reset();
+        pendingTerritoryAbandonment = null;
+    }
 
     private static bool SubmitEnlistment(TroopRoster roster, FourberieOperation operation)
     {

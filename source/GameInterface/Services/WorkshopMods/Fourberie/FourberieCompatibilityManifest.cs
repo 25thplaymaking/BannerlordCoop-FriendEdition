@@ -53,6 +53,8 @@ internal enum FourberiePatchKind
     ContractConsequence,
     ClientSchemeFilter,
     MainBaseConsequence,
+    TerritorySelectionConsequence,
+    TerritoryAbandonConsequence,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -445,6 +447,11 @@ internal static class FourberieCompatibilityManifest
         Add("Fourberie.CriminalVM", "TerritoryMakeMainBase", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM+<>c", "<TerritoryMakeMainBase>b__160_0",
             FourberiePatchKind.MainBaseConsequence, InquiryElements);
+        Add("Fourberie.CriminalVM", "ListTributeF", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM+<>c", "<ListTributeF>b__157_0",
+            FourberiePatchKind.TerritorySelectionConsequence, InquiryElements);
+        Add("Fourberie.CriminalVM+<>c__DisplayClass157_0", "<ListTributeF>b__2",
+            FourberiePatchKind.TerritoryAbandonConsequence);
         Add("Fourberie.CriminalVM", "Schemhero1", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM", "Schemhero2", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM+<>c__DisplayClass137_0", "<Schemhero1>b__0",

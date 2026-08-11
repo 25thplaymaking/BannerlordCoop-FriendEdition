@@ -4,6 +4,12 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
+> **HANDOFF (2026-08-10): release HELD — Sol taking over.** Launcher hover-crash fixed and
+> confirmed working by Bryce (commit `b2e5f8294`, **unpushed**; rebuilt exe deployed only to the
+> local pinned install `%LOCALAPPDATA%\Programs\CalradiaCoop`). **Nothing pushed, no launcher/workshop
+> release published.** Do not push or cut a release without Bryce's go. Bigger goal still open:
+> full "all mods playable on grain.silo" end-to-end (see P1 + auto-resolve bug above).
+
 ## Known playtest bugs (live)
 
 - **[open] Auto-resolve vs bandit party loops the encounter menu.** (2026-08-11, Bryce, Sea Raiders.)
@@ -138,7 +144,12 @@ This is the biggest remaining phase (Bryce: "route them all, I'll test afterward
       set minus RBM, in handshake order.
 - [ ] **Self-update wiring is built but dormant:** `ModUpdater` pulls a SHA-256-verified client zip
       from `updateManifestUrl`; that URL is empty until the P6 build feed exists. Fill it then.
-- [ ] Live test (deferred with all testing): launch via the .exe, confirm auto-join into grain.silo.
+- [x] **Hover-crash fixed (2026-08-10, confirmed by Bryce).** `WarButton` hover trigger referenced an
+      undefined `BloodBright` brush → render-time `UnsetValue` crash (`0xe0434352`) that killed the
+      process on first hover and left a ghost window (clicks did nothing, no `launcher.log`). Fix: add
+      the brush + a global `DispatcherUnhandledException` handler + `check-xaml-resources.py` guard
+      (commit `b2e5f8294`). See `doc/COOP-OPS-WORKFLOW.md` rule #10. Button now launches the game.
+- [ ] Live test (still open): confirm the launched game auto-joins grain.silo end-to-end with mods.
 
 ### P3 — Packaging consolidation
 - [ ] Fold the co-op adapters + non-framework mod data into `Modules/Coop` where safe.

@@ -39,6 +39,7 @@ static AssemblyInspection Inspect(InspectionFile item)
             return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, false, null, [], [], null);
 
         AssemblyDefinition definition = metadata.GetAssemblyDefinition();
+        IReadOnlyDictionary<int, AuthorityEvidence> authorityEvidence = AuthoritySignalScanner.Scan(pe, metadata);
         var identity = Identity(
             metadata.GetString(definition.Name), definition.Version,
             definition.Culture.IsNil ? null : metadata.GetString(definition.Culture),
@@ -75,7 +76,8 @@ static AssemblyInspection Inspect(InspectionFile item)
                     method.Attributes.ToString(),
                     method.ImplAttributes.ToString(),
                     $"0x{MetadataTokens.GetToken(methodHandle):X8}",
-                    method.RelativeVirtualAddress));
+                    method.RelativeVirtualAddress,
+                    authorityEvidence[MetadataTokens.GetToken(methodHandle)]));
             }
         }
         methods.Sort((left, right) =>
@@ -135,7 +137,8 @@ internal sealed record MethodInspection(
     string Attributes,
     string ImplementationAttributes,
     string MetadataToken,
-    int RelativeVirtualAddress);
+    int RelativeVirtualAddress,
+    AuthorityEvidence AuthorityEvidence);
 
 internal sealed class MetadataTypeNameProvider : ISignatureTypeProvider<string, object?>
 {

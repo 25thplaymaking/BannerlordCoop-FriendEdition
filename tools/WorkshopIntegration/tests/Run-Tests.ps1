@@ -443,6 +443,9 @@ finally {
     }
 }
 
+& (Join-Path $PSScriptRoot 'Run-AuthorityInspectorTests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Authority inspector regression tests failed.' }
+
 # Every failure path above throws. Without this, the exit code of the last native child process
 # leaks as the script's own — including the rejection tests' verifier, which is SUPPOSED to exit 1.
 exit 0

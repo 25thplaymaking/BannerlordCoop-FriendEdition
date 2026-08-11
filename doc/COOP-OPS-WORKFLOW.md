@@ -85,8 +85,8 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
     dies (`0xe0434352`, `InvalidOperationException: '{DependencyProperty.UnsetValue}' is not a valid
     value for property 'Background'` in `Border.OnRender`) but the already-painted window stays on
     screen, ignoring every click — no flash, no `launcher.log` line, nothing. Two guards, both now in:
-    (a) `App.OnStartup` installs a `DispatcherUnhandledException` handler that logs the real exception
-    to `launcher.log` and shows it, so a launcher crash can never again be a silent ghost;
+    (a) `App.OnStartup` installs a `DispatcherUnhandledException` reporter that logs and shows the
+    real exception, then leaves it unhandled so WPF terminates instead of continuing corrupted UI;
     (b) a dangling-`StaticResource` check (every `{StaticResource K}` in `App.xaml`/`MainWindow.xaml`
     must have a matching `x:Key`). Diagnose a dead launcher via the Windows event log, not just
     `launcher.log`: `Get-WinEvent Application | ? Message -match CalradiaCoop` shows the `.NET Runtime`

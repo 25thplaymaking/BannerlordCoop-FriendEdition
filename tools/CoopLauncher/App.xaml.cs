@@ -10,16 +10,19 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        // A render/layout throw (e.g. an unresolved resource) used to kill the process and leave a
-        // painted-but-dead window, so a friend's click just "did nothing". Catch it: log the real
-        // cause, tell them where the log is, and keep the window alive instead of a silent crash.
+        // A render/layout throw (e.g. an unresolved resource) used to leave a painted-but-dead
+        // window, so a friend's click just "did nothing". Surface the real cause, but fail fast:
+        // arbitrary WPF dispatcher faults do not leave the UI in a trustworthy state.
+        var unhandledExceptionReporter = new UnhandledUiExceptionReporter(
+            Log.Write,
+            (title, message) =>
+            {
+                MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Error);
+            },
+            Log.Path);
         DispatcherUnhandledException += (_, ex) =>
         {
-            Log.Write($"UNHANDLED UI EXCEPTION: {ex.Exception}");
-            MessageBox.Show(
-                $"The launcher hit an error:\n\n{ex.Exception.Message}\n\nDetails were written to:\n{Log.Path}",
-                "Calradia Co-op — launcher error", MessageBoxButton.OK, MessageBoxImage.Error);
-            ex.Handled = true;
+            ex.Handled = unhandledExceptionReporter.Report(ex.Exception);
         };
 
         // Offscreen design-review render: `--shoot <path>` writes a PNG of the window without ever

@@ -186,18 +186,20 @@ rolls back canonical Fourberie state and created parties on failure, and returns
       replicated roster/state and mutates only transient spawn lists and local location characters.
       Fourberie's destructive `DataDeleteEx` teardown is now actually patched server-only; each peer can still run
       its harmless `OnGameEnd` screen cleanup without a client clearing campaign state or destroying parties.
+      Outer startup hooks remain per-peer for local troop caches and module flags, while behavior/model registration
+      continues through the exact audited Coop replacement.
       The initialization replacement now rebuilds replicated hero dictionaries only on the server; clients consume
       the canonical snapshot instead of independently rewriting those dictionaries.
   14. `OnMissionBehaviorInitialize` currently preserves the mod's required peer-local setup, but its
      mission callbacks remain open until their authoritative/controller ownership is proven end to end.
-  15. The exact secondary pass currently assigns metadata to 1,042/1,865 required candidates:
+  15. The exact secondary pass currently assigns metadata to 1,044/1,865 required candidates:
      427 presentation-only helpers, 222 pure/read-only policy methods, 186 server callbacks, 53 Coop-owner
-     replacements, 59 server-command methods, 86 framework-lifecycle methods, and 9 unreachable
+     replacements, 59 server-command methods, 88 framework-lifecycle methods, and 9 unreachable
      Homesteads/Bellum Civile add-on methods.
      The strict gameplay gate also rejects campaign mutation, canonical Fourberie-state writes, and
-     authority-sensitive calls mislabeled as client presentation. That gate currently passes 969 and
-     rejects 896: 823 unclassified methods plus 73 unsafe presentation classifications.
-  - **OPEN:** 896 exact UI/mission/lifecycle routes remain, including roughly 300 menu/dialog helpers
+     authority-sensitive calls mislabeled as client presentation. That gate currently passes 971 and
+     rejects 894: 821 unclassified methods plus 73 unsafe presentation classifications.
+  - **OPEN:** 894 exact UI/mission/lifecycle routes remain, including roughly 300 menu/dialog helpers
     that reach shared state and therefore require live command or mission-authority owners. This strict
     count, not the lower metadata-only count, is the completion baseline for subsequent increments.
 

@@ -169,4 +169,12 @@ public sealed class FourberieManifestTests
                     spec.MethodName == method &&
                     spec.Kind.ToString() == expectedKind);
     }
+
+    [Theory]
+    [InlineData("OnSubModuleLoad")]
+    [InlineData("OnGameStart")]
+    public void OuterInitializationEntryPoints_RemainFrameworkOwned(string method) =>
+        Assert.DoesNotContain(
+            FourberieCompatibilityManifest.Methods,
+            spec => spec.TypeName == "Fourberie.Main" && spec.MethodName == method);
 }

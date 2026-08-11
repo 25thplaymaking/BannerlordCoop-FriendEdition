@@ -2646,6 +2646,21 @@
       "moduleId": "Fourberie",
       "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
       "metadataTokens": [
+        "0x06000608",
+        "0x0600060C"
+      ],
+      "disposition": "FrameworkLifecycle",
+      "owner": "Fourberie.Main per-peer initialization around audited inner replacements",
+      "capability": "FrameworkLifecycle",
+      "tests": [
+        "FourberieManifestTests.OuterInitializationEntryPoints_RemainFrameworkOwned",
+        "FourberieManifestTests.ReplacedInitializationEntryPoints_UseTheirAuditedAdapters"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
         "0x060008E2",
         "0x060008E4",
         "0x060008E6",

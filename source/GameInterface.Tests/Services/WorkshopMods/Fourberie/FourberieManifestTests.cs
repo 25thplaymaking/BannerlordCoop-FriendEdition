@@ -83,6 +83,18 @@ public sealed class FourberieManifestTests
     [InlineData("Fourberie.CriminalVM+<>c", "<FContractCom>b__151_3", "ContractConsequence")]
     [InlineData("Fourberie.CriminalVM+<>c", "<FContractCom>b__151_5", "ContractConsequence")]
     [InlineData("Fourberie.FourbContractBehavior", "ContractAborted", "ServerOnly")]
+    [InlineData("Fourberie.CriminalVM+<>c", "<KingdomFilter>b__148_1", "ClientSchemeFilter")]
+    [InlineData("Fourberie.CriminalVM+<>c", "<ClanFilter>b__152_0", "ClientSchemeFilter")]
+    [InlineData("Fourberie.CriminalVM+<>c", "<ClanFilter2>b__153_0", "ClientSchemeFilter")]
+    [InlineData("Fourberie.CriminalVM+<>c", "<ListArmiesF>b__161_0", "ClientSchemeFilter")]
+    [InlineData("Fourberie.CriminalVM+<>c", "<ListKPartiesF>b__162_0", "ClientSchemeFilter")]
+    [InlineData("Fourberie.CriminalVM+<>c", "<KingFiefsF>b__166_0", "ClientSchemeFilter")]
+    [InlineData("Fourberie.CriminalVM+<>c", "<ClanFiefsF>b__167_0", "ClientSchemeFilter")]
+    [InlineData("Fourberie.CriminalVM+<>c", "<ClanFiefsF2>b__168_0", "ClientSchemeFilter")]
+    [InlineData("Fourberie.CriminalVM+<>c", "<ClanPartiesF>b__170_0", "ClientSchemeFilter")]
+    [InlineData("Fourberie.CriminalVM+<>c", "<ClanPartiesF2>b__171_0", "ClientSchemeFilter")]
+    [InlineData("Fourberie.CriminalVM+<>c", "<ListKingPoliticsF>b__551_0", "ClientSchemeFilter")]
+    [InlineData("Fourberie.CriminalVM", "<ListKingDiploF>b__552_2", "ClientSchemeFilter")]
     [InlineData("Fourberie.Main", "OnMissionBehaviorInitialize", "MissionInitialization")]
     public void PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners(
         string type,

@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 
 namespace GameInterface.Services.WorkshopMods.Fourberie;
 
@@ -21,12 +22,78 @@ internal readonly struct FourberieSchemePlan
     public int DurationDays { get; }
 }
 
+internal sealed class FourberieSchemeSelectionSnapshot
+{
+    private static readonly int[] CrimeKeys =
+    {
+        7, 71, 72, 73, 74, 710, 720, 730, 740, 741, 750,
+        8, 81, 82, 83, 84, 810, 820, 830, 840, 841, 850,
+    };
+    private static readonly string[] HeroKeys = { "victim7", "victim8" };
+    private static readonly int[] TimeKeys = { 7, 8 };
+
+    private readonly Dictionary<int, object> crimeValues = new Dictionary<int, object>();
+    private readonly HashSet<int> presentCrimeKeys = new HashSet<int>();
+    private readonly Dictionary<string, object> heroValues = new Dictionary<string, object>(StringComparer.Ordinal);
+    private readonly HashSet<string> presentHeroKeys = new HashSet<string>(StringComparer.Ordinal);
+    private readonly Dictionary<int, object> timeValues = new Dictionary<int, object>();
+    private readonly HashSet<int> presentTimeKeys = new HashSet<int>();
+
+    public FourberieSchemeSelectionSnapshot(IDictionary crime, IDictionary heroes, IDictionary times)
+    {
+        Capture(crime, CrimeKeys, crimeValues, presentCrimeKeys);
+        Capture(heroes, HeroKeys, heroValues, presentHeroKeys);
+        Capture(times, TimeKeys, timeValues, presentTimeKeys);
+    }
+
+    public void Restore(IDictionary crime, IDictionary heroes, IDictionary times)
+    {
+        Restore(crime, CrimeKeys, crimeValues, presentCrimeKeys);
+        Restore(heroes, HeroKeys, heroValues, presentHeroKeys);
+        Restore(times, TimeKeys, timeValues, presentTimeKeys);
+    }
+
+    private static void Capture<TKey>(
+        IDictionary source,
+        IEnumerable<TKey> keys,
+        IDictionary<TKey, object> values,
+        ISet<TKey> present)
+    {
+        if (source == null) return;
+        foreach (TKey key in keys)
+        {
+            if (!source.Contains(key)) continue;
+            present.Add(key);
+            values[key] = source[key];
+        }
+    }
+
+    private static void Restore<TKey>(
+        IDictionary target,
+        IEnumerable<TKey> keys,
+        IReadOnlyDictionary<TKey, object> values,
+        ISet<TKey> present)
+    {
+        if (target == null) return;
+        foreach (TKey key in keys)
+        {
+            if (present.Contains(key)) target[key] = values[key];
+            else target.Remove(key);
+        }
+    }
+}
+
 /// <summary>
 /// Pinned Fourberie 1.4.7.5 scheme rules. The server supplies the target facts and random offset;
 /// clients send only stable target/type/lifecycle intent.
 /// </summary>
 internal static class FourberieSchemeAuthority
 {
+    public static FourberieSchemeSelectionSnapshot CaptureSelection(
+        IDictionary crime,
+        IDictionary heroes,
+        IDictionary times) => new FourberieSchemeSelectionSnapshot(crime, heroes, times);
+
     public static bool TryPlan(
         int scheme,
         int targetRank,

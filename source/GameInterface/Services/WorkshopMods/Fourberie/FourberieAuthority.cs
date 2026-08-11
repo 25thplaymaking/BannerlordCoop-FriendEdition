@@ -529,6 +529,30 @@ internal static class FourberieAuthorityPatches
         _ => null,
     };
 
+    public static void ClientSchemeFilterPrefix(ref FourberieSchemeSelectionSnapshot __state)
+    {
+        if (ModInformation.IsClient)
+            __state = FourberieSchemeAuthority.CaptureSelection(
+                FourberieCrimeValues(), FourberieRoles(), FourberieCampaignTimes());
+    }
+
+    public static void ClientSchemeFilterPostfix(FourberieSchemeSelectionSnapshot __state)
+    {
+        if (!ModInformation.IsClient) return;
+        __state?.Restore(FourberieCrimeValues(), FourberieRoles(), FourberieCampaignTimes());
+
+        try
+        {
+            Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
+            object layer = behavior == null ? null : AccessTools.Field(behavior, "_layer")?.GetValue(null);
+            if (layer != null) AccessTools.Method(layer.GetType(), "UpdateLayout", Type.EmptyTypes)?.Invoke(layer, null);
+        }
+        catch
+        {
+            // The canonical values are already restored; a closed/replaced presentation layer is harmless.
+        }
+    }
+
     internal static FourberieOperation SchemeLifecycleOperation(int slot)
     {
         Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
@@ -731,6 +755,14 @@ internal static class FourberieAuthorityPatches
         return behavior == null
             ? null
             : AccessTools.Field(behavior, "_crimeValue")?.GetValue(null) as IDictionary;
+    }
+
+    private static IDictionary FourberieCampaignTimes()
+    {
+        Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
+        return behavior == null
+            ? null
+            : AccessTools.Field(behavior, "_campaignTimeDictio")?.GetValue(null) as IDictionary;
     }
 
     private static bool TryBusinessKey(object[] arguments, out int businessKey)

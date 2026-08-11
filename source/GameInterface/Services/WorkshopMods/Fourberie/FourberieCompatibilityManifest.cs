@@ -51,6 +51,7 @@ internal enum FourberiePatchKind
     CrimeRoomSliderConsequence,
     ClientCrimeRoomRead,
     ContractConsequence,
+    ClientSchemeFilter,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -415,6 +416,31 @@ internal static class FourberieCompatibilityManifest
             FourberiePatchKind.ContractConsequence);
         Add("Fourberie.FourbContractBehavior", "ContractAborted", FourberiePatchKind.ServerOnly,
             "System.Boolean", "System.Int32");
+        const string InquiryElements = "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]";
+        Add("Fourberie.CriminalVM+<>c", "<KingdomFilter>b__148_1",
+            FourberiePatchKind.ClientSchemeFilter, InquiryElements);
+        Add("Fourberie.CriminalVM+<>c", "<ClanFilter>b__152_0",
+            FourberiePatchKind.ClientSchemeFilter, InquiryElements);
+        Add("Fourberie.CriminalVM+<>c", "<ClanFilter2>b__153_0",
+            FourberiePatchKind.ClientSchemeFilter, InquiryElements);
+        Add("Fourberie.CriminalVM+<>c", "<ListArmiesF>b__161_0",
+            FourberiePatchKind.ClientSchemeFilter, InquiryElements);
+        Add("Fourberie.CriminalVM+<>c", "<ListKPartiesF>b__162_0",
+            FourberiePatchKind.ClientSchemeFilter, InquiryElements);
+        Add("Fourberie.CriminalVM+<>c", "<KingFiefsF>b__166_0",
+            FourberiePatchKind.ClientSchemeFilter, InquiryElements);
+        Add("Fourberie.CriminalVM+<>c", "<ClanFiefsF>b__167_0",
+            FourberiePatchKind.ClientSchemeFilter, InquiryElements);
+        Add("Fourberie.CriminalVM+<>c", "<ClanFiefsF2>b__168_0",
+            FourberiePatchKind.ClientSchemeFilter, InquiryElements);
+        Add("Fourberie.CriminalVM+<>c", "<ClanPartiesF>b__170_0",
+            FourberiePatchKind.ClientSchemeFilter, InquiryElements);
+        Add("Fourberie.CriminalVM+<>c", "<ClanPartiesF2>b__171_0",
+            FourberiePatchKind.ClientSchemeFilter, InquiryElements);
+        Add("Fourberie.CriminalVM+<>c", "<ListKingPoliticsF>b__551_0",
+            FourberiePatchKind.ClientSchemeFilter, InquiryElements);
+        Add("Fourberie.CriminalVM", "<ListKingDiploF>b__552_2",
+            FourberiePatchKind.ClientSchemeFilter, InquiryElements);
         Add("Fourberie.CriminalVM", "Schemhero1", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM", "Schemhero2", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM+<>c__DisplayClass137_0", "<Schemhero1>b__0",

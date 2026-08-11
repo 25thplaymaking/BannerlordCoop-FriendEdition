@@ -136,6 +136,48 @@ public sealed class FourberieSchemeAuthorityTests
             crime, stance: 3, out _, out _));
     }
 
+    [Fact]
+    public void ClientFilterSnapshot_RestoresCanonicalSlotsButKeepsPresentationNavigation()
+    {
+        IDictionary crime = new Hashtable
+        {
+            [7] = 3,
+            [74] = 1,
+            [741] = 1,
+            [750] = 2,
+            [310] = 4,
+        };
+        IDictionary heroes = new Hashtable
+        {
+            ["victim7"] = "hero_old",
+            ["paymaster"] = "hero_paymaster",
+        };
+        IDictionary times = new Hashtable { [7] = "time_old" };
+        FourberieSchemeSelectionSnapshot snapshot = FourberieSchemeAuthority.CaptureSelection(
+            crime, heroes, times);
+
+        crime.Remove(7);
+        crime.Remove(750);
+        crime[8] = 6;
+        crime[310] = 3;
+        heroes.Remove("victim7");
+        heroes["victim8"] = "hero_transient";
+        heroes["paymaster"] = "hero_new";
+        times.Remove(7);
+        times[8] = "time_transient";
+        snapshot.Restore(crime, heroes, times);
+
+        Assert.Equal(3, crime[7]);
+        Assert.Equal(2, crime[750]);
+        Assert.False(crime.Contains(8));
+        Assert.Equal(3, crime[310]);
+        Assert.Equal("hero_old", heroes["victim7"]);
+        Assert.False(heroes.Contains("victim8"));
+        Assert.Equal("hero_new", heroes["paymaster"]);
+        Assert.Equal("time_old", times[7]);
+        Assert.False(times.Contains(8));
+    }
+
     [Theory]
     [InlineData((int)FourberieOperation.SelectSchemeVictim, "hero_a", 7, true)]
     [InlineData((int)FourberieOperation.SelectSchemeVictim, "", 7, false)]

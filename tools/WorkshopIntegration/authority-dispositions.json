@@ -2288,6 +2288,31 @@
       "tests": [
         "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
       ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x060001A0",
+        "0x0600069A",
+        "0x060006A5",
+        "0x060006A7",
+        "0x060006B6",
+        "0x060006B9",
+        "0x060006BF",
+        "0x060006C5",
+        "0x060006CB",
+        "0x060006CE",
+        "0x060006D1",
+        "0x060006E3"
+      ],
+      "disposition": "CoopOwnerReplacement",
+      "owner": "FourberieAuthorityPatches client scheme-filter preservation",
+      "capability": "CanonicalState",
+      "tests": [
+        "FourberieSchemeAuthorityTests.ClientFilterSnapshot_RestoresCanonicalSlotsButKeepsPresentationNavigation",
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
     }
   ]
 }

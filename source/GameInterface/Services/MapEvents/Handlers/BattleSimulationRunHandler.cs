@@ -6,6 +6,7 @@ using Common.Network.Messages;
 using Common.Util;
 using GameInterface.Services.MapEvents.Extensions;
 using GameInterface.Services.MapEvents.Logging;
+using GameInterface.Services.MapEvents.Messages;
 using GameInterface.Services.MapEvents.Messages.Start;
 using GameInterface.Services.MobileParties.Extensions;
 using GameInterface.Services.MapEventSides.Messages;
@@ -387,6 +388,11 @@ internal class BattleSimulationRunHandler : IHandler
                 network.SendAll(lootMessage);
 
             network.SendAll(new NetworkBattleSimulationFinished(mapEventId));
+
+            // Finalize the map event authoritatively (destroy the defeated party + close encounters) — the
+            // auto-resolve set the victory state internally, so this never fired on its own and the beaten
+            // party lingered, looping the encounter menu.
+            PublishSimulationConcluded(mapEventId, sim.MapEvent);
         }
     }
 
@@ -726,6 +732,10 @@ internal class BattleSimulationRunHandler : IHandler
                 // Tell the spectators the simulation is over, otherwise they stay stuck in the spectator window now
                 // that the pacing client (which would have driven it to completion) is gone.
                 network.SendAll(new NetworkBattleSimulationFinished(entry.Key));
+
+                // Same authoritative finalize as the paced path, so a battle resolved after the pacer dropped
+                // still destroys the loser and closes any remaining encounter.
+                PublishSimulationConcluded(entry.Key, sim.MapEvent);
             }
         }, blocking: true, context: nameof(Handle_PlayerDisconnected));
 
@@ -741,6 +751,22 @@ internal class BattleSimulationRunHandler : IHandler
     /// allocations (mirroring <c>MapEvent.SimulateBattleRoundEndSession</c>), then restore the observer
     /// that was swapped out when the simulation began.
     /// </summary>
+    /// <summary>
+    /// [Server] Publish <see cref="MapEventConcluded"/> for a decided auto-resolve so the shared finalize
+    /// path runs — <see cref="BattleFinalizeHandler"/> destroys the defeated party and closes every involved
+    /// player's encounter, exactly as a manual battle's victory <c>BattleState</c> does. Manual battles reach
+    /// this via <c>NetworkChangeBattleState</c>; the server-run simulation sets the state internally and never
+    /// travels that route, so without this the beaten party survives and the encounter menu loops. The finalize
+    /// handler dedupes per event, so this is safe alongside any other finalize.
+    /// </summary>
+    private void PublishSimulationConcluded(string mapEventId, MapEvent mapEvent)
+    {
+        if (mapEvent == null || !mapEvent.HasWinner) return;
+
+        var playerPartyIds = MapEventPlayerPartyCollector.CollectPartyIds(mapEvent, objectManager);
+        messageBroker.Publish(this, new MapEventConcluded(mapEventId, playerPartyIds));
+    }
+
     private static void EndSimulationSession(ActiveSimulation sim)
     {
         foreach (var side in sim.MapEvent._sides)

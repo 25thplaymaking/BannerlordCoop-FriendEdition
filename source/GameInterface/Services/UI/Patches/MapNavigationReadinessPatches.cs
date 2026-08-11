@@ -36,14 +36,15 @@ internal static class MapNavigationReadinessPatches
     [HarmonyFinalizer]
     private static Exception IsNavigationBarEnabled_Finalizer(Exception __exception, ref bool __result)
     {
-        if (__exception != null)
+        var filtered = FilterTransientReadinessException(__exception);
+        if (__exception != null && filtered == null)
         {
             // Nav bar treated as disabled until the map screen is fully wired; self-heals.
             __result = false;
             Logger.Verbose(__exception, "Map nav-bar readiness check skipped during co-op load window");
         }
 
-        return null; // swallow so it does not bubble to the global ScreenManager.Tick finalizer
+        return filtered;
     }
 
     [HarmonyPatch(typeof(MapScreen), "HandleIfBlockerStatesDisabled")]
@@ -52,11 +53,19 @@ internal static class MapNavigationReadinessPatches
     {
         // Render-readiness helper. A transient null during the co-op load window is harmless
         // to skip and self-heals next frame; swallow it so it does not abort Game.OnTick.
-        if (__exception != null)
+        var filtered = FilterTransientReadinessException(__exception);
+        if (__exception != null && filtered == null)
         {
             Logger.Verbose(__exception, "Map blocker-state check skipped during co-op load window");
         }
 
-        return null;
+        return filtered;
     }
+
+    /// <summary>
+    /// Only the null dereferences documented above are transient readiness failures. Propagate every
+    /// other exception so this narrow guard cannot hide a real map-navigation defect indefinitely.
+    /// </summary>
+    internal static Exception FilterTransientReadinessException(Exception exception) =>
+        exception is NullReferenceException ? null : exception;
 }

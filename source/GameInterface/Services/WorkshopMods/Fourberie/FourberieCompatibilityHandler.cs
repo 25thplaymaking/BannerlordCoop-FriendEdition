@@ -77,9 +77,10 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         if (!notifiedActions.Add(method)) return;
 
         var message = $"Fourberie entry point '{method}' is disabled in co-op: its singleton campaign/model flow has no validated controller-authorized authority route.";
+        // Log-only: these entry points (Main.OnApplicationTick / OnGameInitializationFinished) are
+        // deliberately blocked and there is nothing the player can do about it, so the on-screen
+        // notice only reads as an error. Keep it in the log for diagnostics.
         Logger.Warning(message);
-        if (ModInformation.IsClient)
-            InformationManager.DisplayMessage(new InformationMessage(message));
     }
 
     public void PublishIfChanged()
@@ -210,6 +211,15 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                 break;
             case FourberiePatchKind.UnsupportedPlayerAction:
                 method = nameof(FourberieAuthorityPatches.UnsupportedPlayerActionPrefix);
+                break;
+            case FourberiePatchKind.BehaviorsWithoutModels:
+                method = nameof(FourberieAuthorityPatches.InitializeBehaviorsOnlyPrefix);
+                break;
+            case FourberiePatchKind.RoutedCreateAction:
+                method = nameof(FourberieAuthorityPatches.RoutedCreateActionPrefix);
+                break;
+            case FourberiePatchKind.RefreshHeroDicoOnly:
+                method = nameof(FourberieAuthorityPatches.RefreshHeroDicoOnlyPrefix);
                 break;
             case FourberiePatchKind.ClientPresentation:
                 method = nameof(FourberieAuthorityPatches.ClientPresentationPrefix);

@@ -16,6 +16,31 @@ internal enum FourberiePatchKind
     UnsupportedPlayerAction,
     ClientPresentation,
     FinanceRead,
+
+    /// <summary>
+    /// Runs Fourberie's gameplay behaviors but suppresses its 14 game-model replacements, which
+    /// overlap Coop's authority (healing, finance, crime, diplomacy, loyalty, food, party, …).
+    /// Used for the monolithic <c>InitializeCampaignBehaviors</c> so its content is available while
+    /// the conflicting models stay vanilla and Coop-synced. Behavior ticks/mutations remain gated
+    /// by their own ServerTick/ServerOnly guards.
+    /// </summary>
+    BehaviorsWithoutModels,
+
+    /// <summary>
+    /// Player create-action routed to the server (Diplomacy-pattern): on a client the guard
+    /// publishes an intent and skips local execution; on the server it runs the mod's routine so
+    /// the created parties/rosters flow through Coop's authoritative create funnels. Used for
+    /// Fourberie actions that mint <c>MobileParty</c>/<c>TroopRoster</c> objects.
+    /// </summary>
+    RoutedCreateAction,
+
+    /// <summary>
+    /// Replaces <c>Main.OnGameInitializationFinished</c>: runs only its
+    /// <c>StringDicoHelper.RefreshHeroDico()</c> call (a client-local hero-name cache the menus
+    /// need) and skips its game-model load-order validation, which would otherwise spam red
+    /// warnings because Coop intentionally suppresses Fourberie's 14 model replacements.
+    /// </summary>
+    RefreshHeroDicoOnly,
 }
 
 internal sealed class FourberieMethodSpec
@@ -270,7 +295,12 @@ internal static class FourberieCompatibilityManifest
 
         foreach (var behavior in BehaviorTypeNames)
         {
-            Add(behavior, "RegisterEvents", FourberiePatchKind.ServerOnly);
+            // RegisterEvents runs on BOTH roles so the behaviors wire up their client-facing game
+            // menus (added via OnSessionLaunched) — otherwise the mod's content is invisible on a
+            // client. This is safe because the actual state-changing callbacks the listeners fire
+            // are separately guarded below (HourlyTick/DailyTick/… = ServerTick, settlement events
+            // = ServerMutation), so a client registration cannot mutate authoritative state.
+            // SyncData stays server-only: the client has no Fourberie models/save graph.
             Add(behavior, "SyncData", FourberiePatchKind.ServerOnly, IDataStore);
         }
 
@@ -280,8 +310,18 @@ internal static class FourberieCompatibilityManifest
         // those overlapping results safe, so the initializer is feature-blocked on every role.
         // Concrete callbacks below remain a second boundary for an already-registered listener;
         // the runtime surface gate separately aborts if the models were installed before Coop.
-        Add("Fourberie.Main", "InitializeCampaignBehaviors", FourberiePatchKind.UnsupportedPlayerAction,
+        Add("Fourberie.Main", "InitializeCampaignBehaviors", FourberiePatchKind.BehaviorsWithoutModels,
             "TaleWorlds.Core.IGameStarter");
+
+        // Player-triggered create-actions (static void M(int)): routed to the server so their
+        // MobileParty.CreateParty / TroopRoster mutations flow through Coop's authoritative create
+        // funnels instead of being authored on a client (which caused the "Failed to get TroopRoster
+        // using Created_####" storm). On a client the guard publishes an intent and skips the local
+        // call; on the server it runs the mod routine directly. See FourberieRecruit{Messages,
+        // Interface,Handler}.cs.
+        Add("Fourberie.CriminalVM", "AgentsEnlistRoutine", FourberiePatchKind.RoutedCreateAction, "System.Int32");
+        Add("Fourberie.FourbBanditBehavior", "FourbRecruitBandit", FourberiePatchKind.RoutedCreateAction, "System.Int32");
+        Add("Fourberie.HelperSubInsuScam", "SpawnBandits", FourberiePatchKind.RoutedCreateAction, "System.Int32");
 
         // These periodic entry points contain the random and persistent campaign decisions found
         // in the 1.4.7.5 audit. They are separately guarded so a duplicate listener cannot execute
@@ -380,48 +420,55 @@ internal static class FourberieCompatibilityManifest
         const string CampaignGameStarter = "TaleWorlds.CampaignSystem.CampaignGameStarter";
         const string MenuCallbackArgs = "TaleWorlds.CampaignSystem.GameMenus.MenuCallbackArgs";
         const string SpawnTags = "System.Collections.Generic.Dictionary`2[System.String,System.Int32]";
-        Add("Fourberie.FourberieBehavior", "AddGameMenus", FourberiePatchKind.UnsupportedPlayerAction,
+        Add("Fourberie.FourberieBehavior", "AddGameMenus", FourberiePatchKind.ClientPresentation,
             CampaignGameStarter);
-        Add("Fourberie.FourberieBehavior", "FourbOnGaMenOpened", FourberiePatchKind.UnsupportedPlayerAction,
+        Add("Fourberie.FourberieBehavior", "FourbOnGaMenOpened", FourberiePatchKind.ClientPresentation,
             MenuCallbackArgs);
-        Add("Fourberie.FourbSafeHouseBehavior", "SHAddGameMenus", FourberiePatchKind.UnsupportedPlayerAction,
+        Add("Fourberie.FourbSafeHouseBehavior", "SHAddGameMenus", FourberiePatchKind.ClientPresentation,
             CampaignGameStarter);
-        Add("Fourberie.FourbSafeHouseBehavior", "SHOnGaMenOpened", FourberiePatchKind.UnsupportedPlayerAction,
+        Add("Fourberie.FourbSafeHouseBehavior", "SHOnGaMenOpened", FourberiePatchKind.ClientPresentation,
             MenuCallbackArgs);
         Add("Fourberie.FourbSafeHouseBehavior", "SHLocationCharactersAreReadyToSpawn",
-            FourberiePatchKind.UnsupportedPlayerAction, SpawnTags);
-        Add("Fourberie.FourbEscapeBehavior", "FourbEscapMenu", FourberiePatchKind.UnsupportedPlayerAction,
+            FourberiePatchKind.ClientPresentation, SpawnTags);
+        Add("Fourberie.FourbEscapeBehavior", "FourbEscapMenu", FourberiePatchKind.ClientPresentation,
             CampaignGameStarter);
-        Add("Fourberie.FourbFightClubBehavior", "PitAddGameMenus", FourberiePatchKind.UnsupportedPlayerAction,
+        Add("Fourberie.FourbFightClubBehavior", "PitAddGameMenus", FourberiePatchKind.ClientPresentation,
             CampaignGameStarter);
         Add("Fourberie.FourbFightClubBehavior", "PitLocationCharactersAreReadyToSpawn",
-            FourberiePatchKind.UnsupportedPlayerAction, SpawnTags);
-        Add("Fourberie.FourbBanditBehavior", "BanditAddMenu", FourberiePatchKind.UnsupportedPlayerAction,
+            FourberiePatchKind.ClientPresentation, SpawnTags);
+        Add("Fourberie.FourbBanditBehavior", "BanditAddMenu", FourberiePatchKind.ClientPresentation,
             CampaignGameStarter);
-        Add("Fourberie.FourbBanditBehavior", "BanditOnGaMenOpened", FourberiePatchKind.UnsupportedPlayerAction,
+        Add("Fourberie.FourbBanditBehavior", "BanditOnGaMenOpened", FourberiePatchKind.ClientPresentation,
             MenuCallbackArgs);
-        Add("Fourberie.FourbRecruitableBehavior", "AddGameMenus", FourberiePatchKind.UnsupportedPlayerAction,
+        Add("Fourberie.FourbRecruitableBehavior", "AddGameMenus", FourberiePatchKind.ClientPresentation,
             CampaignGameStarter);
-        Add("Fourberie.FourbContactMenu", "AddContactMenusF", FourberiePatchKind.UnsupportedPlayerAction,
+        Add("Fourberie.FourbContactMenu", "AddContactMenusF", FourberiePatchKind.ClientPresentation,
             CampaignGameStarter);
-        Add("Fourberie.FourbContactMenu", "FOnGaMenOpened", FourberiePatchKind.UnsupportedPlayerAction,
+        Add("Fourberie.FourbContactMenu", "FOnGaMenOpened", FourberiePatchKind.ClientPresentation,
             MenuCallbackArgs);
-        Add("Fourberie.FourbContractBehavior", "AddGameMenus", FourberiePatchKind.UnsupportedPlayerAction,
+        Add("Fourberie.FourbContractBehavior", "AddGameMenus", FourberiePatchKind.ClientPresentation,
             CampaignGameStarter);
-        Add("Fourberie.HomesSteadsAddOn", "MenuHomeSteads", FourberiePatchKind.UnsupportedPlayerAction,
+        Add("Fourberie.HomesSteadsAddOn", "MenuHomeSteads", FourberiePatchKind.ClientPresentation,
             CampaignGameStarter);
 
-        // Both entry points assume a singleton MainHero/MainParty/PlayerEncounter and can directly
-        // mutate campaign state from local input. No controller-scoped request exists yet.
-        Add("Fourberie.Main", "OnApplicationTick", FourberiePatchKind.UnsupportedPlayerAction, "System.Single");
+        // OnApplicationTick is Fourberie's hotkey handler: it reads local input
+        // (Settings.BaseMenuButton / TacticsMenuButton) and opens the mod's menus for the local
+        // player. On a client Hero.MainHero IS that player, so this is correct client-local UI; the
+        // actual state-changing menu options it opens are separately routed (RoutedCreateAction) or
+        // client-safe. Runs client-only (headless has no input). OnMissionBehaviorInitialize stays
+        // blocked (mission-context singleton mutation, not yet routed).
+        Add("Fourberie.Main", "OnApplicationTick", FourberiePatchKind.ClientPresentation, "System.Single");
         Add("Fourberie.Main", "OnMissionBehaviorInitialize", FourberiePatchKind.UnsupportedPlayerAction,
             "TaleWorlds.MountAndBlade.Mission");
 
-        // Screen registration is presentation-only. The initialization-finished callback validates
-        // and refreshes the monolithic model graph blocked above, so it is feature-blocked too.
+        // Screen registration is presentation-only. OnGameInitializationFinished does two things: it
+        // validates the 14 game-model replacements (which now emit red "move Fourberie in load
+        // order" spam because we intentionally suppress those models) AND calls
+        // StringDicoHelper.RefreshHeroDico() (a client-local hero-name cache the menus need). We run
+        // only the RefreshHeroDico half and skip the model validation — see RefreshHeroDicoOnlyPrefix.
         Add("Fourberie.Main", "OnScreenManagerPushScreen", FourberiePatchKind.ClientPresentation,
             "TaleWorlds.ScreenSystem.ScreenBase");
-        Add("Fourberie.Main", "OnGameInitializationFinished", FourberiePatchKind.UnsupportedPlayerAction,
+        Add("Fourberie.Main", "OnGameInitializationFinished", FourberiePatchKind.RefreshHeroDicoOnly,
             "TaleWorlds.Core.Game");
 
         // This calculation awards random skill XP when applyWithdrawals=true. Clients may calculate

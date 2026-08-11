@@ -1,4 +1,6 @@
 using Common;
+using Common.Messaging;
+using GameInterface.Policies;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -117,6 +119,105 @@ internal static class FourberieAuthorityPatches
         FourberiePatchRuntime.Current?.NotifyUnsupported(
             __originalMethod?.DeclaringType?.FullName + "." + (__originalMethod?.Name ?? "unknown"));
         return false;
+    }
+
+    /// <summary>
+    /// Routes a Fourberie player create-action (static void M(int)) to the server. On a client we
+    /// publish the intent (acting hero + method identity + the single int arg) and skip the local
+    /// call so no MobileParty/TroopRoster is authored client-side. On the server the original runs,
+    /// and its creations replicate through Coop's funnels. A replay (authoritative apply) is let
+    /// through untouched. See FourberieRecruit{Messages,Interface,Handler}.cs.
+    /// </summary>
+    public static bool RoutedCreateActionPrefix(MethodBase __originalMethod, object[] __args)
+    {
+        if (CallOriginalPolicy.IsOriginalAllowed()) return true;
+        if (ModInformation.IsServer) return true;
+
+        var giver = Hero.MainHero;
+        if (giver == null) return false; // no local hero to attribute the action to; drop it
+
+        int arg = __args != null && __args.Length > 0 && __args[0] is int value ? value : 0;
+        MessageBroker.Instance.Publish(null, new FourberieCreateActionAttempted(
+            giver, __originalMethod?.DeclaringType?.FullName, __originalMethod?.Name, arg));
+        return false;
+    }
+
+    private static MethodInfo _refreshHeroDico;
+    private static bool _refreshHeroDicoResolved;
+
+    /// <summary>
+    /// Replaces Fourberie's <c>Main.OnGameInitializationFinished</c>. That method validates the 14
+    /// game-model replacements — which now emit red "move Fourberie in load order" warnings because
+    /// Coop suppresses those models — and then refreshes a client-local hero-name cache
+    /// (<c>StringDicoHelper.RefreshHeroDico()</c>) the menus rely on. We run only the useful cache
+    /// refresh and skip the validation spam. Resolved by reflection; inert if Fourberie is absent.
+    /// </summary>
+    public static bool RefreshHeroDicoOnlyPrefix()
+    {
+        if (!_refreshHeroDicoResolved)
+        {
+            _refreshHeroDicoResolved = true;
+            var type = HarmonyLib.AccessTools.TypeByName("Fourberie.StringDicoHelper");
+            _refreshHeroDico = type == null ? null : HarmonyLib.AccessTools.Method(type, "RefreshHeroDico");
+        }
+
+        try { _refreshHeroDico?.Invoke(null, null); }
+        catch { /* cache refresh is best-effort; never abort game init on it */ }
+
+        return false; // skip the original's model-validation load-order spam
+    }
+
+    /// <summary>
+    /// Fourberie's gameplay behaviors, added by name. Deliberately excludes its optional
+    /// HomesSteadsAddOn / BellumCivileAddOn (cross-mod add-ons) — only the mod's own content.
+    /// </summary>
+    private static readonly string[] FourberieBehaviorTypeNames =
+    {
+        "Fourberie.FourberieBehavior",
+        "Fourberie.FourbSafeHouseBehavior",
+        "Fourberie.FourbEscapeBehavior",
+        "Fourberie.FourbFightClubBehavior",
+        "Fourberie.FourbBanditBehavior",
+        "Fourberie.FourbRecruitableBehavior",
+        "Fourberie.FourbContactMenu",
+        "Fourberie.FourbContractBehavior",
+    };
+
+    /// <summary>
+    /// Replaces Fourberie's monolithic <c>InitializeCampaignBehaviors</c>: adds its gameplay
+    /// behaviors so the mod's content (safe houses, fight clubs, contracts, bandit systems, menus)
+    /// is available in co-op, then returns <c>false</c> to skip the original — whose tail registers
+    /// 14 game-model replacements that overlap Coop's authority. The behaviors' periodic ticks and
+    /// state mutations stay gated by the separate ServerTick/ServerOnly guards; player-triggered
+    /// actions are routed through Coop incrementally.
+    /// </summary>
+    public static bool InitializeBehaviorsOnlyPrefix(object[] __args)
+    {
+        var starter = __args != null && __args.Length > 0
+            ? __args[0] as CampaignGameStarter
+            : null;
+
+        // Without the game starter we cannot add behaviors; fall back to the original block.
+        if (starter == null) return false;
+
+        foreach (var typeName in FourberieBehaviorTypeNames)
+        {
+            try
+            {
+                var type = HarmonyLib.AccessTools.TypeByName(typeName);
+                if (type == null) continue;
+                if (Activator.CreateInstance(type) is CampaignBehaviorBase behavior)
+                {
+                    starter.AddBehavior(behavior);
+                }
+            }
+            catch
+            {
+                // A single behavior failing to construct must not abort campaign start.
+            }
+        }
+
+        return false; // skip original: its AddModel<...> replacements are not registered
     }
 
     public static void FinanceReadPrefix(ref bool applyWithdrawals)

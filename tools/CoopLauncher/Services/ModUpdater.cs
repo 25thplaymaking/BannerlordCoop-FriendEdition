@@ -17,8 +17,9 @@ public readonly record struct UpdateResult(UpdateOutcome Outcome, string Message
 /// byte-exact so the join handshake matches. Large (~1 GB) but changes rarely.</item>
 /// <item>the <b>co-op client</b> — Coop's own assemblies. Small, changes every build.</item>
 /// </list>
-/// Each tier is a manifest + zip whose root entries are module folders, extracted over
-/// <c>Modules\</c>. Both fail soft: an unreachable feed never blocks play, it runs what's installed.
+/// Each tier is a manifest + signed zip whose root entries are module folders. Updates are staged and
+/// exact-replaced under <c>Modules\</c>; any install failure restores the previous module directories.
+/// An unreachable feed still runs what's installed, but a reached-and-invalid required update fails closed.
 /// </summary>
 public sealed class ModUpdater
 {
@@ -35,6 +36,8 @@ public sealed class ModUpdater
             _config.SuiteManifestUrl, modulesDir,
             versionFile: Path.Combine(modulesDir, "coop-suite-version.txt"),
             label: "mod suite", progress);
+        if (suite.Outcome == UpdateOutcome.Failed)
+            return suite;
 
         var client = await InstallTierAsync(
             _config.UpdateManifestUrl, modulesDir,
@@ -63,30 +66,25 @@ public sealed class ModUpdater
             return new(UpdateOutcome.Offline, $"Couldn't reach the {label} feed — using installed");
         }
 
-        if (manifest is null || string.IsNullOrWhiteSpace(manifest.Version) ||
-            string.IsNullOrWhiteSpace(manifest.ClientZipUrl))
+        if (manifest is null || !IsManifestValid(manifest))
             return new(UpdateOutcome.Failed, $"{label} feed was malformed — using installed");
 
         var installed = ReadText(versionFile);
         if (!IsNewer(manifest.Version, installed))
             return new(UpdateOutcome.UpToDate, $"{label}: up to date (build {installed ?? "—"})");
 
-        string tempZip = Path.Combine(Path.GetTempPath(), $"coop-{label.Replace(' ', '-')}-{manifest.Version}.zip");
+        string tempZip = Path.Combine(Path.GetTempPath(), $"coop-update-{Guid.NewGuid():N}.zip");
         try
         {
             await DownloadAsync(manifest.ClientZipUrl, tempZip, label, progress);
 
-            if (!string.IsNullOrWhiteSpace(manifest.Sha256))
-            {
-                progress(-1, $"Verifying {label}…");
-                var actual = await Sha256HexAsync(tempZip);
-                if (!actual.Equals(manifest.Sha256.Trim(), StringComparison.OrdinalIgnoreCase))
-                    return new(UpdateOutcome.Failed, $"{label} failed integrity check — installed kept");
-            }
+            progress(-1, $"Verifying {label}…");
+            var actual = await Sha256HexAsync(tempZip);
+            if (!actual.Equals(manifest.Sha256.Trim(), StringComparison.OrdinalIgnoreCase))
+                return new(UpdateOutcome.Failed, $"{label} failed integrity check — installed kept");
 
             progress(-1, $"Installing {label}…");
-            ExtractOverwrite(tempZip, modulesDir);
-            WriteText(versionFile, manifest.Version);
+            InstallExact(tempZip, modulesDir, versionFile, manifest.Version);
 
             var note = string.IsNullOrWhiteSpace(manifest.Notes) ? "" : $" — {manifest.Notes}";
             return new(UpdateOutcome.Updated, $"{label} updated to {manifest.Version}{note}");
@@ -101,7 +99,7 @@ public sealed class ModUpdater
         }
     }
 
-    private static UpdateResult Combine(UpdateResult suite, UpdateResult client)
+    internal static UpdateResult Combine(UpdateResult suite, UpdateResult client)
     {
         // Rank so the message the user sees reflects the most actionable state.
         static int Rank(UpdateOutcome o) => o switch
@@ -114,6 +112,9 @@ public sealed class ModUpdater
             _ => 0,
         };
         var winner = Rank(suite.Outcome) >= Rank(client.Outcome) ? suite : client;
+        if (winner.Outcome is UpdateOutcome.Failed or UpdateOutcome.Offline)
+            return winner;
+
         // When both simply updated or are current, prefer a concise combined line.
         if (suite.Outcome == UpdateOutcome.Updated || client.Outcome == UpdateOutcome.Updated)
             return new(UpdateOutcome.Updated,
@@ -144,14 +145,111 @@ public sealed class ModUpdater
         }
     }
 
-    private static void ExtractOverwrite(string zipPath, string destRoot)
+    internal static bool IsManifestValid(UpdateManifest? manifest)
+    {
+        if (manifest is null || string.IsNullOrWhiteSpace(manifest.Version) ||
+            string.IsNullOrWhiteSpace(manifest.ClientZipUrl))
+            return false;
+
+        string sha256 = manifest.Sha256?.Trim() ?? string.Empty;
+        return sha256.Length == 64 && sha256.All(Uri.IsHexDigit);
+    }
+
+    /// <summary>
+    /// Stage a zip under the destination volume, exact-replace each top-level module directory, and
+    /// restore every previous directory if any move or version write fails.
+    /// </summary>
+    internal static void InstallExact(string zipPath, string modulesDir, string versionFile, string version)
+    {
+        string modulesFull = Path.GetFullPath(modulesDir);
+        Directory.CreateDirectory(modulesFull);
+
+        string workspace = Path.Combine(modulesFull, $".coop-update-{Guid.NewGuid():N}");
+        string stageRoot = Path.Combine(workspace, "stage");
+        string backupRoot = Path.Combine(workspace, "backup");
+        var replacements = new List<(string Destination, string Backup, bool HadExisting)>();
+        byte[]? previousVersion = null;
+        bool versionExisted = false;
+        bool committed = false;
+
+        try
+        {
+            Directory.CreateDirectory(stageRoot);
+            Directory.CreateDirectory(backupRoot);
+            ExtractToStage(zipPath, stageRoot);
+
+            if (Directory.GetFiles(stageRoot, "*", SearchOption.TopDirectoryOnly).Length > 0)
+                throw new InvalidDataException("Update zip may contain only top-level module directories");
+
+            string[] stagedModules = Directory.GetDirectories(stageRoot);
+            if (stagedModules.Length == 0 || Directory.GetFiles(stageRoot, "*", SearchOption.AllDirectories).Length == 0)
+                throw new InvalidDataException("Update zip contains no module files");
+
+            string versionFull = Path.GetFullPath(versionFile);
+            versionExisted = File.Exists(versionFull);
+            if (versionExisted) previousVersion = File.ReadAllBytes(versionFull);
+
+            foreach (string stagedModule in stagedModules.OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+            {
+                string moduleName = Path.GetFileName(stagedModule);
+                string destination = Path.Combine(modulesFull, moduleName);
+                string backup = Path.Combine(backupRoot, moduleName);
+                if (File.Exists(destination))
+                    throw new InvalidDataException($"Module destination is a file: {moduleName}");
+
+                bool hadExisting = Directory.Exists(destination);
+                replacements.Add((destination, backup, hadExisting));
+                if (hadExisting) Directory.Move(destination, backup);
+                Directory.Move(stagedModule, destination);
+            }
+
+            WriteText(versionFull, version);
+            committed = true;
+        }
+        finally
+        {
+            if (!committed)
+            {
+                for (int i = replacements.Count - 1; i >= 0; i--)
+                {
+                    var replacement = replacements[i];
+                    if (Directory.Exists(replacement.Destination))
+                        Directory.Delete(replacement.Destination, recursive: true);
+                    if (replacement.HadExisting && Directory.Exists(replacement.Backup))
+                        Directory.Move(replacement.Backup, replacement.Destination);
+                }
+
+                string versionFull = Path.GetFullPath(versionFile);
+                bool versionInsideReplacedModule = replacements.Any(replacement =>
+                    IsWithin(versionFull, replacement.Destination));
+                if (!versionInsideReplacedModule)
+                {
+                    if (versionExisted && previousVersion != null)
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(versionFull)!);
+                        File.WriteAllBytes(versionFull, previousVersion);
+                    }
+                    else if (File.Exists(versionFull))
+                    {
+                        File.Delete(versionFull);
+                    }
+                }
+            }
+
+            TryDeleteDirectory(workspace);
+        }
+    }
+
+    private static void ExtractToStage(string zipPath, string stageRoot)
     {
         using var archive = ZipFile.OpenRead(zipPath);
-        var rootFull = Path.GetFullPath(destRoot);
+        string rootWithSeparator = Path.GetFullPath(stageRoot)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
         foreach (var entry in archive.Entries)
         {
-            var target = Path.GetFullPath(Path.Combine(destRoot, entry.FullName));
-            if (!target.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase)) continue;  // zip-slip guard
+            string target = Path.GetFullPath(Path.Combine(stageRoot, entry.FullName));
+            if (!target.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"Update zip entry escapes the staging root: {entry.FullName}");
 
             if (entry.FullName.EndsWith('/') || string.IsNullOrEmpty(entry.Name))
             {
@@ -160,6 +258,25 @@ public sealed class ModUpdater
             }
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             entry.ExtractToFile(target, overwrite: true);
+        }
+    }
+
+    private static bool IsWithin(string path, string directory)
+    {
+        string directoryWithSeparator = Path.GetFullPath(directory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return Path.GetFullPath(path).StartsWith(directoryWithSeparator, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        }
+        catch
+        {
+            // A successful install must not be reported as failed only because antivirus held a staging file.
         }
     }
 

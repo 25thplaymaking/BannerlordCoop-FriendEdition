@@ -89,9 +89,10 @@ public partial class MainWindow : Window
         await RefreshStatusAsync();
         _statusTimer.Start();
 
-        await RunUpdateAsync();
-
-        JoinButton.IsEnabled = true;
+        var update = await RunUpdateAsync();
+        JoinButton.IsEnabled = CanJoinAfterUpdate(update);
+        if (!JoinButton.IsEnabled)
+            JoinButton.Content = "UPDATE REQUIRED";
     }
 
     private void UnfurlBanner()
@@ -121,10 +122,15 @@ public partial class MainWindow : Window
         Sigil.Foreground = accent;   // the banner's sigil is the at-a-glance host indicator
     }
 
-    private async Task RunUpdateAsync()
+    private async Task<UpdateResult> RunUpdateAsync()
     {
         var modulesDir = _bannerlordExe is null ? null : GameLocator.FindModulesDir(_bannerlordExe);
-        if (modulesDir is null) return;
+        if (modulesDir is null)
+        {
+            var missing = new UpdateResult(UpdateOutcome.Failed, "Modules folder not found — update required");
+            UpdateText.Text = missing.Message;
+            return missing;
+        }
 
         UpdateBar.Visibility = Visibility.Visible;
         UpdateBar.IsIndeterminate = false;
@@ -152,7 +158,10 @@ public partial class MainWindow : Window
         if (result.Outcome is UpdateOutcome.Disabled or UpdateOutcome.UpToDate)
             UpdateBar.Visibility = Visibility.Collapsed;
         UpdateText.Text = result.Message;
+        return result;
     }
+
+    internal static bool CanJoinAfterUpdate(UpdateResult result) => result.Outcome != UpdateOutcome.Failed;
 
     private async void OnJoinClicked(object sender, RoutedEventArgs e)
     {

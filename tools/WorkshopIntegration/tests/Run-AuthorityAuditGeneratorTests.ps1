@@ -40,9 +40,22 @@ try {
                     name = 'Execute'
                     metadataToken = '0x06000002'
                     authorityEvidence = [ordered]@{
-                        directSignals = @('global-player:TaleWorlds.CampaignSystem.Hero.get_MainHero')
+                        directSignals = @(
+                            'global-player:TaleWorlds.CampaignSystem.Hero.get_MainHero',
+                            'campaign-mutation:TaleWorlds.CampaignSystem.Actions.GiveGoldAction.ApplyBetweenCharacters'
+                        )
                         transitiveSignals = @()
                         calledMembers = @('TaleWorlds.CampaignSystem.Hero.get_MainHero')
+                    }
+                },
+                [ordered]@{
+                    declaringType = 'Fourberie.HomesSteadsAddOn'
+                    name = 'RegisterEvents'
+                    metadataToken = '0x06000003'
+                    authorityEvidence = [ordered]@{
+                        directSignals = @()
+                        transitiveSignals = @()
+                        calledMembers = @()
                     }
                 }
             )
@@ -59,6 +72,14 @@ try {
             owner = 'FourberieRecruitHandler'
             capability = 'RecruitBandits'
             tests = @('FourberieRecruitTests.Routes')
+        }, [ordered]@{
+            moduleId = 'Fourberie'
+            assemblySha256 = $hash
+            metadataTokens = @('0x06000003')
+            disposition = 'Retired'
+            owner = 'FriendEditionWorkshopModuleCatalog.AbsentHomesteadsDependency'
+            capability = ''
+            tests = @('WorkshopModuleCatalogTests.ActiveModulesExcludeHomesteads')
         })
     })
 
@@ -67,7 +88,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Authority audit generator failed.' }
 
     $audit = Get-Content -LiteralPath $outputPath -Raw | ConvertFrom-Json
-    Assert-True (@($audit.records).Count -eq 2) 'generator did not preserve the complete method surface'
+    Assert-True (@($audit.records).Count -eq 3) 'generator did not preserve the complete method surface'
     $pure = @($audit.records | Where-Object { $_.metadataToken -ceq '0x06000001' })[0]
     $execute = @($audit.records | Where-Object { $_.metadataToken -ceq '0x06000002' })[0]
     Assert-True (-not [bool]$pure.requiresDisposition) 'pure helper was promoted without authority evidence or entrypoint semantics'
@@ -75,11 +96,31 @@ try {
     Assert-True ([bool]$execute.requiresDisposition) 'authority-sensitive Execute entrypoint was omitted'
     Assert-True ([string]$execute.disposition -ceq 'ServerCommand') 'exact hash/token policy was not applied'
     Assert-True ([string]$execute.owner -ceq 'FourberieRecruitHandler') 'route owner was not materialized'
-    Assert-True ((@($execute.evidence) -join '|') -ceq 'global-player:TaleWorlds.CampaignSystem.Hero.get_MainHero|entrypoint:Execute') 'evidence was not deterministic'
+    Assert-True ((@($execute.evidence) -join '|') -ceq 'global-player:TaleWorlds.CampaignSystem.Hero.get_MainHero|campaign-mutation:TaleWorlds.CampaignSystem.Actions.GiveGoldAction.ApplyBetweenCharacters|entrypoint:Execute') 'evidence was not deterministic'
 
     $validator = Join-Path $repoRoot 'tools\WorkshopIntegration\tests\Validate-AuthorityAudit.ps1'
     & $validator -RepoRoot $testRoot -AuditPath $outputPath -PolicyPath $policyPath -InventoryPath $inventoryPath
     if ($LASTEXITCODE -ne 0) { throw 'Valid synthetic authority audit was rejected.' }
+
+    $gameplayValidator = Join-Path $repoRoot 'tools\WorkshopIntegration\tests\Validate-GameplayModuleAuthority.ps1'
+    & $gameplayValidator -RepoRoot $testRoot -AuditPath $outputPath -ModuleId Fourberie
+    if ($LASTEXITCODE -ne 0) { throw 'Gameplay validator rejected proven unreachable embedded add-on code.' }
+
+    $unsafePresentationPath = Join-Path $testRoot 'audit-unsafe-presentation.json'
+    $unsafePresentationAudit = Get-Content -LiteralPath $outputPath -Raw | ConvertFrom-Json
+    $unsafePresentationRecord = @($unsafePresentationAudit.records | Where-Object {
+        [string]$_.metadataToken -ceq '0x06000002'
+    })[0]
+    $unsafePresentationRecord.disposition = 'ClientPresentation'
+    Write-Json -Path $unsafePresentationPath -Value $unsafePresentationAudit
+    $unsafePresentationRejected = $false
+    try {
+        & $gameplayValidator -RepoRoot $testRoot -AuditPath $unsafePresentationPath -ModuleId Fourberie
+    }
+    catch {
+        $unsafePresentationRejected = $true
+    }
+    Assert-True $unsafePresentationRejected 'gameplay validator accepted campaign mutation as client presentation'
 
     $missingPath = Join-Path $testRoot 'audit-missing-record.json'
     $missingAudit = Get-Content -LiteralPath $outputPath -Raw | ConvertFrom-Json

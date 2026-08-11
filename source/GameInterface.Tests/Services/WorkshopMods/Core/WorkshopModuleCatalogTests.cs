@@ -54,6 +54,15 @@ public class WorkshopModuleCatalogTests
             module => Assert.False(module.LoadsBeforeCoop));
     }
 
+    [Fact]
+    public void Catalog_ExcludesOptionalFourberieCrossModAddOns()
+    {
+        var modules = new FriendEditionWorkshopModuleCatalog().Modules;
+
+        Assert.DoesNotContain(modules, module => module.ModuleId == "HomesteadsReloaded");
+        Assert.DoesNotContain(modules, module => module.ModuleId == "BellumCivile");
+    }
+
     private static void AssertModule(
         WorkshopModuleExpectation module,
         string id,

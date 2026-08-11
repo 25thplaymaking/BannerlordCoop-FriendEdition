@@ -36,7 +36,10 @@ $allowed = @(
     'ServerCallback',
     'ServerCommand',
     'ReplicatedCosmetic',
-    'CoopOwnerReplacement'
+    'CoopOwnerReplacement',
+    # Exact methods embedded in an active binary may be retired when their prerequisite module is
+    # absent and the active-module contract proves their behavior/options cannot register.
+    'Retired'
 )
 
 foreach ($module in $ModuleId) {
@@ -47,7 +50,13 @@ foreach ($module in $ModuleId) {
     $open = @($required | Where-Object {
         [string]$_.disposition -notin $allowed -or
         [string]::IsNullOrWhiteSpace([string]$_.owner) -or
-        @($_.tests | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -eq 0
+        @($_.tests | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -eq 0 -or
+        ([string]$_.disposition -ceq 'ClientPresentation' -and
+            @($_.evidence | Where-Object {
+                [string]$_ -match '^campaign-mutation:' -or
+                ([string]$module -ceq 'Fourberie' -and
+                    [string]$_ -match '^calls-authority-sensitive:')
+            }).Count -gt 0)
     })
     if ($open.Count -gt 0) {
         $labels = @($open | ForEach-Object { '{0}/{1}' -f [string]$_.metadataToken, [string]$_.method })

@@ -1,4 +1,5 @@
 using GameInterface.Services.WorkshopMods.Fourberie;
+using Common;
 using System;
 using TaleWorlds.CampaignSystem;
 using Xunit;
@@ -170,5 +171,28 @@ public sealed class FourberieAuthorityTests
     {
         Assert.Throws<InvalidOperationException>(() =>
             FourberieAuthorityPatches.InitializeBehaviorsAndModelsPrefix(Array.Empty<object>()));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public void FinanceCalculation_DisablesWithdrawalSideEffectsOnlyOnClients(
+        bool isServer,
+        bool expectedApplyWithdrawals)
+    {
+        bool previous = ModInformation.IsServer;
+        try
+        {
+            ModInformation.IsServer = isServer;
+            bool applyWithdrawals = true;
+
+            FourberieAuthorityPatches.FinanceReadPrefix(ref applyWithdrawals);
+
+            Assert.Equal(expectedApplyWithdrawals, applyWithdrawals);
+        }
+        finally
+        {
+            ModInformation.IsServer = previous;
+        }
     }
 }

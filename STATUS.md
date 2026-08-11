@@ -6,8 +6,8 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 
 > **AUTHORITY ROUTING IN PROGRESS (2026-08-11): prior RC superseded; stable held.** The exact function
 > ledger covers 41,050 methods across the ten active Workshop modules, retired RBM, and integrated
-> Separatism. Deterministic IL evidence identifies 10,082 authority candidates; 5,283 exact records
-> are classified and release validation rejects the remaining 4,799 active gameplay records.
+> Separatism. Deterministic IL evidence identifies 10,082 authority candidates; 6,153 exact records
+> are classified and release validation rejects the remaining 3,929 active gameplay records.
 > All six active gameplay adapters now share `IWorkshopModule`, and a trusted host capability snapshot
 > is green in unit/E2E tests. UnblockableThrust's four candidates are owned by the accepted collision
 > authority, and all 17 DismembermentPlus candidates now use a deterministic, deduplicated replicated-
@@ -131,9 +131,14 @@ rolls back canonical Fourberie state and created parties on failure, and returns
   → Menus + simple actions confirmed working live.
   4. Both agent-enlistment paths, bandit recruitment, and insurance-scam spawning bypass the unsafe
      `static void M(int)` entry points and use typed, rollback-safe server commands.
-  5. `OnMissionBehaviorInitialize` is classified as peer-local mission lifecycle so required agents/AI
-     initialize on both peers without authorizing campaign mutations.
-  - **OPEN:** close the remaining exact model/menu/mission dispositions and validate the complete ledger.
+  5. `OnMissionBehaviorInitialize` currently preserves the mod's required peer-local setup, but its
+     mission callbacks remain open until their authoritative/controller ownership is proven end to end.
+  6. The exact secondary pass now owns 870/1,759 candidates: 416 presentation-only helpers, 217 pure
+     model-policy methods, 186 server callbacks, 29 finance/model overrides, 13 explicit-command methods,
+     and 9 unreachable Homesteads/Bellum Civile add-on methods. The validator rejects mutation,
+     persistence, randomness, or authority-sensitive calls mislabeled as client presentation.
+  - **OPEN:** 889 exact UI/mission/lifecycle candidates remain, including roughly 300 menu/dialog helpers
+    that reach shared state and therefore require live command or mission-authority owners.
 
 ### Playable session (DONE 2026-08-10)
 - [x] Map-nav NRE fixed and narrowed (`MapNavigationReadinessPatches` suppresses only the transient

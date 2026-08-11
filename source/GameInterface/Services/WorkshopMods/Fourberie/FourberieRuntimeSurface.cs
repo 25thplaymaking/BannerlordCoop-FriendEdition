@@ -7,15 +7,31 @@ using TaleWorlds.CampaignSystem;
 namespace GameInterface.Services.WorkshopMods.Fourberie;
 
 /// <summary>
-/// Fourberie's monolithic initializer replaces healing, death, finance, crime, diplomacy, combat,
-/// food, loyalty, security, transition, power, speed, pricing, and access models. Those results
-/// overlap Coop-owned authority funnels and cannot be made safe by executing them only on the
-/// server. A campaign where any Fourberie MODEL is already active must therefore be rejected. On a
-/// fresh campaign the initializer runs Fourberie's gameplay behaviors (its content is available in
-/// co-op) but skips the model registrations, so this gate only ever fires if a model slipped in.
+/// Verifies that Fourberie's pinned decorator models are either not installed yet (pre-campaign) or
+/// are installed as one complete, exact set. The decorators feed the server-owned campaign actions
+/// and the rendered clients' read-only calculations; partial registration would make UI policy and
+/// authoritative results disagree.
 /// </summary>
 internal static class FourberieRuntimeSurface
 {
+    private static readonly HashSet<string> ExpectedModels = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "Fourberie.FModelDamage",
+        "Fourberie.FModelDeath",
+        "Fourberie.FModelClanFinance",
+        "Fourberie.FModelCrime",
+        "Fourberie.FModelLoyalty",
+        "Fourberie.FModelSecurity",
+        "Fourberie.FModelMobileFood",
+        "Fourberie.FModelAccess",
+        "Fourberie.FModelDonation",
+        "Fourberie.FModelDiplo",
+        "Fourberie.FModelPower",
+        "Fourberie.FModelMapSpeed",
+        "Fourberie.FModelPrice",
+        "Fourberie.FModelPartyTransition",
+    };
+
     internal static bool TryAssertNoActiveCampaignSurface(Assembly fourberieAssembly, out string failure)
     {
         failure = null;
@@ -31,7 +47,7 @@ internal static class FourberieRuntimeSurface
 
         try
         {
-            var active = new List<string>();
+            var active = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var property in models.GetType().GetProperties(
                          BindingFlags.Instance | BindingFlags.Public))
             {
@@ -39,20 +55,17 @@ internal static class FourberieRuntimeSurface
                 var value = property.GetValue(models);
                 if (value?.GetType().Assembly != null &&
                     ReferenceEquals(value.GetType().Assembly, fourberieAssembly))
-                    active.Add(property.Name + "=" + value.GetType().FullName);
+                    active[value.GetType().FullName] = property.Name;
             }
 
-            // NOTE: Fourberie's gameplay behaviors are now INTENTIONALLY added by
-            // FourberieAuthorityPatches.InitializeBehaviorsOnlyPrefix (content is available in
-            // co-op); only its game-MODEL replacements remain forbidden because they overlap
-            // Coop-owned authority. So this gate validates active models only — behaviors present
-            // are expected, not a bypass.
-
             if (active.Count == 0) return true;
+            var unexpected = active.Keys.Except(ExpectedModels, StringComparer.Ordinal).ToArray();
+            var missing = ExpectedModels.Except(active.Keys, StringComparer.Ordinal).ToArray();
+            if (unexpected.Length == 0 && missing.Length == 0) return true;
             failure =
-                "Fourberie game-model replacements were active before Coop's guard could suppress them (" +
-                string.Join(", ", active.Distinct(StringComparer.Ordinal)) +
-                "). Coop startup was aborted; restart with the hardened feature-blocking boundary active before campaign creation.";
+                "Fourberie model composition was incomplete (missing: " +
+                string.Join(", ", missing) + "; unexpected: " + string.Join(", ", unexpected) +
+                "). Coop startup was aborted before calculations could diverge.";
             return false;
         }
         catch (Exception exception)

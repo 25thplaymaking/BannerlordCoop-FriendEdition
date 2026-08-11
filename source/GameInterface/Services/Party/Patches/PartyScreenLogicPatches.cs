@@ -3,6 +3,7 @@ using Common.Messaging;
 using Common.Util;
 using GameInterface.Services.Heroes;
 using GameInterface.Services.Party.Messages;
+using GameInterface.Services.WorkshopMods.Fourberie;
 using HarmonyLib;
 using Serilog;
 using System;
@@ -56,9 +57,10 @@ internal class PartyScreenLogicPatches
 
         PartyScreenHelperPatches.ResetReleasedAndTakenPrisonerActionsRequest();
         bool flag = __instance.PartyPresentationDoneButtonDelegate(__instance.MemberRosters[0], __instance.PrisonerRosters[0], __instance.MemberRosters[1], __instance.PrisonerRosters[1], takenPrisonersRoster, releasedPrisonersRoster, isForced, __instance.LeftOwnerParty, __instance.RightOwnerParty);
+        bool fourberieOwnsCommit = FourberiePartyCommitSuppression.Consume();
         bool applyReleasedAndTakenPrisonerActions =
             PartyScreenHelperPatches.ConsumeReleasedAndTakenPrisonerActionsRequest();
-        if (flag)
+        if (flag && !fourberieOwnsCommit)
         {
             FlattenedTroopRoster recruitedPrisonersRoster = new FlattenedTroopRoster(4);
             foreach (Tuple<CharacterObject, int> tuple in __instance.CurrentData.RecruitedPrisonersHistory)
@@ -126,6 +128,25 @@ internal class PartyScreenLogicPatches
                         __instance,
                         duplicateLeftMemberRoster,
                         duplicateLeftPrisonerRoster);
+                }
+                finally
+                {
+                    InCommit = false;
+                }
+            }
+        }
+        else if (flag)
+        {
+            // Fourberie's typed command owns both the source-roster debit and its mod-state credit.
+            // Restore the local preview exactly as the ordinary Coop party transaction does, but
+            // do not also emit NetworkCompleteDoneLogic for the same selected troops.
+            using (new AllowedThread())
+            {
+                InCommit = true;
+                try
+                {
+                    __instance.Reset(true);
+                    __instance._initialData.CopyFromScreenData(__instance.CurrentData);
                 }
                 finally
                 {

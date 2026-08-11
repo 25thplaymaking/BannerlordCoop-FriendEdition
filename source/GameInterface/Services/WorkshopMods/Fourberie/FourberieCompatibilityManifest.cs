@@ -13,32 +13,28 @@ internal enum FourberiePatchKind
     ServerOnly,
     ServerTick,
     ServerMutation,
-    UnsupportedPlayerAction,
     ClientPresentation,
     FinanceRead,
 
     /// <summary>
-    /// Runs Fourberie's gameplay behaviors but suppresses its 14 game-model replacements, which
-    /// overlap Coop's authority (healing, finance, crime, diplomacy, loyalty, food, party, …).
-    /// Used for the monolithic <c>InitializeCampaignBehaviors</c> so its content is available while
-    /// the conflicting models stay vanilla and Coop-synced. Behavior ticks/mutations remain gated
-    /// by their own ServerTick/ServerOnly guards.
+    /// Runs Fourberie's pinned initializer, including its eight behaviors and fourteen decorator
+    /// models. Behavior ticks and mutations remain gated by their server callbacks; model
+    /// calculations are deterministic policies, with Separatism's loyalty thresholds composed.
     /// </summary>
-    BehaviorsWithoutModels,
+    BehaviorsAndModels,
 
-    /// <summary>
-    /// Player create-action routed to the server (Diplomacy-pattern): on a client the guard
-    /// publishes an intent and skips local execution; on the server it runs the mod's routine so
-    /// the created parties/rosters flow through Coop's authoritative create funnels. Used for
-    /// Fourberie actions that mint <c>MobileParty</c>/<c>TroopRoster</c> objects.
-    /// </summary>
-    RoutedCreateAction,
+    ClientOperationPresentation,
+    EnlistPartyConsequence,
+    EnlistLadsConsequence,
+    RecruitBanditsConsequence,
+    InsuranceScamConsequence,
+    MissionInitialization,
+    SeparatismLoyaltyComposition,
 
     /// <summary>
     /// Replaces <c>Main.OnGameInitializationFinished</c>: runs only its
     /// <c>StringDicoHelper.RefreshHeroDico()</c> call (a client-local hero-name cache the menus
-    /// need) and skips its game-model load-order validation, which would otherwise spam red
-    /// warnings because Coop intentionally suppresses Fourberie's 14 model replacements.
+    /// need). Compatibility validation remains owned by this exact-binary adapter.
     /// </summary>
     RefreshHeroDicoOnly,
 }
@@ -139,8 +135,6 @@ internal static class FourberieCompatibilityManifest
         "Fourberie.FourbRecruitableBehavior",
         "Fourberie.FourbContactMenu",
         "Fourberie.FourbContractBehavior",
-        "Fourberie.HomesSteadsAddOn",
-        "Fourberie.BellumCivileAddOn",
     };
 
     private const string Void = "System.Void";
@@ -292,6 +286,9 @@ internal static class FourberieCompatibilityManifest
         var methods = new List<FourberieMethodSpec>();
         void Add(string type, string method, FourberiePatchKind kind, params string[] parameters) =>
             methods.Add(new FourberieMethodSpec(type, method, Void, kind, parameters));
+        void AddReturning(string type, string method, string returnType, FourberiePatchKind kind,
+            params string[] parameters) =>
+            methods.Add(new FourberieMethodSpec(type, method, returnType, kind, parameters));
 
         foreach (var behavior in BehaviorTypeNames)
         {
@@ -304,23 +301,33 @@ internal static class FourberieCompatibilityManifest
             Add(behavior, "SyncData", FourberiePatchKind.ServerOnly, IDataStore);
         }
 
-        // Fourberie's monolithic initializer installs every behavior plus fourteen model
-        // replacements that overlap Coop's healing, birth/death, combat, finance, diplomacy,
-        // food, settlement, and party-transition authority. Server-only execution does not make
-        // those overlapping results safe, so the initializer is feature-blocked on every role.
-        // Concrete callbacks below remain a second boundary for an already-registered listener;
-        // the runtime surface gate separately aborts if the models were installed before Coop.
-        Add("Fourberie.Main", "InitializeCampaignBehaviors", FourberiePatchKind.BehaviorsWithoutModels,
+        // Fourberie's monolithic initializer installs its eight behaviors and fourteen decorator
+        // models. Callback guards below own mutations, and the runtime gate validates the exact
+        // decorator set instead of silently dropping the mod's policy formulas.
+        Add("Fourberie.Main", "InitializeCampaignBehaviors", FourberiePatchKind.BehaviorsAndModels,
             "TaleWorlds.Core.IGameStarter");
 
-        // These static void M(int) routines create parties/rosters through MainHero, MainParty and
-        // Fourberie's singleton _agentsParty. A server request can authenticate its peer, but the
-        // original API cannot receive that peer's hero/party context. Running it would therefore
-        // apply to the host singleton. Keep all three fail-closed until an explicit-context API is
-        // deliberately implemented and tested.
-        Add("Fourberie.CriminalVM", "AgentsEnlistRoutine", FourberiePatchKind.UnsupportedPlayerAction, "System.Int32");
-        Add("Fourberie.FourbBanditBehavior", "FourbRecruitBandit", FourberiePatchKind.UnsupportedPlayerAction, "System.Int32");
-        Add("Fourberie.HelperSubInsuScam", "SpawnBandits", FourberiePatchKind.UnsupportedPlayerAction, "System.Int32");
+        // These original routines use MainHero/MainParty and private static selection state. The
+        // presentation halves remain local, while exact selection consequences become typed
+        // requests and server-side explicit-context transactions.
+        const string TroopRoster = "TaleWorlds.CampaignSystem.Roster.TroopRoster";
+        const string FlattenedTroopRoster = "TaleWorlds.CampaignSystem.Roster.FlattenedTroopRoster";
+        Add("Fourberie.CriminalVM", "AgentsEnlistRoutine", FourberiePatchKind.ClientOperationPresentation, "System.Int32");
+        AddReturning("Fourberie.CriminalVM", "EnlistFromPartyDone", "System.Boolean",
+            FourberiePatchKind.EnlistPartyConsequence,
+            TroopRoster, TroopRoster, TroopRoster, TroopRoster,
+            FlattenedTroopRoster, FlattenedTroopRoster, "System.Boolean", PartyBase, PartyBase);
+        Add("Fourberie.CriminalVM", "EnlistFromLadsDone", FourberiePatchKind.EnlistLadsConsequence,
+            PartyBase, TroopRoster, TroopRoster, PartyBase, TroopRoster, TroopRoster, "System.Boolean");
+        Add("Fourberie.FourbBanditBehavior", "FourbRecruitBandit",
+            FourberiePatchKind.ClientOperationPresentation, "System.Int32");
+        AddReturning("Fourberie.FourbBanditBehavior", "RecruitLadsOnDoneClicked", "System.Boolean",
+            FourberiePatchKind.RecruitBanditsConsequence,
+            TroopRoster, TroopRoster, TroopRoster, TroopRoster,
+            FlattenedTroopRoster, FlattenedTroopRoster, "System.Boolean", PartyBase, PartyBase);
+        Add("Fourberie.HelperSubInsuScam", "SpawnBandits", FourberiePatchKind.ServerOnly, "System.Int32");
+        Add("Fourberie.HelperSubInsuScam+<>c__DisplayClass0_0", "<Menu>b__4",
+            FourberiePatchKind.InsuranceScamConsequence);
 
         // These periodic entry points contain the random and persistent campaign decisions found
         // in the 1.4.7.5 audit. They are separately guarded so a duplicate listener cannot execute
@@ -447,28 +454,31 @@ internal static class FourberieCompatibilityManifest
             MenuCallbackArgs);
         Add("Fourberie.FourbContractBehavior", "AddGameMenus", FourberiePatchKind.ClientPresentation,
             CampaignGameStarter);
-        Add("Fourberie.HomesSteadsAddOn", "MenuHomeSteads", FourberiePatchKind.ClientPresentation,
-            CampaignGameStarter);
-
         // OnApplicationTick is Fourberie's hotkey handler: it reads local input
         // (Settings.BaseMenuButton / TacticsMenuButton) and opens the mod's menus for the local
         // player. On a client Hero.MainHero IS that player, so this is correct client-local UI; the
-        // actual state-changing menu options it opens are separately routed (RoutedCreateAction) or
-        // client-safe. Runs client-only (headless has no input). OnMissionBehaviorInitialize stays
-        // blocked (mission-context singleton mutation, not yet routed).
+        // state-changing consequences have their own typed operation or callback routes. Runs
+        // client-only (headless has no input). Mission initialization has its own
+        // role-aware authority boundary below.
         Add("Fourberie.Main", "OnApplicationTick", FourberiePatchKind.ClientPresentation, "System.Single");
-        Add("Fourberie.Main", "OnMissionBehaviorInitialize", FourberiePatchKind.UnsupportedPlayerAction,
+        Add("Fourberie.Main", "OnMissionBehaviorInitialize", FourberiePatchKind.MissionInitialization,
             "TaleWorlds.MountAndBlade.Mission");
 
-        // Screen registration is presentation-only. OnGameInitializationFinished does two things: it
-        // validates the 14 game-model replacements (which now emit red "move Fourberie in load
-        // order" spam because we intentionally suppress those models) AND calls
-        // StringDicoHelper.RefreshHeroDico() (a client-local hero-name cache the menus need). We run
-        // only the RefreshHeroDico half and skip the model validation — see RefreshHeroDicoOnlyPrefix.
+        // Screen registration is presentation-only. The adapter owns exact model compatibility, so
+        // OnGameInitializationFinished keeps only StringDicoHelper.RefreshHeroDico(), the local
+        // hero-name cache the menus need.
         Add("Fourberie.Main", "OnScreenManagerPushScreen", FourberiePatchKind.ClientPresentation,
             "TaleWorlds.ScreenSystem.ScreenBase");
         Add("Fourberie.Main", "OnGameInitializationFinished", FourberiePatchKind.RefreshHeroDicoOnly,
             "TaleWorlds.Core.Game");
+
+        // Fourberie's loyalty decorator remains the active model so its town modifiers are not
+        // discarded. These two delegated thresholds are composed with Friend Edition's integrated
+        // Separatism settings instead of replacing the whole Fourberie model afterward.
+        AddReturning("Fourberie.FModelLoyalty", "get_RebellionStartLoyaltyThreshold", "System.Int32",
+            FourberiePatchKind.SeparatismLoyaltyComposition);
+        AddReturning("Fourberie.FModelLoyalty", "get_RebelliousStateStartLoyaltyThreshold", "System.Int32",
+            FourberiePatchKind.SeparatismLoyaltyComposition);
 
         // This calculation awards random skill XP when applyWithdrawals=true. Clients may calculate
         // display values, but may never apply those side effects.

@@ -125,6 +125,9 @@ public class GameInterfaceModule : Module
         builder.RegisterType<ImprovedGarrisonsCapabilitySource>()
             .As<IWorkshopCapabilitySource>()
             .InstancePerLifetimeScope();
+        builder.RegisterType<FourberieCapabilitySource>()
+            .As<IWorkshopCapabilitySource>()
+            .InstancePerLifetimeScope();
         builder.RegisterType<MainPartyBattleRewardsCache>().As<IMainPartyBattleRewardsCache>().InstancePerLifetimeScope();
         builder.RegisterType<PacketManager>().As<IPacketManager>().InstancePerLifetimeScope();
         builder.RegisterType<MapEventInitializationBarrierBinding>().InstancePerLifetimeScope().AutoActivate();

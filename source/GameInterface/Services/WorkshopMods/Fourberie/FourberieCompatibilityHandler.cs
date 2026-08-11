@@ -2,8 +2,11 @@ using Common;
 using Common.Logging;
 using Common.Messaging;
 using Common.Network;
+using Common.Util;
+using GameInterface.Configuration;
 using GameInterface.Registry.Messages;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.Players;
 using GameInterface.Services.WorkshopMods.Core;
 using HarmonyLib;
 using LiteNetLib;
@@ -12,6 +15,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
+using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Encounters;
+using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.Library;
 
 namespace GameInterface.Services.WorkshopMods.Fourberie;
@@ -31,28 +38,39 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
     private readonly IMessageBroker messageBroker;
     private readonly INetwork network;
     private readonly IObjectManager objectManager;
+    private readonly IPlayerManager playerManager;
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IWorkshopCapabilityRegistry capabilityRegistry;
     private readonly Harmony harmony;
-    private readonly HashSet<string> notifiedActions = new HashSet<string>(StringComparer.Ordinal);
     private readonly FourberieRevisionGate revisionGate = new FourberieRevisionGate();
     private readonly object snapshotSync = new object();
+    private readonly FourberieRequestLedger<NetPeer> requestLedger = new FourberieRequestLedger<NetPeer>(256);
+    private readonly Dictionary<long, FourberieOperation> pendingOperations = new Dictionary<long, FourberieOperation>();
 
     private Assembly assembly;
     private string configurationFingerprint;
     private string lastPublishedFingerprint;
     private long serverRevision;
+    private long nextRequestId;
     private bool compatible;
-    private bool limitationNoticeShown;
     private bool stateReady;
+    private FourberieOperationExecutor operationExecutor;
 
     public FourberieCompatibilityHandler(
         IMessageBroker messageBroker,
         INetwork network,
         IObjectManager objectManager,
+        IPlayerManager playerManager,
+        IModConfigAuthority configAuthority,
+        IWorkshopCapabilityRegistry capabilityRegistry,
         Harmony _)
     {
         this.messageBroker = messageBroker;
         this.network = network;
         this.objectManager = objectManager;
+        this.playerManager = playerManager;
+        this.configAuthority = configAuthority;
+        this.capabilityRegistry = capabilityRegistry;
         this.harmony = new Harmony(FourberieCompatibilityManifest.AdapterHarmonyId);
 
         compatible = TryInstall();
@@ -60,6 +78,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
 
         messageBroker.Subscribe<AllGameObjectsRegistered>(HandleAllGameObjectsRegistered);
         messageBroker.Subscribe<NetworkRequestFourberieState>(HandleStateRequest);
+        messageBroker.Subscribe<NetworkRequestFourberieOperation>(HandleOperationRequest);
+        messageBroker.Subscribe<NetworkFourberieOperationResult>(HandleOperationResult);
         messageBroker.Subscribe<NetworkFourberieState>(HandleState);
     }
 
@@ -67,26 +87,58 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
     {
         messageBroker.Unsubscribe<AllGameObjectsRegistered>(HandleAllGameObjectsRegistered);
         messageBroker.Unsubscribe<NetworkRequestFourberieState>(HandleStateRequest);
+        messageBroker.Unsubscribe<NetworkRequestFourberieOperation>(HandleOperationRequest);
+        messageBroker.Unsubscribe<NetworkFourberieOperationResult>(HandleOperationResult);
         messageBroker.Unsubscribe<NetworkFourberieState>(HandleState);
         if (ReferenceEquals(FourberiePatchRuntime.Current, this)) FourberiePatchRuntime.Current = null;
-    }
-
-    public void NotifyUnsupported(string method)
-    {
-        method ??= "unknown Fourberie action";
-        if (!notifiedActions.Add(method)) return;
-
-        var message = $"Fourberie entry point '{method}' is disabled in co-op: its singleton campaign/model flow has no validated controller-authorized authority route.";
-        // Log-only: these entry points (Main.OnApplicationTick / OnGameInitializationFinished) are
-        // deliberately blocked and there is nothing the player can do about it, so the on-screen
-        // notice only reads as an error. Keep it in the log for diagnostics.
-        Logger.Warning(message);
     }
 
     public void PublishIfChanged()
     {
         if (!compatible || !stateReady || !ModInformation.IsServer) return;
         SendSnapshotOrAbort(peer: null, onlyIfChanged: true);
+    }
+
+    public bool TrySubmit(FourberieLocalOperation operation)
+    {
+        if (!ModInformation.IsClient || operation == null || !CanUseGameplayRoute(out var config))
+            return false;
+
+        string settlementId = string.Empty;
+        string targetId = string.Empty;
+        string secondaryTargetId = string.Empty;
+        if (operation.Settlement != null && !objectManager.TryGetId(operation.Settlement, out settlementId))
+            return false;
+        if (operation.TargetHero != null && !objectManager.TryGetId(operation.TargetHero, out targetId))
+            return false;
+        if (operation.SecondarySettlement != null &&
+            !objectManager.TryGetId(operation.SecondarySettlement, out secondaryTargetId))
+            return false;
+
+        var troops = new List<FourberieTroopSelection>();
+        foreach (FourberieLocalTroopSelection troop in operation.Troops)
+        {
+            if (troop?.Troop == null || !objectManager.TryGetId(troop.Troop, out string troopId))
+                return false;
+            troops.Add(new FourberieTroopSelection(troopId, troop.Count));
+        }
+
+        long requestId = Interlocked.Increment(ref nextRequestId);
+        var request = new NetworkRequestFourberieOperation(
+            config.SessionId,
+            requestId,
+            revisionGate.Revision,
+            operation.Operation,
+            settlementId,
+            targetId,
+            secondaryTargetId,
+            operation.IntValue,
+            troops.ToArray());
+        if (!FourberieOperationProtocol.IsRequestShapeValid(request)) return false;
+
+        pendingOperations[requestId] = operation.Operation;
+        network.SendAll(request);
+        return true;
     }
 
     private bool TryInstall()
@@ -101,6 +153,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             Logger.Debug("Fourberie is not loaded; compatibility adapter is inactive");
             return false;
         }
+
+        operationExecutor = new FourberieOperationExecutor(assembly, objectManager);
 
         if (!FourberieCompatibilityManifest.TryValidate(assembly, out var methods, out var failure))
         {
@@ -192,7 +246,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         }
 
         Logger.Information(
-            "Fourberie {Version} co-op feature-blocking adapter enabled ({Methods} guarded methods, config {Fingerprint}, files {Files})",
+            "Fourberie {Version} co-op authority adapter enabled ({Methods} routed methods, config {Fingerprint}, files {Files})",
             FourberieCompatibilityManifest.SupportedModuleVersion,
             methods.Count,
             configurationFingerprint,
@@ -209,14 +263,29 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.ServerMutation:
                 method = nameof(FourberieAuthorityPatches.ServerTickPrefix);
                 break;
-            case FourberiePatchKind.UnsupportedPlayerAction:
-                method = nameof(FourberieAuthorityPatches.UnsupportedPlayerActionPrefix);
+            case FourberiePatchKind.BehaviorsAndModels:
+                method = nameof(FourberieAuthorityPatches.InitializeBehaviorsAndModelsPrefix);
                 break;
-            case FourberiePatchKind.BehaviorsWithoutModels:
-                method = nameof(FourberieAuthorityPatches.InitializeBehaviorsOnlyPrefix);
+            case FourberiePatchKind.ClientOperationPresentation:
+                method = nameof(FourberieAuthorityPatches.ClientOperationPresentationPrefix);
                 break;
-            case FourberiePatchKind.RoutedCreateAction:
-                method = nameof(FourberieAuthorityPatches.RoutedCreateActionPrefix);
+            case FourberiePatchKind.EnlistPartyConsequence:
+                method = nameof(FourberieAuthorityPatches.EnlistPartyConsequencePrefix);
+                break;
+            case FourberiePatchKind.EnlistLadsConsequence:
+                method = nameof(FourberieAuthorityPatches.EnlistLadsConsequencePrefix);
+                break;
+            case FourberiePatchKind.RecruitBanditsConsequence:
+                method = nameof(FourberieAuthorityPatches.RecruitBanditsConsequencePrefix);
+                break;
+            case FourberiePatchKind.InsuranceScamConsequence:
+                method = nameof(FourberieAuthorityPatches.InsuranceScamConsequencePrefix);
+                break;
+            case FourberiePatchKind.MissionInitialization:
+                method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
+                break;
+            case FourberiePatchKind.SeparatismLoyaltyComposition:
+                method = nameof(FourberieAuthorityPatches.SeparatismLoyaltyCompositionPrefix);
                 break;
             case FourberiePatchKind.RefreshHeroDicoOnly:
                 method = nameof(FourberieAuthorityPatches.RefreshHeroDicoOnlyPrefix);
@@ -243,11 +312,14 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             throw new InvalidOperationException(runtimeFailure);
 
         FourberieAuthorityPatches.ResetTickLedger();
+        FourberiePartyCommitSuppression.Reset();
+        requestLedger.Reset();
+        pendingOperations.Clear();
+        nextRequestId = 0;
         lock (snapshotSync) revisionGate.Reset();
         stateReady = true;
         if (ModInformation.IsClient)
         {
-            ShowLimitationNotice();
             network.SendAll(new NetworkRequestFourberieState());
             return;
         }
@@ -255,6 +327,128 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         serverRevision = 0;
         lastPublishedFingerprint = null;
         SendSnapshotOrAbort(peer: null, onlyIfChanged: false);
+    }
+
+    private bool CanUseGameplayRoute(out ModConfigSnapshot config)
+    {
+        config = null;
+        return compatible && stateReady && configAuthority.TryGetCurrent(out config) &&
+               capabilityRegistry.IsEnabled(FourberieCapabilitySource.ModuleId, FourberieCapabilitySource.Operation);
+    }
+
+    private void HandleOperationRequest(MessagePayload<NetworkRequestFourberieOperation> payload)
+    {
+        if (!ModInformation.IsServer || payload.Who is not NetPeer peer) return;
+        GameThread.RunSafe(() => ApplyOperationRequest(peer, payload.What),
+            context: nameof(FourberieCompatibilityHandler));
+    }
+
+    private void ApplyOperationRequest(NetPeer peer, NetworkRequestFourberieOperation request)
+    {
+        if (!FourberieOperationProtocol.IsRequestShapeValid(request) ||
+            !CanUseGameplayRoute(out var config))
+        {
+            Logger.Warning("Rejected malformed or unavailable Fourberie operation from peer {Peer}", peer.Id);
+            return;
+        }
+        if (!string.Equals(config.SessionId, request.SessionId, StringComparison.Ordinal))
+        {
+            SendOperationResult(peer, request, FourberieOperationStatus.StaleSession, config.SessionId);
+            return;
+        }
+
+        string commandKey = FourberieOperationProtocol.CommandKey(request);
+        FourberieReplayDecision replay = requestLedger.Inspect(
+            peer, request.RequestId, commandKey, out NetworkFourberieOperationResult cached);
+        if (replay == FourberieReplayDecision.Conflict)
+        {
+            DenyPeerOrAbortSession(peer,
+                "reused Fourberie request ID " + request.RequestId + " with different payload");
+            return;
+        }
+        if (replay == FourberieReplayDecision.Replay)
+        {
+            network.Send(peer, cached);
+            SendSnapshotOrAbort(peer, onlyIfChanged: false);
+            return;
+        }
+        if (request.ExpectedRevision != serverRevision)
+        {
+            SendOperationResult(peer, request, FourberieOperationStatus.StaleState, config.SessionId);
+            SendSnapshotOrAbort(peer, onlyIfChanged: false);
+            return;
+        }
+        if (!playerManager.TryGetPlayer(peer, out var player) ||
+            !objectManager.TryGetObject(player.HeroId, out Hero actor) ||
+            !objectManager.TryGetObject(player.MobilePartyId, out MobileParty actorParty) ||
+            actor == null || actorParty == null)
+        {
+            SendOperationResult(peer, request, FourberieOperationStatus.Rejected, config.SessionId);
+            return;
+        }
+
+        FourberieOperationStatus status;
+        try
+        {
+            status = operationExecutor.TryExecute(actor, actorParty, request, out string failure)
+                ? FourberieOperationStatus.Accepted
+                : FourberieOperationStatus.Rejected;
+            if (failure != null)
+                Logger.Warning("Rejected Fourberie operation {Operation} request {RequestId}: {Failure}",
+                    request.Operation, request.RequestId, failure);
+        }
+        catch (Exception fatal)
+        {
+            DenyPeerOrAbortSession(null,
+                "Fourberie operation " + request.RequestId + " could not roll back: " + fatal.Message);
+            return;
+        }
+
+        if (status == FourberieOperationStatus.Accepted)
+            SendSnapshotOrAbort(peer: null, onlyIfChanged: true);
+        var result = new NetworkFourberieOperationResult(
+            config.SessionId, request.RequestId, status, serverRevision);
+        requestLedger.Record(peer, request.RequestId, commandKey, result);
+        network.Send(peer, result);
+        if (status != FourberieOperationStatus.Accepted)
+            SendSnapshotOrAbort(peer, onlyIfChanged: false);
+    }
+
+    private void SendOperationResult(
+        NetPeer peer,
+        NetworkRequestFourberieOperation request,
+        FourberieOperationStatus status,
+        string sessionId)
+    {
+        network.Send(peer, new NetworkFourberieOperationResult(
+            sessionId, request.RequestId, status, serverRevision));
+    }
+
+    private void HandleOperationResult(MessagePayload<NetworkFourberieOperationResult> payload)
+    {
+        if (!ModInformation.IsClient || payload.Who is not NetPeer serverPeer ||
+            !FourberieSnapshotOriginGuard.IsTrustedServerTransport(serverPeer, localIsClient: true) ||
+            payload.What == null || !pendingOperations.TryGetValue(payload.What.RequestId, out FourberieOperation operation))
+            return;
+        pendingOperations.Remove(payload.What.RequestId);
+
+        if (payload.What.Status == FourberieOperationStatus.Accepted)
+        {
+            InformationManager.DisplayMessage(new InformationMessage("Fourberie action accepted by the co-op server."));
+            if (operation == FourberieOperation.StartInsuranceScam)
+            {
+                using (new AllowedThread())
+                {
+                    PlayerEncounter.LeaveSettlement();
+                    PlayerEncounter.Finish(true);
+                }
+            }
+        }
+        else
+        {
+            InformationManager.DisplayMessage(new InformationMessage(
+                "The Fourberie action could not be applied because its campaign state changed. Reopen the option and try again."));
+        }
     }
 
     private void HandleStateRequest(MessagePayload<NetworkRequestFourberieState> payload)
@@ -441,11 +635,4 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             "The Coop session cannot continue without authoritative Fourberie state: " + failure);
     }
 
-    private void ShowLimitationNotice()
-    {
-        if (limitationNoticeShown) return;
-        limitationNoticeShown = true;
-        InformationManager.DisplayMessage(new InformationMessage(
-            "Fourberie co-op guard is active. Its campaign behaviors, model replacements, menus, shortcuts, conversations, and missions are blocked, not integrated. Only presentation assets remain available."));
-    }
 }

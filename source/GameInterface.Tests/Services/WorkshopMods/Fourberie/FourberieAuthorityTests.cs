@@ -104,19 +104,37 @@ public sealed class FourberieAuthorityTests
     }
 
     [Fact]
-    public void CreateActionInterface_RefusesLegacyRoutesWithoutExplicitPlayerContext()
+    public void OperationProtocol_AcceptsBoundedStableSelectionsAndRejectsMalformedShapes()
     {
-        var adapter = new FourberieCreateActionInterface();
+        var valid = new NetworkRequestFourberieOperation(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            7,
+            3,
+            FourberieOperation.EnlistAgentsFromParty,
+            "town_a",
+            string.Empty,
+            12,
+            new[] { new FourberieTroopSelection("troop_a", 2) });
 
-        Assert.Equal(
-            FourberieCreateActionVerdict.NotAllowed,
-            adapter.TryRun("Fourberie.CriminalVM", "AgentsEnlistRoutine", 4));
-        Assert.Equal(
-            FourberieCreateActionVerdict.NotAllowed,
-            adapter.TryRun("Fourberie.FourbBanditBehavior", "FourbRecruitBandit", 4));
-        Assert.Equal(
-            FourberieCreateActionVerdict.NotAllowed,
-            adapter.TryRun("Fourberie.HelperSubInsuScam", "SpawnBandits", 4));
+        Assert.True(FourberieOperationProtocol.IsRequestShapeValid(valid));
+        Assert.False(FourberieOperationProtocol.IsRequestShapeValid(new NetworkRequestFourberieOperation(
+            valid.SessionId,
+            valid.RequestId,
+            valid.ExpectedRevision,
+            valid.Operation,
+            valid.SettlementId,
+            valid.TargetId,
+            valid.IntValue,
+            new[] { new FourberieTroopSelection("troop_a", -1) })));
+        Assert.False(FourberieOperationProtocol.IsRequestShapeValid(new NetworkRequestFourberieOperation(
+            valid.SessionId,
+            valid.RequestId,
+            valid.ExpectedRevision,
+            valid.Operation,
+            valid.SettlementId,
+            valid.TargetId,
+            valid.IntValue,
+            new FourberieTroopSelection[FourberieOperationProtocol.MaxTroopSelections + 1])));
     }
 
     [Fact]
@@ -148,9 +166,9 @@ public sealed class FourberieAuthorityTests
     }
 
     [Fact]
-    public void InitializeBehaviorsWithoutStarter_FailsClosedInsteadOfRunningTheUnsafeOriginal()
+    public void InitializeBehaviorsAndModelsWithoutStarter_FailsClosedInsteadOfPartiallyRegistering()
     {
         Assert.Throws<InvalidOperationException>(() =>
-            FourberieAuthorityPatches.InitializeBehaviorsOnlyPrefix(Array.Empty<object>()));
+            FourberieAuthorityPatches.InitializeBehaviorsAndModelsPrefix(Array.Empty<object>()));
     }
 }

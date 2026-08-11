@@ -65,8 +65,8 @@ internal sealed class FourberieStateApplyTransaction
 
 /// <summary>
 /// Stable-ID representation of every field FourberieBehavior.SyncData persists in 1.4.7.5.
-/// Mission-only/transient fields are deliberately excluded because Fourberie mission entry points
-/// are disabled until they can be associated with a validated Coop controller.
+/// Mission-only/transient fields are deliberately excluded because mission state is owned by the
+/// active Coop mission instance rather than the campaign snapshot.
 /// </summary>
 internal static class FourberieCanonicalState
 {

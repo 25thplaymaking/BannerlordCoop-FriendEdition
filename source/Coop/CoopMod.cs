@@ -538,7 +538,14 @@ namespace Coop
                 campaignGameStarter.AddBehavior(new PlayerPartyInteractionCampaignBehavior());
                 campaignGameStarter.AddBehavior(new CoopTournamentCampaignBehavior());
                 campaignGameStarter.AddBehavior(new SeparatismCampaignBehavior());
-                campaignGameStarter.AddModel(new SeparatismSettlementLoyaltyModel());
+                // Fourberie installs a decorator loyalty model that preserves its criminal-network
+                // modifiers. The Fourberie adapter composes Separatism's two thresholds directly
+                // into that decorator; installing a second model here would silently discard the
+                // Fourberie formula. Without Fourberie, retain the ordinary integrated model.
+                bool fourberieActive = AppDomain.CurrentDomain.GetAssemblies().Any(assembly =>
+                    string.Equals(assembly.GetName().Name, "Fourberie", StringComparison.Ordinal));
+                if (!fourberieActive)
+                    campaignGameStarter.AddModel(new SeparatismSettlementLoyaltyModel());
             }
         }
 

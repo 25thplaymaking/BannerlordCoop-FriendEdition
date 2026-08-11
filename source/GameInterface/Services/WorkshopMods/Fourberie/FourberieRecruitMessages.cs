@@ -1,62 +1,179 @@
 using Common.Messaging;
 using ProtoBuf;
-using TaleWorlds.CampaignSystem;
+using System;
+using System.Globalization;
+using System.Linq;
+using System.Text;
 
 namespace GameInterface.Services.WorkshopMods.Fourberie;
 
-/// <summary>
-/// The local player triggered a Fourberie action that creates campaign parties/troops
-/// (saboteur/bandit recruiting, scam bandit spawns); ask the server to run it.
-/// </summary>
-/// <remarks>
-/// These actions are <c>static void M(int)</c> routines that call vanilla
-/// <c>MobileParty.CreateParty</c> + <c>TroopRoster</c> mutators. Run on a client they author
-/// objects Coop forbids (the "Failed to get TroopRoster using Created_####" storm). Routed to the
-/// server they pass through Coop's create funnels and replicate to every client. The requesting
-/// hero is carried explicitly so the server never re-reads <c>Hero.MainHero</c>.
-/// </remarks>
-internal readonly struct FourberieCreateActionAttempted : IEvent
+internal enum FourberieOperation
 {
-    public readonly Hero Requester;
-    public readonly string DeclaringTypeName;
-    public readonly string MethodName;
-    public readonly int Arg;
+    EnlistAgentsFromParty = 1,
+    EnlistAgentsFromLads = 2,
+    RecruitBandits = 3,
+    StartInsuranceScam = 4,
+}
 
-    public FourberieCreateActionAttempted(Hero requester, string declaringTypeName, string methodName, int arg)
+internal enum FourberieOperationStatus
+{
+    Accepted = 1,
+    Rejected = 2,
+    StaleSession = 3,
+    StaleState = 4,
+    Failed = 5,
+}
+
+[ProtoContract(SkipConstructor = true)]
+internal sealed class FourberieTroopSelection
+{
+    [ProtoMember(1)] public string TroopId { get; private set; }
+    [ProtoMember(2)] public int Count { get; private set; }
+
+    private FourberieTroopSelection()
     {
-        Requester = requester;
-        DeclaringTypeName = declaringTypeName;
-        MethodName = methodName;
-        Arg = arg;
+    }
+
+    public FourberieTroopSelection(string troopId, int count)
+    {
+        TroopId = troopId;
+        Count = count;
     }
 }
 
-/// <summary>
-/// Client asks the server to run one of Fourberie's whitelisted static create-actions
-/// authoritatively. Carries the requesting hero id, the method identity, and its single int intent
-/// — never outcomes. The server validates ownership and that the method is on the routed
-/// allow-list before invoking it.
-/// </summary>
 [ProtoContract(SkipConstructor = true)]
-internal record NetworkRequestFourberieCreateAction : ICommand
+internal sealed class NetworkRequestFourberieOperation : ICommand
 {
-    [ProtoMember(1)]
-    public string RequesterHeroId { get; }
+    [ProtoMember(1)] public string SessionId { get; private set; }
+    [ProtoMember(2)] public long RequestId { get; private set; }
+    [ProtoMember(3)] public long ExpectedRevision { get; private set; }
+    [ProtoMember(4)] public FourberieOperation Operation { get; private set; }
+    [ProtoMember(5)] public string SettlementId { get; private set; }
+    [ProtoMember(6)] public string TargetId { get; private set; }
+    [ProtoMember(7)] public string SecondaryTargetId { get; private set; }
+    [ProtoMember(8)] public int IntValue { get; private set; }
+    [ProtoMember(9)] private FourberieTroopSelection[] troops;
 
-    [ProtoMember(2)]
-    public string DeclaringTypeName { get; }
+    public FourberieTroopSelection[] Troops => troops ?? Array.Empty<FourberieTroopSelection>();
 
-    [ProtoMember(3)]
-    public string MethodName { get; }
-
-    [ProtoMember(4)]
-    public int Arg { get; }
-
-    public NetworkRequestFourberieCreateAction(string requesterHeroId, string declaringTypeName, string methodName, int arg)
+    private NetworkRequestFourberieOperation()
     {
-        RequesterHeroId = requesterHeroId;
-        DeclaringTypeName = declaringTypeName;
-        MethodName = methodName;
-        Arg = arg;
+    }
+
+    public NetworkRequestFourberieOperation(
+        string sessionId,
+        long requestId,
+        long expectedRevision,
+        FourberieOperation operation,
+        string settlementId,
+        string targetId,
+        int intValue,
+        FourberieTroopSelection[] troops)
+        : this(sessionId, requestId, expectedRevision, operation, settlementId, targetId,
+            string.Empty, intValue, troops)
+    {
+    }
+
+    public NetworkRequestFourberieOperation(
+        string sessionId,
+        long requestId,
+        long expectedRevision,
+        FourberieOperation operation,
+        string settlementId,
+        string targetId,
+        string secondaryTargetId,
+        int intValue,
+        FourberieTroopSelection[] troops)
+    {
+        SessionId = sessionId;
+        RequestId = requestId;
+        ExpectedRevision = expectedRevision;
+        Operation = operation;
+        SettlementId = settlementId ?? string.Empty;
+        TargetId = targetId ?? string.Empty;
+        SecondaryTargetId = secondaryTargetId ?? string.Empty;
+        IntValue = intValue;
+        this.troops = troops ?? Array.Empty<FourberieTroopSelection>();
+    }
+}
+
+[ProtoContract(SkipConstructor = true)]
+internal sealed class NetworkFourberieOperationResult : ICommand
+{
+    [ProtoMember(1)] public string SessionId { get; private set; }
+    [ProtoMember(2)] public long RequestId { get; private set; }
+    [ProtoMember(3)] public FourberieOperationStatus Status { get; private set; }
+    [ProtoMember(4)] public long Revision { get; private set; }
+
+    private NetworkFourberieOperationResult()
+    {
+    }
+
+    public NetworkFourberieOperationResult(
+        string sessionId,
+        long requestId,
+        FourberieOperationStatus status,
+        long revision)
+    {
+        SessionId = sessionId;
+        RequestId = requestId;
+        Status = status;
+        Revision = revision;
+    }
+}
+
+internal static class FourberieOperationProtocol
+{
+    internal const int MaxTroopSelections = 64;
+    internal const int MaxStableIdLength = 256;
+    internal const int MaxSelectedTroops = 2_000;
+
+    public static bool IsRequestShapeValid(NetworkRequestFourberieOperation request)
+    {
+        if (request == null || request.SessionId == null || request.SessionId.Length != 32 ||
+            !Guid.TryParseExact(request.SessionId, "N", out _) || request.RequestId <= 0 ||
+            request.ExpectedRevision < 0 || !Enum.IsDefined(typeof(FourberieOperation), request.Operation) ||
+            !IsStableId(request.SettlementId, allowEmpty: true) ||
+            !IsStableId(request.TargetId, allowEmpty: true) || request.IntValue < 0 ||
+            !IsStableId(request.SecondaryTargetId, allowEmpty: true) ||
+            request.IntValue > MaxSelectedTroops || request.Troops.Length > MaxTroopSelections)
+            return false;
+
+        int total = 0;
+        foreach (FourberieTroopSelection troop in request.Troops)
+        {
+            if (troop == null || !IsStableId(troop.TroopId, allowEmpty: false) ||
+                troop.Count <= 0 || troop.Count > MaxSelectedTroops)
+                return false;
+            total += troop.Count;
+            if (total > MaxSelectedTroops) return false;
+        }
+
+        return request.Troops
+            .Select(troop => troop.TroopId)
+            .Distinct(StringComparer.Ordinal)
+            .Count() == request.Troops.Length;
+    }
+
+    public static string CommandKey(NetworkRequestFourberieOperation request)
+    {
+        var builder = new StringBuilder();
+        builder.Append(request.SessionId).Append('|')
+            .Append(request.ExpectedRevision.ToString(CultureInfo.InvariantCulture)).Append('|')
+            .Append(((int)request.Operation).ToString(CultureInfo.InvariantCulture)).Append('|')
+            .Append(request.SettlementId).Append('|').Append(request.TargetId).Append('|')
+            .Append(request.SecondaryTargetId).Append('|')
+            .Append(request.IntValue.ToString(CultureInfo.InvariantCulture));
+        foreach (FourberieTroopSelection troop in request.Troops.OrderBy(value => value.TroopId, StringComparer.Ordinal))
+            builder.Append('|').Append(troop.TroopId).Append(':')
+                .Append(troop.Count.ToString(CultureInfo.InvariantCulture));
+        return builder.ToString();
+    }
+
+    private static bool IsStableId(string value, bool allowEmpty)
+    {
+        if (string.IsNullOrEmpty(value)) return allowEmpty;
+        return value.Length <= MaxStableIdLength && value.All(character =>
+            !char.IsControl(character) && character != '|' && character != ':');
     }
 }

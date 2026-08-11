@@ -1,6 +1,5 @@
 using Common;
-using Common.Messaging;
-using GameInterface.Policies;
+using GameInterface.Configuration;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -9,18 +8,76 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Party;
+using TaleWorlds.CampaignSystem.Roster;
+using TaleWorlds.CampaignSystem.Settlements;
+using TaleWorlds.Core;
 
 namespace GameInterface.Services.WorkshopMods.Fourberie;
 
 internal interface IFourberiePatchRuntime
 {
-    void NotifyUnsupported(string method);
     void PublishIfChanged();
+    bool TrySubmit(FourberieLocalOperation operation);
 }
 
 internal static class FourberiePatchRuntime
 {
     public static IFourberiePatchRuntime Current { get; set; }
+}
+
+internal sealed class FourberieLocalTroopSelection
+{
+    public FourberieLocalTroopSelection(CharacterObject troop, int count)
+    {
+        Troop = troop;
+        Count = count;
+    }
+
+    public CharacterObject Troop { get; }
+    public int Count { get; }
+}
+
+internal sealed class FourberieLocalOperation
+{
+    public FourberieLocalOperation(
+        FourberieOperation operation,
+        Settlement settlement,
+        Hero targetHero,
+        Settlement secondarySettlement,
+        int intValue,
+        FourberieLocalTroopSelection[] troops)
+    {
+        Operation = operation;
+        Settlement = settlement;
+        TargetHero = targetHero;
+        SecondarySettlement = secondarySettlement;
+        IntValue = intValue;
+        Troops = troops ?? Array.Empty<FourberieLocalTroopSelection>();
+    }
+
+    public FourberieOperation Operation { get; }
+    public Settlement Settlement { get; }
+    public Hero TargetHero { get; }
+    public Settlement SecondarySettlement { get; }
+    public int IntValue { get; }
+    public FourberieLocalTroopSelection[] Troops { get; }
+}
+
+internal static class FourberiePartyCommitSuppression
+{
+    [ThreadStatic] private static bool pending;
+
+    public static void Request() => pending = true;
+
+    public static bool Consume()
+    {
+        bool result = pending;
+        pending = false;
+        return result;
+    }
+
+    public static void Reset() => pending = false;
 }
 
 internal sealed class FourberieTickLedger
@@ -99,10 +156,104 @@ internal sealed class FourberieRevisionGate
 internal static class FourberieAuthorityPatches
 {
     private static readonly FourberieTickLedger TickLedger = new FourberieTickLedger();
+    private static int agentEnlistSource;
+    private static Settlement banditRecruitmentSettlement;
+    private static int banditRecruitmentMaximum;
 
     public static bool ServerOnlyPrefix() => ModInformation.IsServer;
 
     public static bool ClientPresentationPrefix() => ModInformation.IsClient;
+
+    public static bool ClientOperationPresentationPrefix(MethodBase __originalMethod, object[] __args)
+    {
+        if (!ModInformation.IsClient) return false;
+
+        if (string.Equals(__originalMethod?.DeclaringType?.FullName, "Fourberie.CriminalVM", StringComparison.Ordinal))
+        {
+            agentEnlistSource = __args != null && __args.Length > 0 && __args[0] is int value ? value : 0;
+        }
+        else
+        {
+            banditRecruitmentSettlement = Settlement.CurrentSettlement;
+            banditRecruitmentMaximum = __args != null && __args.Length > 0 && __args[0] is int value ? value : 0;
+        }
+
+        return true;
+    }
+
+    public static bool EnlistPartyConsequencePrefix(TroopRoster leftMemberRoster, ref bool __result)
+    {
+        if (!ModInformation.IsClient) return true;
+        bool submitted = SubmitEnlistment(leftMemberRoster, FourberieOperation.EnlistAgentsFromParty);
+        agentEnlistSource = 0;
+        FourberiePartyCommitSuppression.Request();
+        __result = submitted;
+        return false;
+    }
+
+    public static bool EnlistLadsConsequencePrefix(TroopRoster leftMemberRoster, bool fromCancel)
+    {
+        if (!ModInformation.IsClient) return true;
+        if (!fromCancel) SubmitEnlistment(leftMemberRoster, FourberieOperation.EnlistAgentsFromLads);
+        agentEnlistSource = 0;
+        return false;
+    }
+
+    public static bool RecruitBanditsConsequencePrefix(TroopRoster leftMemberRoster, ref bool __result)
+    {
+        if (!ModInformation.IsClient) return true;
+
+        var type = HarmonyLib.AccessTools.TypeByName("Fourberie.FourbBanditBehavior");
+        var baseline = type == null
+            ? null
+            : HarmonyLib.AccessTools.Field(type, "_dummyTroopRooster")?.GetValue(null) as TroopRoster;
+        var selected = Difference(baseline, leftMemberRoster);
+        bool submitted = FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+            FourberieOperation.RecruitBandits,
+            banditRecruitmentSettlement,
+            null,
+            null,
+            banditRecruitmentMaximum,
+            selected)) == true;
+        banditRecruitmentSettlement = null;
+        banditRecruitmentMaximum = 0;
+        FourberiePartyCommitSuppression.Request();
+        __result = submitted;
+        return false;
+    }
+
+    public static bool InsuranceScamConsequencePrefix(object __instance)
+    {
+        if (!ModInformation.IsClient) return false;
+        if (__instance == null) return false;
+
+        var type = __instance.GetType();
+        var merchant = HarmonyLib.AccessTools.Field(type, "merchtarg")?.GetValue(__instance) as Hero;
+        var settlement = HarmonyLib.AccessTools.Field(type, "currentSet")?.GetValue(__instance) as Settlement;
+        var destination = HarmonyLib.AccessTools.Field(type, "settofrom")?.GetValue(__instance) as Settlement;
+        FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+            FourberieOperation.StartInsuranceScam,
+            settlement,
+            merchant,
+            destination,
+            0,
+            Array.Empty<FourberieLocalTroopSelection>()));
+        return false;
+    }
+
+    public static bool MissionInitializationPrefix() => true;
+
+    public static bool SeparatismLoyaltyCompositionPrefix(MethodBase __originalMethod, ref int __result)
+    {
+        if (!ModConfigProvider.ModOptions.Separatism.Enabled) return true;
+        __result = string.Equals(
+                __originalMethod?.Name,
+                "get_RebellionStartLoyaltyThreshold",
+                StringComparison.Ordinal)
+            ? ModConfigProvider.ModOptions.Separatism.SettlementRebellionStartLoyaltyThreshold
+            : ModConfigProvider.ModOptions.Separatism.SettlementRebellionEndLoyaltyThreshold;
+        return false;
+    }
 
     public static bool ServerTickPrefix(MethodBase __originalMethod, object[] __args)
     {
@@ -114,43 +265,13 @@ internal static class FourberieAuthorityPatches
         return TickLedger.TryEnter(campaignId, MethodKey(__originalMethod), SubjectKey(__args), tick);
     }
 
-    public static bool UnsupportedPlayerActionPrefix(MethodBase __originalMethod)
-    {
-        FourberiePatchRuntime.Current?.NotifyUnsupported(
-            __originalMethod?.DeclaringType?.FullName + "." + (__originalMethod?.Name ?? "unknown"));
-        return false;
-    }
-
-    /// <summary>
-    /// Routes a Fourberie player create-action (static void M(int)) to the server. On a client we
-    /// publish the intent (acting hero + method identity + the single int arg) and skip the local
-    /// call so no MobileParty/TroopRoster is authored client-side. On the server the original runs,
-    /// and its creations replicate through Coop's funnels. A replay (authoritative apply) is let
-    /// through untouched. See FourberieRecruit{Messages,Interface,Handler}.cs.
-    /// </summary>
-    public static bool RoutedCreateActionPrefix(MethodBase __originalMethod, object[] __args)
-    {
-        if (CallOriginalPolicy.IsOriginalAllowed()) return true;
-        if (ModInformation.IsServer) return true;
-
-        var giver = Hero.MainHero;
-        if (giver == null) return false; // no local hero to attribute the action to; drop it
-
-        int arg = __args != null && __args.Length > 0 && __args[0] is int value ? value : 0;
-        MessageBroker.Instance.Publish(null, new FourberieCreateActionAttempted(
-            giver, __originalMethod?.DeclaringType?.FullName, __originalMethod?.Name, arg));
-        return false;
-    }
-
     private static MethodInfo _refreshHeroDico;
     private static bool _refreshHeroDicoResolved;
 
     /// <summary>
-    /// Replaces Fourberie's <c>Main.OnGameInitializationFinished</c>. That method validates the 14
-    /// game-model replacements — which now emit red "move Fourberie in load order" warnings because
-    /// Coop suppresses those models — and then refreshes a client-local hero-name cache
-    /// (<c>StringDicoHelper.RefreshHeroDico()</c>) the menus rely on. We run only the useful cache
-    /// refresh and skip the validation spam. Resolved by reflection; inert if Fourberie is absent.
+    /// Replaces Fourberie's <c>Main.OnGameInitializationFinished</c> with the client-local hero-name
+    /// cache refresh its menus need. Exact model compatibility is enforced earlier by the adapter,
+    /// so Fourberie's load-order diagnostic is redundant here.
     /// </summary>
     public static bool RefreshHeroDicoOnlyPrefix()
     {
@@ -164,7 +285,7 @@ internal static class FourberieAuthorityPatches
         try { _refreshHeroDico?.Invoke(null, null); }
         catch { /* cache refresh is best-effort; never abort game init on it */ }
 
-        return false; // skip the original's model-validation load-order spam
+        return false;
     }
 
     /// <summary>
@@ -191,7 +312,7 @@ internal static class FourberieAuthorityPatches
     /// state mutations stay gated by the separate ServerTick/ServerOnly guards; player-triggered
     /// actions are routed through Coop incrementally.
     /// </summary>
-    public static bool InitializeBehaviorsOnlyPrefix(object[] __args)
+    public static bool InitializeBehaviorsAndModelsPrefix(object[] __args)
     {
         var starter = __args != null && __args.Length > 0
             ? __args[0] as CampaignGameStarter
@@ -201,15 +322,10 @@ internal static class FourberieAuthorityPatches
             throw new InvalidOperationException(
                 "Fourberie behavior initialization had no CampaignGameStarter; refusing the unsafe original initializer.");
 
-        var behaviors = PreflightBehaviors(
-            FourberieBehaviorTypeNames,
-            HarmonyLib.AccessTools.TypeByName);
-        foreach (var behavior in behaviors)
-        {
-            starter.AddBehavior(behavior);
-        }
-
-        return false; // skip original: its AddModel<...> replacements are not registered
+        // The pinned original registers the eight Fourberie behaviors and fourteen decorator
+        // models. Its two embedded cross-mod flags remain false because their prerequisite modules
+        // are absent from Friend Edition, so those add-ons cannot register.
+        return true;
     }
 
     internal static IReadOnlyList<CampaignBehaviorBase> PreflightBehaviors(
@@ -255,6 +371,45 @@ internal static class FourberieAuthorityPatches
     }
 
     internal static void ResetTickLedger() => TickLedger.Reset();
+
+    private static bool SubmitEnlistment(TroopRoster roster, FourberieOperation operation)
+    {
+        if (agentEnlistSource != (operation == FourberieOperation.EnlistAgentsFromParty ? 1 : 2))
+            return false;
+        return FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+            operation,
+            Settlement.CurrentSettlement,
+            null,
+            null,
+            0,
+            Selections(roster))) == true;
+    }
+
+    private static FourberieLocalTroopSelection[] Selections(TroopRoster roster)
+    {
+        if (roster == null) return Array.Empty<FourberieLocalTroopSelection>();
+        var selected = new List<FourberieLocalTroopSelection>();
+        for (int index = 0; index < roster.Count; index++)
+        {
+            CharacterObject troop = roster.GetCharacterAtIndex(index);
+            int count = roster.GetElementNumber(index);
+            if (troop != null && count > 0) selected.Add(new FourberieLocalTroopSelection(troop, count));
+        }
+        return selected.ToArray();
+    }
+
+    private static FourberieLocalTroopSelection[] Difference(TroopRoster baseline, TroopRoster remaining)
+    {
+        if (baseline == null) return Array.Empty<FourberieLocalTroopSelection>();
+        var selected = new List<FourberieLocalTroopSelection>();
+        for (int index = 0; index < baseline.Count; index++)
+        {
+            CharacterObject troop = baseline.GetCharacterAtIndex(index);
+            int count = baseline.GetElementNumber(index) - (remaining?.GetTroopCount(troop) ?? 0);
+            if (troop != null && count > 0) selected.Add(new FourberieLocalTroopSelection(troop, count));
+        }
+        return selected.ToArray();
+    }
 
     /// <summary>
     /// Produces a bounded canonical key from every stable object id and primitive/enum argument.

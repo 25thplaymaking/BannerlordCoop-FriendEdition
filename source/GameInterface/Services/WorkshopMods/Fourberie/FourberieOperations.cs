@@ -183,6 +183,9 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.StopSafehouseWait:
                     ApplySafehouseWait(actorParty, request.SettlementId, request.Operation);
                     break;
+                case FourberieOperation.CompleteSafehouseReturn:
+                    ApplySafehouseReturn(actorParty, request.SettlementId);
+                    break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
             }
@@ -244,6 +247,24 @@ internal sealed class FourberieOperationExecutor
     }
 
     public void Reset() => grudgeQuotes.Clear();
+
+    private void ApplySafehouseReturn(MobileParty actorParty, string settlementId)
+    {
+        if (!TryResolveCurrentSettlement(actorParty, settlementId, out Settlement settlement))
+            throw new InvalidOperationException("the controller is no longer at the selected safehouse");
+        Settlement currentBase = GetStaticField("_crimeBase") as Settlement;
+        IDictionary crime = GetDictionary("_crimeValue");
+        if (!FourberieSafehouseReturnAuthority.CanComplete(
+                settlementId,
+                currentBase?.StringId,
+                settlement.StringId,
+                settlement.IsTown,
+                crime,
+                out string failure))
+            throw new InvalidOperationException(failure);
+
+        FourberieSafehouseReturnAuthority.Commit(crime);
+    }
 
     private void ApplySafehouseWait(
         MobileParty actorParty,

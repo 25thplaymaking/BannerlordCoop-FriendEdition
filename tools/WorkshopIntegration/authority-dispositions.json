@@ -1856,7 +1856,6 @@
         "0x06000428",
         "0x0600042A",
         "0x0600046D",
-        "0x06000497",
         "0x06000498",
         "0x06000499",
         "0x0600049B",
@@ -2461,6 +2460,22 @@
         "FourberieSafehouseWaitAuthorityTests.Commit_StartsAndStopsOnlyTheCanonicalWaitMarker",
         "FourberieSafehouseWaitAuthorityTests.Protocol_RequiresOnlyTheCurrentSafehouse",
         "FourberieSafehouseWaitAuthorityTests.ConsequenceMap_RoutesBothWaitActions",
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x06000497"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieOperationExecutor safehouse return transaction",
+      "capability": "ExplicitOperations",
+      "tests": [
+        "FourberieSafehouseReturnAuthorityTests.Access_RequiresPendingReturnAtThePinnedSafehouse",
+        "FourberieSafehouseReturnAuthorityTests.Commit_RemovesOnlyThePendingReturnMarker",
+        "FourberieSafehouseReturnAuthorityTests.Protocol_RequiresOnlyTheCurrentSafehouse",
         "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
       ]
     },

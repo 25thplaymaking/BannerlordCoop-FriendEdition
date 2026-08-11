@@ -450,6 +450,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.SafehouseWaitConsequence:
                 method = nameof(FourberieAuthorityPatches.SafehouseWaitConsequencePrefix);
                 break;
+            case FourberiePatchKind.SafehouseReturnLifecycle:
+                method = nameof(FourberieAuthorityPatches.SafehouseReturnLifecyclePrefix);
+                break;
             case FourberiePatchKind.GrudgeSelectionConsequence:
                 method = nameof(FourberieAuthorityPatches.GrudgeSelectionConsequencePrefix);
                 break;
@@ -665,11 +668,34 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                 if (PlayerEncounter.Current != null) PlayerEncounter.Current.IsPlayerWaiting = false;
                 GameMenu.SwitchToMenu("safehouse_menu");
             }
+            if (operation == FourberieOperation.CompleteSafehouseReturn)
+                CompleteSafehouseReturnPresentation();
         }
         else
         {
             InformationManager.DisplayMessage(new InformationMessage(
                 "The Fourberie action could not be applied because its campaign state changed. Reopen the option and try again."));
+        }
+    }
+
+    private void CompleteSafehouseReturnPresentation()
+    {
+        Type behavior = assembly.GetType("Fourberie.FourberieBehavior", false, false);
+        Type safehouseBehavior = assembly.GetType("Fourberie.FourbSafeHouseBehavior", false, false);
+        Settlement crimeBase = behavior == null
+            ? null
+            : AccessTools.Field(behavior, "_crimeBase")?.GetValue(null) as Settlement;
+        object safehouse = safehouseBehavior == null
+            ? null
+            : AccessTools.Field(safehouseBehavior, "_safehouse")?.GetValue(null);
+        if (crimeBase == null || safehouse == null) return;
+
+        using (new AllowedThread())
+        {
+            PlayerEncounter.LeaveSettlement();
+            PlayerEncounter.Finish(false);
+            AccessTools.Method(safehouse.GetType(), "SetOwnerComplex")?.Invoke(safehouse, new object[] { null });
+            EncounterManager.StartSettlementEncounter(MobileParty.MainParty, crimeBase);
         }
     }
 

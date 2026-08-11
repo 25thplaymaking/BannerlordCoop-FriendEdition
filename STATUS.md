@@ -17,7 +17,7 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > settlement rebellion cannot run from a client. Improved Garrisons' 723 candidates are now closed too:
 > management/settings commands carry stable selections, authenticated clan ownership, session/revision
 > concurrency, exact replay results, canonical rollback, server-created parties, and an authenticated building-
-> reserve command while clients retain the menu and roster-selection surface. Fourberie's forty-four explicit
+> reserve command while clients retain the menu and roster-selection surface. Fourberie's forty-five explicit
 > operation families now use authenticated,
 > rollback-safe server commands, while its menus and mission setup remain role-local presentation/lifecycle.
 > Diplomacy's explicit player operations and server callbacks are routed too, including a persisted,
@@ -178,18 +178,20 @@ rolls back canonical Fourberie state and created parties on failure, and returns
       default duties, relic RNG, and retained-party reuse or creation are revalidated before the client opens its management view.
       Safehouse wait start/stop is server-owned too: the pinned base is revalidated before visibility, follower AI,
       and the canonical wait marker change; stopping also releases the original mod's permanently frozen follower AI.
+      Safehouse mission return now clears its replicated marker through the server before performing the local
+      encounter transition, preventing snapshots from repeatedly reopening a finished safehouse encounter.
       The initialization replacement now rebuilds replicated hero dictionaries only on the server; clients consume
       the canonical snapshot instead of independently rewriting those dictionaries.
   14. `OnMissionBehaviorInitialize` currently preserves the mod's required peer-local setup, but its
      mission callbacks remain open until their authoritative/controller ownership is proven end to end.
   15. The exact secondary pass currently assigns metadata to 1,034/1,865 required candidates:
-     429 presentation-only helpers, 222 pure/read-only policy methods, 187 server callbacks, 53 Coop-owner
-     replacements, 58 server-command methods, 76 framework-lifecycle methods, and 9 unreachable
+     428 presentation-only helpers, 222 pure/read-only policy methods, 187 server callbacks, 53 Coop-owner
+     replacements, 59 server-command methods, 76 framework-lifecycle methods, and 9 unreachable
      Homesteads/Bellum Civile add-on methods.
      The strict gameplay gate also rejects campaign mutation, canonical Fourberie-state writes, and
-     authority-sensitive calls mislabeled as client presentation. That gate currently passes 959 and
-     rejects 906: 831 unclassified methods plus 75 unsafe presentation classifications.
-  - **OPEN:** 906 exact UI/mission/lifecycle routes remain, including roughly 300 menu/dialog helpers
+     authority-sensitive calls mislabeled as client presentation. That gate currently passes 960 and
+     rejects 905: 831 unclassified methods plus 74 unsafe presentation classifications.
+  - **OPEN:** 905 exact UI/mission/lifecycle routes remain, including roughly 300 menu/dialog helpers
     that reach shared state and therefore require live command or mission-authority owners. This strict
     count, not the lower metadata-only count, is the completion baseline for subsequent increments.
 

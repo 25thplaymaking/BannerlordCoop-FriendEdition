@@ -59,6 +59,7 @@ internal enum FourberiePatchKind
     SafehouseEstablishmentConsequence,
     SafehouseTraderConsequence,
     SafehouseWaitConsequence,
+    SafehouseReturnLifecycle,
     GrudgeSelectionConsequence,
     GrudgeSettlementConsequence,
     ContractTickReplacement,
@@ -486,6 +487,8 @@ internal static class FourberieCompatibilityManifest
             FourberiePatchKind.SafehouseWaitConsequence, MenuCallbackArgs);
         Add("Fourberie.FourbSafeHouseBehavior+<>c", "<MenuSafeHouse>b__13_7",
             FourberiePatchKind.SafehouseWaitConsequence, MenuCallbackArgs);
+        Add("Fourberie.FourbSafeHouseBehavior", "SHOnGaMenOpened",
+            FourberiePatchKind.SafehouseReturnLifecycle, MenuCallbackArgs);
         Add("Fourberie.CriminalVM", "ClanGruFdilter", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM", "CanPlayerPay", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM", "<ClanGruFdilter>b__149_0",
@@ -625,8 +628,6 @@ internal static class FourberieCompatibilityManifest
             MenuCallbackArgs);
         Add("Fourberie.FourbSafeHouseBehavior", "SHAddGameMenus", FourberiePatchKind.ClientPresentation,
             CampaignGameStarter);
-        Add("Fourberie.FourbSafeHouseBehavior", "SHOnGaMenOpened", FourberiePatchKind.ClientPresentation,
-            MenuCallbackArgs);
         Add("Fourberie.FourbSafeHouseBehavior", "SHLocationCharactersAreReadyToSpawn",
             FourberiePatchKind.ClientPresentation, SpawnTags);
         Add("Fourberie.FourbEscapeBehavior", "FourbEscapMenu", FourberiePatchKind.ClientPresentation,

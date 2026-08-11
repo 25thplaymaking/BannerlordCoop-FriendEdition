@@ -663,6 +663,24 @@ internal static class FourberieAuthorityPatches
         _ => null,
     };
 
+    public static bool SafehouseReturnLifecyclePrefix()
+    {
+        if (!ModInformation.IsClient) return false;
+
+        Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
+        Type safehouseBehavior = AccessTools.TypeByName("Fourberie.FourbSafeHouseBehavior");
+        IDictionary crime = behavior == null
+            ? null
+            : AccessTools.Field(behavior, "_crimeValue")?.GetValue(null) as IDictionary;
+        object safehouse = safehouseBehavior == null
+            ? null
+            : AccessTools.Field(safehouseBehavior, "_safehouse")?.GetValue(null);
+        Settlement settlement = Settlement.CurrentSettlement;
+        if (safehouse != null && settlement != null && FourberieSafehouseReturnAuthority.HasPendingReturn(crime))
+            SubmitSettlement(FourberieOperation.CompleteSafehouseReturn, settlement);
+        return false;
+    }
+
     public static bool GrudgeSelectionConsequencePrefix(object[] __args)
     {
         if (ModInformation.IsClient)

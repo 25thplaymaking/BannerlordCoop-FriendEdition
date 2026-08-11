@@ -2,12 +2,53 @@ using CoopLauncher.Services;
 using System;
 using System.IO;
 using System.IO.Compression;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
 using Xunit;
 
 namespace CoopLauncher.Tests;
 
 public sealed class ModUpdaterTests
 {
+    [Fact]
+    public async Task ReachedManifestHttpError_FailsClosed()
+    {
+        using var fixture = new UpdateFixture();
+        var listener = new TcpListener(IPAddress.IPv6Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        Task server = Task.Run(async () =>
+        {
+            using TcpClient client = await listener.AcceptTcpClientAsync();
+            NetworkStream stream = client.GetStream();
+            using var reader = new StreamReader(
+                stream, Encoding.ASCII, detectEncodingFromByteOrderMarks: false, bufferSize: 1024, leaveOpen: true);
+            while (await reader.ReadLineAsync() is { Length: > 0 }) { }
+            byte[] response = Encoding.ASCII.GetBytes(
+                "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            await stream.WriteAsync(response);
+        });
+
+        try
+        {
+            var updater = new ModUpdater(new LauncherConfig
+            {
+                SuiteManifestUrl = "",
+                UpdateManifestUrl = $"http://[::1]:{port}/missing.json",
+            });
+
+            UpdateResult result = await updater.RunAsync(fixture.Modules, (_, _) => { });
+
+            Assert.Equal(UpdateOutcome.Failed, result.Outcome);
+            await server.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
     [Fact]
     public void ManifestRequiresExactSha256()
     {

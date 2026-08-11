@@ -247,6 +247,10 @@ rolls back canonical Fourberie state and created parties on failure, and returns
       in the server launch script and Bryce's private pinned launcher config; replaced all three
       public `launcher-app` assets with password-free builds; made launcher-app publication manual;
       and limited automatic client publication to nightly builds from `development`.
+- [x] **Reached-feed failures now fail closed (2026-08-11).** The launcher distinguishes a real
+      transport outage from an HTTP error returned by the configured update feed. Missing, forbidden,
+      or failed manifests keep **MARCH TO WAR** disabled instead of being mislabeled as offline; the
+      self-contained publish, XAML guard, and all 17 launcher tests pass.
 - [ ] Live test (still open): confirm the launched game auto-joins grain.silo end-to-end with mods.
 
 ### Dedicated server release integrity — LIVE VERIFIED (2026-08-11)

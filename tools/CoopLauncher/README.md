@@ -74,8 +74,9 @@ Design review render (no window shown, no focus steal): `CalradiaCoop.exe --shoo
 
 The launcher extracts each verified zip into a private staging directory on the same volume, then
 exact-replaces the zip's top-level module directories. Stale files are removed by replacement, and
-any move/version-write failure restores every previous module directory. A malformed manifest,
-integrity failure, unsafe archive path, or failed install disables **MARCH TO WAR** until the required
-update succeeds; an unreachable feed still permits the already-installed build.
+any move/version-write failure restores every previous module directory. A malformed manifest, an HTTP
+error from a reached feed, integrity failure, unsafe archive path, or failed install disables **MARCH TO
+WAR** until the required update succeeds; a genuinely unreachable feed still permits the already-installed
+build.
 
 Wire this to the nightly build output when P6 lands; until then leave `updateManifestUrl` empty.

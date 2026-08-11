@@ -61,6 +61,11 @@ public sealed class ModUpdater
             progress(-1, $"Checking {label}…");
             manifest = JsonSerializer.Deserialize<UpdateManifest>(await Http.GetStringAsync(manifestUrl));
         }
+        catch (HttpRequestException ex) when (ex.StatusCode is not null)
+        {
+            return new(UpdateOutcome.Failed,
+                $"{label} feed returned HTTP {(int)ex.StatusCode} — update required");
+        }
         catch
         {
             return new(UpdateOutcome.Offline, $"Couldn't reach the {label} feed — using installed");

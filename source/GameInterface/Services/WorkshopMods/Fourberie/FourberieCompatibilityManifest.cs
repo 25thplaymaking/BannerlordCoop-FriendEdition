@@ -56,6 +56,8 @@ internal enum FourberiePatchKind
     TerritorySelectionConsequence,
     TerritoryAbandonConsequence,
     SafehouseAbandonConsequence,
+    GrudgeSelectionConsequence,
+    GrudgeSettlementConsequence,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -456,6 +458,12 @@ internal static class FourberieCompatibilityManifest
         Add("Fourberie.CriminalVM", "AbandonSafeClick", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM+<>c__DisplayClass544_0", "<AbandonSafeClick>b__0",
             FourberiePatchKind.SafehouseAbandonConsequence);
+        Add("Fourberie.CriminalVM", "ClanGruFdilter", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM", "CanPlayerPay", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM", "<ClanGruFdilter>b__149_0",
+            FourberiePatchKind.GrudgeSelectionConsequence, InquiryElements);
+        Add("Fourberie.CriminalVM+<>c__DisplayClass149_1", "<ClanGruFdilter>b__4",
+            FourberiePatchKind.GrudgeSettlementConsequence);
         Add("Fourberie.CriminalVM", "Schemhero1", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM", "Schemhero2", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM+<>c__DisplayClass137_0", "<Schemhero1>b__0",

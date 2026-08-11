@@ -2401,6 +2401,40 @@
         "FourberieTerritoryAuthorityTests.Protocol_RequiresSettlementOnlyForTerritoryRemoval",
         "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
       ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x060000B0",
+        "0x060000B1"
+      ],
+      "disposition": "ClientPresentation",
+      "owner": "FourberieAuthorityPatches grudge-list and affordability presentation",
+      "capability": "ClientPresentation",
+      "tests": [
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x0600019F",
+        "0x060006F1"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieOperationExecutor grudge quote and settlement transactions",
+      "capability": "ExplicitOperations",
+      "tests": [
+        "FourberieGrudgeAuthorityTests.Quote_UsesPinnedServerRandomRangeAndGrudgeMultiplier",
+        "FourberieGrudgeAuthorityTests.Quote_RejectsIneligibleGrudgeAndClientChosenRandomness",
+        "FourberieGrudgeAuthorityTests.Settlement_RevalidatesQuoteGoldSpyAndUnchangedGrudgeThenCommitsExactKeys",
+        "FourberieGrudgeAuthorityTests.Settlement_RejectsStaleOrUnaffordableConfirmation",
+        "FourberieGrudgeAuthorityTests.Protocol_UsesClanTargetOnlyAndBoundsServerQuote",
+        "FourberieGrudgeAuthorityTests.Result_CarriesServerQuoteWithoutChangingStatusSemantics",
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
     }
   ]
 }

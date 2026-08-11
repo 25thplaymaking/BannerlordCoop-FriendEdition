@@ -23,9 +23,24 @@ namespace GameInterface.Services.WorkshopMods.Fourberie;
 
 internal sealed class FourberieOperationExecutor
 {
+    private sealed class GrudgeQuote
+    {
+        public GrudgeQuote(string clanId, int grudge, int amount)
+        {
+            ClanId = clanId;
+            Grudge = grudge;
+            Amount = amount;
+        }
+
+        public string ClanId { get; }
+        public int Grudge { get; }
+        public int Amount { get; }
+    }
+
     private const string BehaviorTypeName = "Fourberie.FourberieBehavior";
     private readonly Assembly assembly;
     private readonly IObjectManager objectManager;
+    private readonly Dictionary<string, GrudgeQuote> grudgeQuotes = new Dictionary<string, GrudgeQuote>(StringComparer.Ordinal);
 
     public FourberieOperationExecutor(Assembly assembly, IObjectManager objectManager)
     {
@@ -37,9 +52,11 @@ internal sealed class FourberieOperationExecutor
         Hero actor,
         MobileParty actorParty,
         NetworkRequestFourberieOperation request,
-        out string failure)
+        out string failure,
+        out int resultValue)
     {
         failure = null;
+        resultValue = 0;
         if (actor == null || actorParty == null || request == null ||
             actor.PartyBelongedTo != actorParty || actorParty.LeaderHero != actor)
         {
@@ -62,6 +79,8 @@ internal sealed class FourberieOperationExecutor
         MobileParty previousCrimeBase = GetStaticField("_crimeBaseParty") as MobileParty;
         bool previousCrimeBaseWasActive = previousCrimeBase?.IsActive == true;
         int previousActorGold = actor.Gold;
+        Hero previousTransferTarget = null;
+        int previousTransferTargetGold = 0;
 
         try
         {
@@ -141,6 +160,14 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.AbandonSafehouse:
                     ApplySafehouseAbandonment(actor, actorParty, request.SettlementId);
                     break;
+                case FourberieOperation.RequestGrudgeQuote:
+                    resultValue = PrepareGrudgeQuote(actor, request.TargetId);
+                    break;
+                case FourberieOperation.SettleClanGrudge:
+                    previousTransferTarget = ResolveGrudgeRecipient(request.TargetId);
+                    previousTransferTargetGold = previousTransferTarget.Gold;
+                    ApplyGrudgeSettlement(actor, request.TargetId, request.IntValue, previousTransferTarget);
+                    break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
             }
@@ -185,6 +212,11 @@ internal sealed class FourberieOperationExecutor
                 rollbackErrors.Add("canonical state: " + stateFailure);
             try { RestoreGold(actor, previousActorGold); }
             catch (Exception rollback) { rollbackErrors.Add("actor gold: " + rollback.Message); }
+            if (previousTransferTarget != null)
+            {
+                try { RestoreGold(previousTransferTarget, previousTransferTargetGold); }
+                catch (Exception rollback) { rollbackErrors.Add("grudge recipient gold: " + rollback.Message); }
+            }
 
             if (rollbackErrors.Count > 0)
                 throw new InvalidOperationException(
@@ -195,6 +227,8 @@ internal sealed class FourberieOperationExecutor
             return false;
         }
     }
+
+    public void Reset() => grudgeQuotes.Clear();
 
     private void ApplyEnlistment(
         MobileParty actorParty,
@@ -492,6 +526,68 @@ internal sealed class FourberieOperationExecutor
                 GetDictionary("_stringHeroIdDico"),
                 GetDictionary("_campaignTimeDictio"));
             SetStaticField("_crimeBase", null);
+        }
+    }
+
+    private int PrepareGrudgeQuote(Hero actor, string clanId)
+    {
+        if (actor == null || string.IsNullOrEmpty(actor.StringId) ||
+            !objectManager.TryGetObject(clanId, out Clan clan) || clan == null || clan.IsEliminated ||
+            clan == actor.Clan || clan.Leader == null)
+            throw new InvalidOperationException("the selected Fourberie grudge target is unavailable");
+
+        IDictionary grudges = GetDictionary("_stringClanDico");
+        int grudge = ReadInt(grudges, clanId);
+        if (!FourberieGrudgeAuthority.TryQuote(
+                actor.Gold,
+                clan.Gold,
+                grudge,
+                MBRandom.RandomInt(
+                    FourberieGrudgeAuthority.MinimumRandomSurcharge,
+                    FourberieGrudgeAuthority.MaximumRandomSurcharge + 1),
+                out int amount,
+                out string failure))
+            throw new InvalidOperationException(failure);
+
+        grudgeQuotes[actor.StringId] = new GrudgeQuote(clanId, grudge, amount);
+        return amount;
+    }
+
+    private Hero ResolveGrudgeRecipient(string clanId)
+    {
+        if (!objectManager.TryGetObject(clanId, out Clan clan) || clan == null || clan.IsEliminated ||
+            clan.Leader == null)
+            throw new InvalidOperationException("the Fourberie grudge recipient is unavailable");
+        return clan.Leader;
+    }
+
+    private void ApplyGrudgeSettlement(Hero actor, string clanId, int amount, Hero recipient)
+    {
+        if (actor == null || string.IsNullOrEmpty(actor.StringId) ||
+            !grudgeQuotes.TryGetValue(actor.StringId, out GrudgeQuote quote) ||
+            !string.Equals(quote.ClanId, clanId, StringComparison.Ordinal) ||
+            !objectManager.TryGetObject(clanId, out Clan clan) || clan == null || clan.IsEliminated ||
+            clan == actor.Clan || clan.Leader != recipient)
+            throw new InvalidOperationException("the Fourberie grudge quote is missing or stale");
+
+        IDictionary grudges = GetDictionary("_stringClanDico");
+        IDictionary crime = GetDictionary("_crimeValue");
+        if (!FourberieGrudgeAuthority.CanSettle(
+                grudges,
+                crime,
+                clanId,
+                quote.Grudge,
+                actor.Gold,
+                amount,
+                quote.Amount,
+                out string failure))
+            throw new InvalidOperationException(failure);
+
+        using (new AllowedThread())
+        {
+            FourberieGrudgeAuthority.Commit(grudges, crime, clanId);
+            GiveGoldAction.ApplyBetweenCharacters(actor, recipient, amount, false);
+            grudgeQuotes.Remove(actor.StringId);
         }
     }
 

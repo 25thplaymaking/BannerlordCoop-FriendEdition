@@ -42,6 +42,8 @@ internal enum FourberieOperation
     RemoveTerritory = 31,
     AbandonTownCrimeBase = 32,
     AbandonSafehouse = 33,
+    RequestGrudgeQuote = 34,
+    SettleClanGrudge = 35,
 }
 
 internal enum FourberieOperationStatus
@@ -133,6 +135,7 @@ internal sealed class NetworkFourberieOperationResult : ICommand
     [ProtoMember(2)] public long RequestId { get; private set; }
     [ProtoMember(3)] public FourberieOperationStatus Status { get; private set; }
     [ProtoMember(4)] public long Revision { get; private set; }
+    [ProtoMember(5)] public int IntValue { get; private set; }
 
     private NetworkFourberieOperationResult()
     {
@@ -142,12 +145,14 @@ internal sealed class NetworkFourberieOperationResult : ICommand
         string sessionId,
         long requestId,
         FourberieOperationStatus status,
-        long revision)
+        long revision,
+        int intValue = 0)
     {
         SessionId = sessionId;
         RequestId = requestId;
         Status = status;
         Revision = revision;
+        IntValue = intValue;
     }
 }
 
@@ -165,7 +170,8 @@ internal static class FourberieOperationProtocol
             !IsStableId(request.SettlementId, allowEmpty: true) ||
             !IsStableId(request.TargetId, allowEmpty: true) || request.IntValue < 0 ||
             !IsStableId(request.SecondaryTargetId, allowEmpty: true) ||
-            request.IntValue > MaxSelectedTroops || request.Troops.Length > MaxTroopSelections)
+            (request.Operation != FourberieOperation.SettleClanGrudge && request.IntValue > MaxSelectedTroops) ||
+            request.Troops.Length > MaxTroopSelections)
             return false;
 
         int total = 0;
@@ -240,6 +246,13 @@ internal static class FourberieOperationProtocol
                 FourberieOperation.AbandonTownCrimeBase or FourberieOperation.AbandonSafehouse =>
                 !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
                 request.IntValue == 0 && request.Troops.Length == 0,
+            FourberieOperation.RequestGrudgeQuote =>
+                string.IsNullOrEmpty(request.SettlementId) && !string.IsNullOrEmpty(request.TargetId) &&
+                string.IsNullOrEmpty(request.SecondaryTargetId) && request.IntValue == 0 && request.Troops.Length == 0,
+            FourberieOperation.SettleClanGrudge =>
+                string.IsNullOrEmpty(request.SettlementId) && !string.IsNullOrEmpty(request.TargetId) &&
+                string.IsNullOrEmpty(request.SecondaryTargetId) &&
+                request.IntValue <= FourberieGrudgeAuthority.MaximumPayment && request.Troops.Length == 0,
             _ => false,
         };
     }

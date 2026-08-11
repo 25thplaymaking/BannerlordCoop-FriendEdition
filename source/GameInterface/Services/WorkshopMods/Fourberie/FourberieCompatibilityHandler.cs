@@ -22,6 +22,7 @@ using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Library;
+using TaleWorlds.Localization;
 
 namespace GameInterface.Services.WorkshopMods.Fourberie;
 
@@ -48,6 +49,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
     private readonly object snapshotSync = new object();
     private readonly FourberieRequestLedger<NetPeer> requestLedger = new FourberieRequestLedger<NetPeer>(256);
     private readonly Dictionary<long, FourberieOperation> pendingOperations = new Dictionary<long, FourberieOperation>();
+    private readonly Dictionary<long, Clan> pendingOperationClans = new Dictionary<long, Clan>();
 
     private Assembly assembly;
     private string configurationFingerprint;
@@ -111,7 +113,10 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         string secondaryTargetId = string.Empty;
         if (operation.Settlement != null && !objectManager.TryGetId(operation.Settlement, out settlementId))
             return false;
+        if (operation.TargetHero != null && operation.TargetClan != null) return false;
         if (operation.TargetHero != null && !objectManager.TryGetId(operation.TargetHero, out targetId))
+            return false;
+        if (operation.TargetClan != null && !objectManager.TryGetId(operation.TargetClan, out targetId))
             return false;
         if (operation.SecondarySettlement != null &&
             !objectManager.TryGetId(operation.SecondarySettlement, out secondaryTargetId))
@@ -139,6 +144,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         if (!FourberieOperationProtocol.IsRequestShapeValid(request)) return false;
 
         pendingOperations[requestId] = operation.Operation;
+        if (operation.TargetClan != null) pendingOperationClans[requestId] = operation.TargetClan;
         network.SendAll(request);
         return true;
     }
@@ -375,6 +381,12 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.SafehouseAbandonConsequence:
                 method = nameof(FourberieAuthorityPatches.SafehouseAbandonConsequencePrefix);
                 break;
+            case FourberiePatchKind.GrudgeSelectionConsequence:
+                method = nameof(FourberieAuthorityPatches.GrudgeSelectionConsequencePrefix);
+                break;
+            case FourberiePatchKind.GrudgeSettlementConsequence:
+                method = nameof(FourberieAuthorityPatches.GrudgeSettlementConsequencePrefix);
+                break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
                 break;
@@ -409,6 +421,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         FourberiePartyCommitSuppression.Reset();
         requestLedger.Reset();
         pendingOperations.Clear();
+        pendingOperationClans.Clear();
+        operationExecutor?.Reset();
         nextRequestId = 0;
         lock (snapshotSync) revisionGate.Reset();
         stateReady = true;
@@ -483,9 +497,10 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         }
 
         FourberieOperationStatus status;
+        int resultValue;
         try
         {
-            status = operationExecutor.TryExecute(actor, actorParty, request, out string failure)
+            status = operationExecutor.TryExecute(actor, actorParty, request, out string failure, out resultValue)
                 ? FourberieOperationStatus.Accepted
                 : FourberieOperationStatus.Rejected;
             if (failure != null)
@@ -502,7 +517,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         if (status == FourberieOperationStatus.Accepted)
             SendSnapshotOrAbort(peer: null, onlyIfChanged: true);
         var result = new NetworkFourberieOperationResult(
-            config.SessionId, request.RequestId, status, serverRevision);
+            config.SessionId, request.RequestId, status, serverRevision, resultValue);
         requestLedger.Record(peer, request.RequestId, commandKey, result);
         network.Send(peer, result);
         if (status != FourberieOperationStatus.Accepted)
@@ -526,11 +541,17 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             payload.What == null || !pendingOperations.TryGetValue(payload.What.RequestId, out FourberieOperation operation))
             return;
         pendingOperations.Remove(payload.What.RequestId);
+        pendingOperationClans.TryGetValue(payload.What.RequestId, out Clan targetClan);
+        pendingOperationClans.Remove(payload.What.RequestId);
 
         if (payload.What.Status == FourberieOperationStatus.Accepted)
         {
-            if (!FourberieOperationProtocol.IsAbsoluteSetting(operation))
+            if (!FourberieOperationProtocol.IsAbsoluteSetting(operation) &&
+                operation != FourberieOperation.RequestGrudgeQuote)
                 InformationManager.DisplayMessage(new InformationMessage("Fourberie action accepted by the co-op server."));
+            if (operation == FourberieOperation.RequestGrudgeQuote && targetClan != null &&
+                payload.What.IntValue >= 0 && payload.What.IntValue <= FourberieGrudgeAuthority.MaximumPayment)
+                ShowGrudgeSettlement(targetClan, payload.What.IntValue);
             if (operation == FourberieOperation.StartInsuranceScam)
             {
                 using (new AllowedThread())
@@ -559,6 +580,57 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             InformationManager.DisplayMessage(new InformationMessage(
                 "The Fourberie action could not be applied because its campaign state changed. Reopen the option and try again."));
         }
+    }
+
+    private void ShowGrudgeSettlement(Clan clan, int amount)
+    {
+        string title = new TextObject("{=Fov1311x059}Grudge settlement").ToString();
+        string body = new TextObject(
+                "{=Fov1311x060}Your informants let you know that the {CLAN} clan is ready to settle the grudge they are holding for {AMOUNT}{GOLD_ICON}.")
+            .SetTextVariable("CLAN", clan.Name)
+            .SetTextVariable("AMOUNT", amount)
+            .ToString();
+        InformationManager.ShowInquiry(new InquiryData(
+            title,
+            body,
+            true,
+            true,
+            new TextObject("{=FoCom24}Damn it!").ToString(),
+            new TextObject("{=FoSchRm24}No way!").ToString(),
+            () => TrySubmit(new FourberieLocalOperation(
+                FourberieOperation.SettleClanGrudge,
+                null,
+                null,
+                null,
+                amount,
+                Array.Empty<FourberieLocalTroopSelection>(),
+                clan)),
+            null,
+            string.Empty,
+            0f,
+            null,
+            () => GrudgeSettlementAvailability(amount),
+            null),
+            true,
+            false);
+    }
+
+    private ValueTuple<bool, string> GrudgeSettlementAvailability(int amount)
+    {
+        Type behavior = assembly.GetType("Fourberie.FourberieBehavior", false, false);
+        var crime = behavior == null
+            ? null
+            : AccessTools.Field(behavior, "_crimeValue")?.GetValue(null) as System.Collections.IDictionary;
+        int spies = crime?.Contains(310) == true ? Convert.ToInt32(crime[310]) : 0;
+        if (spies < 1)
+            return (false, new TextObject("{=FoAgeOp24}Agent needed for this scheme: {AGT}")
+                .SetTextVariable("AGT", new TextObject("{=FoAgeOp04}Spies"))
+                .ToString());
+        if (Hero.MainHero?.Gold < amount)
+            return (false, new TextObject("{=FoCom70}You don't have enough denars to finish the deal!").ToString());
+        return (true, new TextObject("{=Fov90xx23}You pay {VAL}{GOLD_ICON}")
+            .SetTextVariable("VAL", amount)
+            .ToString());
     }
 
     private void HandleStateRequest(MessagePayload<NetworkRequestFourberieState> payload)

@@ -49,7 +49,8 @@ internal sealed class FourberieLocalOperation
         Hero targetHero,
         Settlement secondarySettlement,
         int intValue,
-        FourberieLocalTroopSelection[] troops)
+        FourberieLocalTroopSelection[] troops,
+        Clan targetClan = null)
     {
         Operation = operation;
         Settlement = settlement;
@@ -57,6 +58,7 @@ internal sealed class FourberieLocalOperation
         SecondarySettlement = secondarySettlement;
         IntValue = intValue;
         Troops = troops ?? Array.Empty<FourberieLocalTroopSelection>();
+        TargetClan = targetClan;
     }
 
     public FourberieOperation Operation { get; }
@@ -65,6 +67,7 @@ internal sealed class FourberieLocalOperation
     public Settlement SecondarySettlement { get; }
     public int IntValue { get; }
     public FourberieLocalTroopSelection[] Troops { get; }
+    public Clan TargetClan { get; }
 }
 
 internal static class FourberiePartyCommitSuppression
@@ -608,6 +611,22 @@ internal static class FourberieAuthorityPatches
         return false;
     }
 
+    public static bool GrudgeSelectionConsequencePrefix(object[] __args)
+    {
+        if (ModInformation.IsClient)
+        {
+            Clan clan = SelectedInquiryIdentifier<Clan>(__args);
+            if (clan != null)
+            {
+                InformationManager.HideInquiry();
+                SubmitClan(FourberieOperation.RequestGrudgeQuote, clan, 0);
+            }
+        }
+        return false;
+    }
+
+    public static bool GrudgeSettlementConsequencePrefix() => false;
+
     internal static FourberieOperation SchemeLifecycleOperation(int slot)
     {
         Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
@@ -798,6 +817,16 @@ internal static class FourberieAuthorityPatches
             null,
             0,
             Array.Empty<FourberieLocalTroopSelection>()));
+
+    private static void SubmitClan(FourberieOperation operation, Clan clan, int amount) =>
+        FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+            operation,
+            null,
+            null,
+            null,
+            amount,
+            Array.Empty<FourberieLocalTroopSelection>(),
+            clan));
 
     private static T SelectedInquiryIdentifier<T>(object[] arguments)
     {

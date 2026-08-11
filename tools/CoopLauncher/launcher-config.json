@@ -4,7 +4,7 @@
 
   "serverHost": "205.209.116.114",
   "serverPort": 4200,
-  "serverPassword": "8888",
+  "serverPassword": "",
 
   "moduleToken": "_MODULES_*Bannerlord.Harmony*Bannerlord.ButterLib*Bannerlord.UIExtenderEx*Bannerlord.MBOptionScreen*Native*SandBoxCore*CustomBattle*Sandbox*StoryMode*PlayerSettlement*Coop*ImprovedGarrisons*DismembermentPlus*Fourberie*Bannerlord.Diplomacy*UnblockableThrust*_MODULES_",
 

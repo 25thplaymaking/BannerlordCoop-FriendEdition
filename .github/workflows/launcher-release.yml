@@ -10,7 +10,7 @@ name: Launcher Client Release
 
 on:
   push:
-    branches: [development, 25vid/workshop-integration]
+    branches: [development]
     paths:
       - 'source/**'
       - 'deploy/**'
@@ -21,7 +21,7 @@ on:
       channels:
         description: Which channel(s) to publish this build to
         type: choice
-        default: both
+        default: nightly
         options: [nightly, stable, both]
 
 permissions:
@@ -32,7 +32,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Verify release safety policy
+        run: |
+          python -m pip install PyYAML==6.0.3
+          python .github/scripts/verify-release-safety.py
+
   build:
+    needs: safety
     runs-on: ubuntu-latest
     timeout-minutes: 30
     container:
@@ -50,6 +64,10 @@ jobs:
 
       - name: Link Bannerlord assemblies
         run: ln -s /home/mb2 mb2
+
+      - name: Run unit and integration tests
+        working-directory: source
+        run: dotnet test CoopUnitTests.slnf -c Release -p:NuGetAudit=false --consoleLoggerParameters:ErrorsOnly
 
       - name: Restore .NET Framework build inputs
         run: |
@@ -168,8 +186,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # No checkout in this job, so gh can't infer the repo from a git remote — name it.
           GH_REPO: ${{ github.repository }}
-          # push → both channels for now; dispatch honors the chosen channel.
-          CHANNELS: ${{ github.event_name == 'workflow_dispatch' && inputs.channels || 'both' }}
+          # Automatic development builds are nightly-only. Stable promotion is always manual.
+          CHANNELS: ${{ github.event_name == 'workflow_dispatch' && inputs.channels || 'nightly' }}
         run: |
           set -eu
           version=$(date -u +%Y.%m.%d.%H%M)

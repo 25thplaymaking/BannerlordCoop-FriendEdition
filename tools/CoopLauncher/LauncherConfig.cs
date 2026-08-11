@@ -18,8 +18,11 @@ public sealed class LauncherConfig
     public string ServerHost { get; set; } = "205.209.116.114";
     public int ServerPort { get; set; } = 4200;
 
-    /// <summary>Group-private join token. Local-only; never sent anywhere but the game's join.</summary>
-    public string ServerPassword { get; set; } = "8888";
+    /// <summary>
+    /// Group-private join token. The public build deliberately leaves this empty; group admins
+    /// distribute a private local config separately from the launcher release.
+    /// </summary>
+    public string ServerPassword { get; set; } = "";
 
     /// <summary>
     /// The launch order token passed to <c>Bannerlord.exe /singleplayer</c>. The full mod set,

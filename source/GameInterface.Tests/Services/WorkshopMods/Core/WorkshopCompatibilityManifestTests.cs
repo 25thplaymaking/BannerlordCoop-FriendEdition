@@ -21,7 +21,7 @@ public class WorkshopCompatibilityManifestTests
 
         Assert.True(roundTrip.TryValidateWireShape(out string error), error);
         Assert.Equal(original.ManifestSha256, roundTrip.ManifestSha256);
-        Assert.Equal(11, roundTrip.Entries.Length);
+        Assert.Equal(10, roundTrip.Entries.Length);
         Assert.Equal(WorkshopPeerRole.Client, roundTrip.PeerRole);
         Assert.Equal(160, roundTrip.Entries.Single(entry => entry.ModuleId == "PlayerSettlement").LoadOrder);
 
@@ -85,7 +85,7 @@ public class WorkshopCompatibilityManifestTests
                 ManifestFactory.StableHash(module.ModuleId, 'b'),
                 module.Role,
                 module.Profile,
-                loadOrder: module.ModuleId == "RBM"
+                loadOrder: module.ModuleId == "UnblockableThrust"
                     ? WorkshopCompatibilityManifest.MaximumLoadOrder + 1
                     : module.LoadOrder));
 

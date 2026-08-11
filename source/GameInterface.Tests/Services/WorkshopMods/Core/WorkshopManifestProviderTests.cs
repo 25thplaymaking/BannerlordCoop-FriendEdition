@@ -44,8 +44,8 @@ public sealed class WorkshopManifestProviderTests : IDisposable
 
         Assert.Same(first, lateJoin);
         Assert.Equal(2, discovery.CallCount); // once per peer-role manifest, never per joiner
-        Assert.Equal(11, first.Entries.Length);
-        Assert.Equal(11, server.Entries.Length); // includes trusted client-visual package digest
+        Assert.Equal(10, first.Entries.Length);
+        Assert.Equal(10, server.Entries.Length);
         Assert.All(first.Entries, entry => Assert.True(entry.ManagedDistributionComponent));
     }
 
@@ -79,72 +79,19 @@ public sealed class WorkshopManifestProviderTests : IDisposable
         Assert.Throws<InvalidOperationException>(() => provider.PrepareManifest(WorkshopPeerRole.Server));
     }
 
-    /// <summary>
-    /// The wine-hosted server engine cannot load some modules' real content (RBM crashes it), so
-    /// such a module is activated server-side as a bare SubModule.xml stub. The server manifest
-    /// must then advertise the receipt's audited pins — clients get byte-verified against the
-    /// audited package — while the same stub on a CLIENT is a broken install and stays unmanaged.
-    /// </summary>
     [Fact]
-    public void Provider_ServerStub_AttestsReceiptPins_ClientStubStaysUnmanaged()
+    public void Provider_RetiredRbmIsNotAdvertisedOnEitherRole()
     {
-        string stubRoot = Path.Combine(root, "stub-module");
-        Directory.CreateDirectory(stubRoot);
-        File.WriteAllText(Path.Combine(stubRoot, "SubModule.xml"), "<Module />");
-        string pinnedContent = new string('a', 64);
-        string pinnedConfiguration = new string('b', 64);
-        var discovery = new StubDiscovery(stubRoot, pinnedContent, pinnedConfiguration);
-
+        var discovery = new FakeDiscovery(root);
         var serverProvider = new WorkshopManifestProvider(discovery);
         WorkshopCompatibilityManifest server = serverProvider.BuildPreparedManifest(
             serverProvider.PrepareManifest(WorkshopPeerRole.Server));
-
-        WorkshopCompatibilityManifestEntry serverEntry = server.Entries.Single(
-            entry => entry.ModuleId == "RBM");
-        Assert.True(serverEntry.ManagedDistributionComponent);
-        Assert.Equal(pinnedContent, serverEntry.ContentSha256);
-        Assert.Equal(pinnedConfiguration, serverEntry.ConfigurationSha256);
-
         var clientProvider = new WorkshopManifestProvider(discovery);
         WorkshopCompatibilityManifest client = clientProvider.BuildPreparedManifest(
             clientProvider.PrepareManifest(WorkshopPeerRole.Client));
-        WorkshopCompatibilityManifestEntry clientEntry = client.Entries.Single(
-            entry => entry.ModuleId == "RBM");
-        Assert.False(clientEntry.ManagedDistributionComponent);
-        Assert.NotEqual(pinnedContent, clientEntry.ContentSha256);
-    }
 
-    private sealed class StubDiscovery : IWorkshopModuleDiscovery
-    {
-        private readonly string stubRoot;
-        private readonly string pinnedContent;
-        private readonly string pinnedConfiguration;
-        private readonly FriendEditionWorkshopModuleCatalog catalog = new();
-
-        public StubDiscovery(string stubRoot, string pinnedContent, string pinnedConfiguration)
-        {
-            this.stubRoot = stubRoot;
-            this.pinnedContent = pinnedContent;
-            this.pinnedConfiguration = pinnedConfiguration;
-        }
-
-        public IReadOnlyList<WorkshopModuleRuntimeInfo> Discover() =>
-            catalog.Modules.Select(module => module.ModuleId == "RBM"
-                ? new WorkshopModuleRuntimeInfo(
-                    module, module.Version, stubRoot,
-                    active: true,
-                    managedDistributionComponent: true,
-                    activationOrderValid: true,
-                    pinnedContentSha256: pinnedContent,
-                    pinnedConfigurationSha256: pinnedConfiguration)
-                : new WorkshopModuleRuntimeInfo(
-                    module, module.Version, Path.GetDirectoryName(stubRoot),
-                    active: true,
-                    managedDistributionComponent: true,
-                    activationOrderValid: true,
-                    pinnedContentSha256: new WorkshopModuleFileHasher().Hash(Path.GetDirectoryName(stubRoot)).ContentSha256,
-                    pinnedConfigurationSha256: new WorkshopModuleFileHasher().Hash(Path.GetDirectoryName(stubRoot)).ConfigurationSha256))
-            .ToArray();
+        Assert.DoesNotContain(server.Entries, entry => entry.ModuleId == "RBM");
+        Assert.DoesNotContain(client.Entries, entry => entry.ModuleId == "RBM");
     }
 
     private sealed class FakeDiscovery : IWorkshopModuleDiscovery

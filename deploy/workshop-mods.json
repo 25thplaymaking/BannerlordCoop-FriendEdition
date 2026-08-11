@@ -4,7 +4,7 @@
     "id": "friend-edition-private-workshop-suite",
     "displayName": "Bannerlord Co-op Friend Edition Private Workshop Suite",
     "appId": "261550",
-    "expectedModuleCount": 11,
+    "expectedModuleCount": 10,
     "requireExactSubscriptionSet": true,
     "audience": "private Friend Edition play group",
     "memberCount": 3,
@@ -259,51 +259,57 @@
         "CustomBattle",
         "Sandbox",
         "StoryMode",
+        "PlayerSettlement",
         "Coop",
-        "RBM",
         "ImprovedGarrisons",
         "DismembermentPlus",
         "Fourberie",
         "Bannerlord.Diplomacy",
-        "UnblockableThrust",
-        "PlayerSettlement"
+        "UnblockableThrust"
       ],
       "activeModuleOrder": [
         "Bannerlord.Harmony",
+        "Bannerlord.ButterLib",
+        "Bannerlord.UIExtenderEx",
+        "Bannerlord.MBOptionScreen",
         "Native",
         "SandBoxCore",
         "CustomBattle",
         "Sandbox",
         "StoryMode",
-        "Coop"
-      ],
-      "stagedInactiveModuleIds": [
-        "Bannerlord.ButterLib",
-        "Bannerlord.UIExtenderEx",
-        "Bannerlord.MBOptionScreen",
-        "RBM",
+        "PlayerSettlement",
+        "Coop",
         "ImprovedGarrisons",
         "DismembermentPlus",
         "Fourberie",
         "Bannerlord.Diplomacy",
-        "UnblockableThrust",
-        "PlayerSettlement"
+        "UnblockableThrust"
       ],
+      "stagedInactiveModuleIds": [],
       "disabledModuleIds": [
         "BirthAndDeath"
       ],
-      "note": "All three rendered clients stage the exact pinned suite, but activate only activeModuleOrder. Frameworks and original gameplay modules remain staged-inactive/feature-blocked until their framework, authority, and E2E gates pass. The optional TaleWorlds BirthAndDeath module stays disabled. Birth/Death is accepted only when preflight and the authenticated host runtime authority both prove the resolved CoopData difficulty.birthAndDeath=true value/fingerprint; the packaged seed default is not live evidence."
+      "note": "All three rendered clients install and activate the exact approved ten-module Friend Edition loadout. RBM is retired after its native campaign-initialization crash. The optional TaleWorlds BirthAndDeath module stays disabled. Birth/Death is accepted only when preflight and the authenticated host runtime authority both prove the resolved CoopData difficulty.birthAndDeath=true value/fingerprint; the packaged seed default is not live evidence."
     },
     "server": {
       "stageAllManagedModules": true,
       "exactActiveModuleOrder": [
         "Bannerlord.Harmony",
+        "Bannerlord.ButterLib",
+        "Bannerlord.UIExtenderEx",
+        "Bannerlord.MBOptionScreen",
         "Native",
         "SandBoxCore",
         "CustomBattle",
         "Sandbox",
         "StoryMode",
-        "Coop"
+        "PlayerSettlement",
+        "Coop",
+        "ImprovedGarrisons",
+        "DismembermentPlus",
+        "Fourberie",
+        "Bannerlord.Diplomacy",
+        "UnblockableThrust"
       ],
       "canonicalHarmonyPolicy": "Activate the pinned Bannerlord.Harmony v2.4.2.248 Workshop module before Native and Coop. Its Win64 0Harmony and wrapper hashes are proven by the selected nightly's live dedicated-server topology. Coop's embedded 0Harmony is excluded, and no bootstrap is provided or implied.",
       "harmonyPreflight": {
@@ -315,12 +321,21 @@
         "moduleVersion": "v2.4.2.248",
         "requiredModuleIds": [
           "Bannerlord.Harmony",
+          "Bannerlord.ButterLib",
+          "Bannerlord.UIExtenderEx",
+          "Bannerlord.MBOptionScreen",
           "Native",
           "SandBoxCore",
           "CustomBattle",
           "Sandbox",
           "StoryMode",
-          "Coop"
+          "PlayerSettlement",
+          "Coop",
+          "ImprovedGarrisons",
+          "DismembermentPlus",
+          "Fourberie",
+          "Bannerlord.Diplomacy",
+          "UnblockableThrust"
         ],
         "harmonyMustPrecede": [
           "Native",
@@ -342,21 +357,10 @@
         ]
       },
       "neverActivateModuleIds": [
-        "Bannerlord.UIExtenderEx",
-        "Bannerlord.MBOptionScreen",
-        "DismembermentPlus",
         "BirthAndDeath"
       ],
-      "guardedModuleIds": [
-        "Bannerlord.ButterLib",
-        "RBM",
-        "ImprovedGarrisons",
-        "Fourberie",
-        "Bannerlord.Diplomacy",
-        "UnblockableThrust",
-        "PlayerSettlement"
-      ],
-      "note": "The complete package is staged for trusted hash advertisement, but production launch must exactly match exactActiveModuleOrder. Bannerlord.Harmony is the only active Workshop provider; every original campaign/mission Workshop submodule remains inactive until explicit TaleWorlds official-headless and co-op authority E2E gates pass. TaleWorlds BirthAndDeath stays disabled. Preflight and runtime authority must prove the resolved CoopData difficulty.birthAndDeath=true value/fingerprint; the packaged default alone is insufficient."
+      "guardedModuleIds": [],
+      "note": "Production launch must exactly match the approved ten-module Friend Edition order on both roles. RBM is retired after its native campaign-initialization crash. TaleWorlds BirthAndDeath stays disabled. Preflight and runtime authority must prove the resolved CoopData difficulty.birthAndDeath=true value/fingerprint; the packaged default alone is insufficient."
     }
   },
   "modules": [
@@ -423,28 +427,6 @@
         "scope": "private three-person Friend Edition integration and distribution"
       },
       "exclusions": []
-    },
-    {
-      "loadOrder": 100,
-      "placement": "after Friend Edition and native campaign modules",
-      "workshopId": "2859251492",
-      "steamManifestId": "8508128689459287315",
-      "workshopUrl": "https://steamcommunity.com/sharedfiles/filedetails/?id=2859251492",
-      "moduleId": "RBM",
-      "name": "(RBM) Realistic Battle Mod Bannerlord",
-      "version": "v4.3.4",
-      "creator": "Fellow93",
-      "permission": {
-        "status": "explicit private permission confirmed by project owner",
-        "scope": "private three-person Friend Edition integration and distribution"
-      },
-      "exclusions": [
-        {
-          "glob": "bin/*/0Harmony.dll",
-          "minimumMatches": 1,
-          "reason": "Duplicate Harmony runtime; Bannerlord.Harmony is the single canonical provider."
-        }
-      ]
     },
     {
       "loadOrder": 110,

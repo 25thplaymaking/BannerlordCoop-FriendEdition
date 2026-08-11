@@ -93,19 +93,10 @@ public interface IWorkshopModuleCatalog
 /// </summary>
 public sealed class FriendEditionWorkshopModuleCatalog : IWorkshopModuleCatalog
 {
-    // Activation is per ROLE, because the dedicated server cannot execute these modules.
-    //
-    // The headless server build ships no UI/View assemblies and, decisively, cannot initialise
-    // Bannerlord.ButterLib at all: it dies during module load even after its duplicate Serilog /
-    // System.* assemblies are de-duplicated against Coop's and after the shared dependencies are
-    // seeded into the root bin (all three verified live on grain.silo). Diplomacy,
-    // ImprovedGarrisons, Fourberie and PlayerSettlement all depend on ButterLib, so no
-    // campaign-mutating module can run server-side today.
-    //
-    // A campaign module running on clients but not on the host would let each client mutate a
-    // world the host never agrees with, so those stay inactive on BOTH roles. Combat and visual
-    // modules do not create or destroy campaign objects, so they run client-side where they are
-    // felt, and the host stays authoritative over the world. Frameworks follow their dependents.
+    // The live Friend Edition loadout runs the exact same ten Workshop modules on both roles.
+    // RBM is intentionally absent: its combat-parameter initialization caused a native access
+    // violation during co-op campaign startup and the project owner retired it from the loadout.
+    // Retaining an RBM catalog entry would make the handshake and pack disagree with the launcher.
     private static readonly WorkshopModuleExpectation[] ExpectedModules =
     {
         new("Bannerlord.Harmony", "2859188632", "5023964903723709557", "v2.4.2.248", 0,
@@ -122,10 +113,6 @@ public sealed class FriendEditionWorkshopModuleCatalog : IWorkshopModuleCatalog
             featureActiveExpectedOnClient: true),
         new("Bannerlord.MBOptionScreen", "2859238197", "4045451207505706745", "v5.12.2", 30,
             WorkshopModuleRole.Framework, WorkshopCompatibilityProfile.AllPeersExact,
-            featureActiveExpectedOnServer: true,
-            featureActiveExpectedOnClient: true),
-        new("RBM", "2859251492", "8508128689459287315", "v4.3.4", 100,
-            WorkshopModuleRole.Mission, WorkshopCompatibilityProfile.DeterministicMission,
             featureActiveExpectedOnServer: true,
             featureActiveExpectedOnClient: true),
         new("ImprovedGarrisons", "2859265386", "5143458534246082850", "v4.2.0.7", 110,

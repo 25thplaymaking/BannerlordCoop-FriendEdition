@@ -25,7 +25,7 @@ public class WorkshopManifestValidatorTests
         WorkshopCompatibilityManifest server = ManifestFactory.Create(WorkshopPeerRole.Server);
         WorkshopCompatibilityManifest client = ManifestFactory.Create(
             WorkshopPeerRole.Client,
-            module => Copy(module, forClient: true, managedDistributionComponent: module.ModuleId != "RBM"));
+            module => Copy(module, forClient: true, managedDistributionComponent: module.ModuleId != "Fourberie"));
 
         WorkshopManifestValidationResult result = validator.Validate(server, client);
 
@@ -62,7 +62,7 @@ public class WorkshopManifestValidatorTests
         WorkshopCompatibilityManifest mismatchedClient = ManifestFactory.Create(
             WorkshopPeerRole.Client,
             module => Copy(module, forClient: true,
-                contentHash: module.ModuleId == "RBM" ? new string('f', 64) : null));
+                contentHash: module.ModuleId == "Fourberie" ? new string('f', 64) : null));
 
         WorkshopManifestValidationResult first = validator.Validate(server, mismatchedClient);
         WorkshopManifestValidationResult lateJoin = validator.Validate(
@@ -70,7 +70,7 @@ public class WorkshopManifestValidatorTests
             ManifestFactory.Create(WorkshopPeerRole.Client));
 
         Assert.False(first.Matches);
-        Assert.Contains(first.Diagnostics, diagnostic => diagnostic.Contains("RBM"));
+        Assert.Contains(first.Diagnostics, diagnostic => diagnostic.Contains("Fourberie"));
         Assert.True(lateJoin.Matches, lateJoin.ToNetworkReason());
     }
 
@@ -105,7 +105,7 @@ public class WorkshopManifestValidatorTests
                 ManifestFactory.StableHash(module.ModuleId, 'a'),
                 ManifestFactory.StableHash(module.ModuleId, 'b'),
                 managedDistributionComponent: true,
-                activationOrderValid: module.ModuleId != "RBM",
+                activationOrderValid: module.ModuleId != "PlayerSettlement",
                 loadOrder: module.LoadOrder,
                 active: module.FeatureActiveExpectedOnClient));
 
@@ -130,7 +130,7 @@ public class WorkshopManifestValidatorTests
                 ManifestFactory.StableHash(module.ModuleId, 'b'),
                 module.Role,
                 module.Profile,
-                loadOrder: module.ModuleId == "RBM" ? module.LoadOrder + 1 : module.LoadOrder,
+                loadOrder: module.ModuleId == "UnblockableThrust" ? module.LoadOrder + 1 : module.LoadOrder,
                 active: module.FeatureActiveExpectedOnClient));
 
         WorkshopManifestValidationResult result = validator.Validate(server, client);
@@ -138,7 +138,7 @@ public class WorkshopManifestValidatorTests
         Assert.False(result.Matches);
         Assert.Contains(result.Diagnostics, diagnostic =>
             diagnostic.Contains("load order", StringComparison.OrdinalIgnoreCase) &&
-            diagnostic.Contains("RBM", StringComparison.Ordinal));
+            diagnostic.Contains("UnblockableThrust", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -164,27 +164,31 @@ public class WorkshopManifestValidatorTests
             Assert.True(catalog.TryGet(entry.ModuleId, out WorkshopModuleExpectation expectation));
             Assert.Equal(expectation.FeatureActiveExpectedOnClient, entry.Active);
         }
-        Assert.Contains(client.Entries, entry => entry.ModuleId == "RBM" && entry.Active);
+        Assert.Equal(10, client.Entries.Length);
+        Assert.DoesNotContain(client.Entries, entry => entry.ModuleId == "RBM");
+        Assert.All(server.Entries, entry => Assert.True(entry.Active));
+        Assert.All(client.Entries, entry => Assert.True(entry.Active));
     }
 
     /// <summary>
-    /// The host cannot execute these modules, so activating one there is refused rather than
-    /// silently letting the host run code the policy says it must not.
+    /// Every retained module is required on both roles; deactivating one side is refused rather
+    /// than silently allowing the runtime contract to diverge.
     /// </summary>
     [Fact]
-    public void ClientOnlyModuleActivatedOnServer_IsRejected()
+    public void RequiredModuleDeactivatedOnServer_IsRejected()
     {
         WorkshopCompatibilityManifest server = ManifestFactory.Create(
             WorkshopPeerRole.Server,
-            module => Copy(module, active: module.ModuleId == "RBM" ||
-                                           module.FeatureActiveExpectedOnServer));
+            module => Copy(module, active: module.ModuleId == "Fourberie"
+                ? false
+                : module.FeatureActiveExpectedOnServer));
         WorkshopCompatibilityManifest client = ManifestFactory.Create(WorkshopPeerRole.Client);
 
         WorkshopManifestValidationResult result = validator.Validate(server, client);
 
         Assert.False(result.Matches);
         Assert.Contains(result.Diagnostics, diagnostic =>
-            diagnostic.Contains("Server must keep 'RBM' inactive", StringComparison.Ordinal));
+            diagnostic.Contains("Server must activate 'Fourberie'", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -193,13 +197,13 @@ public class WorkshopManifestValidatorTests
         WorkshopCompatibilityManifest server = ManifestFactory.Create(WorkshopPeerRole.Server);
         WorkshopCompatibilityManifest client = ManifestFactory.Create(
             WorkshopPeerRole.Client,
-            module => Copy(module, forClient: true, active: module.ModuleId != "RBM"));
+            module => Copy(module, forClient: true, active: module.ModuleId != "UnblockableThrust"));
 
         WorkshopManifestValidationResult result = validator.Validate(server, client);
 
         Assert.False(result.Matches);
         Assert.Contains(result.Diagnostics, diagnostic =>
-            diagnostic.Contains("Client must activate 'RBM'", StringComparison.Ordinal));
+            diagnostic.Contains("Client must activate 'UnblockableThrust'", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -267,7 +271,7 @@ public class WorkshopManifestValidatorTests
             module => new WorkshopCompatibilityManifestEntry(
                 module.ModuleId,
                 module.WorkshopId,
-                module.ModuleId == "RBM" ? "v4.3.4.0" : module.Version,
+                module.ModuleId == "Bannerlord.Diplomacy" ? "v1.4.7.0" : module.Version,
                 module.Role,
                 module.Profile,
                 ManifestFactory.StableHash(module.ModuleId, 'a'),

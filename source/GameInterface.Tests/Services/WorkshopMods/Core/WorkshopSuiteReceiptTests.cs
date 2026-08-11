@@ -42,7 +42,7 @@ public sealed class WorkshopSuiteReceiptTests : IDisposable
     public void Receipt_RequiresExactNumericLoadOrder()
     {
         WorkshopSuiteReceipt receipt = CreateReceipt();
-        receipt.Modules.Single(module => module.ModuleId == "RBM").LoadOrder++;
+        receipt.Modules.Single(module => module.ModuleId == "UnblockableThrust").LoadOrder++;
         receipt.ReceiptSha256 = WorkshopSuiteReceipt.ComputeDigest(receipt.Modules);
 
         Assert.False(receipt.TryValidate(catalog, out string error));
@@ -62,7 +62,7 @@ public sealed class WorkshopSuiteReceiptTests : IDisposable
 
         IReadOnlyList<WorkshopModuleRuntimeInfo> modules = discovery.Discover();
 
-        Assert.Equal(11, modules.Count);
+        Assert.Equal(10, modules.Count);
         Assert.All(modules, module => Assert.True(module.ManagedDistributionComponent));
         Assert.All(modules, module => Assert.True(module.ActivationOrderValid));
         Assert.All(modules.Where(module => module.Expectation.ModuleId != "DismembermentPlus"),
@@ -120,20 +120,20 @@ public sealed class WorkshopSuiteReceiptTests : IDisposable
     public void RuntimeDiscovery_RejectsIdenticalExternalWorkshopCopyAsUnmanaged()
     {
         WorkshopSuiteReceipt receipt = CreateReceipt();
-        string externalRoot = Path.Combine(root, "external-workshop", "RBM");
+        string externalRoot = Path.Combine(root, "external-workshop", "Fourberie");
         Directory.CreateDirectory(externalRoot);
         ModuleInfo[] active = ActiveOrder();
         var discovery = new RuntimeWorkshopModuleDiscovery(
             new FakeModuleInfoProvider(active),
             catalog,
-            moduleId => moduleId == "RBM" ? externalRoot : Path.Combine(root, moduleId),
+            moduleId => moduleId == "Fourberie" ? externalRoot : Path.Combine(root, moduleId),
             new FakeReceiptProvider(receipt));
 
-        WorkshopModuleRuntimeInfo rbm = Assert.Single(discovery.Discover().Where(module =>
-            module.Expectation.ModuleId == "RBM"));
+        WorkshopModuleRuntimeInfo fourberie = Assert.Single(discovery.Discover().Where(module =>
+            module.Expectation.ModuleId == "Fourberie"));
 
-        Assert.True(rbm.Active);
-        Assert.False(rbm.ManagedDistributionComponent);
+        Assert.True(fourberie.Active);
+        Assert.False(fourberie.ManagedDistributionComponent);
     }
 
     private WorkshopSuiteReceipt CreateReceipt()

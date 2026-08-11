@@ -5,7 +5,7 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
 > **EXECUTION ACTIVE (2026-08-11): containment complete; certification in progress.** The inherited
-> launcher and auto-resolve commits plus containment fixes are pushed through `0cc5b3af9` on
+> launcher and auto-resolve commits plus containment/certification fixes are pushed through `54cb75900` on
 > `25vid/workshop-integration`. Public launcher defaults/assets contain no join password; the live
 > password was rotated into only the server launch script and Bryce's private pinned config. Stable
 > releases are manual and development pushes are nightly-only. The all-functions review now covers
@@ -14,6 +14,9 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > across 5 unit, 17 synchronized E2E, 92 Diplomacy-collision, and 8 config-authority cases.
 > Fourberie's unsafe contextless create routes now fail closed, behavior initialization preflights
 > atomically, and the full GameInterface baseline is green (1,146 passed, 11 skipped, 0 failed).
+> Improved Garrisons recruit/upgrade/capture/save authority and the active combat-mod boundaries are
+> now covered by 44 focused IG tests and 70 combat tests. Dismemberment remains intentionally disabled
+> in live Coop; Unblockable Thrust's shield/parry/chamber and foot/mounted defaults are certified.
 > The remaining bounded repair queue and the full live/release gate remain open below.
 
 ## Known playtest bugs (live)

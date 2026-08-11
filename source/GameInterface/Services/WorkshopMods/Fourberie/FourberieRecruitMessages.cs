@@ -23,6 +23,8 @@ internal enum FourberieOperation
     DisbandAgentParty = 12,
     RefillAgentParty = 13,
     ResetCrimeBaseParty = 14,
+    AssignCriminalRole = 15,
+    RemoveCriminalRole = 16,
 }
 
 internal enum FourberieOperationStatus
@@ -191,6 +193,12 @@ internal static class FourberieOperationProtocol
             FourberieOperation.CreateAgentParty or FourberieOperation.DisbandAgentParty or
                 FourberieOperation.RefillAgentParty or FourberieOperation.ResetCrimeBaseParty =>
                 EmptyContext(request) && request.IntValue == 0,
+            FourberieOperation.AssignCriminalRole =>
+                string.IsNullOrEmpty(request.SettlementId) && !string.IsNullOrEmpty(request.TargetId) &&
+                string.IsNullOrEmpty(request.SecondaryTargetId) && request.Troops.Length == 0 &&
+                IsRoleCode(request.IntValue),
+            FourberieOperation.RemoveCriminalRole =>
+                EmptyContext(request) && IsRoleCode(request.IntValue),
             _ => false,
         };
     }
@@ -225,4 +233,6 @@ internal static class FourberieOperationProtocol
 
     private static bool IsBusinessKey(int key) =>
         key == 11 || key == 12 || key == 21 || key == 22 || key == 31 || key == 32;
+
+    private static bool IsRoleCode(int value) => value == 1 || value == 2;
 }

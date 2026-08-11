@@ -12,6 +12,7 @@ using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
+using TaleWorlds.Library;
 
 namespace GameInterface.Services.WorkshopMods.Fourberie;
 
@@ -334,6 +335,43 @@ internal static class FourberieAuthorityPatches
     public static bool CrimeBaseResetConsequencePrefix()
     {
         if (ModInformation.IsClient) SubmitBusiness(FourberieOperation.ResetCrimeBaseParty, 0);
+        return false;
+    }
+
+    public static bool RoleAssignmentConsequencePrefix(object __instance, object[] __args)
+    {
+        if (!ModInformation.IsClient) return false;
+        string role = __instance == null
+            ? null
+            : HarmonyLib.AccessTools.Field(__instance.GetType(), "role")?.GetValue(__instance) as string;
+        Hero hero = (__args != null && __args.Length > 0
+                ? __args[0] as IEnumerable<InquiryElement>
+                : null)?
+            .Select(element => element?.Identifier as Hero)
+            .FirstOrDefault(value => value != null);
+        int roleCode = FourberieRoleAuthority.RoleCode(role);
+        if (hero != null && roleCode != 0)
+        {
+            InformationManager.HideInquiry();
+            FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+                FourberieOperation.AssignCriminalRole,
+                null,
+                hero,
+                null,
+                roleCode,
+                Array.Empty<FourberieLocalTroopSelection>()));
+        }
+        return false;
+    }
+
+    public static bool RoleRemovalConsequencePrefix(object[] __args)
+    {
+        if (ModInformation.IsClient)
+        {
+            string role = __args != null && __args.Length > 0 ? __args[0] as string : null;
+            int roleCode = FourberieRoleAuthority.RoleCode(role);
+            if (roleCode != 0) SubmitBusiness(FourberieOperation.RemoveCriminalRole, roleCode);
+        }
         return false;
     }
 

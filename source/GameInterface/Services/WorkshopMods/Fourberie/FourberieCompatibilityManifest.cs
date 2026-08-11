@@ -38,6 +38,9 @@ internal enum FourberiePatchKind
     AgentPartyDisbandConsequence,
     AgentPartySelectionConsequence,
     CrimeBaseResetConsequence,
+    RoleSelectionPresentation,
+    RoleAssignmentConsequence,
+    RoleRemovalConsequence,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -367,6 +370,17 @@ internal static class FourberieCompatibilityManifest
             "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]");
         Add("Fourberie.CriminalVM+<>c", "<FRefrparty>b__22_0",
             FourberiePatchKind.CrimeBaseResetConsequence);
+        Add("Fourberie.CriminalVM", "ButAssign1", FourberiePatchKind.RoleSelectionPresentation);
+        Add("Fourberie.CriminalVM", "ButRemove1", FourberiePatchKind.RoleSelectionPresentation);
+        Add("Fourberie.CriminalVM", "ButAssign4", FourberiePatchKind.RoleSelectionPresentation);
+        Add("Fourberie.CriminalVM", "ButRemove4", FourberiePatchKind.RoleSelectionPresentation);
+        Add("Fourberie.FourberieBehavior", "Comparole",
+            FourberiePatchKind.RoleSelectionPresentation, "System.String");
+        Add("Fourberie.FourberieBehavior", "RemoveCompa",
+            FourberiePatchKind.RoleRemovalConsequence, "System.String");
+        Add("Fourberie.FourberieBehavior+<>c__DisplayClass84_0", "<Comparole>b__0",
+            FourberiePatchKind.RoleAssignmentConsequence,
+            "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]");
 
         // These periodic entry points contain the random and persistent campaign decisions found
         // in the 1.4.7.5 audit. They are separately guarded so a duplicate listener cannot execute

@@ -57,6 +57,13 @@ public sealed class FourberieManifestTests
     [InlineData("Fourberie.CriminalVM", "UnpackAgents", "AgentPartyDisbandConsequence")]
     [InlineData("Fourberie.CriminalVM+<>c__DisplayClass35_0", "<AgentsList>b__0", "AgentPartySelectionConsequence")]
     [InlineData("Fourberie.CriminalVM+<>c", "<FRefrparty>b__22_0", "CrimeBaseResetConsequence")]
+    [InlineData("Fourberie.CriminalVM", "ButAssign1", "RoleSelectionPresentation")]
+    [InlineData("Fourberie.CriminalVM", "ButRemove1", "RoleSelectionPresentation")]
+    [InlineData("Fourberie.CriminalVM", "ButAssign4", "RoleSelectionPresentation")]
+    [InlineData("Fourberie.CriminalVM", "ButRemove4", "RoleSelectionPresentation")]
+    [InlineData("Fourberie.FourberieBehavior", "Comparole", "RoleSelectionPresentation")]
+    [InlineData("Fourberie.FourberieBehavior", "RemoveCompa", "RoleRemovalConsequence")]
+    [InlineData("Fourberie.FourberieBehavior+<>c__DisplayClass84_0", "<Comparole>b__0", "RoleAssignmentConsequence")]
     [InlineData("Fourberie.Main", "OnMissionBehaviorInitialize", "MissionInitialization")]
     public void PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners(
         string type,

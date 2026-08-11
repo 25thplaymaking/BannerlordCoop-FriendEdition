@@ -1066,6 +1066,41 @@
       "moduleId": "Fourberie",
       "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
       "metadataTokens": [
+        "0x06000340",
+        "0x0600086C"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieOperationExecutor criminal-role transaction",
+      "capability": "ExplicitOperations",
+      "tests": [
+        "FourberieAuthorityTests.RoleAuthority_AssignsAndRemovesOnlyPinnedRoles",
+        "FourberieAuthorityTests.OperationProtocol_RequiresExactRoleAssignmentShapes",
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x0600003B",
+        "0x0600003C",
+        "0x0600003D",
+        "0x0600003E",
+        "0x06000341"
+      ],
+      "disposition": "CoopOwnerReplacement",
+      "owner": "FourberieAuthorityPatches client role selection plus typed command sinks",
+      "capability": "ExplicitOperations",
+      "tests": [
+        "FourberieAuthorityTests.RoleAuthority_MapsPinnedRoleNames",
+        "FourberieAuthorityTests.OperationProtocol_RequiresExactRoleAssignmentShapes",
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
         "0x06000001",
         "0x06000002",
         "0x06000005",

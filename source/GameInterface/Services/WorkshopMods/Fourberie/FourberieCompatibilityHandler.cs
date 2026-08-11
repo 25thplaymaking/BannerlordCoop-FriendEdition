@@ -311,6 +311,15 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.CrimeBaseResetConsequence:
                 method = nameof(FourberieAuthorityPatches.CrimeBaseResetConsequencePrefix);
                 break;
+            case FourberiePatchKind.RoleSelectionPresentation:
+                method = nameof(FourberieAuthorityPatches.ClientPresentationPrefix);
+                break;
+            case FourberiePatchKind.RoleAssignmentConsequence:
+                method = nameof(FourberieAuthorityPatches.RoleAssignmentConsequencePrefix);
+                break;
+            case FourberiePatchKind.RoleRemovalConsequence:
+                method = nameof(FourberieAuthorityPatches.RoleRemovalConsequencePrefix);
+                break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
                 break;

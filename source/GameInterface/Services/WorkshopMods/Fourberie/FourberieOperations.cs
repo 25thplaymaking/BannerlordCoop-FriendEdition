@@ -108,6 +108,10 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.ResetCrimeBaseParty:
                     ApplyCrimeBaseReset(actor, actorParty);
                     break;
+                case FourberieOperation.AssignCriminalRole:
+                case FourberieOperation.RemoveCriminalRole:
+                    ApplyCriminalRole(actor, actorParty, request);
+                    break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
             }
@@ -491,6 +495,39 @@ internal sealed class FourberieOperationExecutor
                 throw new InvalidOperationException("Fourberie did not recreate the crime-base party");
             SetStaticField("_crimeBaseParty", replacement);
         }
+    }
+
+    private void ApplyCriminalRole(
+        Hero actor,
+        MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        IDictionary roles = GetDictionary("_stringHeroIdDico");
+        if (request.Operation == FourberieOperation.RemoveCriminalRole)
+        {
+            using (new AllowedThread())
+                if (!FourberieRoleAuthority.TryRemove(roles, request.IntValue, out string failure))
+                    throw new InvalidOperationException(failure);
+            return;
+        }
+
+        if (!objectManager.TryGetObject(request.TargetId, out Hero target) || target == null ||
+            target == actor || target.IsHumanPlayerCharacter || target.Clan != actor.Clan ||
+            target.PartyBelongedTo != actorParty ||
+            actorParty.MemberRoster.GetTroopCount(target.CharacterObject) <= 0 ||
+            !target.CanMoveToSettlement())
+            throw new InvalidOperationException("selected criminal-role hero is no longer eligible");
+
+        string role = FourberieRoleAuthority.RoleName(request.IntValue);
+        string otherRole = role == "paymaster" ? "enforcer" : "paymaster";
+        if (roles.Contains(role) && string.Equals(roles[role] as string, target.StringId, StringComparison.Ordinal) ||
+            roles.Contains(otherRole) && string.Equals(roles[otherRole] as string, target.StringId, StringComparison.Ordinal))
+            throw new InvalidOperationException("selected hero already holds a Fourberie role");
+
+        using (new AllowedThread())
+            if (!FourberieRoleAuthority.TryAssign(
+                    roles, request.IntValue, target.StringId, out string failure))
+                throw new InvalidOperationException(failure);
     }
 
     private IEnumerable<(CharacterObject Troop, int Count)> ResolveTroops(

@@ -467,6 +467,51 @@ public sealed class FourberieAuthorityTests
     }
 
     [Fact]
+    public void RoleAuthority_AssignsAndRemovesOnlyPinnedRoles()
+    {
+        IDictionary roles = new Hashtable { ["paymaster"] = "hero_old" };
+
+        Assert.True(FourberieRoleAuthority.TryAssign(
+            roles, roleCode: 1, heroId: "hero_new", out var failure), failure);
+        Assert.Equal("hero_new", roles["paymaster"]);
+        Assert.True(FourberieRoleAuthority.TryAssign(
+            roles, roleCode: 2, heroId: "hero_enforcer", out failure), failure);
+        Assert.Equal("hero_enforcer", roles["enforcer"]);
+        Assert.True(FourberieRoleAuthority.TryRemove(roles, roleCode: 1, out failure), failure);
+        Assert.False(roles.Contains("paymaster"));
+        Assert.False(FourberieRoleAuthority.TryAssign(roles, 3, "hero_bad", out _));
+    }
+
+    [Theory]
+    [InlineData("paymaster", 1)]
+    [InlineData("enforcer", 2)]
+    [InlineData("other", 0)]
+    public void RoleAuthority_MapsPinnedRoleNames(string role, int expected) =>
+        Assert.Equal(expected, FourberieRoleAuthority.RoleCode(role));
+
+    [Fact]
+    public void OperationProtocol_RequiresExactRoleAssignmentShapes()
+    {
+        var assign = new NetworkRequestFourberieOperation(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 7, 3,
+            FourberieOperation.AssignCriminalRole,
+            string.Empty, "hero_a", 1, Array.Empty<FourberieTroopSelection>());
+        var remove = new NetworkRequestFourberieOperation(
+            assign.SessionId, 8, assign.ExpectedRevision,
+            FourberieOperation.RemoveCriminalRole,
+            string.Empty, string.Empty, 2, Array.Empty<FourberieTroopSelection>());
+
+        Assert.True(FourberieOperationProtocol.IsRequestShapeValid(assign));
+        Assert.True(FourberieOperationProtocol.IsRequestShapeValid(remove));
+        Assert.False(FourberieOperationProtocol.IsRequestShapeValid(new NetworkRequestFourberieOperation(
+            assign.SessionId, 9, assign.ExpectedRevision, assign.Operation,
+            string.Empty, string.Empty, assign.IntValue, assign.Troops)));
+        Assert.False(FourberieOperationProtocol.IsRequestShapeValid(new NetworkRequestFourberieOperation(
+            remove.SessionId, 10, remove.ExpectedRevision, remove.Operation,
+            string.Empty, "hero_a", remove.IntValue, remove.Troops)));
+    }
+
+    [Fact]
     public void BehaviorPreflight_ConstructsEveryBehaviorBeforeReturningAny()
     {
         var types = new[] { "first", "second" };

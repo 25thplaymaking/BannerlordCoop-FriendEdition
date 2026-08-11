@@ -22,6 +22,7 @@ internal enum FourberieOperation
     CreateAgentParty = 11,
     DisbandAgentParty = 12,
     RefillAgentParty = 13,
+    ResetCrimeBaseParty = 14,
 }
 
 internal enum FourberieOperationStatus
@@ -188,7 +189,7 @@ internal static class FourberieOperationProtocol
                 FourberieOperation.ResetSchemeBonus =>
                 EmptyContext(request) && (request.IntValue == 7 || request.IntValue == 8),
             FourberieOperation.CreateAgentParty or FourberieOperation.DisbandAgentParty or
-                FourberieOperation.RefillAgentParty =>
+                FourberieOperation.RefillAgentParty or FourberieOperation.ResetCrimeBaseParty =>
                 EmptyContext(request) && request.IntValue == 0,
             _ => false,
         };

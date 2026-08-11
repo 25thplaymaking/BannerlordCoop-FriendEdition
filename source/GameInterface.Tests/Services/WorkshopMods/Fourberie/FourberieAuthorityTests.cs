@@ -168,6 +168,7 @@ public sealed class FourberieAuthorityTests
     [InlineData((int)FourberieOperation.ResetSchemeBonus, 9, false)]
     [InlineData((int)FourberieOperation.CreateAgentParty, 0, true)]
     [InlineData((int)FourberieOperation.RefillAgentParty, 1, false)]
+    [InlineData((int)FourberieOperation.ResetCrimeBaseParty, 0, true)]
     public void OperationProtocol_RequiresExactCriminalBusinessShapes(
         int operationValue,
         int businessKey,
@@ -437,6 +438,32 @@ public sealed class FourberieAuthorityTests
         FourberieOperation? operation = FourberieAuthorityPatches.AgentPartyOperationForSelection(selection);
 
         Assert.Equal(expectedOperation == 0 ? null : (FourberieOperation?)expectedOperation, operation);
+    }
+
+    [Fact]
+    public void CrimeBaseResetPrefix_SubmitsTypedClientIntentAndNeverRunsOriginal()
+    {
+        bool previousServer = ModInformation.IsServer;
+        IFourberiePatchRuntime previousRuntime = FourberiePatchRuntime.Current;
+        var runtime = new CaptureRuntime();
+        try
+        {
+            ModInformation.IsServer = false;
+            FourberiePatchRuntime.Current = runtime;
+
+            Assert.False(FourberieAuthorityPatches.CrimeBaseResetConsequencePrefix());
+            Assert.Equal(FourberieOperation.ResetCrimeBaseParty, runtime.LastOperation.Operation);
+            Assert.Equal(0, runtime.LastOperation.IntValue);
+
+            ModInformation.IsServer = true;
+            Assert.False(FourberieAuthorityPatches.CrimeBaseResetConsequencePrefix());
+            Assert.Equal(1, runtime.SubmissionCount);
+        }
+        finally
+        {
+            FourberiePatchRuntime.Current = previousRuntime;
+            ModInformation.IsServer = previousServer;
+        }
     }
 
     [Fact]

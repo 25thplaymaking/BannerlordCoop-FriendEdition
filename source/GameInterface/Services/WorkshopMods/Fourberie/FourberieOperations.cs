@@ -59,6 +59,8 @@ internal sealed class FourberieOperationExecutor
         MobileParty previousAgents = GetStaticField("_agentsParty") as MobileParty;
         bool previousAgentsWasActive = previousAgents?.IsActive == true;
         Dictionary<CharacterObject, int> previousAgentCounts = CaptureAllCounts(previousAgents?.MemberRoster);
+        MobileParty previousCrimeBase = GetStaticField("_crimeBaseParty") as MobileParty;
+        bool previousCrimeBaseWasActive = previousCrimeBase?.IsActive == true;
         int previousActorGold = actor.Gold;
 
         try
@@ -103,6 +105,9 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.RefillAgentParty:
                     ApplyAgentParty(actor, actorParty, request.Operation);
                     break;
+                case FourberieOperation.ResetCrimeBaseParty:
+                    ApplyCrimeBaseReset(actor, actorParty);
+                    break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
             }
@@ -136,6 +141,12 @@ internal sealed class FourberieOperationExecutor
             catch (Exception rollback) { rollbackErrors.Add("agent-party reference: " + rollback.Message); }
             if (previousAgentsWasActive && previousAgents?.IsActive != true)
                 rollbackErrors.Add("agent-party destruction cannot be reversed");
+            MobileParty createdCrimeBase = GetStaticField("_crimeBaseParty") as MobileParty;
+            TryDestroyCreated(createdCrimeBase, previousCrimeBase, rollbackErrors);
+            try { SetStaticField("_crimeBaseParty", previousCrimeBase?.IsActive == true ? previousCrimeBase : null); }
+            catch (Exception rollback) { rollbackErrors.Add("crime-base-party reference: " + rollback.Message); }
+            if (previousCrimeBaseWasActive && previousCrimeBase?.IsActive != true)
+                rollbackErrors.Add("crime-base-party destruction cannot be reversed");
 
             if (!FourberieCanonicalState.TryApply(assembly, objectManager, rollbackState, out var stateFailure))
                 rollbackErrors.Add("canonical state: " + stateFailure);
@@ -454,6 +465,32 @@ internal sealed class FourberieOperationExecutor
         }
         if (current.IsCastle) return actor.Clan?.Settlements.Contains(current) == true;
         return true;
+    }
+
+    private void ApplyCrimeBaseReset(Hero actor, MobileParty actorParty)
+    {
+        if (GetStaticField("_crimeBase") is not Settlement crimeBase ||
+            actorParty.CurrentSettlement != crimeBase)
+            throw new InvalidOperationException("controller is not at the Fourberie crime base");
+        if (GetStaticField("_crimeBaseParty") is not MobileParty party)
+            return;
+        if (!party.IsActive) throw new InvalidOperationException("crime-base party is inactive");
+
+        using (new AllowedThread())
+        {
+            DestroyPartyAction.Apply(null, party);
+            MobileParty replacement;
+            using (new BarterPlayerContext(actor, actorParty))
+                replacement = RequiredMethod(BehaviorTypeName, "CreateVirtualParty", parameterCount: 2)
+                    .Invoke(null, new object[]
+                    {
+                        "fb_crimebase_party",
+                        new TextObject("{=FoSafHou23}Your lads"),
+                    }) as MobileParty;
+            if (replacement == null)
+                throw new InvalidOperationException("Fourberie did not recreate the crime-base party");
+            SetStaticField("_crimeBaseParty", replacement);
+        }
     }
 
     private IEnumerable<(CharacterObject Troop, int Count)> ResolveTroops(

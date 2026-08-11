@@ -331,6 +331,12 @@ internal static class FourberieAuthorityPatches
             _ => null,
         };
 
+    public static bool CrimeBaseResetConsequencePrefix()
+    {
+        if (ModInformation.IsClient) SubmitBusiness(FourberieOperation.ResetCrimeBaseParty, 0);
+        return false;
+    }
+
     public static bool MissionInitializationPrefix() => true;
 
     public static bool SeparatismLoyaltyCompositionPrefix(MethodBase __originalMethod, ref int __result)

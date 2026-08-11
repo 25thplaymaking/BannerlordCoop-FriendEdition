@@ -6,8 +6,8 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 
 > **AUTHORITY ROUTING IN PROGRESS (2026-08-11): prior RC superseded; stable held.** The exact function
 > ledger covers 41,050 methods across the ten active Workshop modules, retired RBM, and integrated
-> Separatism. Deterministic IL evidence identifies 10,082 authority candidates; 6,162 exact records
-> are classified and release validation rejects the remaining 3,920 active gameplay records.
+> Separatism. Deterministic IL evidence identifies 10,082 authority candidates; 6,163 exact records
+> are classified and release validation rejects the remaining 3,919 active gameplay records.
 > All six active gameplay adapters now share `IWorkshopModule`, and a trusted host capability snapshot
 > is green in unit/E2E tests. UnblockableThrust's four candidates are owned by the accepted collision
 > authority, and all 17 DismembermentPlus candidates now use a deterministic, deduplicated replicated-
@@ -16,7 +16,7 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > settlement rebellion cannot run from a client. Improved Garrisons' 684 candidates are now closed too:
 > management/settings commands carry stable selections, authenticated clan ownership, session/revision
 > concurrency, exact replay results, canonical rollback, and server-created parties while clients retain
-> the menu and roster-selection surface. Fourberie's thirteen explicit operation families now use authenticated,
+> the menu and roster-selection surface. Fourberie's fourteen explicit operation families now use authenticated,
 > rollback-safe server commands, while its menus and mission setup remain role-local presentation/lifecycle.
 > Diplomacy's explicit player operations and server callbacks are routed too, including a persisted,
 > controller-scoped server messenger queue with server-owned travel, arrival costs, and accident RNG.
@@ -140,13 +140,15 @@ rolls back canonical Fourberie state and created parties on failure, and returns
   7. Saboteur-party create, refill, and disband now use authenticated server transactions. Location,
      capacity, trained-agent availability, and the current party are re-derived server-side; creation and
      refill have roster rollback, while an irreversible disband failure aborts instead of claiming recovery.
-  8. `OnMissionBehaviorInitialize` currently preserves the mod's required peer-local setup, but its
+  8. The crime-base “all lads leave” confirmation is server-owned and location-checked. Its destructive
+     party replacement is explicit about its irreversible boundary and aborts on an incomplete rebuild.
+  9. `OnMissionBehaviorInitialize` currently preserves the mod's required peer-local setup, but its
      mission callbacks remain open until their authoritative/controller ownership is proven end to end.
-  9. The exact secondary pass now owns 882/1,759 candidates: 416 presentation-only helpers, 217 pure
-     model-policy methods, 186 server callbacks, 29 finance/model overrides, 25 explicit-command methods,
+  10. The exact secondary pass now owns 883/1,759 candidates: 416 presentation-only helpers, 217 pure
+     model-policy methods, 186 server callbacks, 29 finance/model overrides, 26 explicit-command methods,
      and 9 unreachable Homesteads/Bellum Civile add-on methods. The validator rejects mutation,
      persistence, randomness, or authority-sensitive calls mislabeled as client presentation.
-  - **OPEN:** 880 exact UI/mission/lifecycle candidates remain, including roughly 300 menu/dialog helpers
+  - **OPEN:** 879 exact UI/mission/lifecycle candidates remain, including roughly 300 menu/dialog helpers
     that reach shared state and therefore require live command or mission-authority owners.
 
 ### Playable session (DONE 2026-08-10)

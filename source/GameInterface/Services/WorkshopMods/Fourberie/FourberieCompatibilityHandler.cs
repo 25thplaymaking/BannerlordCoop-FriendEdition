@@ -308,6 +308,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.AgentPartySelectionConsequence:
                 method = nameof(FourberieAuthorityPatches.AgentPartySelectionConsequencePrefix);
                 break;
+            case FourberiePatchKind.CrimeBaseResetConsequence:
+                method = nameof(FourberieAuthorityPatches.CrimeBaseResetConsequencePrefix);
+                break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
                 break;

@@ -1,6 +1,8 @@
 using Common;
 using GameInterface.Configuration;
+using HarmonyLib;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -375,6 +377,79 @@ internal static class FourberieAuthorityPatches
         return false;
     }
 
+    public static bool SchemeVictimConsequencePrefix(MethodBase __originalMethod, object[] __args)
+    {
+        if (!ModInformation.IsClient) return false;
+        string typeName = __originalMethod?.DeclaringType?.FullName;
+        int slot = typeName == "Fourberie.CriminalVM+<>c__DisplayClass137_0" ? 7 :
+            typeName == "Fourberie.CriminalVM+<>c__DisplayClass138_0" ? 8 : 0;
+        Hero target = SelectedInquiryIdentifier<Hero>(__args);
+        if (slot != 0 && target != null)
+        {
+            InformationManager.HideInquiry();
+            SubmitScheme(FourberieOperation.SelectSchemeVictim, slot, target);
+        }
+        return false;
+    }
+
+    public static bool SchemeTypeConsequencePrefix(object __instance, object[] __args)
+    {
+        if (!ModInformation.IsClient || __instance == null) return false;
+        object captured = AccessTools.Field(__instance.GetType(), "schr")?.GetValue(__instance);
+        int slot = captured is int value ? value : 0;
+        int scheme = SelectedInquiryIdentifier<int>(__args);
+        if (FourberieSchemeAuthority.IsSlot(slot) && scheme >= 1 && scheme <= 8)
+        {
+            InformationManager.HideInquiry();
+            SubmitBusiness(FourberieOperation.SelectSchemeType, slot * 10 + scheme);
+        }
+        return false;
+    }
+
+    public static bool SchemeLifecycleConsequencePrefix(object[] __args)
+    {
+        if (!ModInformation.IsClient) return false;
+        int slot = __args != null && __args.Length > 0 && __args[0] is int value ? value : 0;
+        if (!FourberieSchemeAuthority.IsSlot(slot)) return false;
+
+        FourberieOperation operation = SchemeLifecycleOperation(slot);
+        if (operation == FourberieOperation.AbortScheme)
+        {
+            InformationManager.ShowInquiry(new InquiryData(
+                "Abort the scheme",
+                "Stop everything? Spent resources will not be refunded.",
+                true,
+                true,
+                "Okay",
+                "Wait a second!",
+                () => SubmitBusiness(FourberieOperation.AbortScheme, slot),
+                null));
+        }
+        else
+        {
+            SubmitBusiness(operation, slot);
+        }
+        return false;
+    }
+
+    public static bool SchemeOwnedReplacementPrefix() => false;
+
+    internal static FourberieOperation SchemeLifecycleOperation(int slot)
+    {
+        Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
+        IDictionary crime = behavior == null
+            ? null
+            : AccessTools.Field(behavior, "_crimeValue")?.GetValue(null) as IDictionary;
+        return SchemeLifecycleOperation(crime, slot);
+    }
+
+    internal static FourberieOperation SchemeLifecycleOperation(IDictionary crime, int slot)
+    {
+        if (crime?.Contains(slot * 100 + 40) == true) return FourberieOperation.AbortScheme;
+        if (crime?.Contains(slot * 100 + 41) == true) return FourberieOperation.ClearCompletedScheme;
+        return FourberieOperation.StartScheme;
+    }
+
     public static bool MissionInitializationPrefix() => true;
 
     public static bool SeparatismLoyaltyCompositionPrefix(MethodBase __originalMethod, ref int __result)
@@ -527,6 +602,25 @@ internal static class FourberieAuthorityPatches
             null,
             businessKey,
             Array.Empty<FourberieLocalTroopSelection>()));
+
+    private static void SubmitScheme(FourberieOperation operation, int slot, Hero target) =>
+        FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+            operation,
+            null,
+            target,
+            null,
+            slot,
+            Array.Empty<FourberieLocalTroopSelection>()));
+
+    private static T SelectedInquiryIdentifier<T>(object[] arguments)
+    {
+        object identifier = (arguments != null && arguments.Length > 0
+                ? arguments[0] as IEnumerable<InquiryElement>
+                : null)?
+            .Select(element => element?.Identifier)
+            .FirstOrDefault(value => value is T);
+        return identifier is T selected ? selected : default;
+    }
 
     private static bool TryBusinessKey(object[] arguments, out int businessKey)
     {

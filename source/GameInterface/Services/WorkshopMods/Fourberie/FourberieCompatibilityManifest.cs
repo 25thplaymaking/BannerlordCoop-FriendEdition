@@ -41,6 +41,10 @@ internal enum FourberiePatchKind
     RoleSelectionPresentation,
     RoleAssignmentConsequence,
     RoleRemovalConsequence,
+    SchemeVictimConsequence,
+    SchemeTypeConsequence,
+    SchemeLifecycleConsequence,
+    SchemeOwnedReplacement,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -381,6 +385,32 @@ internal static class FourberieCompatibilityManifest
         Add("Fourberie.FourberieBehavior+<>c__DisplayClass84_0", "<Comparole>b__0",
             FourberiePatchKind.RoleAssignmentConsequence,
             "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]");
+        Add("Fourberie.CriminalVM", "Schemhero1", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM", "Schemhero2", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM+<>c__DisplayClass137_0", "<Schemhero1>b__0",
+            FourberiePatchKind.SchemeVictimConsequence,
+            "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]");
+        Add("Fourberie.CriminalVM+<>c__DisplayClass138_0", "<Schemhero2>b__0",
+            FourberiePatchKind.SchemeVictimConsequence,
+            "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]");
+        Add("Fourberie.CriminalVM", "Scheme1Sel", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM", "Scheme2Sel", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.FourberieBehavior", "SchemeSel", FourberiePatchKind.ClientPresentation,
+            "System.Int32");
+        Add("Fourberie.FourberieBehavior+<>c__DisplayClass102_0", "<SchemeSel>b__0",
+            FourberiePatchKind.SchemeTypeConsequence,
+            "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]");
+        Add("Fourberie.CriminalVM", "SchemeAllBut", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM", "Scheme2AllBut", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM", "SchemeAllButtonRoutine",
+            FourberiePatchKind.SchemeLifecycleConsequence, "System.Int32");
+        Add("Fourberie.FourberieBehavior", "SchemeAction",
+            FourberiePatchKind.SchemeOwnedReplacement,
+            "System.Int32", "System.Int32", "System.Int32", "System.Int32", "System.Int32", "System.Int32");
+        Add("Fourberie.FourberieBehavior", "AbortScheme",
+            FourberiePatchKind.SchemeOwnedReplacement, "System.Int32");
+        Add("Fourberie.CriminalVM+<>c__DisplayClass77_0", "<SchemeAllButtonRoutine>b__0",
+            FourberiePatchKind.SchemeOwnedReplacement);
 
         // These periodic entry points contain the random and persistent campaign decisions found
         // in the 1.4.7.5 audit. They are separately guarded so a duplicate listener cannot execute

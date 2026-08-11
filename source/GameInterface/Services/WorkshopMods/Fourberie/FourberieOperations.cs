@@ -112,6 +112,13 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.RemoveCriminalRole:
                     ApplyCriminalRole(actor, actorParty, request);
                     break;
+                case FourberieOperation.SelectSchemeVictim:
+                case FourberieOperation.SelectSchemeType:
+                case FourberieOperation.StartScheme:
+                case FourberieOperation.AbortScheme:
+                case FourberieOperation.ClearCompletedScheme:
+                    ApplySchemeOperation(actor, actorParty, request);
+                    break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
             }
@@ -528,6 +535,126 @@ internal sealed class FourberieOperationExecutor
             if (!FourberieRoleAuthority.TryAssign(
                     roles, request.IntValue, target.StringId, out string failure))
                 throw new InvalidOperationException(failure);
+    }
+
+    private void ApplySchemeOperation(
+        Hero actor,
+        MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        IDictionary crime = GetDictionary("_crimeValue");
+        IDictionary heroes = GetDictionary("_stringHeroIdDico");
+        IDictionary times = GetDictionary("_campaignTimeDictio");
+
+        using (new AllowedThread())
+        {
+            if (request.Operation == FourberieOperation.SelectSchemeVictim)
+            {
+                ApplySchemeVictimSelection(heroes, crime, request);
+                return;
+            }
+
+            if (request.Operation == FourberieOperation.SelectSchemeType)
+            {
+                if (!FourberieSchemeAuthority.TryDecodeSelection(
+                        request.IntValue, out int slot, out int scheme))
+                    throw new InvalidOperationException("invalid scheme selection");
+                Hero victim = ResolveMappedHero("victim" + slot) ??
+                              throw new InvalidOperationException("scheme victim is unavailable");
+                EnsureSchemeTarget(actor, actorParty, victim, scheme);
+                if (crime.Contains(slot * 100 + 40) || crime.Contains(slot * 100 + 41))
+                    throw new InvalidOperationException("scheme selection cannot change during its lifecycle");
+                crime[slot] = scheme;
+                return;
+            }
+
+            int lifecycleSlot = request.IntValue;
+            if (request.Operation == FourberieOperation.AbortScheme)
+            {
+                if (!FourberieSchemeAuthority.TryAbort(crime, lifecycleSlot, out string failure))
+                    throw new InvalidOperationException(failure);
+                heroes.Remove("victim" + lifecycleSlot);
+                times.Remove(lifecycleSlot);
+                return;
+            }
+            if (request.Operation == FourberieOperation.ClearCompletedScheme)
+            {
+                if (!FourberieSchemeAuthority.TryClearCompleted(crime, lifecycleSlot, out string failure))
+                    throw new InvalidOperationException(failure);
+                heroes.Remove("victim" + lifecycleSlot);
+                times.Remove(lifecycleSlot);
+                return;
+            }
+
+            Hero target = ResolveMappedHero("victim" + lifecycleSlot) ??
+                          throw new InvalidOperationException("scheme victim is unavailable");
+            int selectedScheme = ReadInt(crime, lifecycleSlot);
+            EnsureSchemeTarget(actor, actorParty, target, selectedScheme);
+            int rank = target.IsFactionLeader ? 3 : target.IsClanLeader ? 2 : 1;
+            int randomOffset = MBRandom.RandomInt(0, 2);
+            if (!FourberieSchemeAuthority.TryPlan(
+                    selectedScheme, rank, randomOffset, out var plan, out string planFailure))
+                throw new InvalidOperationException(planFailure);
+            if (!FourberieSchemeAuthority.TryStart(
+                    crime, lifecycleSlot, actor.Gold, plan, out string startFailure))
+                throw new InvalidOperationException(startFailure);
+
+            times[lifecycleSlot] = CampaignTime.Now;
+            if (plan.Fee > 0)
+                GiveGoldAction.ApplyBetweenCharacters(actor, null, plan.Fee, false);
+
+            object[] arguments = { lifecycleSlot, selectedScheme, false, null, 0, 0, 0, 0 };
+            int successChance;
+            using (new BarterPlayerContext(actor, actorParty))
+                successChance = Convert.ToInt32(RequiredMethod(
+                    BehaviorTypeName, "SchemeSucc", parameterCount: 8).Invoke(null, arguments));
+            int coverage = Convert.ToInt32(arguments[4]);
+            bool success = selectedScheme == 7 || MBRandom.RandomInt(0, 101) > 100 - successChance;
+            bool detected = !success && MBRandom.RandomInt(0, 101) > 100 - coverage;
+            FourberieSchemeAuthority.SetOutcome(crime, lifecycleSlot, selectedScheme, success, detected);
+        }
+    }
+
+    private void ApplySchemeVictimSelection(
+        IDictionary heroes,
+        IDictionary crime,
+        NetworkRequestFourberieOperation request)
+    {
+        int slot = request.IntValue;
+        if (crime.Contains(slot * 100 + 40) || crime.Contains(slot * 100 + 41))
+            throw new InvalidOperationException("scheme victim cannot change during its lifecycle");
+        if (!objectManager.TryGetObject(request.TargetId, out Hero target) || target == null ||
+            !target.IsAlive || target.IsChild || target.Clan == null)
+            throw new InvalidOperationException("selected scheme victim is no longer eligible");
+
+        string otherId = heroes.Contains("victim" + (slot == 7 ? 8 : 7))
+            ? heroes["victim" + (slot == 7 ? 8 : 7)] as string
+            : null;
+        if (string.Equals(otherId, target.StringId, StringComparison.Ordinal))
+            throw new InvalidOperationException("the same hero cannot occupy both scheme slots");
+
+        heroes["victim" + slot] = target.StringId;
+    }
+
+    private void EnsureSchemeTarget(Hero actor, MobileParty actorParty, Hero victim, int scheme)
+    {
+        if (victim == null || !victim.IsAlive || victim.IsChild || victim.Clan?.Kingdom == null)
+            throw new InvalidOperationException("scheme victim is no longer eligible");
+
+        int network;
+        using (new BarterPlayerContext(actor, actorParty))
+            network = Convert.ToInt32(RequiredMethod(
+                BehaviorTypeName, "SchemeNet", parameterCount: 1).Invoke(null, new object[] { victim.Clan.Kingdom }));
+        bool eligible = FourberieSchemeAuthority.IsTargetEligible(
+            scheme,
+            victim.Clan.Influence >= 200f,
+            victim.CanDie((KillCharacterAction.KillCharacterActionDetail)1),
+            victim.IsClanLeader,
+            victim.IsPartyLeader,
+            victim.MapFaction?.IsAtWarWith(actorParty.MapFaction) == true,
+            network);
+        if (!eligible)
+            throw new InvalidOperationException("scheme target requirements changed before execution");
     }
 
     private IEnumerable<(CharacterObject Troop, int Count)> ResolveTroops(

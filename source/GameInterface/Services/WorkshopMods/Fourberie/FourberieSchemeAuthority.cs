@@ -1,0 +1,193 @@
+using System;
+using System.Collections;
+
+namespace GameInterface.Services.WorkshopMods.Fourberie;
+
+internal readonly struct FourberieSchemePlan
+{
+    public FourberieSchemePlan(int scheme, int fee, int agentPoolKey, int agentCost, int durationDays)
+    {
+        Scheme = scheme;
+        Fee = fee;
+        AgentPoolKey = agentPoolKey;
+        AgentCost = agentCost;
+        DurationDays = durationDays;
+    }
+
+    public int Scheme { get; }
+    public int Fee { get; }
+    public int AgentPoolKey { get; }
+    public int AgentCost { get; }
+    public int DurationDays { get; }
+}
+
+/// <summary>
+/// Pinned Fourberie 1.4.7.5 scheme rules. The server supplies the target facts and random offset;
+/// clients send only stable target/type/lifecycle intent.
+/// </summary>
+internal static class FourberieSchemeAuthority
+{
+    public static bool TryPlan(
+        int scheme,
+        int targetRank,
+        int randomOffset,
+        out FourberieSchemePlan plan,
+        out string failure)
+    {
+        plan = default;
+        failure = null;
+        if (scheme < 1 || scheme > 8 || targetRank < 1 || targetRank > 3 ||
+            randomOffset < 0 || randomOffset > 1)
+        {
+            failure = "scheme plan is outside the pinned Fourberie range";
+            return false;
+        }
+
+        int pool = scheme == 3 || scheme == 6 ? 320 : 310;
+        int agents = scheme == 4 || scheme == 5 || scheme == 7 || targetRank < 3 ? 1 : 2;
+        int fee = scheme switch
+        {
+            1 => 35_000 * targetRank,
+            2 => 45_000,
+            3 => 65_000,
+            4 => 0,
+            5 => 10_000,
+            6 => 60_000,
+            7 => 5_000,
+            8 => 40_000 * targetRank,
+            _ => 0,
+        };
+        int duration = scheme switch
+        {
+            1 => 3 + randomOffset + targetRank,
+            2 => 4 + randomOffset,
+            3 => 4 + randomOffset + targetRank,
+            4 => 2 + randomOffset,
+            5 => 1,
+            6 => 4 + randomOffset + targetRank,
+            7 => 1,
+            8 => 4 + randomOffset + targetRank,
+            _ => 0,
+        };
+
+        plan = new FourberieSchemePlan(scheme, fee, pool, agents, duration);
+        return true;
+    }
+
+    public static bool IsTargetEligible(
+        int scheme,
+        bool influenceAboveMinimum,
+        bool canDie,
+        bool clanLeader,
+        bool partyLeader,
+        bool atWarWithActor,
+        int network)
+    {
+        return scheme switch
+        {
+            1 => influenceAboveMinimum,
+            2 or 4 or 8 => clanLeader,
+            3 => canDie,
+            5 => partyLeader,
+            6 => atWarWithActor,
+            7 => partyLeader && network >= 30,
+            _ => false,
+        };
+    }
+
+    public static bool TryStart(
+        IDictionary crime,
+        int slot,
+        int actorGold,
+        FourberieSchemePlan plan,
+        out string failure)
+    {
+        failure = null;
+        if (crime == null || !IsSlot(slot) || Read(crime, slot) != plan.Scheme ||
+            crime.Contains(slot * 100 + 40) || crime.Contains(slot * 100 + 41))
+        {
+            failure = "scheme selection is stale or already active";
+            return false;
+        }
+        if (actorGold < plan.Fee)
+        {
+            failure = "the controller cannot afford the selected scheme";
+            return false;
+        }
+        int available = Read(crime, plan.AgentPoolKey);
+        if (available < plan.AgentCost)
+        {
+            failure = "the selected scheme no longer has enough agents";
+            return false;
+        }
+
+        crime[plan.AgentPoolKey] = available - plan.AgentCost;
+        Replace(crime, slot * 10 + 4, 1);
+        Replace(crime, slot * 100 + 40, plan.DurationDays);
+        return true;
+    }
+
+    public static void SetOutcome(IDictionary crime, int slot, int scheme, bool success, bool detected)
+    {
+        if (crime == null || !IsSlot(slot) || scheme < 1 || scheme > 8)
+            throw new ArgumentOutOfRangeException(nameof(slot));
+
+        crime.Remove(slot * 10 + 1);
+        crime.Remove(slot * 10 + 2);
+        crime.Remove(slot * 10 + 3);
+        int key = slot * 10 + (success ? 1 : detected ? 3 : 2);
+        crime[key] = scheme;
+    }
+
+    public static bool TryAbort(IDictionary crime, int slot, out string failure)
+    {
+        failure = null;
+        if (crime == null || !IsSlot(slot) || !crime.Contains(slot * 100 + 40))
+        {
+            failure = "scheme is not active";
+            return false;
+        }
+
+        crime.Remove(slot);
+        for (int suffix = 1; suffix <= 4; suffix++) crime.Remove(slot * 10 + suffix);
+        for (int suffix = 10; suffix <= 50; suffix += 10) crime.Remove(slot * 100 + suffix);
+        return true;
+    }
+
+    public static bool TryClearCompleted(IDictionary crime, int slot, out string failure)
+    {
+        failure = null;
+        if (crime == null || !IsSlot(slot) || !crime.Contains(slot * 100 + 41))
+        {
+            failure = "scheme is not complete";
+            return false;
+        }
+
+        crime.Remove(slot);
+        crime.Remove(slot * 10 + 4);
+        crime.Remove(slot * 100 + 10);
+        crime.Remove(slot * 100 + 20);
+        crime.Remove(slot * 100 + 30);
+        crime.Remove(slot * 100 + 41);
+        crime.Remove(slot * 100 + 50);
+        return true;
+    }
+
+    public static bool IsSlot(int slot) => slot == 7 || slot == 8;
+
+    public static bool TryDecodeSelection(int value, out int slot, out int scheme)
+    {
+        slot = value / 10;
+        scheme = value % 10;
+        return IsSlot(slot) && scheme >= 1 && scheme <= 8;
+    }
+
+    private static int Read(IDictionary dictionary, int key) =>
+        dictionary.Contains(key) ? Convert.ToInt32(dictionary[key]) : 0;
+
+    private static void Replace(IDictionary dictionary, int key, int value)
+    {
+        dictionary.Remove(key);
+        dictionary[key] = value;
+    }
+}

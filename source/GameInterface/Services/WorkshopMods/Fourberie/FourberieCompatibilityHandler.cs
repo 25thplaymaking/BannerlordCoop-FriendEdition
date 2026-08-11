@@ -320,6 +320,18 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.RoleRemovalConsequence:
                 method = nameof(FourberieAuthorityPatches.RoleRemovalConsequencePrefix);
                 break;
+            case FourberiePatchKind.SchemeVictimConsequence:
+                method = nameof(FourberieAuthorityPatches.SchemeVictimConsequencePrefix);
+                break;
+            case FourberiePatchKind.SchemeTypeConsequence:
+                method = nameof(FourberieAuthorityPatches.SchemeTypeConsequencePrefix);
+                break;
+            case FourberiePatchKind.SchemeLifecycleConsequence:
+                method = nameof(FourberieAuthorityPatches.SchemeLifecycleConsequencePrefix);
+                break;
+            case FourberiePatchKind.SchemeOwnedReplacement:
+                method = nameof(FourberieAuthorityPatches.SchemeOwnedReplacementPrefix);
+                break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
                 break;

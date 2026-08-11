@@ -58,6 +58,7 @@ internal enum FourberiePatchKind
     SafehouseAbandonConsequence,
     SafehouseEstablishmentConsequence,
     SafehouseTraderConsequence,
+    SafehouseWaitConsequence,
     GrudgeSelectionConsequence,
     GrudgeSettlementConsequence,
     ContractTickReplacement,
@@ -435,6 +436,7 @@ internal static class FourberieCompatibilityManifest
         Add("Fourberie.FourbContractBehavior+<>c", "<AddGameMenus>b__5_1",
             FourberiePatchKind.ContractProposalLegacyConsequence);
         const string InquiryElements = "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]";
+        const string MenuCallbackArgs = "TaleWorlds.CampaignSystem.GameMenus.MenuCallbackArgs";
         Add("Fourberie.CriminalVM+<>c", "<KingdomFilter>b__148_1",
             FourberiePatchKind.ClientSchemeFilter, InquiryElements);
         Add("Fourberie.CriminalVM+<>c", "<ClanFilter>b__152_0",
@@ -480,6 +482,10 @@ internal static class FourberieCompatibilityManifest
             FourberiePatchKind.SafehouseTraderConsequence);
         Add("Fourberie.FourbSafeHouseBehavior+<>c", "<AddDialogsSafeHouse>b__9_24",
             FourberiePatchKind.SafehouseTraderConsequence);
+        Add("Fourberie.FourbSafeHouseBehavior+<>c", "<MenuSafeHouse>b__13_5",
+            FourberiePatchKind.SafehouseWaitConsequence, MenuCallbackArgs);
+        Add("Fourberie.FourbSafeHouseBehavior+<>c", "<MenuSafeHouse>b__13_7",
+            FourberiePatchKind.SafehouseWaitConsequence, MenuCallbackArgs);
         Add("Fourberie.CriminalVM", "ClanGruFdilter", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM", "CanPlayerPay", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM", "<ClanGruFdilter>b__149_0",
@@ -612,7 +618,6 @@ internal static class FourberieCompatibilityManifest
         // there is no controller-scoped request, stable target identity, expected revision, or
         // request-id replay ledger for any of their consequences.
         const string CampaignGameStarter = "TaleWorlds.CampaignSystem.CampaignGameStarter";
-        const string MenuCallbackArgs = "TaleWorlds.CampaignSystem.GameMenus.MenuCallbackArgs";
         const string SpawnTags = "System.Collections.Generic.Dictionary`2[System.String,System.Int32]";
         Add("Fourberie.FourberieBehavior", "AddGameMenus", FourberiePatchKind.ClientPresentation,
             CampaignGameStarter);

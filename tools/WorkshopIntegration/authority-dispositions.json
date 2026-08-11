@@ -2095,9 +2095,7 @@
         "0x060008F4",
         "0x060008F5",
         "0x060008F6",
-        "0x060008F7",
         "0x060008F8",
-        "0x060008F9",
         "0x060008FA",
         "0x060008FB",
         "0x060008FC",
@@ -2431,6 +2429,24 @@
         "FourberieSafehouseEstablishmentAuthorityTests.FirstBaseCommit_InitializesSafehouseAndClearsOnlyBaseUpgrades",
         "FourberieSafehouseEstablishmentAuthorityTests.TownMigration_PreservesPartyStateSchemeAndExistingRelicChoice",
         "FourberieSafehouseEstablishmentAuthorityTests.Protocol_RequiresOnlyTheSelectedHideout",
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x060008F7",
+        "0x060008F9"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieOperationExecutor safehouse wait transactions",
+      "capability": "ExplicitOperations",
+      "tests": [
+        "FourberieSafehouseWaitAuthorityTests.Access_RequiresControllerAtInitializedPinnedSafehouse",
+        "FourberieSafehouseWaitAuthorityTests.Commit_StartsAndStopsOnlyTheCanonicalWaitMarker",
+        "FourberieSafehouseWaitAuthorityTests.Protocol_RequiresOnlyTheCurrentSafehouse",
+        "FourberieSafehouseWaitAuthorityTests.ConsequenceMap_RoutesBothWaitActions",
         "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
       ]
     },

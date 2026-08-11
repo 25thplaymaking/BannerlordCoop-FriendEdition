@@ -644,6 +644,25 @@ internal static class FourberieAuthorityPatches
         _ => null,
     };
 
+    public static bool SafehouseWaitConsequencePrefix(MethodBase __originalMethod)
+    {
+        if (ModInformation.IsClient)
+        {
+            FourberieOperation? operation = SafehouseWaitOperationForMethod(__originalMethod?.Name);
+            Settlement settlement = Settlement.CurrentSettlement;
+            if (operation.HasValue && settlement != null)
+                SubmitSettlement(operation.Value, settlement);
+        }
+        return false;
+    }
+
+    internal static FourberieOperation? SafehouseWaitOperationForMethod(string methodName) => methodName switch
+    {
+        "<MenuSafeHouse>b__13_5" => FourberieOperation.StartSafehouseWait,
+        "<MenuSafeHouse>b__13_7" => FourberieOperation.StopSafehouseWait,
+        _ => null,
+    };
+
     public static bool GrudgeSelectionConsequencePrefix(object[] __args)
     {
         if (ModInformation.IsClient)

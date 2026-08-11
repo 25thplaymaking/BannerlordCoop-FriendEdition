@@ -447,6 +447,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.SafehouseTraderConsequence:
                 method = nameof(FourberieAuthorityPatches.SafehouseTraderConsequencePrefix);
                 break;
+            case FourberiePatchKind.SafehouseWaitConsequence:
+                method = nameof(FourberieAuthorityPatches.SafehouseWaitConsequencePrefix);
+                break;
             case FourberiePatchKind.GrudgeSelectionConsequence:
                 method = nameof(FourberieAuthorityPatches.GrudgeSelectionConsequencePrefix);
                 break;
@@ -654,6 +657,13 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                 Type behavior = assembly.GetType("Fourberie.FourberieBehavior", false, false);
                 if (behavior != null)
                     AccessTools.Method(behavior, "SafeHouseVM", Type.EmptyTypes)?.Invoke(null, null);
+            }
+            if (operation == FourberieOperation.StartSafehouseWait)
+                GameMenu.SwitchToMenu("hide_wait_fmenus2");
+            if (operation == FourberieOperation.StopSafehouseWait)
+            {
+                if (PlayerEncounter.Current != null) PlayerEncounter.Current.IsPlayerWaiting = false;
+                GameMenu.SwitchToMenu("safehouse_menu");
             }
         }
         else

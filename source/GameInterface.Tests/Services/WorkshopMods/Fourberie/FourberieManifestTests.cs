@@ -107,6 +107,8 @@ public sealed class FourberieManifestTests
     [InlineData("Fourberie.FourbSafeHouseBehavior+<>c", "<AddDialogsSafeHouse>b__9_20", "SafehouseTraderConsequence")]
     [InlineData("Fourberie.FourbSafeHouseBehavior+<>c", "<AddDialogsSafeHouse>b__9_22", "SafehouseTraderConsequence")]
     [InlineData("Fourberie.FourbSafeHouseBehavior+<>c", "<AddDialogsSafeHouse>b__9_24", "SafehouseTraderConsequence")]
+    [InlineData("Fourberie.FourbSafeHouseBehavior+<>c", "<MenuSafeHouse>b__13_5", "SafehouseWaitConsequence")]
+    [InlineData("Fourberie.FourbSafeHouseBehavior+<>c", "<MenuSafeHouse>b__13_7", "SafehouseWaitConsequence")]
     [InlineData("Fourberie.CriminalVM", "ClanGruFdilter", "ClientPresentation")]
     [InlineData("Fourberie.CriminalVM", "CanPlayerPay", "ClientPresentation")]
     [InlineData("Fourberie.CriminalVM", "<ClanGruFdilter>b__149_0", "GrudgeSelectionConsequence")]

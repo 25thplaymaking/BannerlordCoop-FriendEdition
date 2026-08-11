@@ -179,6 +179,10 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.EstablishSafehouse:
                     ApplySafehouseEstablishment(actor, actorParty, request.SettlementId);
                     break;
+                case FourberieOperation.StartSafehouseWait:
+                case FourberieOperation.StopSafehouseWait:
+                    ApplySafehouseWait(actorParty, request.SettlementId, request.Operation);
+                    break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
             }
@@ -240,6 +244,57 @@ internal sealed class FourberieOperationExecutor
     }
 
     public void Reset() => grudgeQuotes.Clear();
+
+    private void ApplySafehouseWait(
+        MobileParty actorParty,
+        string settlementId,
+        FourberieOperation operation)
+    {
+        if (!TryResolveCurrentSettlement(actorParty, settlementId, out Settlement settlement))
+            throw new InvalidOperationException("the controller is no longer at the selected safehouse");
+        Settlement currentBase = GetStaticField("_crimeBase") as Settlement;
+        IDictionary crime = GetDictionary("_crimeValue");
+        if (!FourberieSafehouseWaitAuthority.CanChangeWaitState(
+                settlementId,
+                currentBase?.StringId,
+                settlement.StringId,
+                settlement.IsTown,
+                crime,
+                out string failure))
+            throw new InvalidOperationException(failure);
+
+        var followers = (GetStaticField("_banditsFollowers") as IEnumerable)?
+            .Cast<object>()
+            .OfType<MobileParty>()
+            .Where(party => party.IsActive)
+            .ToArray() ?? Array.Empty<MobileParty>();
+        bool waiting = operation == FourberieOperation.StartSafehouseWait;
+        using (new AllowedThread())
+        {
+            foreach (MobileParty follower in followers)
+            {
+                if (follower.Ai == null) continue;
+                if (waiting)
+                {
+                    follower.IgnoreByOtherPartiesTill(CampaignTime.DaysFromNow(3f));
+                    follower.Ai.SetDoNotMakeNewDecisions(true);
+                    follower.SetMoveModeHold();
+                    follower.SetMovePatrolAroundSettlement(
+                        settlement, follower.NavigationCapability, false);
+                }
+                else
+                {
+                    // The original never released this flag, permanently freezing retained followers.
+                    follower.Ai.SetDoNotMakeNewDecisions(false);
+                    follower.Ai.RethinkAtNextHourlyTick = true;
+                }
+            }
+
+            FourberieSafehouseWaitAuthority.Commit(crime, waiting);
+            actorParty.IsVisible = !waiting;
+            if (waiting) actorParty.IgnoreByOtherPartiesTill(CampaignTime.HoursFromNow(3f));
+        }
+    }
 
     private void ApplySafehouseEstablishment(
         Hero actor,

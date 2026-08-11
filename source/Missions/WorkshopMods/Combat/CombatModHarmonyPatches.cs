@@ -414,6 +414,8 @@ internal static class DismembermentSlowMotionPatch
 [HarmonyPatchCategory(MissionModule.CombatHitPresentationPatchCategory)]
 internal static class UnblockableThrustAuthorityPatch
 {
+    private const bool AuditedMountedOnlyDefault = false;
+
     private static IEnumerable<MethodBase> TargetMethods()
     {
         // Guarantees the workshop postfix is removed before this replacement joins the same target,
@@ -457,7 +459,8 @@ internal static class UnblockableThrustAuthorityPatch
             crushedThrough,
             (int)strikeType,
             (int)collisionResult,
-            blockedWithShield);
+            blockedWithShield,
+            attackerAgent.HasMount);
     }
 
     internal static bool ResolveCrushThrough(
@@ -467,11 +470,15 @@ internal static class UnblockableThrustAuthorityPatch
         bool alreadyCrushedThrough,
         int strikeType,
         int collisionResult,
-        bool blockedWithShield)
+        bool blockedWithShield,
+        bool attackerIsMounted)
     {
+        // Audited 1.1.3.1 default. Keep the mounted input explicit so a future configuration
+        // change cannot silently drop the foot-versus-mounted authority case from this pure rule.
         if (!moduleCompatible
             || alreadyCrushedThrough
             || strikeType != 1
+            || (AuditedMountedOnlyDefault && !attackerIsMounted)
             || !CombatModAuthorityPolicy.AllowMissionGameplayDecision(
                 isCoopBattleActive,
                 sourceIsLocallyControlled))

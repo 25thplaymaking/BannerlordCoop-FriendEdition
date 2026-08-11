@@ -1,5 +1,7 @@
 using Missions.WorkshopMods.Combat;
 using System;
+using TaleWorlds.Core;
+using TaleWorlds.MountAndBlade;
 using Xunit;
 
 namespace E2E.Tests.Services.WorkshopMods.Combat;
@@ -32,7 +34,8 @@ public sealed class CombatModAuthorityPolicyTests
             alreadyCrushedThrough: false,
             strikeType: 1,
             collisionResult: 3,
-            blockedWithShield: false));
+            blockedWithShield: false,
+            attackerIsMounted: false));
     }
 
     [Fact]
@@ -45,7 +48,8 @@ public sealed class CombatModAuthorityPolicyTests
             alreadyCrushedThrough: false,
             strikeType: 1,
             collisionResult: 3,
-            blockedWithShield: false));
+            blockedWithShield: false,
+            attackerIsMounted: false));
 
         // Idempotent when another compatible calculation already marked it.
         Assert.True(UnblockableThrustAuthorityPatch.ResolveCrushThrough(
@@ -55,7 +59,34 @@ public sealed class CombatModAuthorityPolicyTests
             alreadyCrushedThrough: true,
             strikeType: 1,
             collisionResult: 3,
-            blockedWithShield: false));
+            blockedWithShield: false,
+            attackerIsMounted: false));
+    }
+
+    [Theory]
+    [InlineData(false, CombatCollisionResult.Blocked, false, true)]
+    [InlineData(true, CombatCollisionResult.Blocked, false, true)]
+    [InlineData(false, CombatCollisionResult.Blocked, true, false)]
+    [InlineData(true, CombatCollisionResult.Blocked, true, false)]
+    [InlineData(false, CombatCollisionResult.Parried, false, false)]
+    [InlineData(true, CombatCollisionResult.Parried, false, false)]
+    [InlineData(false, CombatCollisionResult.ChamberBlocked, false, false)]
+    [InlineData(true, CombatCollisionResult.ChamberBlocked, false, false)]
+    public void UnblockableThrust_AuditedDefaultsCoverFootMountedShieldParryAndChamber(
+        bool attackerIsMounted,
+        CombatCollisionResult collisionResult,
+        bool blockedWithShield,
+        bool expected)
+    {
+        Assert.Equal(expected, UnblockableThrustAuthorityPatch.ResolveCrushThrough(
+            moduleCompatible: true,
+            isCoopBattleActive: true,
+            sourceIsLocallyControlled: true,
+            alreadyCrushedThrough: false,
+            strikeType: (int)StrikeType.Thrust,
+            collisionResult: (int)collisionResult,
+            blockedWithShield,
+            attackerIsMounted));
     }
 
     [Fact]
@@ -75,6 +106,13 @@ public sealed class CombatModAuthorityPolicyTests
         Assert.False(CombatModAuthorityPolicy.AllowDismembermentPresentation(
             moduleCompatible: true,
             isServer: true,
+            isCoopBattleActive: true));
+
+        // A client that joins after mission initialization has no accepted dismemberment event to
+        // replay. Keeping the same gate closed prevents a late agent from acquiring local-only state.
+        Assert.False(CombatModAuthorityPolicy.AllowDismembermentPresentation(
+            moduleCompatible: true,
+            isServer: false,
             isCoopBattleActive: true));
     }
 

@@ -292,6 +292,27 @@ public sealed class ImprovedGarrisonsCompatibilityTests : IDisposable
         Assert.True(ImprovedGarrisonsAuthorityPatches.ServerOnlyPrefix());
     }
 
+    [Theory]
+    [InlineData("ImprovedGarrisons.Recruitment.GarrisonRecruitmentLogic::RecruitFromSurroundingVillages(TaleWorlds.CampaignSystem.Settlements.Settlement)", "ServerMutation")]
+    [InlineData("ImprovedGarrisons.Upgrade.GarrisonUpgradeLogic::GiveGarrisonExp(TaleWorlds.CampaignSystem.Settlements.Settlement)", "ServerMutation")]
+    [InlineData("ImprovedGarrisons.Behaviours.GarrisonPartyBehavior::OnSettlementOwnerChanged(TaleWorlds.CampaignSystem.Settlements.Settlement,System.Boolean,TaleWorlds.CampaignSystem.Hero,TaleWorlds.CampaignSystem.Hero,TaleWorlds.CampaignSystem.Hero,TaleWorlds.CampaignSystem.Actions.ChangeOwnerOfSettlementAction+ChangeOwnerOfSettlementDetail)", "ServerMutation")]
+    [InlineData("ImprovedGarrisons.SaveSystem.SaveBehavior::OnSaveEvent(System.Boolean,System.String)", "ServerPersistence")]
+    [InlineData("ImprovedGarrisons.SaveSystem.SaveBehavior::OnLoadEvent(TaleWorlds.CampaignSystem.CampaignGameStarter)", "ServerPersistence")]
+    public void RecruitUpgradeCaptureAndSaveLifecycle_IsPinnedToServerAuthority(
+        string methodKey,
+        string expectedKind)
+    {
+        var spec = Assert.Single(
+            ImprovedGarrisonsCompatibilityManifest.Methods,
+            method => method.Key == methodKey);
+
+        Assert.Equal(expectedKind, spec.Kind.ToString());
+        ModInformation.IsServer = false;
+        Assert.False(ImprovedGarrisonsAuthorityPatches.ServerOnlyPrefix());
+        ModInformation.IsServer = true;
+        Assert.True(ImprovedGarrisonsAuthorityPatches.ServerOnlyPrefix());
+    }
+
     [Fact]
     public void DuplicateServerTick_IsSuppressedButNextTickRuns()
     {

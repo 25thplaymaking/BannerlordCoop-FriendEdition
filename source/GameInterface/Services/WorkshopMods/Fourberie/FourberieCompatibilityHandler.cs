@@ -299,6 +299,15 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.SchemeBonusResetConsequence:
                 method = nameof(FourberieAuthorityPatches.SchemeBonusResetConsequencePrefix);
                 break;
+            case FourberiePatchKind.AgentPartyCreateConsequence:
+                method = nameof(FourberieAuthorityPatches.AgentPartyCreateConsequencePrefix);
+                break;
+            case FourberiePatchKind.AgentPartyDisbandConsequence:
+                method = nameof(FourberieAuthorityPatches.AgentPartyDisbandConsequencePrefix);
+                break;
+            case FourberiePatchKind.AgentPartySelectionConsequence:
+                method = nameof(FourberieAuthorityPatches.AgentPartySelectionConsequencePrefix);
+                break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
                 break;

@@ -1012,6 +1012,25 @@
       "moduleId": "Fourberie",
       "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
       "metadataTokens": [
+        "0x06000060",
+        "0x06000061",
+        "0x060006FB"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieOperationExecutor saboteur-party transaction",
+      "capability": "ExplicitOperations",
+      "tests": [
+        "FourberieAuthorityTests.OperationProtocol_RequiresExactCriminalBusinessShapes",
+        "FourberieAuthorityTests.AgentPartyAuthority_CapsCreationAndRefillAtTwenty",
+        "FourberieAuthorityTests.AgentPartyAuthority_ReturnsSaboteursAndOtherTroopsToPinnedPools",
+        "FourberieAuthorityTests.AgentPartySelection_MapsOnlyDirectStateOptions",
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
         "0x06000068",
         "0x0600006B",
         "0x0600038A",

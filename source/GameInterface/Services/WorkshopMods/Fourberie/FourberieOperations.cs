@@ -17,6 +17,7 @@ using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
+using TaleWorlds.Localization;
 
 namespace GameInterface.Services.WorkshopMods.Fourberie;
 
@@ -55,6 +56,9 @@ internal sealed class FourberieOperationExecutor
         Dictionary<CharacterObject, int> actorCounts = null;
         MobileParty previousCaravan = GetStaticField("_insucaraF") as MobileParty;
         MobileParty previousBandits = GetStaticField("_insubandF") as MobileParty;
+        MobileParty previousAgents = GetStaticField("_agentsParty") as MobileParty;
+        bool previousAgentsWasActive = previousAgents?.IsActive == true;
+        Dictionary<CharacterObject, int> previousAgentCounts = CaptureAllCounts(previousAgents?.MemberRoster);
         int previousActorGold = actor.Gold;
 
         try
@@ -94,6 +98,11 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.ResetSchemeBonus:
                     ApplySchemeBonus(actor, actorParty, request.Operation, request.IntValue);
                     break;
+                case FourberieOperation.CreateAgentParty:
+                case FourberieOperation.DisbandAgentParty:
+                case FourberieOperation.RefillAgentParty:
+                    ApplyAgentParty(actor, actorParty, request.Operation);
+                    break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
             }
@@ -110,11 +119,23 @@ internal sealed class FourberieOperationExecutor
             catch (Exception rollback) { rollbackErrors.Add("source roster: " + rollback.Message); }
             try { RestoreCounts(actorParty.MemberRoster, actorCounts); }
             catch (Exception rollback) { rollbackErrors.Add("actor roster: " + rollback.Message); }
+            try
+            {
+                if (previousAgents?.IsActive == true)
+                    RestoreCounts(previousAgents.MemberRoster, previousAgentCounts);
+            }
+            catch (Exception rollback) { rollbackErrors.Add("agent-party roster: " + rollback.Message); }
 
             MobileParty createdBandits = GetStaticField("_insubandF") as MobileParty;
             MobileParty createdCaravan = GetStaticField("_insucaraF") as MobileParty;
             TryDestroyCreated(createdBandits, previousBandits, rollbackErrors);
             TryDestroyCreated(createdCaravan, previousCaravan, rollbackErrors);
+            MobileParty createdAgents = GetStaticField("_agentsParty") as MobileParty;
+            TryDestroyCreated(createdAgents, previousAgents, rollbackErrors);
+            try { SetStaticField("_agentsParty", previousAgents?.IsActive == true ? previousAgents : null); }
+            catch (Exception rollback) { rollbackErrors.Add("agent-party reference: " + rollback.Message); }
+            if (previousAgentsWasActive && previousAgents?.IsActive != true)
+                rollbackErrors.Add("agent-party destruction cannot be reversed");
 
             if (!FourberieCanonicalState.TryApply(assembly, objectManager, rollbackState, out var stateFailure))
                 rollbackErrors.Add("canonical state: " + stateFailure);
@@ -357,6 +378,84 @@ internal sealed class FourberieOperationExecutor
             enforcer.GetTraitLevel(DefaultTraits.Calculating));
     }
 
+    private void ApplyAgentParty(Hero actor, MobileParty actorParty, FourberieOperation operation)
+    {
+        if (!CanManageAgentParty(actor, actorParty))
+            throw new InvalidOperationException("controller is not at a valid agent-management location");
+
+        IDictionary crime = GetDictionary("_crimeValue");
+        CharacterObject saboteur = objectManager.TryGetObject("fb_saboteur_tier_1", out CharacterObject resolved)
+            ? resolved
+            : throw new InvalidOperationException("Fourberie saboteur troop is unavailable");
+
+        using (new AllowedThread())
+        {
+            if (operation == FourberieOperation.CreateAgentParty)
+            {
+                if (GetStaticField("_agentsParty") != null)
+                    throw new InvalidOperationException("saboteur party already exists");
+                if (!FourberieAgentPartyAuthority.TryTakeForCreate(crime, out int count, out string failure))
+                    throw new InvalidOperationException(failure);
+
+                MobileParty party;
+                using (new BarterPlayerContext(actor, actorParty))
+                    party = RequiredMethod(BehaviorTypeName, "CreateVirtualParty", parameterCount: 2)
+                        .Invoke(null, new object[]
+                        {
+                            "fb_saboteurs_party",
+                            new TextObject("{=FoAgeOp17}Saboteurs"),
+                        }) as MobileParty;
+                if (party == null) throw new InvalidOperationException("Fourberie did not create the saboteur party");
+                SetStaticField("_agentsParty", party);
+                party.MemberRoster.Clear();
+                party.MemberRoster.AddToCounts(saboteur, count, false, 0, 0, true, -1);
+                return;
+            }
+
+            if (GetStaticField("_agentsParty") is not MobileParty existing || !existing.IsActive)
+                throw new InvalidOperationException("saboteur party is unavailable");
+            if (operation == FourberieOperation.RefillAgentParty)
+            {
+                if (!FourberieAgentPartyAuthority.TryTakeForRefill(
+                        crime, existing.MemberRoster.TotalManCount, out int count, out string failure))
+                    throw new InvalidOperationException(failure);
+                existing.MemberRoster.AddToCounts(saboteur, count, false, 0, 0, true, -1);
+                return;
+            }
+
+            int saboteurs = 0;
+            int others = 0;
+            foreach (TroopRosterElement element in existing.MemberRoster.GetTroopRoster())
+            {
+                if (element.Character == saboteur) saboteurs += element.Number;
+                else others += element.Number;
+            }
+            if (!FourberieAgentPartyAuthority.TryReturnDisbanded(
+                    crime, saboteurs, others, out string disbandFailure))
+                throw new InvalidOperationException(disbandFailure);
+            DestroyPartyAction.Apply(null, existing);
+            SetStaticField("_agentsParty", null);
+        }
+    }
+
+    private bool CanManageAgentParty(Hero actor, MobileParty actorParty)
+    {
+        Settlement current = actorParty.CurrentSettlement;
+        if (current == null) return false;
+        IDictionary crime = GetDictionary("_crimeValue");
+        if (crime.Contains(550)) return true;
+        if (GetStaticField("_crimeBase") is Settlement crimeBase && current == crimeBase) return true;
+        if (current.IsTown)
+        {
+            bool territory = (GetStaticField("_territoryList") as IEnumerable)?
+                .Cast<object>()
+                .Any(value => string.Equals(value as string, current.StringId, StringComparison.Ordinal)) == true;
+            return territory || actor.Clan?.Fiefs.Contains(current.Town) == true;
+        }
+        if (current.IsCastle) return actor.Clan?.Settlements.Contains(current) == true;
+        return true;
+    }
+
     private IEnumerable<(CharacterObject Troop, int Count)> ResolveTroops(
         IEnumerable<FourberieTroopSelection> selections)
     {
@@ -414,6 +513,9 @@ internal sealed class FourberieOperationExecutor
                 roster.AddToCounts(pair.Key, pair.Value - roster.GetTroopCount(pair.Key), false, 0, 0, true, -1);
     }
 
+    private static Dictionary<CharacterObject, int> CaptureAllCounts(TroopRoster roster) =>
+        roster?.GetTroopRoster().ToDictionary(element => element.Character, element => element.Number);
+
     private static void RestoreGold(Hero actor, int previousGold)
     {
         int difference = previousGold - actor.Gold;
@@ -456,6 +558,14 @@ internal sealed class FourberieOperationExecutor
         FieldInfo field = AccessTools.Field(type, fieldName) ??
                           throw new MissingFieldException(BehaviorTypeName, fieldName);
         return field.GetValue(null);
+    }
+
+    private void SetStaticField(string fieldName, object value)
+    {
+        Type type = assembly.GetType(BehaviorTypeName, throwOnError: true, ignoreCase: false);
+        FieldInfo field = AccessTools.Field(type, fieldName) ??
+                          throw new MissingFieldException(BehaviorTypeName, fieldName);
+        field.SetValue(null, value);
     }
 
     private IDictionary GetDictionary(string fieldName) =>

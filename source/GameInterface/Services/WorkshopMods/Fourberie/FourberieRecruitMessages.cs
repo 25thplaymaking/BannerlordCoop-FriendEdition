@@ -19,6 +19,9 @@ internal enum FourberieOperation
     UpgradeSchemeBonus = 8,
     DowngradeSchemeBonus = 9,
     ResetSchemeBonus = 10,
+    CreateAgentParty = 11,
+    DisbandAgentParty = 12,
+    RefillAgentParty = 13,
 }
 
 internal enum FourberieOperationStatus
@@ -184,6 +187,9 @@ internal static class FourberieOperationProtocol
             FourberieOperation.UpgradeSchemeBonus or FourberieOperation.DowngradeSchemeBonus or
                 FourberieOperation.ResetSchemeBonus =>
                 EmptyContext(request) && (request.IntValue == 7 || request.IntValue == 8),
+            FourberieOperation.CreateAgentParty or FourberieOperation.DisbandAgentParty or
+                FourberieOperation.RefillAgentParty =>
+                EmptyContext(request) && request.IntValue == 0,
             _ => false,
         };
     }

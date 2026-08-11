@@ -166,6 +166,8 @@ public sealed class FourberieAuthorityTests
     [InlineData((int)FourberieOperation.DowngradeSchemeBonus, 8, true)]
     [InlineData((int)FourberieOperation.ResetSchemeBonus, 7, true)]
     [InlineData((int)FourberieOperation.ResetSchemeBonus, 9, false)]
+    [InlineData((int)FourberieOperation.CreateAgentParty, 0, true)]
+    [InlineData((int)FourberieOperation.RefillAgentParty, 1, false)]
     public void OperationProtocol_RequiresExactCriminalBusinessShapes(
         int operationValue,
         int businessKey,
@@ -393,6 +395,48 @@ public sealed class FourberieAuthorityTests
             FourberiePatchRuntime.Current = previousRuntime;
             ModInformation.IsServer = previousServer;
         }
+    }
+
+    [Fact]
+    public void AgentPartyAuthority_CapsCreationAndRefillAtTwenty()
+    {
+        IDictionary state = new Hashtable { [300] = 28 };
+
+        Assert.True(FourberieAgentPartyAuthority.TryTakeForCreate(
+            state, out var created, out var failure), failure);
+        Assert.Equal(20, created);
+        Assert.Equal(8, state[300]);
+
+        Assert.True(FourberieAgentPartyAuthority.TryTakeForRefill(
+            state, currentPartyCount: 17, out var refilled, out failure), failure);
+        Assert.Equal(3, refilled);
+        Assert.Equal(5, state[300]);
+        Assert.False(FourberieAgentPartyAuthority.TryTakeForRefill(
+            state, currentPartyCount: 20, out _, out _));
+    }
+
+    [Fact]
+    public void AgentPartyAuthority_ReturnsSaboteursAndOtherTroopsToPinnedPools()
+    {
+        IDictionary state = new Hashtable { [300] = 2, [301] = 4 };
+
+        Assert.True(FourberieAgentPartyAuthority.TryReturnDisbanded(
+            state, saboteurs: 6, otherTroops: 3, out var failure), failure);
+
+        Assert.Equal(8, state[300]);
+        Assert.Equal(7, state[301]);
+    }
+
+    [Theory]
+    [InlineData("createAgentsParty", (int)FourberieOperation.CreateAgentParty)]
+    [InlineData("disbandAgentsParty", (int)FourberieOperation.DisbandAgentParty)]
+    [InlineData("addAgentsToParty", (int)FourberieOperation.RefillAgentParty)]
+    [InlineData("enlistAgents", 0)]
+    public void AgentPartySelection_MapsOnlyDirectStateOptions(string selection, int expectedOperation)
+    {
+        FourberieOperation? operation = FourberieAuthorityPatches.AgentPartyOperationForSelection(selection);
+
+        Assert.Equal(expectedOperation == 0 ? null : (FourberieOperation?)expectedOperation, operation);
     }
 
     [Fact]

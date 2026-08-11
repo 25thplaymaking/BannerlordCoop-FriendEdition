@@ -295,6 +295,42 @@ internal static class FourberieAuthorityPatches
         return false;
     }
 
+    public static bool AgentPartyCreateConsequencePrefix()
+    {
+        if (ModInformation.IsClient) SubmitBusiness(FourberieOperation.CreateAgentParty, 0);
+        return false;
+    }
+
+    public static bool AgentPartyDisbandConsequencePrefix()
+    {
+        if (ModInformation.IsClient) SubmitBusiness(FourberieOperation.DisbandAgentParty, 0);
+        return false;
+    }
+
+    public static bool AgentPartySelectionConsequencePrefix(object[] __args)
+    {
+        if (!ModInformation.IsClient) return false;
+        string selection = (__args != null && __args.Length > 0
+                ? __args[0] as IEnumerable<InquiryElement>
+                : null)?
+            .Select(element => element?.Identifier as string)
+            .FirstOrDefault(identifier => !string.IsNullOrEmpty(identifier));
+        FourberieOperation? operation = AgentPartyOperationForSelection(selection);
+        if (!operation.HasValue) return true;
+
+        SubmitBusiness(operation.Value, 0);
+        return false;
+    }
+
+    internal static FourberieOperation? AgentPartyOperationForSelection(string selection) =>
+        selection switch
+        {
+            "createAgentsParty" => FourberieOperation.CreateAgentParty,
+            "disbandAgentsParty" => FourberieOperation.DisbandAgentParty,
+            "addAgentsToParty" => FourberieOperation.RefillAgentParty,
+            _ => null,
+        };
+
     public static bool MissionInitializationPrefix() => true;
 
     public static bool SeparatismLoyaltyCompositionPrefix(MethodBase __originalMethod, ref int __result)

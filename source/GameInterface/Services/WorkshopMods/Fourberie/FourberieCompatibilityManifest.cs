@@ -34,6 +34,9 @@ internal enum FourberiePatchKind
     SchemeBonusUpgradeConsequence,
     SchemeBonusDowngradeConsequence,
     SchemeBonusResetConsequence,
+    AgentPartyCreateConsequence,
+    AgentPartyDisbandConsequence,
+    AgentPartySelectionConsequence,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -354,6 +357,13 @@ internal static class FourberieCompatibilityManifest
             FourberiePatchKind.SchemeBonusResetConsequence);
         Add("Fourberie.CriminalVM", "SchBonus2Re",
             FourberiePatchKind.SchemeBonusResetConsequence);
+        Add("Fourberie.CriminalVM", "PackAgents",
+            FourberiePatchKind.AgentPartyCreateConsequence);
+        Add("Fourberie.CriminalVM", "UnpackAgents",
+            FourberiePatchKind.AgentPartyDisbandConsequence);
+        Add("Fourberie.CriminalVM+<>c__DisplayClass35_0", "<AgentsList>b__0",
+            FourberiePatchKind.AgentPartySelectionConsequence,
+            "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]");
 
         // These periodic entry points contain the random and persistent campaign decisions found
         // in the 1.4.7.5 audit. They are separately guarded so a duplicate listener cannot execute

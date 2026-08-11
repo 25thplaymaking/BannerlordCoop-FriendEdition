@@ -1,6 +1,6 @@
 # Friend Edition mod-function review
 
-Review baseline: `ae5ef9d04` (2026-08-11)
+Review baseline: `4494d07fe` (2026-08-11)
 
 Binary ledger: [`generated/workshop-function-inventory.json`](generated/workshop-function-inventory.json)
 

@@ -7,8 +7,8 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > **AUTHORITY ROUTING IN PROGRESS (2026-08-11): prior RC superseded; stable held.** The exact function
 > ledger covers 41,050 methods across the ten active Workshop modules, retired RBM, and integrated
 > Separatism. Deterministic IL evidence now includes static shared-state writes and collection mutations,
-> identifying 13,729 authority candidates; 8,073 exact records are classified and release validation
-> rejects the remaining 5,656 active gameplay records.
+> identifying 13,729 authority candidates; 8,085 exact records are classified and release validation
+> rejects the remaining 5,644 active gameplay records.
 > All six active gameplay adapters now share `IWorkshopModule`, and a trusted host capability snapshot
 > is green in unit/E2E tests. UnblockableThrust's four candidates are owned by the accepted collision
 > authority, and all 17 DismembermentPlus candidates now use a deterministic, deduplicated replicated-
@@ -178,14 +178,14 @@ rolls back canonical Fourberie state and created parties on failure, and returns
       default duties, relic RNG, and retained-party reuse or creation are revalidated before the client opens its management view.
   14. `OnMissionBehaviorInitialize` currently preserves the mod's required peer-local setup, but its
      mission callbacks remain open until their authoritative/controller ownership is proven end to end.
-  15. The exact secondary pass currently assigns metadata to 955/1,865 required candidates:
-     431 presentation-only helpers, 217 pure model-policy methods, 187 server callbacks, 51 Coop-owner
-     replacements, 56 server-command methods, 4 framework-lifecycle methods, and 9 unreachable
+  15. The exact secondary pass currently assigns metadata to 967/1,865 required candidates:
+     432 presentation-only helpers, 222 pure/read-only policy methods, 187 server callbacks, 51 Coop-owner
+     replacements, 56 server-command methods, 10 framework-lifecycle methods, and 9 unreachable
      Homesteads/Bellum Civile add-on methods.
      The strict gameplay gate also rejects campaign mutation, canonical Fourberie-state writes, and
-     authority-sensitive calls mislabeled as client presentation. That gate currently passes 875 and
-     rejects 990: 910 unclassified methods plus 80 unsafe presentation classifications.
-  - **OPEN:** 990 exact UI/mission/lifecycle routes remain, including roughly 300 menu/dialog helpers
+     authority-sensitive calls mislabeled as client presentation. That gate currently passes 886 and
+     rejects 979: 898 unclassified methods plus 81 unsafe presentation classifications.
+  - **OPEN:** 979 exact UI/mission/lifecycle routes remain, including roughly 300 menu/dialog helpers
     that reach shared state and therefore require live command or mission-authority owners. This strict
     count, not the lower metadata-only count, is the completion baseline for subsequent increments.
 

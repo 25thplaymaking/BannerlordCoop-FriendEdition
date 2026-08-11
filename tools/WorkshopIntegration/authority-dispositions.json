@@ -2107,7 +2107,6 @@
         "0x06000900",
         "0x06000901",
         "0x06000902",
-        "0x06000903",
         "0x06000904",
         "0x06000905",
         "0x06000906",
@@ -2433,6 +2432,57 @@
         "FourberieSafehouseEstablishmentAuthorityTests.TownMigration_PreservesPartyStateSchemeAndExistingRelicChoice",
         "FourberieSafehouseEstablishmentAuthorityTests.Protocol_RequiresOnlyTheSelectedHideout",
         "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x06000490",
+        "0x060004C1",
+        "0x060004C2",
+        "0x060004CB",
+        "0x060008D1",
+        "0x060008D2"
+      ],
+      "disposition": "FrameworkLifecycle",
+      "owner": "Fourberie safehouse behavior registration and generated lifecycle",
+      "capability": "ServerCampaignCallbacks",
+      "tests": [
+        "FourberieAuthorityTests.BehaviorPreflight_ConstructsEveryBehaviorBeforeReturningAny",
+        "FourberieManifestTests.PresentationEntryPoints_AreClientOnly"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x060004A8",
+        "0x060004A9",
+        "0x060004AE",
+        "0x060004BA",
+        "0x06000903"
+      ],
+      "disposition": "PurePolicy",
+      "owner": "Fourberie read-only safehouse conditions and ransom calculation",
+      "capability": "ClientPresentation",
+      "tests": [
+        "FourberieSafehouseTraderAuthorityTests.Plan_DerivesQuantityRewardAndCooldownFromCanonicalState",
+        "FourberieManifestTests.PresentationEntryPoints_AreClientOnly"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x060004B7",
+        "0x060004B9"
+      ],
+      "disposition": "ClientPresentation",
+      "owner": "FourberieAuthorityPatches safehouse menu and mission-spawn presentation",
+      "capability": "ClientPresentation",
+      "tests": [
+        "FourberieManifestTests.PresentationEntryPoints_AreClientOnly"
       ]
     },
     {

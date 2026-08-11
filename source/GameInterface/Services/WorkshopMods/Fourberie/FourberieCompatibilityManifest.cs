@@ -560,6 +560,7 @@ internal static class FourberieCompatibilityManifest
         Add("Fourberie.FourberieBehavior", "FMapEventEnded", FourberiePatchKind.ServerMutation, MapEvent);
         Add("Fourberie.FourberieBehavior", "DataDelete", FourberiePatchKind.ServerMutation,
             "TaleWorlds.CampaignSystem.CampaignGameStarter");
+        Add("Fourberie.FourberieBehavior", "DataDeleteEx", FourberiePatchKind.ServerMutation);
         Add("Fourberie.FourberieBehavior", "FOnheroKilled", FourberiePatchKind.ServerMutation,
             Hero, Hero, "TaleWorlds.CampaignSystem.Actions.KillCharacterAction+KillCharacterActionDetail", "System.Boolean");
         Add("Fourberie.FourberieBehavior", "HeroBecomePrisoner", FourberiePatchKind.ServerMutation,

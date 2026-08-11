@@ -361,6 +361,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.ClientSchemeFilter:
                 method = nameof(FourberieAuthorityPatches.ClientSchemeFilterPrefix);
                 break;
+            case FourberiePatchKind.MainBaseConsequence:
+                method = nameof(FourberieAuthorityPatches.MainBaseConsequencePrefix);
+                break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
                 break;

@@ -131,6 +131,9 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.AbortContract:
                     ApplyContractOperation(actor, actorParty, request.Operation);
                     break;
+                case FourberieOperation.SetMainCrimeBase:
+                    ApplyMainCrimeBase(request.SettlementId);
+                    break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
             }
@@ -385,6 +388,27 @@ internal sealed class FourberieOperationExecutor
             using (new BarterPlayerContext(actor, actorParty))
                 ChangeRelationAction.ApplyPlayerRelation(giver, -5, true, true);
             FourberieContractAuthority.CommitAbort(crime, heroes, cooldown);
+        }
+    }
+
+    private void ApplyMainCrimeBase(string settlementId)
+    {
+        string failure = null;
+        if (!objectManager.TryGetObject(settlementId, out Settlement settlement) || settlement == null ||
+            !FourberieTerritoryAuthority.CanMakeMainBase(
+                GetStaticField("_territoryList") as IEnumerable,
+                settlementId,
+                settlement.IsTown,
+                out failure))
+            throw new InvalidOperationException(failure ?? "the selected Fourberie territory is unavailable");
+
+        using (new AllowedThread())
+        {
+            SetStaticField("_crimeBase", settlement);
+            FourberieTerritoryAuthority.CommitMainBase(
+                GetDictionary("_campaignTimeDictio"),
+                GetDictionary("_stringHeroIdDico"),
+                CampaignTime.Now);
         }
     }
 

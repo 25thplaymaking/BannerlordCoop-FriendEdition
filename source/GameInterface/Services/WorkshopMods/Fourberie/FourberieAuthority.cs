@@ -553,6 +553,20 @@ internal static class FourberieAuthorityPatches
         }
     }
 
+    public static bool MainBaseConsequencePrefix(object[] __args)
+    {
+        if (ModInformation.IsClient)
+        {
+            Settlement settlement = SelectedInquiryIdentifier<Settlement>(__args);
+            if (settlement != null)
+            {
+                InformationManager.HideInquiry();
+                SubmitSettlement(FourberieOperation.SetMainCrimeBase, settlement);
+            }
+        }
+        return false;
+    }
+
     internal static FourberieOperation SchemeLifecycleOperation(int slot)
     {
         Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
@@ -729,6 +743,15 @@ internal static class FourberieAuthorityPatches
             target,
             null,
             slot,
+            Array.Empty<FourberieLocalTroopSelection>()));
+
+    private static void SubmitSettlement(FourberieOperation operation, Settlement settlement) =>
+        FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+            operation,
+            settlement,
+            null,
+            null,
+            0,
             Array.Empty<FourberieLocalTroopSelection>()));
 
     private static T SelectedInquiryIdentifier<T>(object[] arguments)

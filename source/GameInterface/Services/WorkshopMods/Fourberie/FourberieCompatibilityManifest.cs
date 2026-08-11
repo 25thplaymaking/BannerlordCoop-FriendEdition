@@ -52,6 +52,7 @@ internal enum FourberiePatchKind
     ClientCrimeRoomRead,
     ContractConsequence,
     ClientSchemeFilter,
+    MainBaseConsequence,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -441,6 +442,9 @@ internal static class FourberieCompatibilityManifest
             FourberiePatchKind.ClientSchemeFilter, InquiryElements);
         Add("Fourberie.CriminalVM", "<ListKingDiploF>b__552_2",
             FourberiePatchKind.ClientSchemeFilter, InquiryElements);
+        Add("Fourberie.CriminalVM", "TerritoryMakeMainBase", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM+<>c", "<TerritoryMakeMainBase>b__160_0",
+            FourberiePatchKind.MainBaseConsequence, InquiryElements);
         Add("Fourberie.CriminalVM", "Schemhero1", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM", "Schemhero2", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM+<>c__DisplayClass137_0", "<Schemhero1>b__0",

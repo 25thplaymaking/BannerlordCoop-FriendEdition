@@ -2313,6 +2313,35 @@
         "FourberieSchemeAuthorityTests.ClientFilterSnapshot_RestoresCanonicalSlotsButKeepsPresentationNavigation",
         "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
       ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x060000BB"
+      ],
+      "disposition": "ClientPresentation",
+      "owner": "FourberieAuthorityPatches main-base selection presentation",
+      "capability": "ClientPresentation",
+      "tests": [
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x060006B1"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieOperationExecutor main crime-base transaction",
+      "capability": "ExplicitOperations",
+      "tests": [
+        "FourberieTerritoryAuthorityTests.MainBaseSelection_RequiresPinnedTownTerritory",
+        "FourberieTerritoryAuthorityTests.MainBaseCommit_ResetsRolesAndReplacesTimestampWithoutTouchingOtherState",
+        "FourberieTerritoryAuthorityTests.Protocol_RequiresOneStableSettlementAndNoOtherContext",
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
     }
   ]
 }

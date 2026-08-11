@@ -67,9 +67,9 @@ internal enum FourberiePatchKind
     SeparatismLoyaltyComposition,
 
     /// <summary>
-    /// Replaces <c>Main.OnGameInitializationFinished</c>: runs only its
-    /// <c>StringDicoHelper.RefreshHeroDico()</c> call (a client-local hero-name cache the menus
-    /// need). Compatibility validation remains owned by this exact-binary adapter.
+    /// Replaces <c>Main.OnGameInitializationFinished</c>: the server runs only its
+    /// <c>StringDicoHelper.RefreshHeroDico()</c> call and replicates those dictionaries to clients.
+    /// Compatibility validation remains owned by this exact-binary adapter.
     /// </summary>
     RefreshHeroDicoOnly,
 }
@@ -658,8 +658,7 @@ internal static class FourberieCompatibilityManifest
             "TaleWorlds.MountAndBlade.Mission");
 
         // Screen registration is presentation-only. The adapter owns exact model compatibility, so
-        // OnGameInitializationFinished keeps only StringDicoHelper.RefreshHeroDico(), the local
-        // hero-name cache the menus need.
+        // OnGameInitializationFinished keeps only the server-owned hero-dictionary rebuild.
         Add("Fourberie.Main", "OnScreenManagerPushScreen", FourberiePatchKind.ClientPresentation,
             "TaleWorlds.ScreenSystem.ScreenBase");
         Add("Fourberie.Main", "OnGameInitializationFinished", FourberiePatchKind.RefreshHeroDicoOnly,

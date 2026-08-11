@@ -574,6 +574,12 @@ public sealed class FourberieAuthorityTests
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, true)]
+    public void HeroDictionaryRefresh_RunsOnlyOnTheAuthoritativeServer(bool isServer, bool expected) =>
+        Assert.Equal(expected, FourberieAuthorityPatches.ShouldRefreshHeroDico(isServer));
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
     public void FinanceCalculation_DisablesWithdrawalSideEffectsOnlyOnClients(
         bool isServer,
         bool expectedApplyWithdrawals)

@@ -731,12 +731,14 @@ internal static class FourberieAuthorityPatches
     private static bool _refreshHeroDicoResolved;
 
     /// <summary>
-    /// Replaces Fourberie's <c>Main.OnGameInitializationFinished</c> with the client-local hero-name
-    /// cache refresh its menus need. Exact model compatibility is enforced earlier by the adapter,
-    /// so Fourberie's load-order diagnostic is redundant here.
+    /// Replaces Fourberie's <c>Main.OnGameInitializationFinished</c> with an authoritative rebuild
+    /// of its replicated hero dictionaries. Exact model compatibility is enforced earlier by the
+    /// adapter, so Fourberie's load-order diagnostic is redundant here.
     /// </summary>
     public static bool RefreshHeroDicoOnlyPrefix()
     {
+        if (!ShouldRefreshHeroDico(ModInformation.IsServer)) return false;
+
         if (!_refreshHeroDicoResolved)
         {
             _refreshHeroDicoResolved = true;
@@ -749,6 +751,8 @@ internal static class FourberieAuthorityPatches
 
         return false;
     }
+
+    internal static bool ShouldRefreshHeroDico(bool isServer) => isServer;
 
     /// <summary>
     /// Fourberie's gameplay behaviors, added by name. Deliberately excludes its optional

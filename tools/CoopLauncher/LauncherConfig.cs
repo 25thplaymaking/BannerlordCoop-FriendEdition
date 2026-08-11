@@ -44,6 +44,14 @@ public sealed class LauncherConfig
     public string UpdateManifestUrl { get; set; } =
         "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/client-stable/launcher.json";
 
+    /// <summary>
+    /// Mod-suite manifest URL — the full non-base module set (frameworks + workshop mods) a friend
+    /// needs, byte-exact for the join handshake. Large but changes rarely; installed before the
+    /// co-op client. Empty disables suite installs (for machines that already have the mods).
+    /// </summary>
+    public string SuiteManifestUrl { get; set; } =
+        "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/suite-stable/suite.json";
+
     private static readonly JsonSerializerOptions Options = new()
     {
         PropertyNameCaseInsensitive = true,

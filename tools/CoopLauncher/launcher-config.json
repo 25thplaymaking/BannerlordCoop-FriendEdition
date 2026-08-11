@@ -12,5 +12,8 @@
   "gamePath": "",
 
   // Client build feed (public GitHub release). Swap client-stable → client-nightly for bleeding edge.
-  "updateManifestUrl": "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/client-stable/launcher.json"
+  "updateManifestUrl": "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/client-stable/launcher.json",
+
+  // Full mod-suite feed (frameworks + workshop mods, byte-exact). Empty to skip if mods already present.
+  "suiteManifestUrl": "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/suite-stable/suite.json"
 }

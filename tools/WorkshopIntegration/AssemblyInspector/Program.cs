@@ -1,5 +1,7 @@
+using System.Collections.Immutable;
 using System.Reflection;
 using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
 using System.Reflection.PortableExecutable;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -30,11 +32,11 @@ static AssemblyInspection Inspect(InspectionFile item)
         using var stream = File.OpenRead(item.Path);
         using var pe = new PEReader(stream, PEStreamOptions.LeaveOpen);
         if (!pe.HasMetadata)
-            return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, false, null, [], null);
+            return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, false, null, [], [], null);
 
         MetadataReader metadata = pe.GetMetadataReader();
         if (!metadata.IsAssembly)
-            return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, false, null, [], null);
+            return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, false, null, [], [], null);
 
         AssemblyDefinition definition = metadata.GetAssemblyDefinition();
         var identity = Identity(
@@ -53,15 +55,47 @@ static AssemblyInspection Inspect(InspectionFile item)
                 Token(metadata, reference.PublicKeyOrToken, fullKey)));
         }
         references.Sort((left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.FullName, right.FullName));
-        return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, true, identity, references.ToArray(), null);
+
+        var methods = new List<MethodInspection>();
+        var typeProvider = new MetadataTypeNameProvider();
+        foreach (TypeDefinitionHandle typeHandle in metadata.TypeDefinitions)
+        {
+            TypeDefinition type = metadata.GetTypeDefinition(typeHandle);
+            string declaringType = typeProvider.GetTypeFromDefinition(metadata, typeHandle, 0);
+            foreach (MethodDefinitionHandle methodHandle in type.GetMethods())
+            {
+                MethodDefinition method = metadata.GetMethodDefinition(methodHandle);
+                MethodSignature<string> signature = method.DecodeSignature(typeProvider, genericContext: null);
+                methods.Add(new MethodInspection(
+                    declaringType,
+                    metadata.GetString(method.Name),
+                    signature.ReturnType,
+                    signature.ParameterTypes.ToArray(),
+                    method.GetGenericParameters().Count,
+                    method.Attributes.ToString(),
+                    method.ImplAttributes.ToString(),
+                    $"0x{MetadataTokens.GetToken(methodHandle):X8}",
+                    method.RelativeVirtualAddress));
+            }
+        }
+        methods.Sort((left, right) =>
+        {
+            int typeOrder = StringComparer.Ordinal.Compare(left.DeclaringType, right.DeclaringType);
+            return typeOrder != 0
+                ? typeOrder
+                : StringComparer.Ordinal.Compare(left.MetadataToken, right.MetadataToken);
+        });
+
+        return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, true,
+            identity, references.ToArray(), methods.ToArray(), null);
     }
     catch (BadImageFormatException)
     {
-        return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, false, null, [], null);
+        return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, false, null, [], [], null);
     }
     catch (Exception exception)
     {
-        return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, false, null, [], exception.Message);
+        return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, false, null, [], [], exception.Message);
     }
 }
 
@@ -90,5 +124,94 @@ internal sealed record InspectionFile(string ModuleId, string RelativePath, stri
 internal sealed record InspectionResult(AssemblyInspection[] Files);
 internal sealed record AssemblyInspection(
     string ModuleId, string RelativePath, string Path, bool Included, string Platform, string Sha256,
-    bool Managed, AssemblyIdentity? Identity, AssemblyIdentity[] References, string? Error);
+    bool Managed, AssemblyIdentity? Identity, AssemblyIdentity[] References, MethodInspection[] Methods, string? Error);
 internal sealed record AssemblyIdentity(string Name, string Version, string Culture, string PublicKeyToken, string FullName);
+internal sealed record MethodInspection(
+    string DeclaringType,
+    string Name,
+    string ReturnType,
+    string[] ParameterTypes,
+    int GenericArity,
+    string Attributes,
+    string ImplementationAttributes,
+    string MetadataToken,
+    int RelativeVirtualAddress);
+
+internal sealed class MetadataTypeNameProvider : ISignatureTypeProvider<string, object?>
+{
+    public string GetArrayType(string elementType, ArrayShape shape)
+        => $"{elementType}[{new string(',', Math.Max(0, shape.Rank - 1))}]";
+
+    public string GetByReferenceType(string elementType) => elementType + "&";
+
+    public string GetFunctionPointerType(MethodSignature<string> signature)
+        => $"delegate*<{string.Join(",", signature.ParameterTypes.Append(signature.ReturnType))}>";
+
+    public string GetGenericInstantiation(string genericType, ImmutableArray<string> typeArguments)
+        => $"{genericType}<{string.Join(",", typeArguments)}>";
+
+    public string GetGenericMethodParameter(object? genericContext, int index) => $"!!{index}";
+
+    public string GetGenericTypeParameter(object? genericContext, int index) => $"!{index}";
+
+    public string GetModifiedType(string modifier, string unmodifiedType, bool isRequired)
+        => $"{unmodifiedType} {(isRequired ? "modreq" : "modopt")}({modifier})";
+
+    public string GetPinnedType(string elementType) => elementType + " pinned";
+
+    public string GetPointerType(string elementType) => elementType + "*";
+
+    public string GetPrimitiveType(PrimitiveTypeCode typeCode) => typeCode switch
+    {
+        PrimitiveTypeCode.Boolean => "System.Boolean",
+        PrimitiveTypeCode.Byte => "System.Byte",
+        PrimitiveTypeCode.Char => "System.Char",
+        PrimitiveTypeCode.Double => "System.Double",
+        PrimitiveTypeCode.Int16 => "System.Int16",
+        PrimitiveTypeCode.Int32 => "System.Int32",
+        PrimitiveTypeCode.Int64 => "System.Int64",
+        PrimitiveTypeCode.IntPtr => "System.IntPtr",
+        PrimitiveTypeCode.Object => "System.Object",
+        PrimitiveTypeCode.SByte => "System.SByte",
+        PrimitiveTypeCode.Single => "System.Single",
+        PrimitiveTypeCode.String => "System.String",
+        PrimitiveTypeCode.TypedReference => "System.TypedReference",
+        PrimitiveTypeCode.UInt16 => "System.UInt16",
+        PrimitiveTypeCode.UInt32 => "System.UInt32",
+        PrimitiveTypeCode.UInt64 => "System.UInt64",
+        PrimitiveTypeCode.UIntPtr => "System.UIntPtr",
+        PrimitiveTypeCode.Void => "System.Void",
+        _ => typeCode.ToString(),
+    };
+
+    public string GetSZArrayType(string elementType) => elementType + "[]";
+
+    public string GetTypeFromDefinition(MetadataReader reader, TypeDefinitionHandle handle, byte rawTypeKind)
+    {
+        TypeDefinition definition = reader.GetTypeDefinition(handle);
+        string name = reader.GetString(definition.Name);
+        TypeDefinitionHandle declaringType = definition.GetDeclaringType();
+        if (!declaringType.IsNil)
+            return GetTypeFromDefinition(reader, declaringType, rawTypeKind) + "+" + name;
+        string @namespace = reader.GetString(definition.Namespace);
+        return string.IsNullOrEmpty(@namespace) ? name : @namespace + "." + name;
+    }
+
+    public string GetTypeFromReference(MetadataReader reader, TypeReferenceHandle handle, byte rawTypeKind)
+    {
+        TypeReference reference = reader.GetTypeReference(handle);
+        string name = reader.GetString(reference.Name);
+        EntityHandle scope = reference.ResolutionScope;
+        if (scope.Kind == HandleKind.TypeReference)
+            return GetTypeFromReference(reader, (TypeReferenceHandle)scope, rawTypeKind) + "+" + name;
+        string @namespace = reader.GetString(reference.Namespace);
+        return string.IsNullOrEmpty(@namespace) ? name : @namespace + "." + name;
+    }
+
+    public string GetTypeFromSpecification(
+        MetadataReader reader,
+        object? genericContext,
+        TypeSpecificationHandle handle,
+        byte rawTypeKind)
+        => reader.GetTypeSpecification(handle).DecodeSignature(this, genericContext);
+}

@@ -158,6 +158,23 @@ try {
     Assert-True ($plan.Modules.Count -eq 2) 'exact ACF subscriptions should be planned'
     Assert-True (@($plan.Modules[1].ExcludedFiles).Count -eq 1) 'duplicate Harmony should be excluded'
     Assert-True ($plan.AssemblyAudit.ClosureProofs.Count -eq 1) 'assembly reference closure should prove the Coop Harmony exclusion'
+    $inspectorRequest = @([ordered]@{
+        moduleId = 'Inspector.Fixture'; relativePath = 'Inspector.Fixture.dll'; path = $managedFixture
+        included = $true; platform = 'Win64_Shipping_Client'
+    })
+    $workshopModule = Get-Module WorkshopIntegration
+    $fixtureInspection = @(& $workshopModule { param($files) Invoke-AssemblyInspector -Files $files } $inspectorRequest)[0]
+    Assert-True (@($fixtureInspection.methods).Count -gt 0) 'assembly inspector must enumerate the complete managed method surface'
+    $requestConstructor = @($fixtureInspection.methods | Where-Object {
+        [string]$_.declaringType -ceq 'InspectionRequest' -and
+        [string]$_.name -ceq '.ctor' -and
+        @($_.parameterTypes).Count -eq 1 -and
+        [string]$_.parameterTypes[0] -ceq 'InspectionFile[]'
+    })
+    Assert-True ($requestConstructor.Count -eq 1 -and
+        [string]$requestConstructor[0].returnType -ceq 'System.Void' -and
+        [int]$requestConstructor[0].genericArity -eq 0 -and
+        [string]$requestConstructor[0].metadataToken -match '^0x06[0-9A-F]{6}$') 'method inventory must preserve declaring type, return type, parameter shape, arity, and token'
     Assert-True (@($plan.Coop.ExcludedFiles).Count -eq 4) 'Coop plan must exclude Harmony, TaleWorlds, Sandbox, and noncanonical JSON payloads'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $testRoot 'dry-run-output'))) 'planning/dry run must not create output'
 

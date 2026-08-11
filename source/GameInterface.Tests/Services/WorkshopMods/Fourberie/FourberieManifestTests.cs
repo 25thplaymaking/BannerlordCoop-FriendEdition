@@ -38,18 +38,9 @@ public sealed class FourberieManifestTests
     }
 
     [Theory]
-    [InlineData("Fourberie.FourberieBehavior", "AddGameMenus")]
-    [InlineData("Fourberie.FourbSafeHouseBehavior", "SHAddGameMenus")]
-    [InlineData("Fourberie.FourbEscapeBehavior", "FourbEscapMenu")]
-    [InlineData("Fourberie.FourbFightClubBehavior", "PitAddGameMenus")]
-    [InlineData("Fourberie.FourbBanditBehavior", "BanditAddMenu")]
-    [InlineData("Fourberie.FourbRecruitableBehavior", "AddGameMenus")]
-    [InlineData("Fourberie.FourbContactMenu", "AddContactMenusF")]
-    [InlineData("Fourberie.FourbContractBehavior", "AddGameMenus")]
-    [InlineData("Fourberie.HomesSteadsAddOn", "MenuHomeSteads")]
-    [InlineData("Fourberie.Main", "InitializeCampaignBehaviors")]
-    [InlineData("Fourberie.Main", "OnGameInitializationFinished")]
-    [InlineData("Fourberie.Main", "OnApplicationTick")]
+    [InlineData("Fourberie.CriminalVM", "AgentsEnlistRoutine")]
+    [InlineData("Fourberie.FourbBanditBehavior", "FourbRecruitBandit")]
+    [InlineData("Fourberie.HelperSubInsuScam", "SpawnBandits")]
     [InlineData("Fourberie.Main", "OnMissionBehaviorInitialize")]
     public void UnsafeFeatureEntryPoints_AreExplicitlyFailClosed(string type, string method)
     {
@@ -60,4 +51,38 @@ public sealed class FourberieManifestTests
                     spec.Kind == FourberiePatchKind.UnsupportedPlayerAction);
     }
 
+    [Theory]
+    [InlineData("Fourberie.FourberieBehavior", "AddGameMenus")]
+    [InlineData("Fourberie.FourbSafeHouseBehavior", "SHAddGameMenus")]
+    [InlineData("Fourberie.FourbEscapeBehavior", "FourbEscapMenu")]
+    [InlineData("Fourberie.FourbFightClubBehavior", "PitAddGameMenus")]
+    [InlineData("Fourberie.FourbBanditBehavior", "BanditAddMenu")]
+    [InlineData("Fourberie.FourbRecruitableBehavior", "AddGameMenus")]
+    [InlineData("Fourberie.FourbContactMenu", "AddContactMenusF")]
+    [InlineData("Fourberie.FourbContractBehavior", "AddGameMenus")]
+    [InlineData("Fourberie.HomesSteadsAddOn", "MenuHomeSteads")]
+    [InlineData("Fourberie.Main", "OnApplicationTick")]
+    public void PresentationEntryPoints_AreClientOnly(string type, string method)
+    {
+        Assert.Contains(
+            FourberieCompatibilityManifest.Methods,
+            spec => spec.TypeName == type &&
+                    spec.MethodName == method &&
+                    spec.Kind == FourberiePatchKind.ClientPresentation);
+    }
+
+    [Theory]
+    [InlineData("Fourberie.Main", "InitializeCampaignBehaviors", "BehaviorsWithoutModels")]
+    [InlineData("Fourberie.Main", "OnGameInitializationFinished", "RefreshHeroDicoOnly")]
+    public void ReplacedInitializationEntryPoints_UseTheirAuditedAdapters(
+        string type,
+        string method,
+        string expectedKind)
+    {
+        Assert.Contains(
+            FourberieCompatibilityManifest.Methods,
+            spec => spec.TypeName == type &&
+                    spec.MethodName == method &&
+                    spec.Kind.ToString() == expectedKind);
+    }
 }

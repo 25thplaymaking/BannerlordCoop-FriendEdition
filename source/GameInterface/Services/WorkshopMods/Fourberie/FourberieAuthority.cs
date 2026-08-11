@@ -197,27 +197,51 @@ internal static class FourberieAuthorityPatches
             ? __args[0] as CampaignGameStarter
             : null;
 
-        // Without the game starter we cannot add behaviors; fall back to the original block.
-        if (starter == null) return false;
+        if (starter == null)
+            throw new InvalidOperationException(
+                "Fourberie behavior initialization had no CampaignGameStarter; refusing the unsafe original initializer.");
 
-        foreach (var typeName in FourberieBehaviorTypeNames)
+        var behaviors = PreflightBehaviors(
+            FourberieBehaviorTypeNames,
+            HarmonyLib.AccessTools.TypeByName);
+        foreach (var behavior in behaviors)
         {
-            try
-            {
-                var type = HarmonyLib.AccessTools.TypeByName(typeName);
-                if (type == null) continue;
-                if (Activator.CreateInstance(type) is CampaignBehaviorBase behavior)
-                {
-                    starter.AddBehavior(behavior);
-                }
-            }
-            catch
-            {
-                // A single behavior failing to construct must not abort campaign start.
-            }
+            starter.AddBehavior(behavior);
         }
 
         return false; // skip original: its AddModel<...> replacements are not registered
+    }
+
+    internal static IReadOnlyList<CampaignBehaviorBase> PreflightBehaviors(
+        IEnumerable<string> typeNames,
+        Func<string, Type> resolveType)
+    {
+        if (typeNames == null) throw new ArgumentNullException(nameof(typeNames));
+        if (resolveType == null) throw new ArgumentNullException(nameof(resolveType));
+
+        var behaviors = new List<CampaignBehaviorBase>();
+        foreach (var typeName in typeNames)
+        {
+            var type = resolveType(typeName);
+            if (type == null || !typeof(CampaignBehaviorBase).IsAssignableFrom(type))
+                throw new InvalidOperationException(
+                    "Fourberie behavior preflight failed for " + (typeName ?? "missing type name") + ".");
+
+            try
+            {
+                if (Activator.CreateInstance(type) is not CampaignBehaviorBase behavior)
+                    throw new InvalidOperationException("constructor returned no campaign behavior");
+                behaviors.Add(behavior);
+            }
+            catch (Exception exception)
+            {
+                throw new InvalidOperationException(
+                    "Fourberie behavior preflight failed for " + typeName + ".",
+                    exception);
+            }
+        }
+
+        return behaviors;
     }
 
     public static void FinanceReadPrefix(ref bool applyWithdrawals)

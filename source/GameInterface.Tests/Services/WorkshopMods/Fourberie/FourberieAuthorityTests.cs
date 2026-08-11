@@ -1,4 +1,6 @@
 using GameInterface.Services.WorkshopMods.Fourberie;
+using System;
+using TaleWorlds.CampaignSystem;
 using Xunit;
 
 namespace GameInterface.Tests.Services.WorkshopMods.Fourberie;
@@ -18,6 +20,18 @@ public sealed class FourberieAuthorityTests
     {
         public StableArgument(string stringId) => StringId = stringId;
         public string StringId { get; }
+    }
+
+    private sealed class FirstBehavior : CampaignBehaviorBase
+    {
+        public override void RegisterEvents() { }
+        public override void SyncData(IDataStore dataStore) { }
+    }
+
+    private sealed class SecondBehavior : CampaignBehaviorBase
+    {
+        public override void RegisterEvents() { }
+        public override void SyncData(IDataStore dataStore) { }
     }
 
     [Fact]
@@ -87,5 +101,56 @@ public sealed class FourberieAuthorityTests
         Assert.Equal(first, duplicate);
         Assert.NotEqual(first, differentOpponent);
         Assert.Equal(64, first.Length);
+    }
+
+    [Fact]
+    public void CreateActionInterface_RefusesLegacyRoutesWithoutExplicitPlayerContext()
+    {
+        var adapter = new FourberieCreateActionInterface();
+
+        Assert.Equal(
+            FourberieCreateActionVerdict.NotAllowed,
+            adapter.TryRun("Fourberie.CriminalVM", "AgentsEnlistRoutine", 4));
+        Assert.Equal(
+            FourberieCreateActionVerdict.NotAllowed,
+            adapter.TryRun("Fourberie.FourbBanditBehavior", "FourbRecruitBandit", 4));
+        Assert.Equal(
+            FourberieCreateActionVerdict.NotAllowed,
+            adapter.TryRun("Fourberie.HelperSubInsuScam", "SpawnBandits", 4));
+    }
+
+    [Fact]
+    public void BehaviorPreflight_ConstructsEveryBehaviorBeforeReturningAny()
+    {
+        var types = new[] { "first", "second" };
+
+        var behaviors = FourberieAuthorityPatches.PreflightBehaviors(
+            types,
+            name => name == "first" ? typeof(FirstBehavior) : typeof(SecondBehavior));
+
+        Assert.Collection(
+            behaviors,
+            behavior => Assert.IsType<FirstBehavior>(behavior),
+            behavior => Assert.IsType<SecondBehavior>(behavior));
+    }
+
+    [Fact]
+    public void BehaviorPreflight_FailsClosedWhenAnyBehaviorCannotBeConstructed()
+    {
+        var types = new[] { "first", "missing" };
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            FourberieAuthorityPatches.PreflightBehaviors(
+                types,
+                name => name == "first" ? typeof(FirstBehavior) : null));
+
+        Assert.Contains("missing", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InitializeBehaviorsWithoutStarter_FailsClosedInsteadOfRunningTheUnsafeOriginal()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            FourberieAuthorityPatches.InitializeBehaviorsOnlyPrefix(Array.Empty<object>()));
     }
 }

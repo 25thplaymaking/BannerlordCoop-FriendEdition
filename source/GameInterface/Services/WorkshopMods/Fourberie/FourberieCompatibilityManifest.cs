@@ -313,15 +313,14 @@ internal static class FourberieCompatibilityManifest
         Add("Fourberie.Main", "InitializeCampaignBehaviors", FourberiePatchKind.BehaviorsWithoutModels,
             "TaleWorlds.Core.IGameStarter");
 
-        // Player-triggered create-actions (static void M(int)): routed to the server so their
-        // MobileParty.CreateParty / TroopRoster mutations flow through Coop's authoritative create
-        // funnels instead of being authored on a client (which caused the "Failed to get TroopRoster
-        // using Created_####" storm). On a client the guard publishes an intent and skips the local
-        // call; on the server it runs the mod routine directly. See FourberieRecruit{Messages,
-        // Interface,Handler}.cs.
-        Add("Fourberie.CriminalVM", "AgentsEnlistRoutine", FourberiePatchKind.RoutedCreateAction, "System.Int32");
-        Add("Fourberie.FourbBanditBehavior", "FourbRecruitBandit", FourberiePatchKind.RoutedCreateAction, "System.Int32");
-        Add("Fourberie.HelperSubInsuScam", "SpawnBandits", FourberiePatchKind.RoutedCreateAction, "System.Int32");
+        // These static void M(int) routines create parties/rosters through MainHero, MainParty and
+        // Fourberie's singleton _agentsParty. A server request can authenticate its peer, but the
+        // original API cannot receive that peer's hero/party context. Running it would therefore
+        // apply to the host singleton. Keep all three fail-closed until an explicit-context API is
+        // deliberately implemented and tested.
+        Add("Fourberie.CriminalVM", "AgentsEnlistRoutine", FourberiePatchKind.UnsupportedPlayerAction, "System.Int32");
+        Add("Fourberie.FourbBanditBehavior", "FourbRecruitBandit", FourberiePatchKind.UnsupportedPlayerAction, "System.Int32");
+        Add("Fourberie.HelperSubInsuScam", "SpawnBandits", FourberiePatchKind.UnsupportedPlayerAction, "System.Int32");
 
         // These periodic entry points contain the random and persistent campaign decisions found
         // in the 1.4.7.5 audit. They are separately guarded so a duplicate listener cannot execute

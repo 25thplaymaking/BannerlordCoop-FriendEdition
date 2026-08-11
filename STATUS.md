@@ -4,11 +4,12 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
-> **HANDOFF (2026-08-10): release HELD — Sol taking over.** Launcher hover-crash fixed and
-> confirmed working by Bryce (commit `b2e5f8294`, **unpushed**; rebuilt exe deployed only to the
-> local pinned install `%LOCALAPPDATA%\Programs\CalradiaCoop`). **Nothing pushed, no launcher/workshop
-> release published.** Do not push or cut a release without Bryce's go. Bigger goal still open:
-> full "all mods playable on grain.silo" end-to-end (see P1 + auto-resolve bug above).
+> **EXECUTION ACTIVE (2026-08-11): containment complete; certification in progress.** The inherited
+> launcher and auto-resolve commits plus containment fixes are pushed through `bdfe4138b` on
+> `25vid/workshop-integration`. Public launcher defaults/assets contain no join password; the live
+> password was rotated into only the server launch script and Bryce's private pinned config. Stable
+> releases are manual and development pushes are nightly-only. The larger all-functions review,
+> Separatism certification, and full live/release gate remain open below.
 
 ## Known playtest bugs (live)
 
@@ -137,18 +138,23 @@ This is the biggest remaining phase (Bryce: "route them all, I'll test afterward
       `mb2\Modules\Coop\bin\Win64_Shipping_Client`.
 - [x] **Frontir "Calradia Co-op" launcher** (`tools/CoopLauncher`, WPF net8.0-windows):
       Bannerlord-themed (hanging war-banner signature; sigil = live host status), one-click
-      "March to War" runs `Bannerlord.exe /singleplayer <token> /coopjoin 205.209.116.114 4200 8888`.
+      "March to War" runs `Bannerlord.exe /singleplayer <token> /coopjoin 205.209.116.114 4200 <private-password>`.
       Steam auto-detect for the game path; TCP host probe; self-contained single-file publish
       (`CalradiaCoop.exe`, no .NET install for friends). Replaces `Play Friend Edition.cmd`.
 - [x] Module token lives in `launcher-config.json` (edit, no rebuild); the loadout is the full
       set minus RBM, in handshake order.
-- [ ] **Self-update wiring is built but dormant:** `ModUpdater` pulls a SHA-256-verified client zip
-      from `updateManifestUrl`; that URL is empty until the P6 build feed exists. Fill it then.
+- [x] **Self-update feed is wired:** `ModUpdater` pulls the SHA-256-verified client zip from the
+      rolling `client-stable` manifest. Transactional updater hardening remains part of the active
+      launcher certification phase.
 - [x] **Hover-crash fixed (2026-08-10, confirmed by Bryce).** `WarButton` hover trigger referenced an
       undefined `BloodBright` brush → render-time `UnsetValue` crash (`0xe0434352`) that killed the
       process on first hover and left a ghost window (clicks did nothing, no `launcher.log`). Fix: add
-      the brush + a global `DispatcherUnhandledException` handler + `check-xaml-resources.py` guard
+      the brush + a fail-fast `DispatcherUnhandledException` reporter + `check-xaml-resources.py` guard
       (commit `b2e5f8294`). See `doc/COOP-OPS-WORKFLOW.md` rule #10. Button now launches the game.
+- [x] **Credential/release containment (2026-08-11).** Rotated the live server password; kept it only
+      in the server launch script and Bryce's private pinned launcher config; replaced all three
+      public `launcher-app` assets with password-free builds; made launcher-app publication manual;
+      and limited automatic client publication to nightly builds from `development`.
 - [ ] Live test (still open): confirm the launched game auto-joins grain.silo end-to-end with mods.
 
 ### P3 — Packaging consolidation

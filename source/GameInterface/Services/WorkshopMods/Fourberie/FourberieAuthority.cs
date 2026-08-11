@@ -448,6 +448,17 @@ internal static class FourberieAuthorityPatches
         return false;
     }
 
+    public static void ClientRoleRefreshPrefix(ref FourberieRoleSnapshot __state)
+    {
+        if (ModInformation.IsClient)
+            __state = FourberieRoleAuthority.Capture(FourberieRoles());
+    }
+
+    public static void ClientRoleRefreshPostfix(FourberieRoleSnapshot __state)
+    {
+        if (ModInformation.IsClient) __state?.Restore(FourberieRoles());
+    }
+
     internal static FourberieOperation SchemeLifecycleOperation(int slot)
     {
         Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
@@ -634,6 +645,14 @@ internal static class FourberieAuthorityPatches
             .Select(element => element?.Identifier)
             .FirstOrDefault(value => value is T);
         return identifier is T selected ? selected : default;
+    }
+
+    private static IDictionary FourberieRoles()
+    {
+        Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
+        return behavior == null
+            ? null
+            : AccessTools.Field(behavior, "_stringHeroIdDico")?.GetValue(null) as IDictionary;
     }
 
     private static bool TryBusinessKey(object[] arguments, out int businessKey)

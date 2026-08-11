@@ -193,7 +193,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                     var postfix = pair.Key.Kind == FourberiePatchKind.ServerTick ||
                                   pair.Key.Kind == FourberiePatchKind.ServerMutation
                         ? AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.ServerTickPostfix))
-                        : null;
+                        : pair.Key.Kind == FourberiePatchKind.ClientRoleRefresh
+                            ? AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.ClientRoleRefreshPostfix))
+                            : null;
                     return (Original: pair.Value, Prefix: prefix, Postfix: postfix);
                 })
                 .ToArray();
@@ -334,6 +336,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                 break;
             case FourberiePatchKind.SchemeStanceConsequence:
                 method = nameof(FourberieAuthorityPatches.SchemeStanceConsequencePrefix);
+                break;
+            case FourberiePatchKind.ClientRoleRefresh:
+                method = nameof(FourberieAuthorityPatches.ClientRoleRefreshPrefix);
                 break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);

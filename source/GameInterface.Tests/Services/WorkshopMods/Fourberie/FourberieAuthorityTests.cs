@@ -482,6 +482,27 @@ public sealed class FourberieAuthorityTests
         Assert.False(FourberieRoleAuthority.TryAssign(roles, 3, "hero_bad", out _));
     }
 
+    [Fact]
+    public void RoleSnapshot_RestoresServerOwnedMappingsAfterClientPresentationRefresh()
+    {
+        IDictionary roles = new Hashtable
+        {
+            ["paymaster"] = "hero_paymaster",
+            ["enforcer"] = "hero_enforcer",
+            ["victim7"] = "hero_victim",
+        };
+        FourberieRoleSnapshot snapshot = FourberieRoleAuthority.Capture(roles);
+
+        roles.Remove("paymaster");
+        roles["enforcer"] = "wrong_hero";
+        roles["victim7"] = "new_victim";
+        snapshot.Restore(roles);
+
+        Assert.Equal("hero_paymaster", roles["paymaster"]);
+        Assert.Equal("hero_enforcer", roles["enforcer"]);
+        Assert.Equal("new_victim", roles["victim7"]);
+    }
+
     [Theory]
     [InlineData("paymaster", 1)]
     [InlineData("enforcer", 2)]

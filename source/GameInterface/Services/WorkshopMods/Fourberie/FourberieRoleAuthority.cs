@@ -2,8 +2,35 @@ using System.Collections;
 
 namespace GameInterface.Services.WorkshopMods.Fourberie;
 
+internal sealed class FourberieRoleSnapshot
+{
+    private readonly bool hadPaymaster;
+    private readonly string paymaster;
+    private readonly bool hadEnforcer;
+    private readonly string enforcer;
+
+    public FourberieRoleSnapshot(IDictionary roles)
+    {
+        hadPaymaster = roles?.Contains("paymaster") == true;
+        paymaster = hadPaymaster ? roles["paymaster"] as string : null;
+        hadEnforcer = roles?.Contains("enforcer") == true;
+        enforcer = hadEnforcer ? roles["enforcer"] as string : null;
+    }
+
+    public void Restore(IDictionary roles)
+    {
+        if (roles == null) return;
+        if (hadPaymaster) roles["paymaster"] = paymaster;
+        else roles.Remove("paymaster");
+        if (hadEnforcer) roles["enforcer"] = enforcer;
+        else roles.Remove("enforcer");
+    }
+}
+
 internal static class FourberieRoleAuthority
 {
+    public static FourberieRoleSnapshot Capture(IDictionary roles) => new FourberieRoleSnapshot(roles);
+
     public static int RoleCode(string role) => role switch
     {
         "paymaster" => 1,

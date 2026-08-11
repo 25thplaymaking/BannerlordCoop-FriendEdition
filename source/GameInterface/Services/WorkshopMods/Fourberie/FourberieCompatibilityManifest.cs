@@ -46,6 +46,7 @@ internal enum FourberiePatchKind
     SchemeLifecycleConsequence,
     SchemeOwnedReplacement,
     SchemeStanceConsequence,
+    ClientRoleRefresh,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -386,6 +387,8 @@ internal static class FourberieCompatibilityManifest
         Add("Fourberie.FourberieBehavior+<>c__DisplayClass84_0", "<Comparole>b__0",
             FourberiePatchKind.RoleAssignmentConsequence,
             "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]");
+        Add("Fourberie.CriminalVM", "RefreshValues", FourberiePatchKind.ClientRoleRefresh);
+        Add("Fourberie.CriminalVM", "Close2", FourberiePatchKind.ClientRoleRefresh);
         Add("Fourberie.CriminalVM", "Schemhero1", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM", "Schemhero2", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM+<>c__DisplayClass137_0", "<Schemhero1>b__0",

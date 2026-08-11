@@ -69,6 +69,8 @@ public sealed class FourberieManifestTests
     [InlineData("Fourberie.FourberieBehavior+<>c__DisplayClass102_0", "<SchemeSel>b__0", "SchemeTypeConsequence")]
     [InlineData("Fourberie.CriminalVM", "SchemeAllButtonRoutine", "SchemeLifecycleConsequence")]
     [InlineData("Fourberie.CriminalVM+<>c__DisplayClass562_0", "<SchemeRoomStanceList>b__0", "SchemeStanceConsequence")]
+    [InlineData("Fourberie.CriminalVM", "RefreshValues", "ClientRoleRefresh")]
+    [InlineData("Fourberie.CriminalVM", "Close2", "ClientRoleRefresh")]
     [InlineData("Fourberie.Main", "OnMissionBehaviorInitialize", "MissionInitialization")]
     public void PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners(
         string type,

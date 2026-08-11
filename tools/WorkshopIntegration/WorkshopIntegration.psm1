@@ -957,8 +957,14 @@ function Invoke-ManagedAssemblyAudit {
         }
         $stagedConflictProperty = $pin.PSObject.Properties['stagedInactiveConflictModuleIds']
         $coactiveAlternateProperty = $pin.PSObject.Properties['coactiveAlternateProviderModuleIds']
-        $conflictIds = if ($null -ne $stagedConflictProperty) { @($stagedConflictProperty.Value | ForEach-Object { [string]$_ }) } else { @() }
-        $coactiveIds = if ($null -ne $coactiveAlternateProperty) { @($coactiveAlternateProperty.Value | ForEach-Object { [string]$_ }) } else { @() }
+        $conflictIds = @()
+        if ($null -ne $stagedConflictProperty) {
+            $conflictIds = @($stagedConflictProperty.Value | ForEach-Object { [string]$_ })
+        }
+        $coactiveIds = @()
+        if ($null -ne $coactiveAlternateProperty) {
+            $coactiveIds = @($coactiveAlternateProperty.Value | ForEach-Object { [string]$_ })
+        }
         if ($conflictIds.Count -gt 0 -and $coactiveIds.Count -gt 0) {
             throw "Required Coop assembly pin cannot define both staged-inactive conflicts and verified coactive alternate providers: $($pin.path)"
         }
@@ -1287,10 +1293,11 @@ function New-WorkshopSuitePlan {
             }
         }
     }
-    $orderedManagedIds = @($clientOrder | Where-Object { $_ -in $suiteIds })
-    $numericManagedIds = @($plannedModules | Sort-Object { [int]$_.Config.loadOrder } | ForEach-Object { [string]$_.Descriptor.ModuleId })
-    if (($orderedManagedIds -join '|') -cne ($numericManagedIds -join '|')) {
-        throw 'Numeric managed loadOrder values do not match client exactModuleOrder.'
+    if (-not (Test-ManagedLoadOrderMatchesActivationCohorts `
+        -ClientOrder $clientOrder `
+        -CoopModuleId ([string]$coop.Descriptor.ModuleId) `
+        -ManagedModules $plannedModules.ToArray())) {
+        throw 'Numeric managed loadOrder values do not match client exactModuleOrder within the before-Coop and after-Coop cohorts.'
     }
 
     $activeClientOrder = @($Manifest.activationPolicy.client.activeModuleOrder | ForEach-Object { [string]$_ })
@@ -1373,6 +1380,36 @@ function New-WorkshopSuitePlan {
         ServerPreflightFiles = $serverPreflightFiles
         ClientInstallerFiles = $clientInstallerFiles
     }
+}
+
+function Test-ManagedLoadOrderMatchesActivationCohorts {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string[]]$ClientOrder,
+        [Parameter(Mandatory = $true)][string]$CoopModuleId,
+        [Parameter(Mandatory = $true)][object[]]$ManagedModules
+    )
+
+    $coopIndex = [array]::IndexOf($ClientOrder, $CoopModuleId)
+    if ($coopIndex -lt 0) { return $false }
+
+    $managedIds = @($ManagedModules | ForEach-Object { [string]$_.Descriptor.ModuleId })
+    $orderedBeforeCoop = New-Object System.Collections.Generic.List[string]
+    $orderedAfterCoop = New-Object System.Collections.Generic.List[string]
+    for ($index = 0; $index -lt $ClientOrder.Count; $index++) {
+        $moduleId = [string]$ClientOrder[$index]
+        if ($moduleId -notin $managedIds) { continue }
+        if ($index -lt $coopIndex) { $orderedBeforeCoop.Add($moduleId) }
+        else { $orderedAfterCoop.Add($moduleId) }
+    }
+
+    $numericIds = @($ManagedModules |
+        Sort-Object { [int]$_.Config.loadOrder } |
+        ForEach-Object { [string]$_.Descriptor.ModuleId })
+    $numericBeforeCoop = @($numericIds | Where-Object { $_ -in $orderedBeforeCoop })
+    $numericAfterCoop = @($numericIds | Where-Object { $_ -in $orderedAfterCoop })
+    return (($orderedBeforeCoop.ToArray() -join '|') -ceq ($numericBeforeCoop -join '|')) -and
+        (($orderedAfterCoop.ToArray() -join '|') -ceq ($numericAfterCoop -join '|'))
 }
 
 function Get-ReceiptDigest {

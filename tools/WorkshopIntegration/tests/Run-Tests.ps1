@@ -34,6 +34,14 @@ function Write-TestModule {
     Write-TestFile -Path (Join-Path $Root "bin\Win64_Shipping_Client\$Dll") -Content "$Id runtime"
 }
 
+function New-LoadOrderFixture {
+    param([string]$ModuleId, [int]$LoadOrder)
+    return [pscustomobject]@{
+        Descriptor = [pscustomobject]@{ ModuleId = $ModuleId }
+        Config = [pscustomobject]@{ loadOrder = $LoadOrder }
+    }
+}
+
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
 $productionManifest = Get-Content -LiteralPath (Join-Path $repoRoot 'deploy\workshop-mods.json') -Raw | ConvertFrom-Json
 $approvedWorkshopIds = @(
@@ -69,6 +77,26 @@ Assert-True ($vectorsAllowance.Count -eq 1) 'production suite must contain one S
 Assert-True ($null -eq $vectorsAllowance[0].PSObject.Properties['stagedInactiveModuleIds']) 'the vectors allowance must not retain staged-inactive modules'
 Assert-True ((@($vectorsAllowance[0].coactiveModuleIds) -join ',') -ceq 'Bannerlord.ButterLib') 'the vectors allowance must identify coactive ButterLib'
 Assert-True ([string]$vectorsAllowance[0].coactivationPolicy -ceq 'verified-framework-load-context-e2e') 'the vectors allowance must record the closed live load-context gate'
+$workshopModule = Get-Module WorkshopIntegration
+$crossCohortOrder = @(
+    (New-LoadOrderFixture -ModuleId 'Framework' -LoadOrder 0),
+    (New-LoadOrderFixture -ModuleId 'Gameplay' -LoadOrder 100),
+    (New-LoadOrderFixture -ModuleId 'BeforeCoop' -LoadOrder 200)
+)
+$crossCohortValid = & $workshopModule {
+    param($order, $modules)
+    Test-ManagedLoadOrderMatchesActivationCohorts -ClientOrder $order -CoopModuleId 'Coop' -ManagedModules $modules
+} @('Framework', 'BeforeCoop', 'Coop', 'Gameplay') $crossCohortOrder
+Assert-True $crossCohortValid 'a loads-before-Coop module may have a later numeric Workshop order than after-Coop gameplay'
+$invalidWithinCohort = & $workshopModule {
+    param($order, $modules)
+    Test-ManagedLoadOrderMatchesActivationCohorts -ClientOrder $order -CoopModuleId 'Coop' -ManagedModules $modules
+} @('Framework', 'Coop', 'GameplayA', 'GameplayB') @(
+    (New-LoadOrderFixture -ModuleId 'Framework' -LoadOrder 0),
+    (New-LoadOrderFixture -ModuleId 'GameplayA' -LoadOrder 200),
+    (New-LoadOrderFixture -ModuleId 'GameplayB' -LoadOrder 100)
+)
+Assert-True (-not $invalidWithinCohort) 'numeric Workshop order must still be preserved within an activation cohort'
 $launcherConfig = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\CoopLauncher\launcher-config.json') -Raw | ConvertFrom-Json
 $launcherOrder = @(([string]$launcherConfig.moduleToken).Split('*') | Where-Object { $_ -and $_ -notin @('_MODULES_') })
 Assert-True (($launcherOrder -join ',') -ceq ($approvedActiveOrder -join ',')) 'launcher token must match the approved ten-module loadout'

@@ -96,9 +96,20 @@ internal static class DiplomacyCompatibilityPolicy
             },
             ["Diplomacy.ViewModel.GrantFiefVM"] = new[] { ("OnGrantFief", 0) },
             ["Diplomacy.ViewModel.DonateGoldVM"] = new[] { ("ExecutePropose", 0) },
-            // The routed donation's server-side apply. Hero-parameterised in the audited binary
-            // (no MainHero in its body) — the reason DiplomacyDonateGoldInterface may reuse it.
             ["Diplomacy.Actions.GiveGoldToClanAction"] = new[] { ("ApplyFromHeroToClan", 3) },
+            ["Diplomacy.Actions.GrantFiefAction"] = new[] { ("Apply", 2) },
+            ["Diplomacy.Costs.DiplomacyCostCalculator"] = new[]
+            {
+                ("DetermineCostForSendingMessenger", 1),
+                ("DetermineCostForDeclaringWar", 2),
+            },
+            ["Diplomacy.Messengers.MessengerManager"] = new[]
+            {
+                ("SendMessenger", 1),
+                ("CanSendMessengerWithCost", 2),
+            },
+            ["Diplomacy.Character.PlayerCharacterTraitHelper"] = new[] { ("UpdateTrait", 4) },
+            ["Diplomacy.Character.PlayerCharacterTraitEventExperience"] = new[] { ("Apply", 0) },
             ["Diplomacy.ViewModelMixin.EncyclopediaHeroPageVMMixin"] = new[] { ("SendMessenger", 0) },
             ["Diplomacy.ViewModelMixin.KingdomWarItemVMMixin"] = new[] { ("ExecuteDirectAction", 0) },
             ["Diplomacy.ViewModelMixin.KingdomTruceItemVMMixin"] = new[]
@@ -108,6 +119,7 @@ internal static class DiplomacyCompatibilityPolicy
             ["Diplomacy.DiplomaticAction.AbstractDiplomaticAction`1"] = new[] { ("TryApply", 6) },
             ["Diplomacy.DiplomaticAction.NonAggressionPact.FormNonAggressionPactAction"] = new[]
             {
+                ("PassesConditions", 4),
                 ("ApplyInternal", 3),
             },
             ["Diplomacy.DiplomaticAction.NonAggressionPactAgreement"] = new[] { ("NotifyExpired", 0) },

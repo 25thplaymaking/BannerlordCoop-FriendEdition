@@ -1,6 +1,5 @@
 using Common;
 using Common.Logging;
-using Common.Messaging;
 using GameInterface.Policies;
 using GameInterface.Services.WorkshopMods.Core;
 using HarmonyLib;
@@ -14,13 +13,9 @@ using TaleWorlds.CampaignSystem;
 namespace GameInterface.Services.WorkshopMods.Diplomacy;
 
 /// <summary>
-/// Routes Diplomacy's "Donate Gold" dialog through the server — the first Workshop mod action to
-/// get the four-part intent shape instead of a block. Vanilla's <c>ExecutePropose</c> takes the
-/// gold from <c>Hero.MainHero</c>, distributes it across the clan's lords, and applies relation
-/// and trait gains — all local writes that replicate nothing. The client now only announces the
-/// intent (ids and the chosen amount) and closes its dialog; the server validates ownership and
-/// the amount against its own books, runs the mod's own hero-parameterised apply, and the results
-/// arrive back as ordinary gold/relation deltas through Coop's existing funnels.
+/// Routes Diplomacy's donation dialog through the same revisioned, replay-safe command protocol as
+/// every other Diplomacy player consequence. The server reproduces gold, relation, and both trait
+/// effects under the authenticated controller's explicit player context.
 /// </summary>
 [HarmonyPatch]
 [HarmonyPatchCategory(WorkshopPatchCategories.Diplomacy)]
@@ -43,21 +38,16 @@ internal static class DiplomacyDonateGoldRoutingPatch
     private static bool Prefix(object __instance)
     {
         if (CallOriginalPolicy.IsOriginalAllowed()) return true;
-        // The hosting player's own donation runs vanilla: MainHero is the right hero there, and
-        // every write it makes replicates through the funnels Coop already owns.
-        if (ModInformation.IsServer) return true;
+        if (!ModInformation.IsClient) return false;
 
         var clan = AccessTools.Field(__instance.GetType(), "_clan")?.GetValue(__instance) as Clan;
         var amount = AccessTools.Property(__instance.GetType(), "IntValue")?.GetValue(__instance) as int? ?? 0;
-        var giver = Hero.MainHero;
-
-        if (giver != null && clan != null && amount > 0)
+        if (clan != null && amount > 0)
+            DiplomacyPatchRuntime.Current?.TrySubmit(new DiplomacyLocalOperation(
+                DiplomacyOperation.DonateGold, clan, intValue: amount));
+        else if (clan == null)
         {
-            MessageBroker.Instance.Publish(__instance, new DiplomacyGoldDonationAttempted(giver, clan, amount));
-        }
-        else if (giver == null || clan == null)
-        {
-            Logger.Warning("Suppressed a Diplomacy gold donation with no resolvable giver or clan.");
+            Logger.Warning("Suppressed a Diplomacy gold donation with no resolvable clan.");
         }
 
         // Close the dialog either way — vanilla's only UI consequence. A zero amount routes

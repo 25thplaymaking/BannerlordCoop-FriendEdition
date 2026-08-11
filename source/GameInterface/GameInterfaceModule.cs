@@ -128,6 +128,9 @@ public class GameInterfaceModule : Module
         builder.RegisterType<FourberieCapabilitySource>()
             .As<IWorkshopCapabilitySource>()
             .InstancePerLifetimeScope();
+        builder.RegisterType<DiplomacyCapabilitySource>()
+            .As<IWorkshopCapabilitySource>()
+            .InstancePerLifetimeScope();
         builder.RegisterType<MainPartyBattleRewardsCache>().As<IMainPartyBattleRewardsCache>().InstancePerLifetimeScope();
         builder.RegisterType<PacketManager>().As<IPacketManager>().InstancePerLifetimeScope();
         builder.RegisterType<MapEventInitializationBarrierBinding>().InstancePerLifetimeScope().AutoActivate();

@@ -42,7 +42,7 @@ public interface IDiplomacyDonateGoldInterface : IGameAbstraction
 }
 
 /// <summary>
-/// Reproduces <c>DonateGoldVM.ExecutePropose</c>'s consequence with every hero explicit.
+/// Applies the gold and relation portion of <c>DonateGoldVM.ExecutePropose</c> with every hero explicit.
 /// </summary>
 /// <remarks>
 /// The gold movement runs the MOD'S OWN <c>GiveGoldToClanAction.ApplyFromHeroToClan</c> (via
@@ -54,19 +54,15 @@ public interface IDiplomacyDonateGoldInterface : IGameAbstraction
 /// MainHero-bound <c>ApplyPlayerRelation</c>.
 ///
 /// <para>
-/// Deliberately NOT reproduced: the VM's Generosity/Calculating trait XP. Vanilla's whole trait
-/// pipeline (<c>TraitLevelingHelper</c>, <c>Campaign.PlayerTraitDeveloper</c>) is hard-bound to
-/// <c>Hero.MainHero</c>, which on this process is not the giver; crediting the XP to the wrong
-/// hero is worse than crediting none. Revisit if remote-player trait development ever gets its
-/// own routed shape.
+/// The unified Diplomacy operation executor follows this primitive with the pinned mod's exact
+/// Generosity/Calculating trait calls while <c>BarterPlayerContext</c> temporarily binds the
+/// authenticated actor as the campaign player. Keeping those calls in the outer executor makes
+/// gold, relation, and trait consequences one server-only operation.
 /// </para>
 ///
 /// <para>
-/// This is also the first production consumer of
-/// <see cref="WorkshopModuleRegistrar.ResolveLiveModules"/> — the operator's per-module switch
-/// finally gates something at runtime: a disabled module refuses the intent before any state is
-/// touched. Nothing here publishes a Diplomacy snapshot because a donation touches no Diplomacy
-/// manager state — gold and relation replicate through Coop's native funnels.
+/// The operator's per-module switch gates the primitive before any state is touched. Snapshot
+/// publication is owned by the unified operation handler after the complete consequence succeeds.
 /// </para>
 /// </remarks>
 internal sealed class DiplomacyDonateGoldInterface : IDiplomacyDonateGoldInterface

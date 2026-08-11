@@ -1,6 +1,7 @@
 using Common;
 using Common.Logging;
 using GameInterface.Services.WorkshopMods.Core;
+using GameInterface.Services.Barters;
 using HarmonyLib;
 using System;
 using System.Collections;
@@ -10,6 +11,8 @@ using System.Linq;
 using System.Reflection;
 using TaleWorlds.Core;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Party;
+using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.CampaignSystem.ComponentInterfaces;
 using TaleWorlds.Library;
 using TaleWorlds.Localization;
@@ -227,25 +230,15 @@ internal static class DiplomacyCivilWarCollisionPatch
     }
 }
 
-/// <summary>
-/// These Diplomacy UI consequences assume the vanilla singleton player and directly mutate the
-/// campaign. A dedicated server has no Hero.MainHero, while executing them on a client would make
-/// that client diverge. Until a validated request/authorization flow exists, fail closed and tell
-/// the player instead of silently applying the action on the wrong process.
-/// </summary>
+/// <summary>Client presentation entry points for the unified Diplomacy command route.</summary>
 [HarmonyPatch]
 [HarmonyPatchCategory(WorkshopPatchCategories.Diplomacy)]
-internal static class DiplomacyUnsupportedPlayerActionPatch
+internal static class DiplomacyPlayerActionRoutingPatch
 {
-    private static readonly ILogger Logger = LogManager.GetLogger(typeof(DiplomacyUnsupportedPlayerActionPatch));
-    private static readonly HashSet<string> LoggedMethods = new();
-
     private static readonly IReadOnlyDictionary<string, string[]> EntryPoints =
         new Dictionary<string, string[]>(System.StringComparer.Ordinal)
         {
             ["Diplomacy.ViewModel.GrantFiefVM"] = new[] { "OnGrantFief" },
-            // DonateGoldVM.ExecutePropose is deliberately absent: it is routed through
-            // DiplomacyDonateGoldRoutingPatch instead of blocked.
             ["Diplomacy.ViewModelMixin.EncyclopediaHeroPageVMMixin"] = new[] { "SendMessenger" },
             ["Diplomacy.ViewModelMixin.KingdomWarItemVMMixin"] = new[] { "ExecuteDirectAction" },
             ["Diplomacy.ViewModelMixin.KingdomTruceItemVMMixin"] = new[]
@@ -253,7 +246,6 @@ internal static class DiplomacyUnsupportedPlayerActionPatch
                 "ExecuteDirectAction",
                 "ProposeNonAggressionPact",
             },
-            ["Diplomacy.CampaignBehaviors.KeepFiefAfterSiegeBehavior"] = new[] { "OnPlayerSettlementTaken" },
         };
 
     private static IEnumerable<MethodBase> TargetMethods()
@@ -278,22 +270,80 @@ internal static class DiplomacyUnsupportedPlayerActionPatch
     private static bool Prepare() => TargetMethods().Any();
 
     [HarmonyPrefix]
-    private static bool Prefix(MethodBase __originalMethod)
+    private static bool Prefix(object __instance, MethodBase __originalMethod)
     {
-        var method = $"{__originalMethod?.DeclaringType?.FullName}.{__originalMethod?.Name}";
-        if (LoggedMethods.Add(method))
+        if (!ModInformation.IsClient || __instance == null) return false;
+        string type = __originalMethod?.DeclaringType?.FullName ?? string.Empty;
+        string method = __originalMethod?.Name ?? string.Empty;
+        DiplomacyLocalOperation operation = null;
+
+        if (type == "Diplomacy.ViewModel.GrantFiefVM")
         {
-            Logger.Warning(
-                "Blocked unsupported Diplomacy player action {Method}; it requires a Coop server request/authorization path.",
-                method);
+            object selected = AccessTools.Property(__instance.GetType(), "SelectedSettlementItem")?.GetValue(__instance);
+            var settlement = selected == null
+                ? null
+                : AccessTools.Property(selected.GetType(), "Settlement")?.GetValue(selected) as Settlement;
+            var targetHero = AccessTools.Field(__instance.GetType(), "_targetHero")?.GetValue(__instance) as Hero;
+            if (targetHero?.Clan != null && settlement != null)
+                operation = new DiplomacyLocalOperation(
+                    DiplomacyOperation.GrantFief, targetHero.Clan, settlement);
+            (AccessTools.Field(__instance.GetType(), "_onComplete")?.GetValue(__instance) as Action)?.Invoke();
+        }
+        else if (type == "Diplomacy.ViewModelMixin.EncyclopediaHeroPageVMMixin")
+        {
+            var hero = AccessTools.Field(__instance.GetType(), "_hero")?.GetValue(__instance) as Hero;
+            if (hero != null)
+                operation = new DiplomacyLocalOperation(DiplomacyOperation.SendMessenger, hero);
+        }
+        else
+        {
+            var first = AccessTools.Field(__instance.GetType(), "_faction1")?.GetValue(__instance) as Kingdom;
+            var second = AccessTools.Field(__instance.GetType(), "_faction2")?.GetValue(__instance) as Kingdom;
+            if (first != null && second != null)
+            {
+                DiplomacyOperation kind;
+                if (type == "Diplomacy.ViewModelMixin.KingdomWarItemVMMixin")
+                    kind = DiplomacyOperation.MakePeace;
+                else if (method == "ProposeNonAggressionPact")
+                    kind = DiplomacyOperation.FormNonAggressionPact;
+                else
+                    kind = first.IsAllyWith(second)
+                        ? DiplomacyOperation.EndAlliance
+                        : DiplomacyOperation.DeclareWar;
+                operation = new DiplomacyLocalOperation(kind, first, second);
+            }
         }
 
-        if (ModInformation.IsClient)
-        {
+        if (operation == null || DiplomacyPatchRuntime.Current?.TrySubmit(operation) != true)
             InformationManager.DisplayMessage(new InformationMessage(
-                "This Diplomacy action is disabled in co-op until it has a server-authorized request path."));
-        }
+                "The Diplomacy action is not available until the co-op authority handshake is complete."));
+        return false;
+    }
+}
 
+/// <summary>
+/// Converts the server's settlement-capture callback into a prompt for the controller who led the
+/// final assault. Accept/decline returns through the same authenticated command protocol.
+/// </summary>
+[HarmonyPatch]
+[HarmonyPatchCategory(WorkshopPatchCategories.Diplomacy)]
+internal static class DiplomacyKeepFiefCallbackRoutingPatch
+{
+    private static IEnumerable<MethodBase> TargetMethods()
+    {
+        var type = DiplomacyCompatibilityPolicy.ResolveType(
+            "Diplomacy.CampaignBehaviors.KeepFiefAfterSiegeBehavior");
+        var method = type == null ? null : AccessTools.Method(type, "OnPlayerSettlementTaken");
+        if (method != null) yield return method;
+    }
+
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
+
+    [HarmonyPrefix]
+    private static bool Prefix(Settlement settlement)
+    {
+        if (ModInformation.IsServer) DiplomacyPatchRuntime.Current?.TryPromptKeepFief(settlement);
         return false;
     }
 }
@@ -323,10 +373,8 @@ internal static class DiplomacyServerUiGuardPatch
 }
 
 /// <summary>
-/// Messenger state dereferences Hero.MainHero/MainParty and starts global PlayerEncounter state.
-/// The initiating action has no server request path, so the feature and any messenger records
-/// inherited from a single-player save are inert on every peer rather than mutating whichever
-/// hero happens to be exposed through the local singleton.
+/// Messenger travel/dialogue is controller-local presentation. The server owns authorization and
+/// cost; client behavior methods own only that controller's inquiry, travel marker, and encounter.
 /// </summary>
 [HarmonyPatch]
 [HarmonyPatchCategory(WorkshopPatchCategories.Diplomacy)]
@@ -358,13 +406,13 @@ internal static class DiplomacyMessengerFeatureGuardPatch
     private static bool Prepare() => TargetMethods().Any();
 
     [HarmonyPrefix]
-    private static bool Prefix() => false;
+    private static bool Prefix(MethodBase __originalMethod) =>
+        ModInformation.IsClient && __originalMethod?.Name != "OnMessengerSent";
 }
 
 /// <summary>
-/// Keep-fief prompts capture Hero.MainHero inside a deferred inquiry callback. That cannot be
-/// attributed to the requesting co-op player, so do not register the behavior on either role.
-/// The callback itself is also in the unsupported-player-action guard as defense in depth.
+/// Keep-fief capture detection is a server callback; its inquiry is routed to the winning
+/// controller by <see cref="DiplomacyKeepFiefCallbackRoutingPatch"/>.
 /// </summary>
 [HarmonyPatch]
 [HarmonyPatchCategory(WorkshopPatchCategories.Diplomacy)]
@@ -383,14 +431,13 @@ internal static class DiplomacyKeepFiefBehaviorGuardPatch
     private static bool Prepare() => TargetMethods().Any();
 
     [HarmonyPrefix]
-    private static bool Prefix() => false;
+    private static bool Prefix() => ModInformation.IsServer;
 }
 
 /// <summary>
-/// Diplomacy routes pacts and exhaustion peace through Clan.PlayerClan and local inquiries. Those
-/// methods dereference the vanilla singleton even for nominal AI-to-AI calls, so a headless server
-/// cannot safely execute them. Coop's existing stance/decision services remain the sole peace
-/// authority; NAP creation stays feature-blocked until it has a complete server request path.
+/// Diplomacy pacts and peace execute only on the campaign server. Explicit player commands enter
+/// with a verified context; automated server callbacks receive the proposing kingdom leader as a
+/// temporary player context so singleton reads cannot resolve to an arbitrary client.
 /// </summary>
 [HarmonyPatch]
 [HarmonyPatchCategory(WorkshopPatchCategories.Diplomacy)]
@@ -422,16 +469,30 @@ internal static class DiplomacyPlayerKingdomActionGuardPatch
     private static bool Prepare() => TargetMethods().Any();
 
     [HarmonyPrefix]
-    private static bool Prefix(MethodBase __originalMethod)
+    private static bool Prefix(MethodBase __originalMethod, object[] __args, ref BarterPlayerContext __state)
     {
-        string method = $"{__originalMethod?.DeclaringType?.FullName}.{__originalMethod?.Name}";
-        if (LoggedMethods.Add(method))
+        if (!ModInformation.IsServer) return false;
+        if (DiplomacyExplicitOperationScope.IsAllowed) return true;
+
+        var proposing = __args?.OfType<Kingdom>().FirstOrDefault();
+        var actor = proposing?.Leader;
+        if (actor == null || actor.Clan?.Kingdom != proposing)
         {
-            Logger.Warning(
-                "Blocked Diplomacy action {Method}; it depends on Clan.PlayerClan and has no headless-safe Coop authority path.",
-                method);
+            string method = $"{__originalMethod?.DeclaringType?.FullName}.{__originalMethod?.Name}";
+            if (LoggedMethods.Add(method))
+                Logger.Warning("Refused Diplomacy server action {Method} without a proposing kingdom leader.", method);
+            return false;
         }
-        return false;
+
+        __state = new BarterPlayerContext(actor, actor.PartyBelongedTo);
+        return true;
+    }
+
+    [HarmonyFinalizer]
+    private static Exception Finalizer(Exception __exception, BarterPlayerContext __state)
+    {
+        __state?.Dispose();
+        return __exception;
     }
 
     internal static bool ShouldAllowKingdomAction() => false;

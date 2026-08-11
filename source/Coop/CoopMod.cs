@@ -21,6 +21,7 @@ using GameInterface.Services.UI;
 using GameInterface.Services.UI.CoopOptions;
 using GameInterface.Services.UI.Messages;
 using GameInterface.Services.UI.CrashReporting;
+using GameInterface.Services.WorkshopMods.Diplomacy;
 using GameInterface.Services.WorkshopMods.Frameworks;
 using GameInterface.Utils;
 using HarmonyLib;
@@ -538,6 +539,13 @@ namespace Coop
                 campaignGameStarter.AddBehavior(new PlayerPartyInteractionCampaignBehavior());
                 campaignGameStarter.AddBehavior(new CoopTournamentCampaignBehavior());
                 campaignGameStarter.AddBehavior(new SeparatismCampaignBehavior());
+                bool diplomacyActive = AppDomain.CurrentDomain.GetAssemblies().Any(assembly =>
+                    string.Equals(
+                        assembly.GetName().Name,
+                        "Bannerlord.Diplomacy.1.4.7",
+                        StringComparison.Ordinal));
+                if (diplomacyActive)
+                    campaignGameStarter.AddBehavior(new DiplomacyMessengerAuthorityBehavior());
                 // Fourberie installs a decorator loyalty model that preserves its criminal-network
                 // modifiers. The Fourberie adapter composes Separatism's two thresholds directly
                 // into that decorator; installing a second model here would silently discard the

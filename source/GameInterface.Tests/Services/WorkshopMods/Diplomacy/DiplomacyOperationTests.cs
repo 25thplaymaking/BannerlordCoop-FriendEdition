@@ -26,6 +26,9 @@ public sealed class DiplomacyOperationTests
                 DiplomacyOperation.FormNonAggressionPact,
                 DiplomacyOperation.AcceptKeepFief,
                 DiplomacyOperation.DeclineKeepFief,
+                DiplomacyOperation.CompleteMessenger,
+                DiplomacyOperation.CancelMessenger,
+                DiplomacyOperation.AcknowledgeMessengerAccident,
             },
             Enum.GetValues<DiplomacyOperation>());
     }
@@ -63,11 +66,15 @@ public sealed class DiplomacyOperationTests
     [InlineData((int)DiplomacyOperation.FormNonAggressionPact, "kingdom.a", "kingdom.b", 0, true)]
     [InlineData((int)DiplomacyOperation.AcceptKeepFief, "settlement.source", "", 0, true)]
     [InlineData((int)DiplomacyOperation.DeclineKeepFief, "settlement.source", "", 0, true)]
+    [InlineData((int)DiplomacyOperation.CompleteMessenger, "hero.target", "", 7, true)]
+    [InlineData((int)DiplomacyOperation.CancelMessenger, "hero.target", "", 7, true)]
+    [InlineData((int)DiplomacyOperation.AcknowledgeMessengerAccident, "hero.target", "", 7, true)]
     [InlineData((int)DiplomacyOperation.DonateGold, "clan.target", "", 0, false)]
     [InlineData((int)DiplomacyOperation.GrantFief, "", "settlement.source", 0, false)]
     [InlineData((int)DiplomacyOperation.SendMessenger, "", "", 0, false)]
     [InlineData((int)DiplomacyOperation.MakePeace, "kingdom.a", "", 0, false)]
     [InlineData((int)DiplomacyOperation.AcceptKeepFief, "", "", 0, false)]
+    [InlineData((int)DiplomacyOperation.CompleteMessenger, "hero.target", "", 0, false)]
     public void Protocol_RequiresTheExactShapeForEachOperation(
         int operationValue,
         string targetId,
@@ -118,6 +125,15 @@ public sealed class DiplomacyOperationTests
             new NetworkDiplomacyKeepFiefPrompt(SessionId, "", 3)));
         Assert.False(DiplomacyOperationProtocol.IsKeepFiefPromptShapeValid(
             new NetworkDiplomacyKeepFiefPrompt("bad-session", "settlement.source", 3)));
+
+        Assert.True(DiplomacyOperationProtocol.IsMessengerArrivalPromptShapeValid(
+            new NetworkDiplomacyMessengerArrivalPrompt(SessionId, 7, "hero.target", 3)));
+        Assert.False(DiplomacyOperationProtocol.IsMessengerArrivalPromptShapeValid(
+            new NetworkDiplomacyMessengerArrivalPrompt(SessionId, 0, "hero.target", 3)));
+        Assert.True(DiplomacyOperationProtocol.IsMessengerAccidentShapeValid(
+            new NetworkDiplomacyMessengerAccident(SessionId, 7, "hero.target", 6)));
+        Assert.False(DiplomacyOperationProtocol.IsMessengerAccidentShapeValid(
+            new NetworkDiplomacyMessengerAccident(SessionId, 7, "hero.target", 7)));
     }
 
     [Fact]
@@ -191,6 +207,44 @@ public sealed class DiplomacyOperationTests
         bool expected)
     {
         Assert.Equal(expected, DiplomacyCapabilityPolicy.IsEnabled(optionEnabled, routeReady));
+    }
+
+    [Fact]
+    public void MessengerAuthorityStore_PreservesTravelAcrossRestartAndRejectsWrongController()
+    {
+        var store = new DiplomacyMessengerAuthorityStore();
+        Assert.True(store.TryDispatch("controller.a", "hero.target", arrivalTicks: 100, out int id));
+        Assert.False(store.TryGetArrived("controller.a", id, "hero.target", nowTicks: 99, out _));
+        Assert.True(store.TryGetArrived("controller.a", id, "hero.target", nowTicks: 100, out var arrived));
+        Assert.False(store.TryGetArrived("controller.b", id, "hero.target", nowTicks: 100, out _));
+
+        var restored = new DiplomacyMessengerAuthorityStore(
+            store.Export(),
+            store.NextId);
+        Assert.True(restored.TryGetArrived(
+            "controller.a", id, "hero.target", nowTicks: 100, out var restoredRecord));
+        Assert.Equal(arrived.ArrivalTicks, restoredRecord.ArrivalTicks);
+        Assert.False(restored.TryRemoveArrived(
+            "controller.a", id, "hero.target", nowTicks: 99));
+        Assert.True(restored.TryRemoveArrived(
+            "controller.a", id, "hero.target", nowTicks: 100));
+        Assert.Empty(restored.Export());
+    }
+
+    [Fact]
+    public void MessengerAuthorityStore_MarksOneAuthoritativeAccidentUntilAcknowledged()
+    {
+        var store = new DiplomacyMessengerAuthorityStore();
+        Assert.True(store.TryDispatch("controller.a", "hero.one", arrivalTicks: 100, out int first));
+        Assert.True(store.TryDispatch("controller.a", "hero.two", arrivalTicks: 100, out int second));
+
+        Assert.True(store.TryMarkAccident(first, accidentIndex: 4));
+        Assert.False(store.TryGetArrived("controller.a", first, "hero.one", nowTicks: 200, out _));
+        Assert.Single(store.AccidentsFor("controller.a"));
+        Assert.False(store.TryRemoveArrived(
+            "controller.a", first, "hero.one", nowTicks: 200));
+        Assert.True(store.TryRemoveAccident("controller.a", first, "hero.one"));
+        Assert.Equal(second, Assert.Single(store.Export()).MessengerId);
     }
 
     private static NetworkRequestDiplomacyOperation Request(

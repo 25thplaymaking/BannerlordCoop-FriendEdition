@@ -373,8 +373,8 @@ internal static class DiplomacyServerUiGuardPatch
 }
 
 /// <summary>
-/// Messenger travel/dialogue is controller-local presentation. The server owns authorization and
-/// cost; client behavior methods own only that controller's inquiry, travel marker, and encounter.
+/// Coop owns messenger travel, persistence, and accidents. The pinned manager remains available
+/// only as a presentation helper for the authorized client's inquiry and conversation mission.
 /// </summary>
 [HarmonyPatch]
 [HarmonyPatchCategory(WorkshopPatchCategories.Diplomacy)]
@@ -406,8 +406,8 @@ internal static class DiplomacyMessengerFeatureGuardPatch
     private static bool Prepare() => TargetMethods().Any();
 
     [HarmonyPrefix]
-    private static bool Prefix(MethodBase __originalMethod) =>
-        ModInformation.IsClient && __originalMethod?.Name != "OnMessengerSent";
+    private static bool Prefix() =>
+        DiplomacyCompatibilityPolicy.ShouldRunOriginalMessengerBehavior();
 }
 
 /// <summary>

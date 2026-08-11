@@ -16,9 +16,13 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > settlement rebellion cannot run from a client. Improved Garrisons' 684 candidates are now closed too:
 > management/settings commands carry stable selections, authenticated clan ownership, session/revision
 > concurrency, exact replay results, canonical rollback, and server-created parties while clients retain
-> the menu and roster-selection surface. This is not a completed-suite claim: Fourberie entry points,
-> Diplomacy operations, Player Settlement construction, and the
-> remaining campaign-mod routes still require typed server routes. The previous
+> the menu and roster-selection surface. Fourberie's four explicit player actions now use authenticated,
+> rollback-safe server commands, while its menus and mission setup remain role-local presentation/lifecycle.
+> Diplomacy's explicit player operations and server callbacks are routed too, including a persisted,
+> controller-scoped server messenger queue with server-owned travel, arrival costs, and accident RNG.
+> This is not a completed-suite claim: remaining Fourberie model/menu/mission dispositions, the exact
+> Diplomacy ledger, Player Settlement construction, and other campaign-mod records still require closure.
+> The previous
 > ten-module archive remains an uninstalled historical RC and cannot be promoted. Stable also retains
 > the rendered install/join and Sea Raider auto-resolve gates after functional closure. Foundation
 > verification is green: 3,392 passed, 18 skipped, 0 failed; build completed with 0 errors.
@@ -89,15 +93,19 @@ superseded by the authority-routing work; it is not eligible for stable promotio
 3. Run rendered all-option client/server coverage, then the existing install/join and Sea Raider checks.
 4. Build a fresh ten-module candidate; stable promotion remains manual.
 
-### Fourberie create-action boundary (CERTIFIED 2026-08-11)
-The audited create routines accept only an `int` and internally select the process-global
-`MainHero`, `MainParty`, and `_agentsParty`. Authenticating a request's peer does not pass that
-player context into the original routine, so replaying it on the server targets the wrong player.
-All three routes currently fail closed on both roles, including legacy network requests. The active
-authority plan now requires explicit-context/per-player Coop commands before those options can ship.
+### Fourberie create-action boundary (ROUTED 2026-08-11)
+The original create routines still accept only an `int` and select process-global player state, so Coop
+does not replay them. Four authenticated, revision-checked commands now carry stable settlement, hero,
+destination, and troop selections into explicit server implementations for both agent-enlistment paths,
+bandit recruitment, and insurance-scam spawning. Each operation validates the controller's current party,
+rolls back canonical Fourberie state and created parties on failure, and returns an exact replay result.
 
 ### Mod integration progress (2026-08-11)
-- **Diplomacy** ✅ working (DiplomacyEvents client init).
+- **Diplomacy** — explicit donate/fief/messenger/peace/war/alliance/pact commands and keep-fief callbacks
+  are authenticated server operations. Messenger dispatch now commits a controller-scoped server queue;
+  the server owns persistence, travel timing, arrival expenses, wanderer activation, accident RNG, and
+  reconnect prompts while the client owns only inquiries and dialogue presentation. Exact classification
+  of the remaining Diplomacy ledger is still open.
 - **ImprovedGarrisons** ✅ all 684 authority candidates are exact-classified. Every management/settings
   consequence is routed to the server with authenticated clan ownership and stable IDs; party creation,
   recruiter/mobile orders, templates, culture, roster setup, and hostile encounters now have live routes.
@@ -121,11 +129,11 @@ authority plan now requires explicit-context/per-player Coop commands before tho
   2. `RegisterEvents` un-gated (runs on both) so behaviors wire client menus.
   3. Menu builders (`AddGameMenus`/`*OnGaMenOpened`/contact/escape/spawn) → `ClientPresentation`.
   → Menus + simple actions confirmed working live.
-  - **OPEN/FAIL-CLOSED:** actions that create authoritative parties/rosters cannot safely carry
-    the authenticated player's context through Fourberie's `static void M(int)` APIs. Saboteur
-    enlistment, bandit recruitment, and scam spawning are blocked; client-side object creation and
-    host-singleton replay are both prevented. `OnMissionBehaviorInitialize` also stays blocked until
-    its typed route is implemented and capability-enabled.
+  4. Both agent-enlistment paths, bandit recruitment, and insurance-scam spawning bypass the unsafe
+     `static void M(int)` entry points and use typed, rollback-safe server commands.
+  5. `OnMissionBehaviorInitialize` is classified as peer-local mission lifecycle so required agents/AI
+     initialize on both peers without authorizing campaign mutations.
+  - **OPEN:** close the remaining exact model/menu/mission dispositions and validate the complete ledger.
 
 ### Playable session (DONE 2026-08-10)
 - [x] Map-nav NRE fixed and narrowed (`MapNavigationReadinessPatches` suppresses only the transient

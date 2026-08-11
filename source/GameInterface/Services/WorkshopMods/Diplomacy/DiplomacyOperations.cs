@@ -20,6 +20,9 @@ internal enum DiplomacyOperation
     FormNonAggressionPact = 7,
     AcceptKeepFief = 8,
     DeclineKeepFief = 9,
+    CompleteMessenger = 10,
+    CancelMessenger = 11,
+    AcknowledgeMessengerAccident = 12,
 }
 
 internal enum DiplomacyOperationStatus
@@ -115,6 +118,56 @@ internal sealed class NetworkDiplomacyKeepFiefPrompt : ICommand
     }
 }
 
+[ProtoContract(SkipConstructor = true)]
+internal sealed class NetworkDiplomacyMessengerArrivalPrompt : ICommand
+{
+    [ProtoMember(1)] public string SessionId { get; private set; }
+    [ProtoMember(2)] public int MessengerId { get; private set; }
+    [ProtoMember(3)] public string TargetId { get; private set; }
+    [ProtoMember(4)] public long Revision { get; private set; }
+
+    private NetworkDiplomacyMessengerArrivalPrompt()
+    {
+    }
+
+    public NetworkDiplomacyMessengerArrivalPrompt(
+        string sessionId,
+        int messengerId,
+        string targetId,
+        long revision)
+    {
+        SessionId = sessionId;
+        MessengerId = messengerId;
+        TargetId = targetId ?? string.Empty;
+        Revision = revision;
+    }
+}
+
+[ProtoContract(SkipConstructor = true)]
+internal sealed class NetworkDiplomacyMessengerAccident : ICommand
+{
+    [ProtoMember(1)] public string SessionId { get; private set; }
+    [ProtoMember(2)] public int MessengerId { get; private set; }
+    [ProtoMember(3)] public string TargetId { get; private set; }
+    [ProtoMember(4)] public int AccidentIndex { get; private set; }
+
+    private NetworkDiplomacyMessengerAccident()
+    {
+    }
+
+    public NetworkDiplomacyMessengerAccident(
+        string sessionId,
+        int messengerId,
+        string targetId,
+        int accidentIndex)
+    {
+        SessionId = sessionId;
+        MessengerId = messengerId;
+        TargetId = targetId ?? string.Empty;
+        AccidentIndex = accidentIndex;
+    }
+}
+
 internal static class DiplomacyOperationProtocol
 {
     internal const int MaximumStableIdLength = 256;
@@ -147,6 +200,10 @@ internal static class DiplomacyOperationProtocol
             DiplomacyOperation.FormNonAggressionPact => pair,
             DiplomacyOperation.AcceptKeepFief => targetOnly,
             DiplomacyOperation.DeclineKeepFief => targetOnly,
+            DiplomacyOperation.CompleteMessenger or DiplomacyOperation.CancelMessenger or
+                DiplomacyOperation.AcknowledgeMessengerAccident =>
+                !string.IsNullOrEmpty(request.TargetId) &&
+                string.IsNullOrEmpty(request.SecondaryTargetId) && request.IntValue > 0,
             _ => false,
         };
     }
@@ -160,6 +217,15 @@ internal static class DiplomacyOperationProtocol
     public static bool IsKeepFiefPromptShapeValid(NetworkDiplomacyKeepFiefPrompt prompt) =>
         prompt != null && IsSessionId(prompt.SessionId) && prompt.Revision >= 0 &&
         IsStableId(prompt.SettlementId, allowEmpty: false);
+
+    public static bool IsMessengerArrivalPromptShapeValid(
+        NetworkDiplomacyMessengerArrivalPrompt prompt) =>
+        prompt != null && IsSessionId(prompt.SessionId) && prompt.MessengerId > 0 &&
+        prompt.Revision >= 0 && IsStableId(prompt.TargetId, allowEmpty: false);
+
+    public static bool IsMessengerAccidentShapeValid(NetworkDiplomacyMessengerAccident accident) =>
+        accident != null && IsSessionId(accident.SessionId) && accident.MessengerId > 0 &&
+        accident.AccidentIndex is >= 0 and <= 6 && IsStableId(accident.TargetId, allowEmpty: false);
 
     public static string CommandKey(NetworkRequestDiplomacyOperation request) => string.Join(
         "|",

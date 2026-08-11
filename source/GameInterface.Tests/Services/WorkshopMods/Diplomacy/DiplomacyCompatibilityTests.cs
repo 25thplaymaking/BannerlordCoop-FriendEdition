@@ -42,6 +42,15 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
     }
 
     [Fact]
+    public void OriginalMessengerQueue_IsRetiredOnBothPeers()
+    {
+        ModInformation.IsServer = true;
+        Assert.False(DiplomacyCompatibilityPolicy.ShouldRunOriginalMessengerBehavior());
+        ModInformation.IsServer = false;
+        Assert.False(DiplomacyCompatibilityPolicy.ShouldRunOriginalMessengerBehavior());
+    }
+
+    [Fact]
     public void DiplomacyCivilWar_IsBlockedOnBothPeers_WhenFriendSeparatismIsEnabled()
     {
         ModConfigProvider.LoadModConfig(new ModOptionsData

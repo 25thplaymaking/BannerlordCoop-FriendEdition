@@ -235,6 +235,8 @@ internal static class DiplomacyCompatibilityPolicy
     internal static bool ShouldRunSharedMutation(string typeName, string methodName) =>
         ModInformation.IsServer;
 
+    internal static bool ShouldRunOriginalMessengerBehavior() => false;
+
     // Diplomacy's CivilWarBehavior reads Friend Edition configuration while behaviors are being
     // registered, before the host config is guaranteed to be loaded. More importantly, its
     // RebelFactionManager has no controller-safe UI or complete late-join representation here.

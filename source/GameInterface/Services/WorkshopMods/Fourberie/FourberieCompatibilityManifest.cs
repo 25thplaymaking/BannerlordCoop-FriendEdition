@@ -56,6 +56,7 @@ internal enum FourberiePatchKind
     TerritorySelectionConsequence,
     TerritoryAbandonConsequence,
     SafehouseAbandonConsequence,
+    SafehouseTraderConsequence,
     GrudgeSelectionConsequence,
     GrudgeSettlementConsequence,
     ContractTickReplacement,
@@ -468,6 +469,14 @@ internal static class FourberieCompatibilityManifest
         Add("Fourberie.CriminalVM", "AbandonSafeClick", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM+<>c__DisplayClass544_0", "<AbandonSafeClick>b__0",
             FourberiePatchKind.SafehouseAbandonConsequence);
+        Add("Fourberie.FourbSafeHouseBehavior+<>c", "<AddDialogsSafeHouse>b__9_18",
+            FourberiePatchKind.SafehouseTraderConsequence);
+        Add("Fourberie.FourbSafeHouseBehavior+<>c", "<AddDialogsSafeHouse>b__9_20",
+            FourberiePatchKind.SafehouseTraderConsequence);
+        Add("Fourberie.FourbSafeHouseBehavior+<>c", "<AddDialogsSafeHouse>b__9_22",
+            FourberiePatchKind.SafehouseTraderConsequence);
+        Add("Fourberie.FourbSafeHouseBehavior+<>c", "<AddDialogsSafeHouse>b__9_24",
+            FourberiePatchKind.SafehouseTraderConsequence);
         Add("Fourberie.CriminalVM", "ClanGruFdilter", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM", "CanPlayerPay", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM", "<ClanGruFdilter>b__149_0",

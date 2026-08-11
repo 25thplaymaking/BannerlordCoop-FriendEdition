@@ -441,6 +441,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.SafehouseAbandonConsequence:
                 method = nameof(FourberieAuthorityPatches.SafehouseAbandonConsequencePrefix);
                 break;
+            case FourberiePatchKind.SafehouseTraderConsequence:
+                method = nameof(FourberieAuthorityPatches.SafehouseTraderConsequencePrefix);
+                break;
             case FourberiePatchKind.GrudgeSelectionConsequence:
                 method = nameof(FourberieAuthorityPatches.GrudgeSelectionConsequencePrefix);
                 break;

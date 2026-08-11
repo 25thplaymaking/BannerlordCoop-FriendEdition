@@ -170,6 +170,12 @@ internal sealed class FourberieOperationExecutor
                     previousTransferTargetGold = previousTransferTarget.Gold;
                     ApplyGrudgeSettlement(actor, request.TargetId, request.IntValue, previousTransferTarget);
                     break;
+                case FourberieOperation.SellQuarterSlaves:
+                case FourberieOperation.SellHalfSlaves:
+                case FourberieOperation.DeclineCrookedTrader:
+                case FourberieOperation.RobCrookedTrader:
+                    ApplySafehouseTrader(actor, actorParty, request);
+                    break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
             }
@@ -231,6 +237,50 @@ internal sealed class FourberieOperationExecutor
     }
 
     public void Reset() => grudgeQuotes.Clear();
+
+    private void ApplySafehouseTrader(
+        Hero actor,
+        MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        if (!TryResolveCurrentSettlement(actorParty, request.SettlementId, out Settlement settlement))
+            throw new InvalidOperationException("the controller is no longer at the selected safehouse");
+
+        Settlement currentBase = GetStaticField("_crimeBase") as Settlement;
+        IDictionary crime = GetDictionary("_crimeValue");
+        IDictionary times = GetDictionary("_campaignTimeDictio");
+        float elapsedDays = times.Contains(556) && times[556] is CampaignTime lastVisit
+            ? lastVisit.ElapsedDaysUntilNow
+            : float.PositiveInfinity;
+        if (!FourberieSafehouseTraderAuthority.CanExecute(
+                request.SettlementId,
+                currentBase?.StringId,
+                settlement.StringId,
+                settlement.IsTown,
+                crime,
+                elapsedDays,
+                out string accessFailure))
+            throw new InvalidOperationException(accessFailure);
+
+        MethodInfo ransom = RequiredMethod("Fourberie.FourbSafeHouseBehavior", "GetRansomValueOfSlaves", 1);
+        MethodInfo regionWealth = RequiredMethod(BehaviorTypeName, "RegionWealth", 0);
+        using (new BarterPlayerContext(actor, actorParty))
+        using (new AllowedThread())
+        {
+            if (!FourberieSafehouseTraderAuthority.TryCreatePlan(
+                    crime,
+                    request.Operation,
+                    quantity => Convert.ToInt32(ransom.Invoke(null, new object[] { quantity })),
+                    () => Convert.ToSingle(regionWealth.Invoke(null, null)),
+                    out FourberieSafehouseTraderPlan plan,
+                    out string planFailure))
+                throw new InvalidOperationException(planFailure);
+
+            FourberieSafehouseTraderAuthority.Commit(crime, times, plan, CampaignTime.Now);
+            if (plan.GoldReward > 0)
+                GiveGoldAction.ApplyBetweenCharacters(null, actor, plan.GoldReward, false);
+        }
+    }
 
     private void ApplyEnlistment(
         MobileParty actorParty,

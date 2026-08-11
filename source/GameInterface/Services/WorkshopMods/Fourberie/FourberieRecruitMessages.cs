@@ -46,6 +46,10 @@ internal enum FourberieOperation
     SettleClanGrudge = 35,
     AcceptContractProposal = 36,
     DeclineContractProposal = 37,
+    SellQuarterSlaves = 38,
+    SellHalfSlaves = 39,
+    DeclineCrookedTrader = 40,
+    RobCrookedTrader = 41,
 }
 
 internal enum FourberieOperationStatus
@@ -277,7 +281,9 @@ internal static class FourberieOperationProtocol
                 FourberieOperation.DeclineContractProposal =>
                 EmptyContext(request) && request.IntValue == 0,
             FourberieOperation.SetMainCrimeBase or FourberieOperation.RemoveTerritory or
-                FourberieOperation.AbandonTownCrimeBase or FourberieOperation.AbandonSafehouse =>
+                FourberieOperation.AbandonTownCrimeBase or FourberieOperation.AbandonSafehouse or
+                FourberieOperation.SellQuarterSlaves or FourberieOperation.SellHalfSlaves or
+                FourberieOperation.DeclineCrookedTrader or FourberieOperation.RobCrookedTrader =>
                 !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
                 request.IntValue == 0 && request.Troops.Length == 0,
             FourberieOperation.RequestGrudgeQuote =>

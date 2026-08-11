@@ -2082,9 +2082,6 @@
         "0x060008DE",
         "0x060008DF",
         "0x060008E0",
-        "0x060008E5",
-        "0x060008E6",
-        "0x060008E8",
         "0x060008E9",
         "0x060008EA",
         "0x060008EB",
@@ -2398,6 +2395,44 @@
         "FourberieTerritoryAuthorityTests.SafehouseAbandonment_ClearsSlavesBaseAndOnlyLowBarracksMarker",
         "FourberieTerritoryAuthorityTests.Protocol_RequiresSettlementOnlyForTerritoryRemoval",
         "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x060008E1",
+        "0x060008E3",
+        "0x060008E5",
+        "0x060008E7"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieOperationExecutor crooked-trader safehouse transactions",
+      "capability": "ExplicitOperations",
+      "tests": [
+        "FourberieSafehouseTraderAuthorityTests.Access_RequiresPinnedSafehouseMarkerAndElapsedCooldown",
+        "FourberieSafehouseTraderAuthorityTests.Plan_DerivesQuantityRewardAndCooldownFromCanonicalState",
+        "FourberieSafehouseTraderAuthorityTests.Commit_UpdatesOnlyTraderStateUsingThePinnedPlan",
+        "FourberieSafehouseTraderAuthorityTests.Protocol_RequiresOnlyTheCurrentSafehouse",
+        "FourberieSafehouseTraderAuthorityTests.ConsequenceMap_RoutesEveryCrookedTraderAction",
+        "FourberieManifestTests.PreviouslyBlockedFeatureEntryPoints_HaveLiveAuthorityOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71",
+      "metadataTokens": [
+        "0x060008E2",
+        "0x060008E4",
+        "0x060008E6",
+        "0x060008E8"
+      ],
+      "disposition": "ClientPresentation",
+      "owner": "FourbSafeHouseBehavior read-only crooked-trader hint presentation",
+      "capability": "ClientPresentation",
+      "tests": [
+        "FourberieSafehouseTraderAuthorityTests.Plan_DerivesQuantityRewardAndCooldownFromCanonicalState",
+        "FourberieManifestTests.PresentationEntryPoints_AreClientOnly"
       ]
     },
     {

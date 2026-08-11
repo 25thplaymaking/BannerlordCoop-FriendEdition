@@ -612,6 +612,27 @@ internal static class FourberieAuthorityPatches
         return false;
     }
 
+    public static bool SafehouseTraderConsequencePrefix(MethodBase __originalMethod)
+    {
+        if (ModInformation.IsClient)
+        {
+            FourberieOperation? operation = SafehouseTraderOperationForMethod(__originalMethod?.Name);
+            Settlement settlement = Settlement.CurrentSettlement;
+            if (operation.HasValue && settlement != null)
+                SubmitSettlement(operation.Value, settlement);
+        }
+        return false;
+    }
+
+    internal static FourberieOperation? SafehouseTraderOperationForMethod(string methodName) => methodName switch
+    {
+        "<AddDialogsSafeHouse>b__9_18" => FourberieOperation.SellQuarterSlaves,
+        "<AddDialogsSafeHouse>b__9_20" => FourberieOperation.SellHalfSlaves,
+        "<AddDialogsSafeHouse>b__9_22" => FourberieOperation.DeclineCrookedTrader,
+        "<AddDialogsSafeHouse>b__9_24" => FourberieOperation.RobCrookedTrader,
+        _ => null,
+    };
+
     public static bool GrudgeSelectionConsequencePrefix(object[] __args)
     {
         if (ModInformation.IsClient)

@@ -49,7 +49,7 @@ public sealed class WorkshopManifestConnectionIsolationTests
             mismatchedPeer,
             new NetworkModuleVersionsValidate(modules, CreateManifest(
                 WorkshopPeerRole.Client,
-                mismatchModuleId: "RBM"))));
+                mismatchModuleId: "Bannerlord.Diplomacy"))));
         lateJoin.Handle_ModuleVersionsValidate(new MessagePayload<NetworkModuleVersionsValidate>(
             lateJoinPeer,
             new NetworkModuleVersionsValidate(modules, CreateManifest(WorkshopPeerRole.Client))));

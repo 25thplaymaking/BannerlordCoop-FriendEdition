@@ -610,7 +610,7 @@ internal static class FourberieCompatibilityManifest
 
         Add("Fourberie.FourbSafeHouseBehavior", "SHOnMissionEnded", FourberiePatchKind.ServerMutation,
             "TaleWorlds.Core.IMission");
-        Add("Fourberie.FourbSafeHouseBehavior", "SHOnMissionStarted", FourberiePatchKind.ServerMutation,
+        Add("Fourberie.FourbSafeHouseBehavior", "SHOnMissionStarted", FourberiePatchKind.ClientPresentation,
             "TaleWorlds.Core.IMission");
         Add("Fourberie.FourbSafeHouseBehavior", "SHOnSiegeBombardmentWallHit", FourberiePatchKind.ServerMutation,
             MobileParty, Settlement, BattleSide, "TaleWorlds.Core.SiegeEngineType", "System.Boolean");

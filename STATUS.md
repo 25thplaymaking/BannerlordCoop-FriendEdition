@@ -180,12 +180,14 @@ rolls back canonical Fourberie state and created parties on failure, and returns
       and the canonical wait marker change; stopping also releases the original mod's permanently frozen follower AI.
       Safehouse mission return now clears its replicated marker through the server before performing the local
       encounter transition, preventing snapshots from repeatedly reopening a finished safehouse encounter.
+      Safehouse mission-start geometry now runs on clients, so locally rendered upgrade entities are hidden as intended;
+      mission-end marker changes remain server-owned.
       The initialization replacement now rebuilds replicated hero dictionaries only on the server; clients consume
       the canonical snapshot instead of independently rewriting those dictionaries.
   14. `OnMissionBehaviorInitialize` currently preserves the mod's required peer-local setup, but its
      mission callbacks remain open until their authoritative/controller ownership is proven end to end.
   15. The exact secondary pass currently assigns metadata to 1,034/1,865 required candidates:
-     428 presentation-only helpers, 222 pure/read-only policy methods, 187 server callbacks, 53 Coop-owner
+     429 presentation-only helpers, 222 pure/read-only policy methods, 186 server callbacks, 53 Coop-owner
      replacements, 59 server-command methods, 76 framework-lifecycle methods, and 9 unreachable
      Homesteads/Bellum Civile add-on methods.
      The strict gameplay gate also rejects campaign mutation, canonical Fourberie-state writes, and

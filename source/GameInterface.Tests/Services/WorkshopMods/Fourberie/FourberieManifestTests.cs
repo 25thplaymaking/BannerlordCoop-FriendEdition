@@ -136,6 +136,7 @@ public sealed class FourberieManifestTests
     [Theory]
     [InlineData("Fourberie.FourberieBehavior", "AddGameMenus")]
     [InlineData("Fourberie.FourbSafeHouseBehavior", "SHAddGameMenus")]
+    [InlineData("Fourberie.FourbSafeHouseBehavior", "SHOnMissionStarted")]
     [InlineData("Fourberie.FourbEscapeBehavior", "FourbEscapMenu")]
     [InlineData("Fourberie.FourbFightClubBehavior", "PitAddGameMenus")]
     [InlineData("Fourberie.FourbBanditBehavior", "BanditAddMenu")]

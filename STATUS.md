@@ -4,6 +4,24 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
+## Known playtest bugs (live)
+
+- **[open] Auto-resolve vs bandit party loops the encounter menu.** (2026-08-11, Bryce, Sea Raiders.)
+  Choosing **"Send your troops to attack"** (auto-resolve) instead of **"Attack!"** (manual) against a
+  bandit party leaves the encounter menu looping until you pay off / surrender. Mechanism (from
+  `Coop_client.log` MapEvent_Created_1155): the auto-resolve is server-gated (`BattleSimulationStartPatch`
+  → `BattleStartCoordinator.RequestBlocking(Simulation)`) and accepted, but the client-paced simulation's
+  authoritative writes are blocked — `AutoSync … Client updated managed MapEvent.IsPlayerSimulation`, then
+  `DestroyPartyActionPatch … Client attempted to apply DestroyPartyAction for party Sea Raiders`. The
+  beaten party is never destroyed/synced, so the encounter re-evaluates as "enemy present" and re-opens the
+  menu; pay-off/surrender are separate terminal paths, which is why paying escaped it.
+  **Fix direction:** apply the auto-resolve OUTCOME authoritatively — server (or an authoritative client
+  replay window) must run the loser `DestroyPartyAction` + event resolution and broadcast, the same way the
+  manual battle path resolves cleanly (`MapEvent_Created_897/905` closed with no loop). Needs a focused pass
+  + **live co-op verification** before shipping to the feed.
+  **Workaround for now:** fight bandit encounters with **"Attack!"** (manual battle) — it syncs and resolves
+  cleanly; avoid "Send your troops to attack".
+
 ## Where we are (2026-08-10)
 
 Modded co-op **joins and loads**: server hosts the full campaign, validation +

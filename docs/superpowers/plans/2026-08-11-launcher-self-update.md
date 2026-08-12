@@ -47,7 +47,7 @@
 - Produces: `LauncherUpdateManifest`, `LauncherUpdateOutcome`, `LauncherUpdateResult`,
   `LauncherUpdateCommand`, and `LauncherSelfUpdater.CheckAndStageAsync(...)` for Tasks 2 and 3.
 
-- [ ] **Step 1: Write failing configuration and manifest tests**
+- [x] **Step 1: Write failing configuration and manifest tests**
 
 Add tests proving the shipped config has a non-empty HTTPS `launcher-app/launcher.json` URL, old configs inherit that default, manifests require a numeric version, HTTPS executable URL, and exact 64-character SHA-256, and remote versions must be strictly greater than the embedded version.
 
@@ -59,14 +59,14 @@ Assert.False(LauncherSelfUpdater.IsManifestValid(new LauncherUpdateManifest { Ve
 Assert.True(LauncherSelfUpdater.IsNewer("2026.8.11.2", new Version(2026, 8, 11, 1)));
 ```
 
-- [ ] **Step 2: Run the focused tests and verify they fail**
+- [x] **Step 2: Run the focused tests and verify they fail**
 
 Run:
 `"C:\Program Files\dotnet\dotnet.exe" test tools/CoopLauncher.Tests/CoopLauncher.Tests.csproj -c Release -p:NuGetAudit=false --filter "FullyQualifiedName~LauncherConfigTests|FullyQualifiedName~LauncherSelfUpdaterTests" --consoleLoggerParameters:ErrorsOnly`
 
 Expected: FAIL because the launcher feed property, manifest, and updater do not exist.
 
-- [ ] **Step 3: Add the minimal feed model and decision logic**
+- [x] **Step 3: Add the minimal feed model and decision logic**
 
 Add the default property and model:
 
@@ -88,11 +88,11 @@ Define `LauncherUpdateOutcome { Disabled, UpToDate, Restarting, Offline, Failed 
 strict `Version.TryParse` comparison, HTTPS payload validation, and an injectable `HttpClient`
 constructor for deterministic tests.
 
-- [ ] **Step 4: Write failing fetch/download tests**
+- [x] **Step 4: Write failing fetch/download tests**
 
 Use a test `HttpMessageHandler` to prove: no newer build does not download, DNS/timeout-style exceptions return `Offline`, reached HTTP errors return `Failed`, a wrong SHA returns `Failed` and is never launched, and a valid newer executable is staged under `.calradia-launcher-update-*` beside the target.
 
-- [ ] **Step 5: Implement minimal verified staging**
+- [x] **Step 5: Implement minimal verified staging**
 
 Implement:
 
@@ -108,7 +108,7 @@ Fetch with a bounded client timeout, download to the same-volume stage, verify S
 apply-mode arguments through `LauncherUpdateCommand`, start only the verified file, and delete the
 stage on pre-launch failure.
 
-- [ ] **Step 6: Run focused tests and commit**
+- [x] **Step 6: Run focused tests and commit**
 
 Run the command from Step 2. Expected: PASS.
 
@@ -131,7 +131,7 @@ git commit -m "Add verified launcher update feed"
   and SHA-256.
 - Produces: `TryParseApplyArguments`, `ApplyAndRelaunch`, `BuildCompletionArguments`, and `ScheduleCleanup` for Task 3.
 
-- [ ] **Step 1: Write failing filesystem transaction tests**
+- [x] **Step 1: Write failing filesystem transaction tests**
 
 Create temporary directories and prove the applier rejects a stage outside a `.calradia-launcher-update-*` child of the target directory, replaces the target bytes, keeps `launcher-config.json` byte-identical, and restores the original target when the injected relaunch action throws.
 
@@ -142,14 +142,14 @@ Assert.Equal("old launcher", File.ReadAllText(targetExe));
 Assert.Equal(originalConfig, File.ReadAllBytes(configPath));
 ```
 
-- [ ] **Step 2: Run the applier tests and verify they fail**
+- [x] **Step 2: Run the applier tests and verify they fail**
 
 Run:
 `"C:\Program Files\dotnet\dotnet.exe" test tools/CoopLauncher.Tests/CoopLauncher.Tests.csproj -c Release -p:NuGetAudit=false --filter FullyQualifiedName~LauncherUpdateApplierTests --consoleLoggerParameters:ErrorsOnly`
 
 Expected: FAIL because the applier does not exist.
 
-- [ ] **Step 3: Implement the replacement transaction**
+- [x] **Step 3: Implement the replacement transaction**
 
 Validate full paths and the staged hash again, wait for the old PID with a finite timeout, copy the staged executable to a same-directory pending file, then use `File.Replace(pending, target, backup)`. Relaunch the installed path with:
 
@@ -159,11 +159,11 @@ Validate full paths and the staged hash again, wait for the old PID with a finit
 
 If replacement or relaunch fails, restore the backup and return a failed result. Do not enumerate, move, or delete any path outside the validated target, pending, backup, and stage paths.
 
-- [ ] **Step 4: Add argument and cleanup tests, then implement them**
+- [x] **Step 4: Add argument and cleanup tests, then implement them**
 
 Prove malformed/missing arguments are rejected, an apply chain carries the expected target/PID/hash, cleanup waits for the helper PID and removes only the validated backup/stage, and a cleanup failure is best-effort and logged. Add exact constants for `--apply-launcher-update`, `--launcher-update-complete`, and `--skip-launcher-update-once` so Task 3 does not duplicate strings.
 
-- [ ] **Step 5: Run focused tests and commit**
+- [x] **Step 5: Run focused tests and commit**
 
 Run the command from Step 2 and the Task 1 focused tests. Expected: PASS.
 
@@ -184,7 +184,7 @@ git commit -m "Apply launcher updates with rollback"
 - Consumes: the Task 1 updater and Task 2 apply/cleanup modes.
 - Produces: a startup path where self-update precedes Bannerlord discovery and mod updates, and only `Failed` blocks normal Join.
 
-- [ ] **Step 1: Write failing startup-gate and loop-prevention tests**
+- [x] **Step 1: Write failing startup-gate and loop-prevention tests**
 
 Test `MainWindow.CanContinueAfterLauncherUpdate(...)` for every outcome and test argument parsing so `--skip-launcher-update-once` suppresses exactly one check while normal and completion launches still show the window.
 
@@ -194,15 +194,15 @@ Test `MainWindow.CanContinueAfterLauncherUpdate(...)` for every outcome and test
 [InlineData(LauncherUpdateOutcome.UpToDate, true)]
 ```
 
-- [ ] **Step 2: Run focused tests and verify they fail**
+- [x] **Step 2: Run focused tests and verify they fail**
 
 Run the two launcher updater test classes. Expected: FAIL because startup does not route these modes.
 
-- [ ] **Step 3: Implement app-mode routing and UI orchestration**
+- [x] **Step 3: Implement app-mode routing and UI orchestration**
 
 In `App.OnStartup`, handle apply mode without creating a window; handle completion mode by showing the normal window and scheduling validated cleanup; pass `skipLauncherUpdate` into `MainWindow` only for the one-shot rollback path. In `MainWindow.OnLoaded`, check self-update immediately after logging. Show progress in the existing update rail, close on `Restarting`, block Join on `Failed`, and otherwise continue into the unchanged game locator, server probe, and `ModUpdater` flow.
 
-- [ ] **Step 4: Run all launcher tests and XAML validation**
+- [x] **Step 4: Run all launcher tests and XAML validation**
 
 Run:
 
@@ -213,7 +213,7 @@ python tools/CoopLauncher/check-xaml-resources.py
 
 Expected: all tests pass and every XAML resource reference resolves.
 
-- [ ] **Step 5: Commit startup integration**
+- [x] **Step 5: Commit startup integration**
 
 ```powershell
 git add -- tools/CoopLauncher/App.xaml.cs tools/CoopLauncher/MainWindow.xaml.cs tools/CoopLauncher.Tests/LauncherSelfUpdaterTests.cs tools/CoopLauncher.Tests/LauncherUpdateApplierTests.cs
@@ -231,17 +231,17 @@ git commit -m "Run launcher self-update on startup"
 - Consumes: the Task 1 manifest schema and built assembly version.
 - Produces: `launcher-app/launcher.json` for stable and `launcher-nightly/launcher.json` for opt-in nightly.
 
-- [ ] **Step 1: Extend the failing release-safety assertions**
+- [x] **Step 1: Extend the failing release-safety assertions**
 
 Require development pushes to publish only `launcher-nightly`, manual dispatch to select stable or nightly with nightly as the safe default, stable to map to `launcher-app`, and the build to generate `launcher.json` from the exact executable SHA-256. Continue requiring launcher tests, XAML checks, and blank public `serverPassword`.
 
-- [ ] **Step 2: Run the safety script and verify it fails**
+- [x] **Step 2: Run the safety script and verify it fails**
 
 Run: `python .github/scripts/verify-release-safety.py`
 
 Expected: FAIL because the current workflow is manual-only and publishes no manifest.
 
-- [ ] **Step 3: Implement channel-aware release publishing**
+- [x] **Step 3: Implement channel-aware release publishing**
 
 Add a path-filtered `development` push trigger plus a manual `channel` choice. Generate a numeric UTC/run version, pass it to `dotnet publish -p:Version=$version`, hash `dist/CalradiaCoop.exe`, and write:
 
@@ -251,7 +251,7 @@ Add a path-filtered `development` push trigger plus a manual `channel` choice. G
 
 Upload `CalradiaCoop.exe`, `CalradiaCoop-Launcher.zip`, `launcher-config.json`, and `launcher.json` with `--clobber`. Never allow a development push to select `launcher-app`.
 
-- [ ] **Step 4: Update documentation and run full local verification**
+- [x] **Step 4: Update documentation and run full local verification**
 
 Document `launcherManifestUrl`, one-time bootstrap behavior for launchers predating self-update, stable/manual versus nightly/development, and config preservation. Run:
 
@@ -264,7 +264,7 @@ python tools/CoopLauncher/check-xaml-resources.py
 
 Expected: safety PASS, all launcher tests PASS, XAML PASS, and the publish directory contains non-empty `CalradiaCoop.exe` and blank-password `launcher-config.json`.
 
-- [ ] **Step 5: Exercise the replacement harness and commit**
+- [x] **Step 5: Exercise the replacement harness and commit**
 
 Use the applier test fixture as the local end-to-end harness: install old executable/config bytes in a temporary target directory, stage the published candidate, run the replacement entry point with an injected headless relaunch, and assert the target hash matches the candidate while the config hash is unchanged.
 
@@ -282,18 +282,18 @@ git commit -m "Publish launcher self-update manifests"
 - Consumes: all prior tasks.
 - Produces: a verified, publishable branch with no unrelated files staged.
 
-- [ ] **Step 1: Run final checks and inspect scope**
+- [x] **Step 1: Run final checks and inspect scope**
 
 Run the Task 4 verification commands, `git diff --check`, `git status --short`, and `git log -5 --oneline`. Confirm only the two pre-existing mission edits and `work/` remain unrelated/dirty.
 
-- [ ] **Step 2: Push stable and development branches and publish feeds**
+- [x] **Step 2: Push stable and development branches and publish feeds**
 
 Push the verified commits to `25vid/workshop-integration` and `development`. Allow the development workflow to publish `launcher-nightly`; manually dispatch stable only from the same verified commit. Wait without polling, then verify each public manifest version, executable URL, SHA-256, and asset hash.
 
-- [ ] **Step 3: Bootstrap the local installed launcher**
+- [x] **Step 3: Bootstrap the local installed launcher**
 
 Inventory the current launcher directory, preserve `launcher-config.json`, back up the installed executable, replace only `CalradiaCoop.exe` with the exact stable asset, and verify its hash. This one-time replacement is required because pre-feature launchers cannot self-update.
 
-- [ ] **Step 4: Record completion**
+- [x] **Step 4: Record completion**
 
 Mark all plan checkboxes complete, commit the plan update, and report exact commit, release URLs, hashes, test counts, local install state, and the unchanged unrelated worktree files.

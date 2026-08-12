@@ -299,11 +299,24 @@ rolls back canonical Fourberie state and created parties on failure, and returns
 - [ ] Goal: wire a NEW mod into co-op networking by writing one adapter class, not a
       hand-port. Document with one worked example (e.g. Diplomacy Donate Gold).
 
-### P6 — Upstream nightly sync (requested 2026-08-10)
-- [ ] Pull the main/nightly BannerlordCoop fixes into this fork. Fork has diverged
-      heavily (the whole `WorkshopMods` system) — do a careful merge, not a blind pull:
-      identify upstream since our base, apply non-conflicting fixes, re-run CI, re-verify
-      the modded join still works. Do AFTER P1 (playable session) is locked.
+### P6 — Upstream nightly sync — SOURCE VERIFIED (2026-08-12)
+- [x] Audited upstream nightly PRs after the Friend Edition base and selectively backported
+      nine final reviewed bugfixes: #2968, #2913, #2905, #2897, #2898, #2899, #2884,
+      #2855, and #2768. Bannerlord remains pinned to `v1.4.7`; upstream project/module
+      identity changes were not imported.
+- [x] Added or imported regressions for party-screen inventory reset, trade-gold coalescing,
+      troop-roster XP normalization, player-garrison protection, local settlement visibility,
+      escort following, chat behavior/settings, invalid map-event parties, and clan-party
+      disband safety. Combined local gate: Release build 0 errors, 45 focused GameInterface
+      tests passed, and 5 isolated E2E tests passed.
+- [x] Existing-save boundary preserved: this batch adds no save field or migration, creates no
+      save, and performs no live-server deployment. #2903 remains deferred specifically because
+      it adds persisted session data.
+- [ ] Launcher nightly publication: push the verified source commits to `development`, require
+      the full `Launcher Client Release` build/test job to pass, and record the published run.
+- Deferred for separate reconciliation: #2931/#2912 overlap settlement authority work;
+  #2941/#2773/#2863 overlap existing Friend Edition backports; #2867 overlaps custom auto-resolve;
+  feature/content PRs and upstream 1.4.8/nightly-identity changes remain out of scope.
 
 ### P5 — Serilog hardening
 - [ ] Audit every bundled assembly; pin each to the Serilog its runtime needs

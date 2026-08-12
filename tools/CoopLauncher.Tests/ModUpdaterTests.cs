@@ -218,6 +218,36 @@ public sealed class ModUpdaterTests
     }
 
     [Fact]
+    public async Task ExactInstall_RetriesWhileScannerTemporarilyLocksStagedFile()
+    {
+        using var fixture = new UpdateFixture();
+        fixture.WriteInstalled("Coop", "current.dll", "old");
+        string zip = fixture.CreateZip(
+            ("Coop/locked-by-scanner.dll", "new"),
+            ("Coop/padding.bin", new string('x', 32 * 1024 * 1024)));
+        string versionFile = Path.Combine(fixture.Modules, "Coop", "installed-version.txt");
+        using var scannerStarted = new ManualResetEventSlim();
+        using var lockAcquired = new ManualResetEventSlim();
+        Task scanner = HoldStagedFileOpenAsync(
+            fixture.Modules,
+            "locked-by-scanner.dll",
+            scannerStarted,
+            lockAcquired,
+            TimeSpan.FromMilliseconds(750));
+        Assert.True(scannerStarted.Wait(TimeSpan.FromSeconds(5)));
+
+        Exception? failure = Record.Exception(() =>
+            ModUpdater.InstallExact(zip, fixture.Modules, versionFile, "2026.8.12.1"));
+        await scanner;
+
+        Assert.True(lockAcquired.IsSet, "The test scanner never locked the staged payload.");
+        Assert.Null(failure);
+        Assert.Equal("new", File.ReadAllText(
+            Path.Combine(fixture.Modules, "Coop", "locked-by-scanner.dll")));
+        Assert.Equal("2026.8.12.1", File.ReadAllText(versionFile));
+    }
+
+    [Fact]
     public void InstallFailure_RollsBackPreviouslyInstalledModule()
     {
         using var fixture = new UpdateFixture();
@@ -334,6 +364,43 @@ public sealed class ModUpdaterTests
             }
         }
         return stream.ToArray();
+    }
+
+    private static async Task HoldStagedFileOpenAsync(
+        string modules,
+        string fileName,
+        ManualResetEventSlim scannerStarted,
+        ManualResetEventSlim lockAcquired,
+        TimeSpan holdDuration)
+    {
+        scannerStarted.Set();
+        DateTime deadline = DateTime.UtcNow.AddSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            string? path = Directory
+                .EnumerateFiles(modules, fileName, SearchOption.AllDirectories)
+                .FirstOrDefault(candidate => candidate.Contains(
+                    $"{Path.DirectorySeparatorChar}.coop-update-",
+                    StringComparison.OrdinalIgnoreCase));
+            if (path != null)
+            {
+                try
+                {
+                    using FileStream held = new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    lockAcquired.Set();
+                    await Task.Delay(holdDuration);
+                    return;
+                }
+                catch (IOException)
+                {
+                    // Extraction still owns the file. Try again until its scanner-style lock can be held.
+                }
+            }
+
+            await Task.Delay(1);
+        }
+
+        throw new TimeoutException("The staged lock target was not observed in time.");
     }
 
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> response) : HttpMessageHandler

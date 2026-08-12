@@ -100,6 +100,22 @@ namespace Coop.LiveTesting
             }
         }
 
+        private LiveTestResponse HandleCommandCatalog(LiveTestRequest request)
+        {
+            return ExecuteOnGameThread(request, () =>
+            {
+                if (!ContainerProvider.TryResolve<ILiveTestCommandDispatcher>(out var dispatcher))
+                {
+                    dispatcher = new LiveTestCommandDispatcher();
+                }
+
+                return Success(request.Id, new
+                {
+                    commands = dispatcher.GetCommandNames(),
+                });
+            }, false);
+        }
+
         private LiveTestResponse HandleCommand(LiveTestRequest request)
         {
             if (!TryReadCommand(request.Parameters, out var command, out var arguments, out var error))
@@ -120,6 +136,23 @@ namespace Coop.LiveTesting
             {
                 if (!ContainerProvider.TryResolve<ILiveTestCommandDispatcher>(out var dispatcher))
                 {
+                    if (string.Equals(command, "coop.debug.connection.start", StringComparison.Ordinal))
+                    {
+                        string output = Coop.JoinFixtureCommands.Start(arguments);
+                        bool hasFallbackStructuredResult = TryParseStructuredResult(
+                            output,
+                            out var fallbackStructuredResult);
+                        return Success(request.Id, new
+                        {
+                            name = command,
+                            arguments,
+                            found = true,
+                            output,
+                            hasStructuredResult = hasFallbackStructuredResult,
+                            structuredResult = fallbackStructuredResult,
+                        });
+                    }
+
                     return Failure(
                         request.Id,
                         "session_not_ready",
@@ -133,6 +166,9 @@ namespace Coop.LiveTesting
                     return Failure(request.Id, "command_not_found", result.Output, false);
                 }
 
+                bool hasStructuredResult = TryParseStructuredResult(
+                    result.Output,
+                    out var structuredResult);
                 return Success(request.Id, new
                 {
                     name = command,

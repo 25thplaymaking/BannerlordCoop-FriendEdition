@@ -27,6 +27,9 @@ using GameInterface.Utils;
 using HarmonyLib;
 using Serilog;
 using System;
+#if DEBUG
+using System.Collections.Generic;
+#endif
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -43,6 +46,9 @@ using TaleWorlds.Localization;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.View;
 using TaleWorlds.ScreenSystem;
+#if DEBUG
+using static TaleWorlds.Library.CommandLineFunctionality;
+#endif
 using Module = TaleWorlds.MountAndBlade.Module;
 
 namespace Coop
@@ -114,6 +120,10 @@ namespace Coop
         private int coopJoinPort = 0;
         private string coopJoinPassword = string.Empty;
         private bool _coopJoinFired = false;
+#if DEBUG
+        private bool deferClientAutoConnect;
+        private bool isLiveTestRun;
+#endif
         public override void NoHarmonyInit() 
         {
             AssemblyHellscape.CreateAssemblyBindingRedirects();
@@ -132,6 +142,12 @@ namespace Coop
             }
 
             isAutoConnect = args.Any(a => a.Equals("/autoconnect", StringComparison.OrdinalIgnoreCase));
+#if DEBUG
+            deferClientAutoConnect = args.Any(a =>
+                a.Equals("/cooptestmanualjoin", StringComparison.OrdinalIgnoreCase));
+            isLiveTestRun = args.Any(a =>
+                a.Equals("/cooptestrun", StringComparison.OrdinalIgnoreCase));
+#endif
 
             // GetFullCommandLineString splits on spaces, which would cut a quoted save
             // name apart; the managed-server arguments need real Windows arg parsing.
@@ -617,10 +633,19 @@ namespace Coop
             if (!steamBootAttempted && isAtMainMenu)
             {
                 steamBootAttempted = true;
-                var steamPump = SteamIntegrationBoot.TryStartWithCallbackPump(
-                    isServer, Utilities.GetFullCommandLineString());
-                // The standalone server has no game frame of its own to dispatch its game-server callbacks.
-                if (steamPump != null) Updateables.Add(steamPump);
+#if DEBUG
+                if (isLiveTestRun)
+                {
+                    Logger.Information("[LiveTest] Steam integration disabled for this scoped runtime");
+                }
+                else
+#endif
+                {
+                    var steamPump = SteamIntegrationBoot.TryStartWithCallbackPump(
+                        isServer, Utilities.GetFullCommandLineString());
+                    // The standalone server has no game frame of its own to dispatch its game-server callbacks.
+                    if (steamPump != null) Updateables.Add(steamPump);
+                }
             }
 
             TimeSpan frameTime = TimeSpan.FromSeconds(dt);
@@ -687,7 +712,12 @@ namespace Coop
             // The auto-load-save start path owns this process's startup.
             if (ManagedServerConfig.HasAutoLoadSave) return;
 
-            if (isAutoConnect && !_autoStarted && GameStateManager.Current?.ActiveState is InitialState)
+            if (isAutoConnect &&
+#if DEBUG
+                !deferClientAutoConnect &&
+#endif
+                !_autoStarted &&
+                GameStateManager.Current?.ActiveState is InitialState)
             {
                 _autoStarted = true;
                 try
@@ -859,4 +889,37 @@ namespace Coop
             base.OnAfterGameInitializationFinished(game, starterObject);
         }
     }
+
+#if DEBUG
+    /// <summary>
+    /// Starts a deferred live-test client through the normal connection path.
+    /// </summary>
+    internal static class JoinFixtureCommands
+    {
+        [CommandLineArgumentFunction("start", "coop.debug.connection")]
+        public static string Start(List<string> args)
+        {
+            if (args.Count != 0)
+            {
+                return "Usage: coop.debug.connection.start";
+            }
+
+            if (ModInformation.IsServer)
+            {
+                return "start must be run on a client.";
+            }
+
+            if (ContainerProvider.TryResolve<Common.LogicStates.ILogic>(out _))
+            {
+                return "Client co-op connection is already starting or running.";
+            }
+
+            if (!CoopMod.Coop.StartAsClient())
+            {
+                throw new InvalidOperationException("Client co-op connection start was refused.");
+            }
+            return "Client co-op connection started.";
+        }
+    }
+#endif
 }

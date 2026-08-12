@@ -1,3 +1,4 @@
+using Common;
 using Common.Logging;
 using HarmonyLib;
 using SandBox.View.Map;
@@ -41,7 +42,13 @@ internal static class DiplomacyClientInitializationPatch
 
     [HarmonyPatch(typeof(MapScreen), nameof(MapScreen.OnInitialize))]
     [HarmonyPrefix]
-    private static void EnsureDiplomacyEventsInitialized()
+    private static void EnsureDiplomacyClientSingletonsInitialized()
+    {
+        EnsureDiplomacyEvents();
+        EnsureAgreementManager();
+    }
+
+    private static void EnsureDiplomacyEvents()
     {
         try
         {
@@ -66,6 +73,30 @@ internal static class DiplomacyClientInitializationPatch
         catch (Exception ex)
         {
             Logger.Error(ex, "Failed to pre-initialize Diplomacy DiplomacyEvents singleton");
+        }
+    }
+
+    /// <summary>
+    /// The co-op client only creates <c>DiplomaticAgreementManager</c> when the join-handshake Diplomacy
+    /// snapshot is applied (<c>DiplomacyRuntime.ApplySnapshot</c> → <c>EnsureManager</c>). Until then its
+    /// <c>Instance</c> is null, and Diplomacy's encyclopedia faction mixin dereferences it unguarded
+    /// (<c>HasNonAggressionPact</c>) — clicking a kingdom link before the snapshot lands NREs out of the
+    /// page VM and, via the screen-tick abort, bricks the map UI. Pre-create the manager (empty and
+    /// idempotently, reusing the same path the snapshot uses) at map build on the client so the read
+    /// always finds a live, empty manager; the subsequent snapshot repopulates its agreements onto that
+    /// same instance. Server-side Diplomacy behaviours create it themselves, so this is client-only.
+    /// The <c>EncyclopediaFactionPageReadinessPatch</c> finalizer remains as the belt-and-braces net.
+    /// </summary>
+    private static void EnsureAgreementManager()
+    {
+        if (!ModInformation.IsClient) return;
+        try
+        {
+            DiplomacyRuntime.EnsureManager("Diplomacy.DiplomaticAction.DiplomaticAgreementManager");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Failed to pre-initialize Diplomacy DiplomaticAgreementManager on client");
         }
     }
 }

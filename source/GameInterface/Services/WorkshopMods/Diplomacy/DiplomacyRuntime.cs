@@ -963,7 +963,13 @@ internal sealed class DiplomacyRuntime : IDiplomacyRuntime
         return true;
     }
 
-    private static void EnsureManager(string managerTypeName)
+    /// <summary>
+    /// Idempotently create a Diplomacy manager singleton by type name (no-op if already present or if
+    /// Diplomacy is absent). Used both when applying a server snapshot and, on the client, to pre-create
+    /// the agreement manager at map build so encyclopedia/UI reads never hit a null Instance
+    /// (see <see cref="DiplomacyClientInitializationPatch"/>).
+    /// </summary>
+    internal static void EnsureManager(string managerTypeName)
     {
         var type = DiplomacyCompatibilityPolicy.ResolveType(managerTypeName);
         if (type == null || GetStaticInstance(type) != null) return;

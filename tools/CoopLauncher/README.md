@@ -116,7 +116,8 @@ not claim the installed files match the server when GitHub cannot confirm their 
 3. If any required version is newer or absent, the row shows installed → available and the primary
    action becomes **PREPARE YOUR ARMY**. Nothing downloads before that click.
 4. Preparation re-queries all manifests, applies the launcher first when needed, resumes the same
-   approved transaction after restart, then installs the suite and client in that order.
+   approved transaction after restart, then installs the suite and client in that order. Once the
+   final receipts are current, the same window immediately enables **MARCH TO WAR**.
 5. A final manifest query and local receipt read must confirm all three components current before
    **MARCH TO WAR** is enabled.
 6. If GitHub or any required feed cannot be verified, **TRY THE JESTER AGAIN** performs only a fresh

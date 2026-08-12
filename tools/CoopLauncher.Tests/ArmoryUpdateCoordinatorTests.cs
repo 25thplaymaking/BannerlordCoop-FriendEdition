@@ -1,4 +1,7 @@
 using CoopLauncher.Services;
+using System.Reflection;
+using System.Runtime.ExceptionServices;
+using System.Threading;
 using Xunit;
 
 namespace CoopLauncher.Tests;
@@ -163,6 +166,53 @@ public sealed class ArmoryUpdateCoordinatorTests
         Assert.False(MainWindow.CanDispatchPrimaryAction(operationActive: true, current));
         Assert.False(MainWindow.CanDispatchPrimaryAction(operationActive: false, snapshot: null));
         Assert.True(MainWindow.CanDispatchPrimaryAction(operationActive: false, current));
+    }
+
+    [Fact]
+    public void CompletedPreparation_EnablesLaunchButtonAfterOperation()
+    {
+        RunOnSta(() =>
+        {
+            if (System.Windows.Application.Current is null)
+            {
+                var application = new App();
+                application.InitializeComponent();
+            }
+            var window = new MainWindow(shootMode: true);
+            FieldInfo operationActive = typeof(MainWindow).GetField(
+                "_operationActive", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            operationActive.SetValue(window, true);
+            ArmorySnapshot current = Snapshot(
+                ComponentUpdateState.Current,
+                ComponentUpdateState.Current,
+                ComponentUpdateState.Current);
+
+            window.CompletePreparation(current);
+
+            Assert.True(window.JoinButton.IsEnabled);
+            Assert.Equal("MARCH TO WAR", window.JoinButton.Content);
+            window.Close();
+        });
+    }
+
+    private static void RunOnSta(Action action)
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
     }
 
     private static ArmorySnapshot Snapshot(

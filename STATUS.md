@@ -302,6 +302,10 @@ rolls back canonical Fourberie state and created parties on failure, and returns
       directory moves retry access-denied, sharing-violation, and lock-violation failures for a bounded
       five-second window before using the existing rollback path. A regression test holds a freshly
       extracted staged DLL open and proves the verified payload installs after the lock is released.
+- [x] **Post-update launch button re-enables (2026-08-12).** Successful preparation now clears the
+      operation guard before rendering the final current snapshot, so **MARCH TO WAR** is usable in
+      the same window. The WPF regression asserts the real button state, and updater failure tests use
+      an injected log sink instead of writing simulated failures into the member's launcher log.
 - [x] **Nightly test composition repaired (2026-08-11).** The shared Coop.Tests client/server
       container now registers the same real Workshop capability registry supplied by the production
       GameInterface module; all 614 Coop.Tests cases build their containers again (613 pass, 1 skipped).

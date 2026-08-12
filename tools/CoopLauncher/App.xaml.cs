@@ -25,6 +25,33 @@ public partial class App : Application
             ex.Handled = unhandledExceptionReporter.Report(ex.Exception);
         };
 
+        string runningExecutable = Environment.ProcessPath ??
+            System.IO.Path.Combine(AppContext.BaseDirectory, "CalradiaCoop.exe");
+        if (e.Args.FirstOrDefault() == LauncherUpdateCommand.ApplySwitch)
+        {
+            Log.Begin();
+            if (LauncherUpdateApplier.TryParseApplyArguments(
+                    e.Args, runningExecutable, out LauncherApplyRequest? apply))
+            {
+                LauncherApplyResult result = LauncherUpdateApplier.ApplyAndRelaunch(apply!);
+                Log.Write(result.Message);
+            }
+            else
+            {
+                Log.Write("Rejected malformed launcher apply arguments.");
+            }
+            Shutdown();
+            return;
+        }
+
+        LauncherCompletionRequest? completion = null;
+        if (e.Args.FirstOrDefault() == LauncherUpdateApplier.CompletionSwitch &&
+            !LauncherUpdateApplier.TryParseCompletionArguments(e.Args, runningExecutable, out completion))
+        {
+            Log.Write("Rejected malformed launcher completion arguments.");
+            completion = null;
+        }
+
         // Offscreen design-review render: `--shoot <path>` writes a PNG of the window without ever
         // showing it (no focus steal), then exits. Not part of the shipped launch flow.
         int shootIdx = Array.FindIndex(e.Args, a => a == "--shoot");
@@ -36,6 +63,9 @@ public partial class App : Application
             return;
         }
 
-        new MainWindow().Show();
+        bool skipLauncherUpdate = LauncherUpdateApplier.ShouldSkipSelfUpdate(e.Args);
+        new MainWindow(shootMode: false, skipLauncherUpdate).Show();
+        if (completion is not null)
+            _ = Task.Run(() => LauncherUpdateApplier.CleanupAfterStartup(completion));
     }
 }

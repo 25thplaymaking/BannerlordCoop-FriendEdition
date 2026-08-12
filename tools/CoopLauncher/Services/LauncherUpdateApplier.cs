@@ -26,6 +26,9 @@ public static class LauncherUpdateApplier
     public const string SkipOnceSwitch = "--skip-launcher-update-once";
     internal const string StagePrefix = ".calradia-launcher-update-";
 
+    internal static bool ShouldSkipSelfUpdate(string[] args) =>
+        args.Length == 1 && args[0] == SkipOnceSwitch;
+
     public static bool TryParseApplyArguments(
         string[] args,
         string runningExecutablePath,

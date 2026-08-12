@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -11,6 +12,7 @@ namespace CoopLauncher;
 public partial class MainWindow : Window
 {
     private readonly LauncherConfig _config;
+    private readonly bool _skipLauncherUpdate;
     private string? _bannerlordExe;
     private readonly DispatcherTimer _statusTimer = new() { Interval = TimeSpan.FromSeconds(12) };
 
@@ -18,11 +20,13 @@ public partial class MainWindow : Window
     private SolidColorBrush Steel => (SolidColorBrush)FindResource("Steel");
     private SolidColorBrush Parchment => (SolidColorBrush)FindResource("Parchment");
 
-    public MainWindow() : this(shootMode: false) { }
+    public MainWindow() : this(shootMode: false, skipLauncherUpdate: false) { }
 
-    public MainWindow(bool shootMode)
+    public MainWindow(bool shootMode, bool skipLauncherUpdate = false)
     {
         InitializeComponent();
+
+        _skipLauncherUpdate = skipLauncherUpdate;
 
         var configPath = Path.Combine(AppContext.BaseDirectory, "launcher-config.json");
         _config = LauncherConfig.Load(configPath);
@@ -74,6 +78,24 @@ public partial class MainWindow : Window
         UnfurlBanner();
         Log.Begin();
 
+        if (!_skipLauncherUpdate)
+        {
+            LauncherUpdateResult launcherUpdate = await RunLauncherUpdateAsync();
+            if (launcherUpdate.Outcome == LauncherUpdateOutcome.Restarting)
+            {
+                JoinButton.Content = "RESTARTING…";
+                JoinButton.IsEnabled = false;
+                Close();
+                return;
+            }
+            if (!CanContinueAfterLauncherUpdate(launcherUpdate))
+            {
+                JoinButton.Content = "UPDATE REQUIRED";
+                JoinButton.IsEnabled = false;
+                return;
+            }
+        }
+
         _bannerlordExe = GameLocator.FindBannerlordExe(_config.GamePath);
         Log.Write(_bannerlordExe is null
             ? $"Bannerlord.exe NOT found (configured gamePath='{_config.GamePath}')"
@@ -94,6 +116,33 @@ public partial class MainWindow : Window
         JoinButton.IsEnabled = CanJoinAfterUpdate(update);
         if (!JoinButton.IsEnabled)
             JoinButton.Content = "UPDATE REQUIRED";
+    }
+
+    private async Task<LauncherUpdateResult> RunLauncherUpdateAsync()
+    {
+        string? executablePath = Environment.ProcessPath;
+        Version currentVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0);
+        if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
+            return new(LauncherUpdateOutcome.Failed, "launcher executable path was unavailable");
+
+        UpdateBar.Visibility = Visibility.Visible;
+        UpdateBar.IsIndeterminate = true;
+        var updater = new LauncherSelfUpdater(_config);
+        LauncherUpdateResult result = await updater.CheckAndStageAsync(
+            executablePath, currentVersion, (fraction, message) => Dispatcher.Invoke(() =>
+            {
+                UpdateBar.IsIndeterminate = fraction < 0;
+                if (fraction >= 0) UpdateBar.Value = fraction;
+                UpdateText.Text = message;
+            }));
+
+        UpdateBar.IsIndeterminate = false;
+        UpdateBar.Value = result.Outcome == LauncherUpdateOutcome.Restarting ? 1 : 0;
+        if (result.Outcome is LauncherUpdateOutcome.Disabled or LauncherUpdateOutcome.UpToDate)
+            UpdateBar.Visibility = Visibility.Collapsed;
+        UpdateText.Text = result.Message;
+        Log.Write($"Launcher update: {result.Outcome} — {result.Message}");
+        return result;
     }
 
     private void UnfurlBanner()
@@ -163,6 +212,9 @@ public partial class MainWindow : Window
     }
 
     internal static bool CanJoinAfterUpdate(UpdateResult result) => result.Outcome != UpdateOutcome.Failed;
+
+    internal static bool CanContinueAfterLauncherUpdate(LauncherUpdateResult result) =>
+        result.Outcome != LauncherUpdateOutcome.Failed;
 
     private async void OnJoinClicked(object sender, RoutedEventArgs e)
     {

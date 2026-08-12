@@ -133,6 +133,28 @@ public sealed class LauncherSelfUpdaterTests
         Assert.Equal(sha, started.ArgumentList[3]);
     }
 
+    [Theory]
+    [InlineData(LauncherUpdateOutcome.Failed, false)]
+    [InlineData(LauncherUpdateOutcome.Offline, true)]
+    [InlineData(LauncherUpdateOutcome.UpToDate, true)]
+    [InlineData(LauncherUpdateOutcome.Disabled, true)]
+    public void StartupGate_BlocksOnlyFailedLauncherUpdate(
+        LauncherUpdateOutcome outcome, bool expected)
+    {
+        Assert.Equal(expected, MainWindow.CanContinueAfterLauncherUpdate(
+            new LauncherUpdateResult(outcome, "status")));
+    }
+
+    [Fact]
+    public void RollbackSkipMarker_SuppressesOnlyExplicitOneShotLaunch()
+    {
+        Assert.True(LauncherUpdateApplier.ShouldSkipSelfUpdate(
+            [LauncherUpdateApplier.SkipOnceSwitch]));
+        Assert.False(LauncherUpdateApplier.ShouldSkipSelfUpdate([]));
+        Assert.False(LauncherUpdateApplier.ShouldSkipSelfUpdate(
+            [LauncherUpdateApplier.SkipOnceSwitch, "unexpected"]));
+    }
+
     private static LauncherSelfUpdater Updater(HttpClient http) => new(
         new LauncherConfig { LauncherManifestUrl = "https://updates.example/launcher.json" }, http);
 

@@ -124,7 +124,7 @@ jobs:
           apk add --no-cache 7zip >/dev/null
           module=release-stage/Coop
           binary="$module/bin/Win64_Shipping_Client"
-          mkdir -p "$binary" "$module/GUI/Prefabs"
+          mkdir -p "$binary" "$module/GUI/Prefabs" "$module/WorkshopSuite"
 
           # Ship Coop's own assemblies (incl. Serilog 4.x); never the game's own DLLs.
           for file in source/Coop/bin/Release/*.dll; do
@@ -154,6 +154,9 @@ jobs:
             -e "s/\${version}/v$coop_version/g" \
             -e "s/\${game_version}/$game_version/g" \
             deploy/SubModule.xml > "$module/SubModule.xml"
+
+          cp deploy/WorkshopSuite/MANIFEST.json "$module/WorkshopSuite/MANIFEST.json"
+          test -s "$module/WorkshopSuite/MANIFEST.json"
 
           mkdir -p artifact
           # Zip root entry is `Coop/…`, so the launcher extracts it over the Modules folder.

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -27,6 +28,54 @@ def step_names(workflow: dict, job: str) -> set[str]:
     return {step.get("name", "") for step in workflow["jobs"][job]["steps"]}
 
 
+def validate_workshop_receipt() -> None:
+    manifest = json.loads((ROOT / "deploy" / "workshop-mods.json").read_text(encoding="utf-8"))
+    receipt_path = ROOT / "deploy" / "WorkshopSuite" / "MANIFEST.json"
+    require(receipt_path.is_file(), "client payload source must include the managed Workshop receipt")
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+
+    expected = {
+        module["moduleId"]: {
+            key: module[key]
+            for key in ("moduleId", "workshopId", "steamManifestId", "version", "loadOrder")
+        }
+        for module in manifest["modules"]
+    }
+    actual = {
+        module["moduleId"]: {
+            key: module[key]
+            for key in ("moduleId", "workshopId", "steamManifestId", "version", "loadOrder")
+        }
+        for module in receipt["modules"]
+    }
+    require(receipt["schemaVersion"] == 1, "managed Workshop receipt schema must be version 1")
+    require(receipt["suiteId"] == manifest["suite"]["id"], "managed Workshop suite identity drifted")
+    require(
+        receipt["moduleCount"] == manifest["suite"]["expectedModuleCount"] == len(actual),
+        "managed Workshop receipt count drifted from the production suite",
+    )
+    require(actual == expected, "managed Workshop receipt identities drifted from the production suite")
+
+    canonical = "\n".join(
+        "|".join(
+            (
+                module["moduleId"].lower(),
+                module["workshopId"],
+                module["steamManifestId"],
+                module["version"],
+                str(module["loadOrder"]),
+                module["contentSha256"].lower(),
+                module["configurationSha256"].lower(),
+            )
+        )
+        for module in sorted(receipt["modules"], key=lambda item: item["moduleId"].lower())
+    )
+    require(
+        hashlib.sha256(canonical.encode("utf-8")).hexdigest() == receipt["receiptSha256"],
+        "managed Workshop receipt digest is invalid",
+    )
+
+
 def main() -> None:
     client = load_workflow("launcher-release.yml")
     client_triggers = client["on"]
@@ -42,6 +91,15 @@ def main() -> None:
     require("'nightly'" in channels and "'both'" not in channels, "pushes must never publish stable")
     require("safety" in client["jobs"], "client release must have a release-safety gate")
     require(client["jobs"]["build"].get("needs") == "safety", "client build must wait for release-safety")
+    client_workflow_text = (ROOT / ".github" / "workflows" / "launcher-release.yml").read_text(
+        encoding="utf-8"
+    )
+    require(
+        "deploy/WorkshopSuite/MANIFEST.json" in client_workflow_text
+        and '"$module/WorkshopSuite/MANIFEST.json"' in client_workflow_text,
+        "client release must package the managed Workshop receipt",
+    )
+    validate_workshop_receipt()
 
     app = load_workflow("launcher-app-release.yml")
     app_triggers = app["on"]
@@ -89,7 +147,7 @@ def main() -> None:
 
     print(
         "PASS: stable feeds are manual, pushes are nightly-only, launcher manifests are pinned, "
-        "and public config has no password"
+        "the managed Workshop receipt is pinned, and public config has no password"
     )
 
 

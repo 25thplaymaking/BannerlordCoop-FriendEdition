@@ -312,8 +312,10 @@ rolls back canonical Fourberie state and created parties on failure, and returns
 - [x] Existing-save boundary preserved: this batch adds no save field or migration, creates no
       save, and performs no live-server deployment. #2903 remains deferred specifically because
       it adds persisted session data.
-- [ ] Launcher nightly publication: push the verified source commits to `development`, require
-      the full `Launcher Client Release` build/test job to pass, and record the published run.
+- [x] Launcher nightly published from `development` commit `d90c6a020` by GitHub run
+      `31611057545`: safety, full unit/integration tests, Serilog 4.x client build, package, and
+      publish all passed. The rolling `client-nightly` manifest is version `2026.08.12.1517`
+      with SHA-256 `200226f389a847a65e2dd470d29373519d316014e2bef3705c4181025fefb286`.
 - Deferred for separate reconciliation: #2931/#2912 overlap settlement authority work;
   #2941/#2773/#2863 overlap existing Friend Edition backports; #2867 overlaps custom auto-resolve;
   feature/content PRs and upstream 1.4.8/nightly-identity changes remain out of scope.

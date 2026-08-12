@@ -110,5 +110,5 @@ Defer from this batch:
 - [x] Run all focused backport regression classes locally with isolated test-runner processes.
 - [x] Run repository formatting/diff checks and confirm the pre-existing mission/work status is unchanged.
 - [x] Update `STATUS.md` with imported/deferred PRs, save compatibility, and verification evidence.
-- [ ] Push the verified commits to `development` and require the complete GitHub test workflow to pass before treating the launcher nightly as published.
+- [x] Push the verified commits to `development` and require the complete GitHub test workflow to pass before treating the launcher nightly as published.
 - [x] Do not deploy or create a save as part of this backport pass.

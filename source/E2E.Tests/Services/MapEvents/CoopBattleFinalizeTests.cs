@@ -288,7 +288,7 @@ public class CoopBattleFinalizeTests : MapEventTestBase
     }
 
     /// <summary>
-    /// The coop auto-finalize on conclusion: both allied players win — a client commits the victory
+    /// The coop Send Troops auto-finalize on conclusion: both allied players win — a client commits the victory
     /// <see cref="BattleState"/>, the server applies it (OnBattleWon), broadcasts the authoritative battle
     /// results (<c>NetworkCommitMapEventResults</c>) and, recognizing the conclusion (<c>MapEventConcluded</c>),
     /// finalizes the shared <see cref="MapEvent"/> with no explicit leave. Each involved winner's
@@ -298,7 +298,7 @@ public class CoopBattleFinalizeTests : MapEventTestBase
     /// <c>MapEventFinalizeAttempted</c> / <c>Finish</c> itself.
     /// </summary>
     [Fact]
-    public void BattleConcludesWithVictory_StagesEachWinnersEncounterForBattleResults()
+    public void SendTroopsBattleConcludesWithVictory_StagesEachWinnersEncounterForBattleResults()
     {
         var (ctx, _, _, _) = SetupTwoAlliedPlayersInBattle();
 
@@ -322,12 +322,6 @@ public class CoopBattleFinalizeTests : MapEventTestBase
             // map scene (the no-winner leave test skips this) — the headless boundary for a concluded finalize.
             .Append(AccessTools.Method(typeof(MapEvent), "MovePartyToSuitablePositionOnMapEventFinalize"))
             .Append(AccessTools.Method(typeof(GameMenu), nameof(GameMenu.ExitToLast)))
-            // On a conclusion the winners' clients are still inside their battle mission when the server tears
-            // the shared event down, so the map-event-destroy fallback (which finishes an encounter left at a
-            // dead menu) defers to the mission flow (MissionState.Current != null) and the staged encounter
-            // survives to drive the results screens. Headless there is no mission, so silence the fallback to
-            // model that — the staged encounter must NOT be finished, or the results screens would be skipped.
-            .Append(AccessTools.Method(typeof(MapEventRegistry), "CloseDestroyedMapEventEncounterIfNeeded"))
             .ToList();
 
         var client1 = Clients.First();

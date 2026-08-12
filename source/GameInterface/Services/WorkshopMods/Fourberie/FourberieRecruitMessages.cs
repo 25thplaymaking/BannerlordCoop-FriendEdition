@@ -55,6 +55,7 @@ internal enum FourberieOperation
     StopSafehouseWait = 44,
     CompleteSafehouseReturn = 45,
     EnslavePrisoners = 46,
+    TransferSafehouseItems = 47,
 }
 
 internal enum FourberieOperationStatus
@@ -84,6 +85,25 @@ internal sealed class FourberieTroopSelection
 }
 
 [ProtoContract(SkipConstructor = true)]
+internal sealed class FourberieItemSelection
+{
+    [ProtoMember(1)] public string ItemId { get; private set; }
+    [ProtoMember(2)] public string ItemModifierId { get; private set; }
+    [ProtoMember(3)] public int DeltaToSafehouse { get; private set; }
+
+    private FourberieItemSelection()
+    {
+    }
+
+    public FourberieItemSelection(string itemId, string itemModifierId, int deltaToSafehouse)
+    {
+        ItemId = itemId;
+        ItemModifierId = itemModifierId ?? string.Empty;
+        DeltaToSafehouse = deltaToSafehouse;
+    }
+}
+
+[ProtoContract(SkipConstructor = true)]
 internal sealed class NetworkRequestFourberieOperation : ICommand
 {
     [ProtoMember(1)] public string SessionId { get; private set; }
@@ -95,8 +115,10 @@ internal sealed class NetworkRequestFourberieOperation : ICommand
     [ProtoMember(7)] public string SecondaryTargetId { get; private set; }
     [ProtoMember(8)] public int IntValue { get; private set; }
     [ProtoMember(9)] private FourberieTroopSelection[] troops;
+    [ProtoMember(10)] private FourberieItemSelection[] items;
 
     public FourberieTroopSelection[] Troops => troops ?? Array.Empty<FourberieTroopSelection>();
+    public FourberieItemSelection[] Items => items ?? Array.Empty<FourberieItemSelection>();
 
     private NetworkRequestFourberieOperation()
     {
@@ -112,7 +134,7 @@ internal sealed class NetworkRequestFourberieOperation : ICommand
         int intValue,
         FourberieTroopSelection[] troops)
         : this(sessionId, requestId, expectedRevision, operation, settlementId, targetId,
-            string.Empty, intValue, troops)
+            string.Empty, intValue, troops, Array.Empty<FourberieItemSelection>())
     {
     }
 
@@ -126,6 +148,22 @@ internal sealed class NetworkRequestFourberieOperation : ICommand
         string secondaryTargetId,
         int intValue,
         FourberieTroopSelection[] troops)
+        : this(sessionId, requestId, expectedRevision, operation, settlementId, targetId,
+            secondaryTargetId, intValue, troops, Array.Empty<FourberieItemSelection>())
+    {
+    }
+
+    public NetworkRequestFourberieOperation(
+        string sessionId,
+        long requestId,
+        long expectedRevision,
+        FourberieOperation operation,
+        string settlementId,
+        string targetId,
+        string secondaryTargetId,
+        int intValue,
+        FourberieTroopSelection[] troops,
+        FourberieItemSelection[] items)
     {
         SessionId = sessionId;
         RequestId = requestId;
@@ -136,6 +174,7 @@ internal sealed class NetworkRequestFourberieOperation : ICommand
         SecondaryTargetId = secondaryTargetId ?? string.Empty;
         IntValue = intValue;
         this.troops = troops ?? Array.Empty<FourberieTroopSelection>();
+        this.items = items ?? Array.Empty<FourberieItemSelection>();
     }
 }
 
@@ -201,8 +240,10 @@ internal sealed class NetworkFourberieContractProposal : ICommand
 internal static class FourberieOperationProtocol
 {
     internal const int MaxTroopSelections = 64;
+    internal const int MaxItemSelections = 256;
     internal const int MaxStableIdLength = 256;
     internal const int MaxSelectedTroops = 2_000;
+    internal const int MaxSelectedItems = 20_000;
 
     public static bool IsRequestShapeValid(NetworkRequestFourberieOperation request)
     {
@@ -213,7 +254,8 @@ internal static class FourberieOperationProtocol
             !IsStableId(request.TargetId, allowEmpty: true) || request.IntValue < 0 ||
             !IsStableId(request.SecondaryTargetId, allowEmpty: true) ||
             (request.Operation != FourberieOperation.SettleClanGrudge && request.IntValue > MaxSelectedTroops) ||
-            request.Troops.Length > MaxTroopSelections)
+            request.Troops.Length > MaxTroopSelections || request.Items.Length > MaxItemSelections ||
+            (request.Operation != FourberieOperation.TransferSafehouseItems && request.Items.Length != 0))
             return false;
 
         int total = 0;
@@ -232,6 +274,23 @@ internal static class FourberieOperationProtocol
             .Count() != request.Troops.Length)
             return false;
 
+        long selectedItems = 0;
+        foreach (FourberieItemSelection item in request.Items)
+        {
+            if (item == null || !IsStableId(item.ItemId, allowEmpty: false) ||
+                !IsStableId(item.ItemModifierId, allowEmpty: true) || item.DeltaToSafehouse == 0 ||
+                Math.Abs((long)item.DeltaToSafehouse) > MaxSelectedItems)
+                return false;
+            selectedItems += Math.Abs((long)item.DeltaToSafehouse);
+            if (selectedItems > MaxSelectedItems) return false;
+        }
+
+        if (request.Items
+            .Select(item => item.ItemId + "\0" + item.ItemModifierId)
+            .Distinct(StringComparer.Ordinal)
+            .Count() != request.Items.Length)
+            return false;
+
         int selected = request.Troops.Sum(troop => troop.Count);
         return request.Operation switch
         {
@@ -246,6 +305,9 @@ internal static class FourberieOperationProtocol
             FourberieOperation.EnslavePrisoners =>
                 !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
                 request.IntValue == 0 && request.Troops.Length > 0,
+            FourberieOperation.TransferSafehouseItems =>
+                !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
+                request.IntValue == 0 && request.Troops.Length == 0 && request.Items.Length > 0,
             FourberieOperation.StartInsuranceScam =>
                 !string.IsNullOrEmpty(request.SettlementId) &&
                 !string.IsNullOrEmpty(request.TargetId) &&
@@ -325,6 +387,11 @@ internal static class FourberieOperationProtocol
         foreach (FourberieTroopSelection troop in request.Troops.OrderBy(value => value.TroopId, StringComparer.Ordinal))
             builder.Append('|').Append(troop.TroopId).Append(':')
                 .Append(troop.Count.ToString(CultureInfo.InvariantCulture));
+        foreach (FourberieItemSelection item in request.Items
+                     .OrderBy(value => value.ItemId, StringComparer.Ordinal)
+                     .ThenBy(value => value.ItemModifierId, StringComparer.Ordinal))
+            builder.Append('|').Append(item.ItemId).Append(':').Append(item.ItemModifierId).Append(':')
+                .Append(item.DeltaToSafehouse.ToString(CultureInfo.InvariantCulture));
         return builder.ToString();
     }
 

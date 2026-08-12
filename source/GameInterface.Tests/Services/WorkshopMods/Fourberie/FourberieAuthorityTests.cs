@@ -2,8 +2,10 @@ using Common;
 using GameInterface.Services.WorkshopMods.Fourberie;
 using System;
 using System.Collections;
+using System.Runtime.Serialization;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Roster;
+using TaleWorlds.CampaignSystem.Settlements;
 using Xunit;
 
 namespace GameInterface.Tests.Services.WorkshopMods.Fourberie;
@@ -200,6 +202,7 @@ public sealed class FourberieAuthorityTests
     {
         var runtime = new CaptureRuntime();
         var prisoner = new CharacterObject();
+        var crimeBase = (Settlement)FormatterServices.GetUninitializedObject(typeof(Settlement));
         var selected = new TroopRoster();
         selected.AddToCounts(prisoner, 2, false, 0, 0, true);
         bool previousServer = ModInformation.IsServer;
@@ -208,6 +211,7 @@ public sealed class FourberieAuthorityTests
         {
             ModInformation.IsServer = false;
             FourberiePatchRuntime.Current = runtime;
+            global::Fourberie.FourberieBehavior._crimeBase = crimeBase;
             FourberiePartyCommitSuppression.Reset();
             bool result = false;
 
@@ -218,6 +222,7 @@ public sealed class FourberieAuthorityTests
             Assert.False(runOriginal);
             Assert.True(result);
             Assert.Equal(FourberieOperation.EnslavePrisoners, runtime.LastOperation.Operation);
+            Assert.Same(crimeBase, runtime.LastOperation.Settlement);
             var selection = Assert.Single(runtime.LastOperation.Troops);
             Assert.Same(prisoner, selection.Troop);
             Assert.Equal(2, selection.Count);
@@ -228,6 +233,7 @@ public sealed class FourberieAuthorityTests
         {
             FourberiePartyCommitSuppression.Reset();
             FourberiePatchRuntime.Current = null;
+            global::Fourberie.FourberieBehavior._crimeBase = null;
             ModInformation.IsServer = previousServer;
         }
     }

@@ -1,4 +1,5 @@
 using Common;
+using Common.Util;
 using GameInterface.Configuration;
 using HarmonyLib;
 using System;
@@ -10,6 +11,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Inventory;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Settlements;
@@ -42,6 +44,18 @@ internal sealed class FourberieLocalTroopSelection
     public int Count { get; }
 }
 
+internal sealed class FourberieLocalItemSelection
+{
+    public FourberieLocalItemSelection(EquipmentElement equipmentElement, int deltaToSafehouse)
+    {
+        EquipmentElement = equipmentElement;
+        DeltaToSafehouse = deltaToSafehouse;
+    }
+
+    public EquipmentElement EquipmentElement { get; }
+    public int DeltaToSafehouse { get; }
+}
+
 internal sealed class FourberieLocalOperation
 {
     public FourberieLocalOperation(
@@ -51,7 +65,8 @@ internal sealed class FourberieLocalOperation
         Settlement secondarySettlement,
         int intValue,
         FourberieLocalTroopSelection[] troops,
-        Clan targetClan = null)
+        Clan targetClan = null,
+        FourberieLocalItemSelection[] items = null)
     {
         Operation = operation;
         Settlement = settlement;
@@ -60,6 +75,7 @@ internal sealed class FourberieLocalOperation
         IntValue = intValue;
         Troops = troops ?? Array.Empty<FourberieLocalTroopSelection>();
         TargetClan = targetClan;
+        Items = items ?? Array.Empty<FourberieLocalItemSelection>();
     }
 
     public FourberieOperation Operation { get; }
@@ -69,6 +85,136 @@ internal sealed class FourberieLocalOperation
     public int IntValue { get; }
     public FourberieLocalTroopSelection[] Troops { get; }
     public Clan TargetClan { get; }
+    public FourberieLocalItemSelection[] Items { get; }
+}
+
+/// <summary>
+/// Marks the stash opened from Fourberie's safehouse dialog and converts the temporary inventory
+/// screen transaction into a stable-ID server operation. The inventory screen works on transient
+/// rosters, so routing it through the generic TradeAttempted path cannot identify the safehouse.
+/// </summary>
+internal static class FourberieSafehouseTransferContext
+{
+    [ThreadStatic] private static bool active;
+
+    public static void Begin(ItemRoster stash)
+    {
+        active = ModInformation.IsClient && stash != null &&
+                 ReferenceEquals(stash, CurrentCrimeBaseParty()?.ItemRoster);
+    }
+
+    public static bool TryHandleDone(InventoryLogic logic, out bool result)
+    {
+        result = false;
+        if (!active || !ModInformation.IsClient || logic == null) return false;
+        active = false;
+
+        FourberieLocalItemSelection[] items = BuildSelections(
+            logic.GetBoughtItems(),
+            logic.GetSoldItems());
+
+        // Undo the speculative UI copies before the server's authoritative roster deltas arrive.
+        using (new AllowedThread()) logic.Reset(true);
+
+        if (items.Length == 0)
+        {
+            result = true;
+            return true;
+        }
+
+        bool submitted = FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+            FourberieOperation.TransferSafehouseItems,
+            CurrentCrimeBase(),
+            null,
+            null,
+            0,
+            Array.Empty<FourberieLocalTroopSelection>(),
+            items: items)) == true;
+        if (!submitted) ShowUnavailable();
+        result = submitted;
+        return true;
+    }
+
+    public static void Cancel() => active = false;
+
+    internal static FourberieLocalItemSelection[] BuildSelections(
+        IEnumerable<(ItemRosterElement, int)> bought,
+        IEnumerable<(ItemRosterElement, int)> sold)
+    {
+        var result = new List<FourberieLocalItemSelection>();
+        Accumulate(result, bought, direction: -1);
+        Accumulate(result, sold, direction: 1);
+        return result.Where(item => item.DeltaToSafehouse != 0).ToArray();
+    }
+
+    internal static Settlement CurrentCrimeBase()
+    {
+        Type behavior = CurrentBehaviorType();
+        return behavior == null
+            ? null
+            : AccessTools.Field(behavior, "_crimeBase")?.GetValue(null) as Settlement;
+    }
+
+    internal static void ShowUnavailable() =>
+        InformationManager.DisplayMessage(new InformationMessage(
+            "The co-op server could not verify this Fourberie safehouse action. Reopen the safehouse and try again."));
+
+    private static MobileParty CurrentCrimeBaseParty()
+    {
+        Type behavior = CurrentBehaviorType();
+        return behavior == null
+            ? null
+            : AccessTools.Field(behavior, "_crimeBaseParty")?.GetValue(null) as MobileParty;
+    }
+
+    private static Type CurrentBehaviorType()
+    {
+        Type[] candidates = AppDomain.CurrentDomain.GetAssemblies()
+            .Select(candidate => candidate.GetType(
+                "Fourberie.FourberieBehavior",
+                throwOnError: false,
+                ignoreCase: false))
+            .Where(candidate => candidate != null)
+            .ToArray();
+        return candidates.FirstOrDefault(candidate =>
+                   AccessTools.Field(candidate, "_crimeBase")?.GetValue(null) != null ||
+                   AccessTools.Field(candidate, "_crimeBaseParty")?.GetValue(null) != null) ??
+               candidates.FirstOrDefault();
+    }
+
+    private static void Accumulate(
+        IList<FourberieLocalItemSelection> selections,
+        IEnumerable<(ItemRosterElement Element, int Price)> exchanges,
+        int direction)
+    {
+        if (exchanges == null) return;
+        foreach (var exchange in exchanges)
+        {
+            EquipmentElement equipment = exchange.Element.EquipmentElement;
+            if (equipment.Item == null || exchange.Element.Amount <= 0) continue;
+            int delta = checked(exchange.Element.Amount * direction);
+            int index = -1;
+            for (int candidate = 0; candidate < selections.Count; candidate++)
+            {
+                if (selections[candidate].EquipmentElement.Equals(equipment))
+                {
+                    index = candidate;
+                    break;
+                }
+            }
+
+            if (index < 0)
+            {
+                selections.Add(new FourberieLocalItemSelection(equipment, delta));
+                continue;
+            }
+
+            var existing = selections[index];
+            selections[index] = new FourberieLocalItemSelection(
+                equipment,
+                checked(existing.DeltaToSafehouse + delta));
+        }
+    }
 }
 
 internal static class FourberiePartyCommitSuppression
@@ -213,11 +359,12 @@ internal static class FourberieAuthorityPatches
 
         bool submitted = FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
             FourberieOperation.EnslavePrisoners,
-            CurrentPlayerSettlement(),
+            FourberieSafehouseTransferContext.CurrentCrimeBase(),
             null,
             null,
             0,
             Selections(leftPrisonRoster))) == true;
+        if (!submitted) FourberieSafehouseTransferContext.ShowUnavailable();
         FourberiePartyCommitSuppression.Request();
         __result = submitted;
         return false;
@@ -986,18 +1133,6 @@ internal static class FourberieAuthorityPatches
             if (troop != null && count > 0) selected.Add(new FourberieLocalTroopSelection(troop, count));
         }
         return selected.ToArray();
-    }
-
-    private static Settlement CurrentPlayerSettlement()
-    {
-        try
-        {
-            return MobileParty.MainParty?.CurrentSettlement;
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private static FourberieLocalTroopSelection[] Difference(TroopRoster baseline, TroopRoster remaining)

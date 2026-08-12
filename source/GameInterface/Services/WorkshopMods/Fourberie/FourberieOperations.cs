@@ -22,6 +22,62 @@ using TaleWorlds.Localization;
 
 namespace GameInterface.Services.WorkshopMods.Fourberie;
 
+internal static class FourberieReplicationGuard
+{
+    public static void EnsureEnabled()
+    {
+        if (AllowedThread.IsThisThreadAllowed())
+            throw new InvalidOperationException(
+                "authoritative Fourberie roster mutation was attempted while Coop replication was suppressed");
+    }
+}
+
+internal static class FourberieSafehouseItemTransferAuthority
+{
+    public static bool CanApply(
+        IEnumerable<(EquipmentElement Equipment, int Delta)> selections,
+        Func<EquipmentElement, int> playerCount,
+        Func<EquipmentElement, int> safehouseCount,
+        out string failure)
+    {
+        failure = null;
+        if (selections == null || playerCount == null || safehouseCount == null)
+        {
+            failure = "safehouse transfer context is unavailable";
+            return false;
+        }
+
+        bool any = false;
+        foreach ((EquipmentElement equipment, int delta) in selections)
+        {
+            any = true;
+            if (equipment.Item == null || delta == 0)
+            {
+                failure = "safehouse transfer contains an invalid item delta";
+                return false;
+            }
+            int required = (int)Math.Min(int.MaxValue, Math.Abs((long)delta));
+            if (delta > 0 && playerCount(equipment) < required)
+            {
+                failure = "player item roster changed before the safehouse transfer";
+                return false;
+            }
+            if (delta < 0 && safehouseCount(equipment) < required)
+            {
+                failure = "safehouse item roster changed before the transfer";
+                return false;
+            }
+        }
+
+        if (!any)
+        {
+            failure = "no safehouse items were selected";
+            return false;
+        }
+        return true;
+    }
+}
+
 internal sealed class FourberieOperationExecutor
 {
     private sealed class GrudgeQuote
@@ -74,6 +130,7 @@ internal sealed class FourberieOperationExecutor
         Dictionary<CharacterObject, int> actorCounts = null;
         Dictionary<CharacterObject, int> actorPrisonCounts = null;
         ItemRosterElement[] actorItems = null;
+        ItemRosterElement[] safehouseItems = null;
         MobileParty previousCaravan = GetStaticField("_insucaraF") as MobileParty;
         MobileParty previousBandits = GetStaticField("_insubandF") as MobileParty;
         MobileParty previousAgents = GetStaticField("_agentsParty") as MobileParty;
@@ -109,6 +166,11 @@ internal sealed class FourberieOperationExecutor
                     actorPrisonCounts = CaptureCounts(actorParty.PrisonRoster, request.Troops);
                     actorItems = CaptureAllItems(actorParty.ItemRoster);
                     ApplyPrisonerEnslavement(actor, actorParty, request);
+                    break;
+                case FourberieOperation.TransferSafehouseItems:
+                    actorItems = CaptureAllItems(actorParty.ItemRoster);
+                    safehouseItems = CaptureAllItems(previousCrimeBase?.ItemRoster);
+                    ApplySafehouseItemTransfer(actorParty, request);
                     break;
                 case FourberieOperation.StartInsuranceScam:
                     ApplyInsuranceScam(actor, actorParty, request);
@@ -214,6 +276,8 @@ internal sealed class FourberieOperationExecutor
             catch (Exception rollback) { rollbackErrors.Add("actor prisoner roster: " + rollback.Message); }
             try { RestoreItems(actorParty.ItemRoster, actorItems); }
             catch (Exception rollback) { rollbackErrors.Add("actor item roster: " + rollback.Message); }
+            try { RestoreItems(previousCrimeBase?.ItemRoster, safehouseItems); }
+            catch (Exception rollback) { rollbackErrors.Add("safehouse item roster: " + rollback.Message); }
             try
             {
                 if (previousAgents?.IsActive == true)
@@ -301,14 +365,43 @@ internal sealed class FourberieOperationExecutor
                    ?? Array.Empty<ItemRosterElement>();
         int total = selected.Sum(selection => selection.Count);
 
+        FourberieReplicationGuard.EnsureEnabled();
         using (new BarterPlayerContext(actor, actorParty))
-        using (new AllowedThread())
         {
             foreach ((CharacterObject troop, int count) in selected)
                 actorParty.PrisonRoster.AddToCounts(troop, -count, false, 0, 0, true, -1);
-            actorParty.ItemRoster.Add(loot);
+            foreach (ItemRosterElement item in loot)
+                actorParty.ItemRoster.AddToCounts(item.EquipmentElement, item.Amount);
             Increment(GetDictionary("_crimeValue"), 1500, total);
             actor.AddSkillXp(DefaultSkills.Roguery, 100f);
+        }
+    }
+
+    private void ApplySafehouseItemTransfer(
+        MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        if (!TryResolveCurrentSettlement(actorParty, request.SettlementId, out Settlement settlement) ||
+            GetStaticField("_crimeBase") is not Settlement currentBase || currentBase != settlement ||
+            GetStaticField("_crimeBaseParty") is not MobileParty baseParty || baseParty.IsActive != true ||
+            baseParty.ItemRoster == null || ReferenceEquals(baseParty.ItemRoster, actorParty.ItemRoster))
+            throw new InvalidOperationException("the controller is no longer at the active Fourberie safehouse");
+
+        var selections = ResolveItems(request.Items).ToArray();
+        if (!FourberieSafehouseItemTransferAuthority.CanApply(
+                selections,
+                equipment => ExactItemCount(actorParty.ItemRoster, equipment),
+                equipment => ExactItemCount(baseParty.ItemRoster, equipment),
+                out string failure))
+            throw new InvalidOperationException(failure);
+
+        // Keep Coop's roster patches live: these are authoritative server mutations and their
+        // deltas must reach the player and the safehouse roster on every rendered client.
+        FourberieReplicationGuard.EnsureEnabled();
+        foreach ((EquipmentElement equipment, int delta) in selections)
+        {
+            actorParty.ItemRoster.AddToCounts(equipment, -delta);
+            baseParty.ItemRoster.AddToCounts(equipment, delta);
         }
     }
 
@@ -1211,6 +1304,28 @@ internal sealed class FourberieOperationExecutor
                 throw new InvalidOperationException("selected troop no longer exists");
             yield return (troop, selection.Count);
         }
+    }
+
+    private IEnumerable<(EquipmentElement Equipment, int Delta)> ResolveItems(
+        IEnumerable<FourberieItemSelection> selections)
+    {
+        foreach (FourberieItemSelection selection in selections)
+        {
+            if (!objectManager.TryGetObject(selection.ItemId, out ItemObject item) || item == null)
+                throw new InvalidOperationException("selected item no longer exists");
+            ItemModifier modifier = null;
+            if (!string.IsNullOrEmpty(selection.ItemModifierId) &&
+                (!objectManager.TryGetObject(selection.ItemModifierId, out modifier) || modifier == null))
+                throw new InvalidOperationException("selected item modifier no longer exists");
+            yield return (new EquipmentElement(item, modifier), selection.DeltaToSafehouse);
+        }
+    }
+
+    private static int ExactItemCount(ItemRoster roster, EquipmentElement equipment)
+    {
+        if (roster == null) return 0;
+        int index = roster.FindIndexOfElement(equipment);
+        return index < 0 ? 0 : roster.GetElementCopyAtIndex(index).Amount;
     }
 
     private bool IsBanditRecruitEligible(CharacterObject troop, string cultureId)

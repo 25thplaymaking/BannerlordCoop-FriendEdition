@@ -9,13 +9,15 @@ public sealed record LauncherApplyRequest(
     string StagedExecutablePath,
     string TargetExecutablePath,
     int PreviousProcessId,
-    string ExpectedSha256);
+    string ExpectedSha256,
+    bool ContinuePreparation = false);
 
 public sealed record LauncherCompletionRequest(
     string TargetExecutablePath,
     int HelperProcessId,
     string StageDirectory,
-    string BackupPath);
+    string BackupPath,
+    bool ContinuePreparation = false);
 
 public readonly record struct LauncherApplyResult(bool Succeeded, string Message);
 
@@ -24,6 +26,7 @@ public static class LauncherUpdateApplier
 {
     public const string CompletionSwitch = "--launcher-update-complete";
     public const string SkipOnceSwitch = "--skip-launcher-update-once";
+    public const string ContinuePreparationSwitch = "--continue-army-preparation";
     internal const string StagePrefix = ".calradia-launcher-update-";
 
     internal static bool ShouldSkipSelfUpdate(string[] args) =>
@@ -35,7 +38,9 @@ public static class LauncherUpdateApplier
         out LauncherApplyRequest? request)
     {
         request = null;
-        if (args.Length != 4 || args[0] != LauncherUpdateCommand.ApplySwitch ||
+        bool continuePreparation = args.Length == 5 && args[4] == ContinuePreparationSwitch;
+        if ((args.Length != 4 && !continuePreparation) ||
+            args[0] != LauncherUpdateCommand.ApplySwitch ||
             !int.TryParse(args[2], NumberStyles.None, CultureInfo.InvariantCulture, out int previousPid) ||
             !IsSha256(args[3]))
             return false;
@@ -46,7 +51,8 @@ public static class LauncherUpdateApplier
                 Path.GetFullPath(runningExecutablePath),
                 Path.GetFullPath(args[1]),
                 previousPid,
-                args[3].ToLowerInvariant());
+                args[3].ToLowerInvariant(),
+                continuePreparation);
             if (!IsSafeApplyLayout(candidate)) return false;
             request = candidate;
             return true;
@@ -89,7 +95,8 @@ public static class LauncherUpdateApplier
             replaced = true;
 
             Process? relaunched = start(BuildCompletionStartInfo(
-                target, Environment.ProcessId, stageDirectory, backup));
+                target, Environment.ProcessId, stageDirectory, backup,
+                request.ContinuePreparation));
             if (relaunched is null)
                 throw new InvalidOperationException("The updated launcher process did not start.");
 
@@ -111,7 +118,8 @@ public static class LauncherUpdateApplier
         out LauncherCompletionRequest? request)
     {
         request = null;
-        if (args.Length != 4 || args[0] != CompletionSwitch ||
+        bool continuePreparation = args.Length == 5 && args[4] == ContinuePreparationSwitch;
+        if ((args.Length != 4 && !continuePreparation) || args[0] != CompletionSwitch ||
             !int.TryParse(args[1], NumberStyles.None, CultureInfo.InvariantCulture, out int helperPid))
             return false;
 
@@ -121,7 +129,8 @@ public static class LauncherUpdateApplier
                 Path.GetFullPath(targetExecutablePath),
                 helperPid,
                 Path.GetFullPath(args[2]),
-                Path.GetFullPath(args[3]));
+                Path.GetFullPath(args[3]),
+                continuePreparation);
             if (!IsSafeCompletionLayout(candidate)) return false;
             request = candidate;
             return true;
@@ -152,13 +161,19 @@ public static class LauncherUpdateApplier
     }
 
     private static ProcessStartInfo BuildCompletionStartInfo(
-        string target, int helperPid, string stageDirectory, string backup)
+        string target,
+        int helperPid,
+        string stageDirectory,
+        string backup,
+        bool continuePreparation)
     {
         var info = NewStartInfo(target);
         info.ArgumentList.Add(CompletionSwitch);
         info.ArgumentList.Add(helperPid.ToString(CultureInfo.InvariantCulture));
         info.ArgumentList.Add(stageDirectory);
         info.ArgumentList.Add(backup);
+        if (continuePreparation)
+            info.ArgumentList.Add(ContinuePreparationSwitch);
         return info;
     }
 

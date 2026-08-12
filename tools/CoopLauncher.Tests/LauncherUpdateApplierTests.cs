@@ -49,6 +49,35 @@ public sealed class LauncherUpdateApplierTests
     }
 
     [Fact]
+    public void ApprovedPreparation_ContinuesExactlyOnceAfterReplacement()
+    {
+        using var fixture = new ApplyFixture();
+        ProcessStartInfo? relaunch = null;
+        var request = new LauncherApplyRequest(
+            fixture.StagedExe, fixture.TargetExe, 123, fixture.StagedSha,
+            ContinuePreparation: true);
+
+        LauncherApplyResult result = LauncherUpdateApplier.ApplyAndRelaunch(
+            request,
+            _ => true,
+            info => { relaunch = info; return new Process(); });
+
+        Assert.True(result.Succeeded, result.Message);
+        Assert.NotNull(relaunch);
+        Assert.Equal(LauncherUpdateApplier.ContinuePreparationSwitch, relaunch!.ArgumentList[4]);
+        Assert.Equal(5, relaunch.ArgumentList.Count);
+        Assert.True(LauncherUpdateApplier.TryParseCompletionArguments(
+            relaunch.ArgumentList.ToArray(), fixture.TargetExe,
+            out LauncherCompletionRequest? completion));
+        Assert.True(completion!.ContinuePreparation);
+
+        var duplicate = relaunch.ArgumentList.ToList();
+        duplicate.Add(LauncherUpdateApplier.ContinuePreparationSwitch);
+        Assert.False(LauncherUpdateApplier.TryParseCompletionArguments(
+            duplicate.ToArray(), fixture.TargetExe, out _));
+    }
+
+    [Fact]
     public void RelaunchFailure_RestoresOriginalAndStartsRollbackOnce()
     {
         using var fixture = new ApplyFixture();
@@ -71,6 +100,7 @@ public sealed class LauncherUpdateApplierTests
         Assert.Equal(fixture.ConfigBytes, File.ReadAllBytes(fixture.ConfigPath));
         Assert.Equal(2, starts.Count);
         Assert.Equal(LauncherUpdateApplier.SkipOnceSwitch, starts[1].ArgumentList[0]);
+        Assert.Single(starts[1].ArgumentList);
     }
 
     [Fact]

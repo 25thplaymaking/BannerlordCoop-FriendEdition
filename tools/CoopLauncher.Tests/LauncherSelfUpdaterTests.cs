@@ -242,6 +242,29 @@ public sealed class LauncherSelfUpdaterTests
         Assert.Equal(sha, started.ArgumentList[3]);
     }
 
+    [Fact]
+    public async Task StageCheckedManifest_CarriesPreparationConsentToApplyProcess()
+    {
+        byte[] payload = Encoding.UTF8.GetBytes("new launcher");
+        string sha = Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();
+        using var http = new HttpClient(new StubHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(payload) }));
+        using var fixture = new UpdateFixture();
+        ProcessStartInfo? started = null;
+
+        LauncherUpdateResult result = await Updater(http).StageAsync(
+            fixture.TargetExe,
+            Manifest("2.0.0", sha),
+            (_, _, _) => { },
+            continuePreparation: true,
+            info => { started = info; return new Process(); });
+
+        Assert.Equal(LauncherUpdateOutcome.Restarting, result.Outcome);
+        Assert.NotNull(started);
+        Assert.Equal(LauncherUpdateApplier.ContinuePreparationSwitch, started!.ArgumentList[4]);
+        Assert.Equal(5, started.ArgumentList.Count);
+    }
+
     [Theory]
     [InlineData(LauncherUpdateOutcome.Failed, false)]
     [InlineData(LauncherUpdateOutcome.Offline, true)]

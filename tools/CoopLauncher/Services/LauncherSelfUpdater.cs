@@ -15,7 +15,8 @@ public sealed record LauncherUpdateCommand(
     string StagedExecutablePath,
     string TargetExecutablePath,
     int PreviousProcessId,
-    string ExpectedSha256)
+    string ExpectedSha256,
+    bool ContinuePreparation = false)
 {
     public const string ApplySwitch = "--apply-launcher-update";
 
@@ -31,12 +32,14 @@ public sealed record LauncherUpdateCommand(
         info.ArgumentList.Add(TargetExecutablePath);
         info.ArgumentList.Add(PreviousProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
         info.ArgumentList.Add(ExpectedSha256);
+        if (ContinuePreparation)
+            info.ArgumentList.Add(LauncherUpdateApplier.ContinuePreparationSwitch);
         return info;
     }
 }
 
 /// <summary>Checks and stages updates for the portable launcher executable.</summary>
-public sealed class LauncherSelfUpdater
+public sealed class LauncherSelfUpdater : ILauncherUpdateService
 {
     private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromSeconds(20) };
 
@@ -115,45 +118,45 @@ public sealed class LauncherSelfUpdater
         Action<double, string> progress,
         Func<ProcessStartInfo, Process?>? startProcess = null)
     {
-        if (string.IsNullOrWhiteSpace(_config.LauncherManifestUrl))
-            return new(LauncherUpdateOutcome.Disabled, "launcher updates off");
-
-        LauncherUpdateManifest? manifest;
-        try
+        progress(-1, "Checking launcher…");
+        LauncherUpdateCheck check = await CheckAsync(currentVersion);
+        if (check.Status.State == ComponentUpdateState.Unverified)
         {
-            progress(-1, "Checking launcher…");
-            using HttpResponseMessage response = await _http.GetAsync(_config.LauncherManifestUrl);
-            if (!response.IsSuccessStatusCode)
-                return new(LauncherUpdateOutcome.Failed,
-                    $"launcher feed returned HTTP {(int)response.StatusCode} — update required");
-            try
-            {
-                manifest = JsonSerializer.Deserialize<LauncherUpdateManifest>(
-                    await response.Content.ReadAsStringAsync());
-            }
-            catch (JsonException)
-            {
-                return new(LauncherUpdateOutcome.Failed, "launcher feed was malformed — update required");
-            }
+            bool offline = check.Status.Detail.Contains("reach", StringComparison.OrdinalIgnoreCase) ||
+                           check.Status.Detail.Contains("timed out", StringComparison.OrdinalIgnoreCase);
+            return new(
+                offline ? LauncherUpdateOutcome.Offline : LauncherUpdateOutcome.Failed,
+                check.Status.Detail);
         }
-        catch (HttpRequestException ex) when (ex.StatusCode is not null)
-        {
-            return new(LauncherUpdateOutcome.Failed,
-                $"launcher feed returned HTTP {(int)ex.StatusCode} — update required");
-        }
-        catch (HttpRequestException)
-        {
-            return new(LauncherUpdateOutcome.Offline, "Couldn't reach launcher feed — using installed");
-        }
-        catch (TaskCanceledException)
-        {
-            return new(LauncherUpdateOutcome.Offline, "Launcher update check timed out — using installed");
-        }
-
-        if (!IsManifestValid(manifest))
-            return new(LauncherUpdateOutcome.Failed, "launcher feed was malformed — update required");
-        if (!IsNewer(manifest!.Version, currentVersion))
+        if (check.Status.State == ComponentUpdateState.Current)
             return new(LauncherUpdateOutcome.UpToDate, $"launcher: up to date ({currentVersion})");
+        if (check.Manifest is null)
+            return new(LauncherUpdateOutcome.Failed, "launcher update plan was incomplete");
+
+        return await StageAsync(
+            executablePath,
+            check.Manifest,
+            (_, fraction, message) => progress(fraction, message),
+            continuePreparation: false,
+            startProcess);
+    }
+
+    public Task<LauncherUpdateResult> StageAsync(
+        string executablePath,
+        LauncherUpdateManifest manifest,
+        Action<ArmoryComponent, double, string> progress,
+        bool continuePreparation) =>
+        StageAsync(executablePath, manifest, progress, continuePreparation, startProcess: null);
+
+    internal async Task<LauncherUpdateResult> StageAsync(
+        string executablePath,
+        LauncherUpdateManifest manifest,
+        Action<ArmoryComponent, double, string> progress,
+        bool continuePreparation,
+        Func<ProcessStartInfo, Process?>? startProcess)
+    {
+        if (!IsManifestValid(manifest))
+            return new(LauncherUpdateOutcome.Failed, "launcher update plan was invalid");
 
         string target = Path.GetFullPath(executablePath);
         string? targetDirectory = Path.GetDirectoryName(target);
@@ -167,7 +170,7 @@ public sealed class LauncherSelfUpdater
         try
         {
             Directory.CreateDirectory(stageDirectory);
-            progress(-1, $"Downloading launcher {manifest.Version}…");
+            progress(ArmoryComponent.Launcher, -1, $"Downloading launcher {manifest.Version}…");
             using HttpResponseMessage response = await _http.GetAsync(
                 manifest.LauncherUrl, HttpCompletionOption.ResponseHeadersRead);
             if (!response.IsSuccessStatusCode)
@@ -178,14 +181,14 @@ public sealed class LauncherSelfUpdater
             await using (var destination = File.Create(stagedExecutable))
                 await source.CopyToAsync(destination);
 
-            progress(-1, "Verifying launcher…");
+            progress(ArmoryComponent.Launcher, -1, "Verifying launcher…");
             string actualSha = await Sha256HexAsync(stagedExecutable);
             if (!actualSha.Equals(manifest.Sha256.Trim(), StringComparison.OrdinalIgnoreCase))
                 return new(LauncherUpdateOutcome.Failed,
                     "launcher failed integrity check — installed kept");
 
             var command = new LauncherUpdateCommand(
-                stagedExecutable, target, Environment.ProcessId, actualSha);
+                stagedExecutable, target, Environment.ProcessId, actualSha, continuePreparation);
             Process? process = (startProcess ?? Process.Start)(command.CreateStartInfo());
             if (process is null)
                 return new(LauncherUpdateOutcome.Failed, "launcher update could not start — installed kept");

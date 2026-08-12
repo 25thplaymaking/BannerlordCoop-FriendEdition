@@ -9,11 +9,15 @@ group host — no module list, no manual connect. Replaces `Desktop\Play Friend 
    (`libraryfolders.vdf`, app `261550`).
 2. **Shows host status** — TCP-probes `serverHost:serverPort`; the banner sigil glows gold when the
    campaign is up, steel when it's down (re-probed every 12 s).
-3. **Self-updates the launcher** — checks the configured GitHub Release when it opens, verifies the
-   replacement executable by SHA-256, atomically swaps it with rollback, and restarts once.
-4. **Updates the mod suite and client** — pulls SHA-256-verified release zips and exact-replaces their
-   `Modules\` payload. A truly unreachable feed uses the installed build; a reached-invalid feed blocks.
-5. **Launches + auto-joins** — the launcher shows a masked join-password field, then runs:
+3. **Checks all three update receipts** — queries the launcher, mod-suite, and co-op-client manifests
+   when it opens without downloading payloads. Each installed and available version stays visible.
+4. **Prepares only when asked** — when any component is older or missing, **PREPARE YOUR ARMY**
+   downloads the SHA-256-verified updates, exact-replaces their `Modules\` payloads, and applies the
+   launcher first with rollback and a one-time continuation after restart.
+5. **Fails closed when versions cannot be verified** — an unreachable, timed-out, missing, or invalid
+   required feed shows **THE COURT JESTER IS ASLEEP** and blocks joining until a retry succeeds.
+6. **Launches + auto-joins** — **MARCH TO WAR** appears only after every component is verified current.
+   The launcher shows a masked join-password field, then runs:
    ```
    Bannerlord.exe /singleplayer <moduleToken> /coopjoin <serverHost> <serverPort> <serverPassword>
    ```
@@ -37,9 +41,9 @@ it with the **Serilog 4.x** flip (see below), same as `GameInterface.dll`.
 | `serverPassword` | optional default for the masked join-password field; blank in the public release |
 | `moduleToken` | `/singleplayer` launch order — full set minus RBM, in handshake order |
 | `gamePath` | explicit install root, or empty to auto-detect |
-| `launcherManifestUrl` | launcher executable feed; stable by default, empty to disable |
-| `updateManifestUrl` | build-feed JSON URL, or empty to disable updates |
-| `suiteManifestUrl` | byte-exact framework/workshop-mod suite feed, or empty to disable |
+| `launcherManifestUrl` | required launcher executable feed; stable by default |
+| `updateManifestUrl` | required co-op-client build-feed JSON URL |
+| `suiteManifestUrl` | required byte-exact framework/workshop-mod suite feed |
 
 ## Build & distribute
 
@@ -55,7 +59,8 @@ it with the **Serilog 4.x** flip (see below), same as `GameInterface.dll`.
 Hand a friend `CalradiaCoop.exe` plus `launcher-config.json` in the same folder. They can enter the
 private password at launch; the UI does not save it or log it. Never commit or attach a populated
 `serverPassword` to a public release. Launchers downloaded before self-update was added need this one
-manual replacement; after that, the executable updates itself and preserves the adjacent config.
+manual replacement; after that, **PREPARE YOUR ARMY** can replace the executable while preserving the
+adjacent config. Opening the launcher checks versions but does not install anything without that click.
 
 Design review render (no window shown, no focus steal): `CalradiaCoop.exe --shoot preview.png`.
 
@@ -99,5 +104,22 @@ The launcher extracts each verified zip into a private staging directory on the 
 exact-replaces the zip's top-level module directories. Stale files are removed by replacement, and
 any move/version-write failure restores every previous module directory. A malformed manifest, an HTTP
 error from a reached feed, integrity failure, unsafe archive path, or failed install disables **MARCH TO
-WAR** until the required update succeeds; a genuinely unreachable feed still permits the already-installed
-build.
+WAR** until the required update succeeds. A genuinely unreachable feed also blocks: the launcher will
+not claim the installed files match the server when GitHub cannot confirm their required versions.
+
+## Member update flow
+
+1. Opening the launcher shows `Checking…` for **Launcher**, **Mod suite**, and **Co-op client**.
+2. If all three receipts match, their versions show `Current` and the primary action becomes
+   **MARCH TO WAR**.
+3. If any required version is newer or absent, the row shows installed → available and the primary
+   action becomes **PREPARE YOUR ARMY**. Nothing downloads before that click.
+4. Preparation re-queries all manifests, applies the launcher first when needed, resumes the same
+   approved transaction after restart, then installs the suite and client in that order.
+5. A final manifest query and local receipt read must confirm all three components current before
+   **MARCH TO WAR** is enabled.
+6. If GitHub or any required feed cannot be verified, **TRY THE JESTER AGAIN** performs only a fresh
+   manifest check; it never launches Bannerlord.
+
+These operations touch only the portable launcher and Bannerlord's `Modules` installation. They do
+not create or migrate a campaign save and do not change the game server or its selected save.

@@ -1,6 +1,7 @@
 using System.IO;
 using System.Reflection;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -12,42 +13,56 @@ namespace CoopLauncher;
 public partial class MainWindow : Window
 {
     private readonly LauncherConfig _config;
-    private readonly bool _skipLauncherUpdate;
-    private string? _bannerlordExe;
+    private readonly ArmoryUpdateCoordinator _updates;
+    private readonly bool _continuePreparation;
     private readonly DispatcherTimer _statusTimer = new() { Interval = TimeSpan.FromSeconds(12) };
+
+    private string? _bannerlordExe;
+    private string? _modulesDir;
+    private ArmorySnapshot? _snapshot;
+    private bool _operationActive;
+    private bool _preparationFailed;
 
     private SolidColorBrush Gold => (SolidColorBrush)FindResource("Gold");
     private SolidColorBrush Steel => (SolidColorBrush)FindResource("Steel");
     private SolidColorBrush Parchment => (SolidColorBrush)FindResource("Parchment");
 
-    public MainWindow() : this(shootMode: false, skipLauncherUpdate: false) { }
+    public MainWindow() : this(shootMode: false, continuePreparation: false) { }
 
-    public MainWindow(bool shootMode, bool skipLauncherUpdate = false)
+    public MainWindow(bool shootMode, bool continuePreparation = false)
     {
         InitializeComponent();
 
-        _skipLauncherUpdate = skipLauncherUpdate;
+        _continuePreparation = continuePreparation;
 
-        var configPath = Path.Combine(AppContext.BaseDirectory, "launcher-config.json");
+        string configPath = Path.Combine(AppContext.BaseDirectory, "launcher-config.json");
         _config = LauncherConfig.Load(configPath);
+        _updates = new ArmoryUpdateCoordinator(_config);
         TitleText.Text = _config.GroupName;
         Title = _config.GroupName;
         ServerPasswordBox.Password = _config.ServerPassword;
 
         if (shootMode)
         {
-            // Static, representative "host online, ready to ride" look for the offscreen render.
             SetStatus(online: true, $"ONLINE — {_config.ServerHost}:{_config.ServerPort}");
+            LauncherUpdateValue.Text = "Current — 2026.8.12.8";
+            SuiteUpdateValue.Text = "Current — 2026.08.12.0218";
+            ClientUpdateValue.Text = "Current — 2026.08.12.1517";
+            ArmoryHeadline.Text = "YOUR ARMY IS READY";
+            ArmoryDetail.Text = "Every required component is verified current.";
+            JoinButton.Content = "MARCH TO WAR";
             JoinButton.IsEnabled = true;
-            UpdateText.Text = "Up to date (build 2026.08.10)";
+            UpdateText.Text = "All update scrolls verified.";
             return;
         }
 
-        TitleBar.MouseLeftButtonDown += (_, e) => { if (e.ButtonState == MouseButtonState.Pressed) DragMove(); };
+        TitleBar.MouseLeftButtonDown += (_, e) =>
+        {
+            if (e.ButtonState == MouseButtonState.Pressed) DragMove();
+        };
         MinButton.Click += (_, _) => WindowState = WindowState.Minimized;
         CloseButton.Click += (_, _) => Close();
-        JoinButton.Click += OnJoinClicked;
-
+        JoinButton.Click += OnPrimaryClicked;
         _statusTimer.Tick += async (_, _) => await RefreshStatusAsync();
 
         Loaded += OnLoaded;
@@ -56,7 +71,7 @@ public partial class MainWindow : Window
     /// <summary>Renders the window's visual tree to a PNG without showing it (design review only).</summary>
     public void RenderToFile(string path)
     {
-        var root = (System.Windows.Media.Visual)Content;
+        var root = (Visual)Content;
         var element = (FrameworkElement)root;
         var size = new Size(Width, Height);
         element.Measure(size);
@@ -64,7 +79,7 @@ public partial class MainWindow : Window
         element.UpdateLayout();
 
         var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(
-            (int)Width, (int)Height, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            (int)Width, (int)Height, 96, 96, PixelFormats.Pbgra32);
         rtb.Render(element);
 
         var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
@@ -78,24 +93,6 @@ public partial class MainWindow : Window
         UnfurlBanner();
         Log.Begin();
 
-        if (!_skipLauncherUpdate)
-        {
-            LauncherUpdateResult launcherUpdate = await RunLauncherUpdateAsync();
-            if (launcherUpdate.Outcome == LauncherUpdateOutcome.Restarting)
-            {
-                JoinButton.Content = "RESTARTING…";
-                JoinButton.IsEnabled = false;
-                Close();
-                return;
-            }
-            if (!CanContinueAfterLauncherUpdate(launcherUpdate))
-            {
-                JoinButton.Content = "UPDATE REQUIRED";
-                JoinButton.IsEnabled = false;
-                return;
-            }
-        }
-
         _bannerlordExe = GameLocator.FindBannerlordExe(_config.GamePath);
         Log.Write(_bannerlordExe is null
             ? $"Bannerlord.exe NOT found (configured gamePath='{_config.GamePath}')"
@@ -103,51 +100,321 @@ public partial class MainWindow : Window
         if (_bannerlordExe is null)
         {
             SetStatus(online: false, "Bannerlord not found — set gamePath in launcher-config.json");
-            JoinButton.Content = "GAME NOT FOUND";
-            JoinButton.IsEnabled = false;
+            SetGameMissingState();
             return;
         }
 
-        // First status read, then keep it live so the banner reflects the host without a relaunch.
+        _modulesDir = GameLocator.FindModulesDir(_bannerlordExe);
+        if (_modulesDir is null)
+        {
+            SetStatus(online: false, "Bannerlord Modules folder not found");
+            SetGameMissingState();
+            return;
+        }
+
         await RefreshStatusAsync();
         _statusTimer.Start();
+        await CheckArmoryAsync();
 
-        var update = await RunUpdateAsync();
-        JoinButton.IsEnabled = CanJoinAfterUpdate(update);
-        if (!JoinButton.IsEnabled)
-            JoinButton.Content = "UPDATE REQUIRED";
+        if (_continuePreparation &&
+            _snapshot?.PrimaryAction == ArmoryPrimaryAction.Prepare)
+            await PrepareArmyAsync();
     }
 
-    private async Task<LauncherUpdateResult> RunLauncherUpdateAsync()
+    private void SetGameMissingState()
     {
-        string? executablePath = Environment.ProcessPath;
-        Version currentVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0);
-        if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
-            return new(LauncherUpdateOutcome.Failed, "launcher executable path was unavailable");
+        LauncherUpdateValue.Text = "Not checked";
+        SuiteUpdateValue.Text = "Could not inspect";
+        ClientUpdateValue.Text = "Could not inspect";
+        ArmoryHeadline.Text = "THE MUSTER GROUND IS MISSING";
+        ArmoryDetail.Text = "Bannerlord must be located before the army can be verified.";
+        UpdateText.Text = "Set gamePath in launcher-config.json or repair the Steam installation.";
+        JoinButton.Content = "GAME NOT FOUND";
+        JoinButton.IsEnabled = false;
+    }
 
+    private async Task CheckArmoryAsync()
+    {
+        if (_operationActive || _modulesDir is null) return;
+
+        _operationActive = true;
+        _preparationFailed = false;
+        SetCheckingState();
+        try
+        {
+            Version currentVersion =
+                Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0);
+            _snapshot = await _updates.CheckAsync(currentVersion, _modulesDir);
+            LogSnapshot(_snapshot);
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"Armory check failed unexpectedly: {ex}");
+            _snapshot = UnexpectedFailureSnapshot(
+                Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0");
+        }
+        finally
+        {
+            _operationActive = false;
+            if (_snapshot is not null) RenderSnapshot(_snapshot);
+        }
+    }
+
+    private async Task PrepareArmyAsync()
+    {
+        if (_operationActive || _snapshot is null || _modulesDir is null ||
+            _snapshot.PrimaryAction != ArmoryPrimaryAction.Prepare)
+            return;
+
+        string? executablePath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
+        {
+            _preparationFailed = true;
+            ArmoryHeadline.Text = "THE QUARTERMASTER LOST THE LAUNCHER";
+            ArmoryDetail.Text = "The launcher executable could not be located. Reopen it and try again.";
+            JoinButton.Content = "TRY PREPARING AGAIN";
+            JoinButton.IsEnabled = true;
+            return;
+        }
+
+        _operationActive = true;
+        _preparationFailed = false;
+        bool restarting = false;
+        JoinButton.Content = "PREPARING YOUR ARMY…";
+        JoinButton.IsEnabled = false;
         UpdateBar.Visibility = Visibility.Visible;
         UpdateBar.IsIndeterminate = true;
-        var updater = new LauncherSelfUpdater(_config);
-        LauncherUpdateResult result = await updater.CheckAndStageAsync(
-            executablePath, currentVersion, (fraction, message) => Dispatcher.Invoke(() =>
-            {
-                UpdateBar.IsIndeterminate = fraction < 0;
-                if (fraction >= 0) UpdateBar.Value = fraction;
-                UpdateText.Text = message;
-            }));
+        UpdateText.Text = "Re-reading the royal update scrolls…";
 
+        try
+        {
+            Version currentVersion =
+                Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0);
+            ArmoryPreparationResult result = await _updates.PrepareAsync(
+                executablePath,
+                currentVersion,
+                _modulesDir,
+                (component, fraction, message) => Dispatcher.Invoke(() =>
+                    RenderProgress(component, fraction, message)));
+
+            _snapshot = result.Snapshot;
+            Log.Write($"Army preparation: {result.Outcome} — {result.Message}");
+            if (result.Outcome == ArmoryPreparationOutcome.Restarting)
+            {
+                restarting = true;
+                JoinButton.Content = "RESTARTING THE MUSTER…";
+                UpdateText.Text = result.Message;
+                Close();
+                return;
+            }
+
+            if (result.Outcome == ArmoryPreparationOutcome.Completed)
+            {
+                RenderSnapshot(result.Snapshot);
+                return;
+            }
+
+            if (result.Outcome == ArmoryPreparationOutcome.Unverified)
+            {
+                RenderSnapshot(result.Snapshot);
+                return;
+            }
+
+            _preparationFailed = true;
+            RenderSnapshot(result.Snapshot);
+            ArmoryHeadline.Text = "THE QUARTERMASTER FUMBLED THE CRATES";
+            ArmoryDetail.Text = result.Message;
+            JoinButton.Content = "TRY PREPARING AGAIN";
+            JoinButton.IsEnabled = true;
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"Army preparation failed unexpectedly: {ex}");
+            _preparationFailed = true;
+            ArmoryHeadline.Text = "THE QUARTERMASTER FUMBLED THE CRATES";
+            ArmoryDetail.Text = "The installed army was kept intact. Try preparing again.";
+            UpdateText.Text = $"Preparation failed. Details: {Log.Path}";
+            JoinButton.Content = "TRY PREPARING AGAIN";
+            JoinButton.IsEnabled = true;
+        }
+        finally
+        {
+            if (!restarting)
+            {
+                _operationActive = false;
+                UpdateBar.IsIndeterminate = false;
+            }
+        }
+    }
+
+    private void SetCheckingState()
+    {
+        LauncherUpdateValue.Text = "Checking…";
+        SuiteUpdateValue.Text = "Checking…";
+        ClientUpdateValue.Text = "Checking…";
+        LauncherUpdateValue.Foreground = Steel;
+        SuiteUpdateValue.Foreground = Steel;
+        ClientUpdateValue.Foreground = Steel;
+        ArmoryHeadline.Text = "CHECKING THE ARMORY";
+        ArmoryDetail.Text = "Reading all three royal update scrolls.";
+        UpdateBar.Visibility = Visibility.Visible;
+        UpdateBar.IsIndeterminate = true;
+        UpdateText.Text = "No files are downloaded during this check.";
+        JoinButton.Content = "CHECKING THE ARMORY…";
+        JoinButton.IsEnabled = false;
+    }
+
+    private void RenderSnapshot(ArmorySnapshot snapshot)
+    {
+        RenderComponent(LauncherUpdateValue, snapshot.Launcher.Status);
+        RenderComponent(SuiteUpdateValue, snapshot.Mods.SuiteStatus);
+        RenderComponent(ClientUpdateValue, snapshot.Mods.ClientStatus);
+
+        ArmoryHeadline.Text = ArmoryHeadlineFor(snapshot);
+        ArmoryDetail.Text = ArmoryDetailFor(snapshot);
         UpdateBar.IsIndeterminate = false;
-        UpdateBar.Value = result.Outcome == LauncherUpdateOutcome.Restarting ? 1 : 0;
-        if (result.Outcome is LauncherUpdateOutcome.Disabled or LauncherUpdateOutcome.UpToDate)
-            UpdateBar.Visibility = Visibility.Collapsed;
-        UpdateText.Text = result.Message;
-        Log.Write($"Launcher update: {result.Outcome} — {result.Message}");
-        return result;
+        UpdateBar.Value = 0;
+        UpdateBar.Visibility = Visibility.Collapsed;
+
+        if (snapshot.PrimaryAction == ArmoryPrimaryAction.RetryCheck)
+        {
+            string details = string.Join("  ", snapshot.Components
+                .Where(item => item.State == ComponentUpdateState.Unverified)
+                .Select(item => $"{item.Label}: {item.Detail}"));
+            UpdateText.Text = details;
+        }
+        else if (snapshot.PrimaryAction == ArmoryPrimaryAction.Prepare)
+        {
+            ComponentUpdateStatus? noted = snapshot.Components.FirstOrDefault(item =>
+                item.State == ComponentUpdateState.UpdateAvailable &&
+                !string.IsNullOrWhiteSpace(item.Notes));
+            UpdateText.Text = noted?.Notes ?? "Verified updates are ready to install.";
+        }
+        else
+        {
+            UpdateText.Text = "All update scrolls verified.";
+        }
+
+        JoinButton.Content = _preparationFailed
+            ? "TRY PREPARING AGAIN"
+            : PrimaryButtonText(snapshot.PrimaryAction);
+        JoinButton.IsEnabled = !_operationActive;
+    }
+
+    private void RenderComponent(TextBlock target, ComponentUpdateStatus status)
+    {
+        target.Text = ComponentStatusText(status);
+        target.Foreground = status.State switch
+        {
+            ComponentUpdateState.Current => Parchment,
+            ComponentUpdateState.UpdateAvailable => Gold,
+            _ => Steel,
+        };
+    }
+
+    private void RenderProgress(ArmoryComponent component, double fraction, string message)
+    {
+        UpdateBar.Visibility = Visibility.Visible;
+        UpdateBar.IsIndeterminate = fraction < 0;
+        if (fraction >= 0) UpdateBar.Value = fraction;
+        UpdateText.Text = message;
+
+        ComponentUpdateStatus? status = _snapshot?.Components.FirstOrDefault(item =>
+            item.Component == component);
+        TextBlock target = component switch
+        {
+            ArmoryComponent.Launcher => LauncherUpdateValue,
+            ArmoryComponent.ModSuite => SuiteUpdateValue,
+            _ => ClientUpdateValue,
+        };
+        target.Text = status?.AvailableVersion is { Length: > 0 } version
+            ? $"Updating to {version}…"
+            : "Updating…";
+        target.Foreground = Gold;
+    }
+
+    internal static string PrimaryButtonText(ArmoryPrimaryAction action) => action switch
+    {
+        ArmoryPrimaryAction.Launch => "MARCH TO WAR",
+        ArmoryPrimaryAction.Prepare => "PREPARE YOUR ARMY",
+        _ => "TRY THE JESTER AGAIN",
+    };
+
+    internal static string ArmoryHeadlineFor(ArmorySnapshot snapshot) =>
+        !snapshot.IsVerified
+            ? "THE COURT JESTER IS ASLEEP"
+            : snapshot.HasUpdates
+                ? "YOUR ARMY NEEDS PREPARATION"
+                : "YOUR ARMY IS READY";
+
+    internal static string ArmoryDetailFor(ArmorySnapshot snapshot) =>
+        !snapshot.IsVerified
+            ? "The royal update scrolls cannot be reached. Wake the jester and try again."
+            : snapshot.HasUpdates
+                ? "Verified updates are waiting. Prepare your army before marching."
+                : "Every required component is verified current.";
+
+    internal static string ComponentStatusText(ComponentUpdateStatus status) => status.State switch
+    {
+        ComponentUpdateState.Unverified => "Could not verify",
+        ComponentUpdateState.UpdateAvailable when string.IsNullOrWhiteSpace(status.InstalledVersion) =>
+            $"Not installed  →  {status.AvailableVersion}",
+        ComponentUpdateState.UpdateAvailable =>
+            $"{status.InstalledVersion}  →  {status.AvailableVersion}",
+        _ => $"Current — {status.InstalledVersion ?? status.AvailableVersion ?? "unknown"}",
+    };
+
+    internal static bool CanDispatchPrimaryAction(
+        bool operationActive,
+        ArmorySnapshot? snapshot) =>
+        !operationActive && snapshot is not null;
+
+    private static ArmorySnapshot UnexpectedFailureSnapshot(string launcherVersion)
+    {
+        ComponentUpdateStatus Failed(ArmoryComponent component, string label, string? installed) =>
+            new(component, label, installed, null, string.Empty,
+                ComponentUpdateState.Unverified, $"{label} check failed unexpectedly.");
+
+        return new ArmorySnapshot(
+            new LauncherUpdateCheck(
+                Failed(ArmoryComponent.Launcher, "Launcher", launcherVersion), null),
+            new ModUpdateCheck(
+                Failed(ArmoryComponent.ModSuite, "Mod suite", null), null,
+                Failed(ArmoryComponent.CoopClient, "Co-op client", null), null));
+    }
+
+    private static void LogSnapshot(ArmorySnapshot snapshot)
+    {
+        foreach (ComponentUpdateStatus component in snapshot.Components)
+        {
+            Log.Write(
+                $"Armory {component.Label}: {component.State}; " +
+                $"installed={component.InstalledVersion ?? "missing"}; " +
+                $"available={component.AvailableVersion ?? "unverified"}; {component.Detail}");
+        }
+    }
+
+    private async void OnPrimaryClicked(object sender, RoutedEventArgs e)
+    {
+        if (!CanDispatchPrimaryAction(_operationActive, _snapshot)) return;
+
+        switch (_snapshot!.PrimaryAction)
+        {
+            case ArmoryPrimaryAction.RetryCheck:
+                await CheckArmoryAsync();
+                break;
+            case ArmoryPrimaryAction.Prepare:
+                await PrepareArmyAsync();
+                break;
+            case ArmoryPrimaryAction.Launch:
+                await LaunchGameAsync();
+                break;
+        }
     }
 
     private void UnfurlBanner()
     {
-        if (!SystemParameters.ClientAreaAnimation) return;   // respect reduced-motion
+        if (!SystemParameters.ClientAreaAnimation) return;
         var unfurl = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(520))
         {
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
@@ -165,60 +432,19 @@ public partial class MainWindow : Window
 
     private void SetStatus(bool online, string text)
     {
-        var accent = online ? Gold : Steel;
+        SolidColorBrush accent = online ? Gold : Steel;
         StatusGlyph.Foreground = accent;
         StatusText.Foreground = online ? Parchment : Steel;
         StatusText.Text = text;
-        Sigil.Foreground = accent;   // the banner's sigil is the at-a-glance host indicator
+        Sigil.Foreground = accent;
     }
 
-    private async Task<UpdateResult> RunUpdateAsync()
+    private async Task LaunchGameAsync()
     {
-        var modulesDir = _bannerlordExe is null ? null : GameLocator.FindModulesDir(_bannerlordExe);
-        if (modulesDir is null)
-        {
-            var missing = new UpdateResult(UpdateOutcome.Failed, "Modules folder not found — update required");
-            UpdateText.Text = missing.Message;
-            return missing;
-        }
+        if (_bannerlordExe is null || _snapshot?.PrimaryAction != ArmoryPrimaryAction.Launch)
+            return;
 
-        UpdateBar.Visibility = Visibility.Visible;
-        UpdateBar.IsIndeterminate = false;
-
-        var updater = new ModUpdater(_config);
-        var result = await updater.RunAsync(modulesDir, (fraction, msg) =>
-        {
-            Dispatcher.Invoke(() =>
-            {
-                if (fraction < 0)
-                {
-                    UpdateBar.IsIndeterminate = true;
-                }
-                else
-                {
-                    UpdateBar.IsIndeterminate = false;
-                    UpdateBar.Value = fraction;
-                }
-                UpdateText.Text = msg;
-            });
-        });
-
-        UpdateBar.IsIndeterminate = false;
-        UpdateBar.Value = result.Outcome == UpdateOutcome.Updated ? 1 : 0;
-        if (result.Outcome is UpdateOutcome.Disabled or UpdateOutcome.UpToDate)
-            UpdateBar.Visibility = Visibility.Collapsed;
-        UpdateText.Text = result.Message;
-        return result;
-    }
-
-    internal static bool CanJoinAfterUpdate(UpdateResult result) => result.Outcome != UpdateOutcome.Failed;
-
-    internal static bool CanContinueAfterLauncherUpdate(LauncherUpdateResult result) =>
-        result.Outcome != LauncherUpdateOutcome.Failed;
-
-    private async void OnJoinClicked(object sender, RoutedEventArgs e)
-    {
-        if (_bannerlordExe is null) return;
+        _operationActive = true;
         try
         {
             JoinButton.IsEnabled = false;
@@ -227,19 +453,20 @@ public partial class MainWindow : Window
             bool steamUp = GameLauncher.IsSteamRunning();
             if (!steamUp) Log.Write("WARNING: Steam client does not appear to be running");
 
-            var proc = GameLauncher.Launch(_bannerlordExe, _config, ServerPasswordBox.Password);
+            var process = GameLauncher.Launch(
+                _bannerlordExe, _config, ServerPasswordBox.Password);
 
-            // Catch an instant exit (failed Steam init, a crash) so the launcher explains it instead of
-            // just vanishing — the classic "I hit play and nothing happened".
-            bool exitedFast = await Task.Run(() => proc.WaitForExit(9000));
+            bool exitedFast = await Task.Run(() => process.WaitForExit(9000));
             if (exitedFast)
             {
-                Log.Write($"Bannerlord exited within 9s (code 0x{proc.ExitCode:X}) — launch did not take");
+                Log.Write(
+                    $"Bannerlord exited within 9s (code 0x{process.ExitCode:X}) — launch did not take");
+                _operationActive = false;
                 JoinButton.IsEnabled = true;
                 JoinButton.Content = "MARCH TO WAR";
                 UpdateText.Foreground = Steel;
                 UpdateText.Text = steamUp
-                    ? $"Bannerlord closed immediately — check your game is v1.4.7. Log: {Log.Path}"
+                    ? $"Bannerlord closed immediately — check your game version. Log: {Log.Path}"
                     : "Bannerlord closed immediately — start Steam first, then try again.";
                 return;
             }
@@ -251,6 +478,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             Log.Write($"Launch threw: {ex}");
+            _operationActive = false;
             JoinButton.IsEnabled = true;
             JoinButton.Content = "MARCH TO WAR";
             UpdateText.Foreground = Steel;

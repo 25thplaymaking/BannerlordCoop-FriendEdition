@@ -15,6 +15,115 @@ public sealed class LauncherSelfUpdaterTests
     private const string ValidSha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     [Fact]
+    public async Task CheckOnly_NewerManifestDoesNotDownloadExecutable()
+    {
+        int manifestRequests = 0;
+        int executableRequests = 0;
+        using var http = new HttpClient(new StubHandler(request =>
+        {
+            Assert.True(request.Headers.CacheControl?.NoCache);
+            Assert.True(request.Headers.CacheControl?.NoStore);
+            if (request.RequestUri!.AbsolutePath.EndsWith("launcher.json"))
+            {
+                manifestRequests++;
+                return JsonResponse(Manifest("2.0.0", ValidSha));
+            }
+            executableRequests++;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(Encoding.UTF8.GetBytes("must not download")),
+            };
+        }));
+
+        LauncherUpdateCheck check = await Updater(http).CheckAsync(new Version(1, 0));
+
+        Assert.Equal(ComponentUpdateState.UpdateAvailable, check.Status.State);
+        Assert.Equal("1.0", check.Status.InstalledVersion);
+        Assert.Equal("2.0.0", check.Status.AvailableVersion);
+        Assert.Equal("test build", check.Status.Notes);
+        Assert.NotNull(check.Manifest);
+        Assert.Equal(1, manifestRequests);
+        Assert.Equal(0, executableRequests);
+    }
+
+    [Fact]
+    public async Task CheckOnly_UnreachableManifestIsUnverified()
+    {
+        using var http = new HttpClient(new StubHandler(_ =>
+            throw new HttpRequestException("offline")));
+
+        LauncherUpdateCheck check = await Updater(http).CheckAsync(new Version(1, 0));
+
+        Assert.Equal(ComponentUpdateState.Unverified, check.Status.State);
+        Assert.Null(check.Manifest);
+    }
+
+    [Fact]
+    public async Task CheckOnly_TimedOutManifestIsUnverified()
+    {
+        using var http = new HttpClient(new StubHandler(_ =>
+            throw new TaskCanceledException("timeout")));
+
+        LauncherUpdateCheck check = await Updater(http).CheckAsync(new Version(1, 0));
+
+        Assert.Equal(ComponentUpdateState.Unverified, check.Status.State);
+        Assert.Contains("timed out", check.Status.Detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CheckOnly_MissingRequiredFeedIsUnverified()
+    {
+        using var http = new HttpClient(new StubHandler(_ =>
+            throw new InvalidOperationException("HTTP must not be called")));
+        var updater = new LauncherSelfUpdater(new LauncherConfig { LauncherManifestUrl = "" }, http);
+
+        LauncherUpdateCheck check = await updater.CheckAsync(new Version(1, 0));
+
+        Assert.Equal(ComponentUpdateState.Unverified, check.Status.State);
+        Assert.Contains("not configured", check.Status.Detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound, "HTTP 404")]
+    [InlineData(HttpStatusCode.InternalServerError, "HTTP 500")]
+    public async Task CheckOnly_HttpFailureIsUnverified(HttpStatusCode status, string detail)
+    {
+        using var http = new HttpClient(new StubHandler(_ => new HttpResponseMessage(status)));
+
+        LauncherUpdateCheck check = await Updater(http).CheckAsync(new Version(1, 0));
+
+        Assert.Equal(ComponentUpdateState.Unverified, check.Status.State);
+        Assert.Contains(detail, check.Status.Detail);
+    }
+
+    [Fact]
+    public async Task CheckOnly_MalformedManifestIsUnverified()
+    {
+        using var http = new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{broken", Encoding.UTF8, "application/json"),
+        }));
+
+        LauncherUpdateCheck check = await Updater(http).CheckAsync(new Version(1, 0));
+
+        Assert.Equal(ComponentUpdateState.Unverified, check.Status.State);
+        Assert.Null(check.Manifest);
+    }
+
+    [Fact]
+    public async Task CheckOnly_EqualOrOlderRemoteVersionIsCurrent()
+    {
+        using var http = new HttpClient(new StubHandler(_ =>
+            JsonResponse(Manifest("1.0.0", ValidSha))));
+
+        LauncherUpdateCheck check = await Updater(http).CheckAsync(new Version(1, 1));
+
+        Assert.Equal(ComponentUpdateState.Current, check.Status.State);
+        Assert.Equal("1.1", check.Status.InstalledVersion);
+        Assert.Equal("1.0.0", check.Status.AvailableVersion);
+    }
+
+    [Fact]
     public void ManifestRequiresNumericVersionHttpsPayloadAndExactSha256()
     {
         var valid = new LauncherUpdateManifest
@@ -133,16 +242,27 @@ public sealed class LauncherSelfUpdaterTests
         Assert.Equal(sha, started.ArgumentList[3]);
     }
 
-    [Theory]
-    [InlineData(LauncherUpdateOutcome.Failed, false)]
-    [InlineData(LauncherUpdateOutcome.Offline, true)]
-    [InlineData(LauncherUpdateOutcome.UpToDate, true)]
-    [InlineData(LauncherUpdateOutcome.Disabled, true)]
-    public void StartupGate_BlocksOnlyFailedLauncherUpdate(
-        LauncherUpdateOutcome outcome, bool expected)
+    [Fact]
+    public async Task StageCheckedManifest_CarriesPreparationConsentToApplyProcess()
     {
-        Assert.Equal(expected, MainWindow.CanContinueAfterLauncherUpdate(
-            new LauncherUpdateResult(outcome, "status")));
+        byte[] payload = Encoding.UTF8.GetBytes("new launcher");
+        string sha = Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();
+        using var http = new HttpClient(new StubHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(payload) }));
+        using var fixture = new UpdateFixture();
+        ProcessStartInfo? started = null;
+
+        LauncherUpdateResult result = await Updater(http).StageAsync(
+            fixture.TargetExe,
+            Manifest("2.0.0", sha),
+            (_, _, _) => { },
+            continuePreparation: true,
+            info => { started = info; return new Process(); });
+
+        Assert.Equal(LauncherUpdateOutcome.Restarting, result.Outcome);
+        Assert.NotNull(started);
+        Assert.Equal(LauncherUpdateApplier.ContinuePreparationSwitch, started!.ArgumentList[4]);
+        Assert.Equal(5, started.ArgumentList.Count);
     }
 
     [Fact]

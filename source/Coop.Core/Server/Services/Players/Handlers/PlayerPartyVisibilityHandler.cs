@@ -122,6 +122,22 @@ internal class PlayerPartyVisibilityHandler : IHandler
         {
             deferredMapEventParking[party] = mapEvent;
             messageBroker.Publish(this, new PlayerDisconnectedFromMapEvent(player.ControllerId, mapEvent));
+
+            // A native hideout mission cannot resume its client-local boss-fight/cinematic state.
+            // Reconnecting the party into the retained MapEvent only returns it to the same black
+            // screen. Abort the event authoritatively; MapEventFinalized will finish parking the
+            // disconnected party once every MapEvent reference has been cleared.
+            if (mapEvent.EventType == MapEvent.BattleTypes.Hideout)
+            {
+                Logger.Warning(
+                    "Aborting unresumable hideout MapEvent {MapEventId} after party {PartyId} disconnected because {Reason}",
+                    mapEvent.StringId,
+                    party.StringId,
+                    reason);
+                messageBroker.Publish(this, new MapEventFinalizeAttempted(mapEvent));
+                return;
+            }
+
             Logger.Information(
                 "Keeping party {PartyId} active in MapEvent {MapEventId} because {Reason}",
                 party.StringId,

@@ -48,6 +48,15 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
   10,612,201-byte payload verified at SHA-256 `48b10731f32a7b3036a796d586dfdc6d478ffa26532bab5bec78bb6bececa7f7`.
   The paired server loaded the existing `friendallmods1` save, passed its full deployment ledger and
   release-pin check, reached `SERVING` on UDP 4200, and retained zero restarts. No new save was created.
+- **[nightly and paired server deployed; rendered validation pending] Upstream bugfix batch.**
+  Nine compatible upstream nightly fixes (#2968, #2913, #2905, #2897, #2898, #2899, #2884,
+  #2855, and #2768) shipped through launcher client version `2026.08.12.1517` and the matching
+  Serilog-2.x dedicated-server build. Server source release `d90c6a020` is paired to core SHA-256
+  `c966123121f21dc86b68fccef92ab0c5c576493052ee84aaf489f2bfd80aebc4`; every deployment-ledger
+  entry passed after restart. The host loaded the existing `friendallmods1` save and reached
+  `SERVING` on UDP 4200 with zero restarts and no fatal startup markers. No save was created or
+  migrated. Rollback snapshot:
+  `/home/bishop/bannerlord-coop/server/_mod_backups/pre-be838ba29-20260812T153007Z`.
 - **[candidate fixed; live validation pending] Auto-resolve vs bandit party loops the encounter menu.**
   (2026-08-11, Bryce, Sea Raiders.)
   Choosing **"Send your troops to attack"** (auto-resolve) instead of **"Attack!"** (manual) against a
@@ -299,7 +308,7 @@ rolls back canonical Fourberie state and created parties on failure, and returns
 - [ ] Goal: wire a NEW mod into co-op networking by writing one adapter class, not a
       hand-port. Document with one worked example (e.g. Diplomacy Donate Gold).
 
-### P6 — Upstream nightly sync — SOURCE VERIFIED (2026-08-12)
+### P6 — Upstream nightly sync — LIVE DEPLOYED (2026-08-12)
 - [x] Audited upstream nightly PRs after the Friend Edition base and selectively backported
       nine final reviewed bugfixes: #2968, #2913, #2905, #2897, #2898, #2899, #2884,
       #2855, and #2768. Bannerlord remains pinned to `v1.4.7`; upstream project/module
@@ -316,6 +325,9 @@ rolls back canonical Fourberie state and created parties on failure, and returns
       `31611057545`: safety, full unit/integration tests, Serilog 4.x client build, package, and
       publish all passed. The rolling `client-nightly` manifest is version `2026.08.12.1517`
       with SHA-256 `200226f389a847a65e2dd470d29373519d316014e2bef3705c4181025fefb286`.
+- [x] Matching Serilog 2.x server build deployed in place without changing the save identity.
+      `friendallmods1` loaded successfully; release-pin verification, the complete deployment
+      ledger, UDP 4200, and repeated server pulses are the live acceptance gates.
 - Deferred for separate reconciliation: #2931/#2912 overlap settlement authority work;
   #2941/#2773/#2863 overlap existing Friend Edition backports; #2867 overlaps custom auto-resolve;
   feature/content PRs and upstream 1.4.8/nightly-identity changes remain out of scope.

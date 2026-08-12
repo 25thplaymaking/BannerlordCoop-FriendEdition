@@ -103,6 +103,13 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
     `SERVER-COOP-PAIRING.json` beside `deployment-sha256.txt`. A `COOP MODULE VERIFICATION FAILED`
     line is a failed boot, never an acceptable warning.
 
+12. **Allow systemd's full stop timeout before touching the live files.** Wine can leave a helper
+    process in `final-sigterm` after the Bannerlord process exits, so this service may consume its
+    configured 45-second `TimeoutStopSec` and finish in `failed (Result: timeout)`. Do not race it
+    with a manual kill or start copying while it is deactivating. Wait until the unit is no longer
+    active and the Bannerlord `dotnet.exe` process is gone, take and byte-verify the save/module
+    rollback snapshot, install the paired payload, then `systemctl --user reset-failed` before start.
+
 ---
 
 ## Checklist: making a handshake-affecting change
@@ -115,6 +122,8 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
 - [ ] Put any backup OUTSIDE the module tree (`~/bannerlord-coop/server/_mod_backups/`).
 - [ ] Restart the service (`systemctl --user restart bannerlord-coop-seven.service`); confirm
       `phase":"serving"`, 4200 bound, `NRestarts 0`.
+- [ ] If stop reaches `final-sigterm`, wait out `TimeoutStopSec`; require the unit to be non-active
+      and the Bannerlord process absent before snapshotting or overwriting files.
 - [ ] **Server verify:** `find Modules/<mod> -type f | grep -vi win64_shipping_server` hashes match
       the client's for every active mod.
 - [ ] **Client verify:** launch `Play Friend Edition.cmd`, attempt Join, read `Coop_client.log`

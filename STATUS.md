@@ -31,31 +31,39 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 
 ## Known playtest bugs (live)
 
-- **[local patch verified; not deployed] Hideout boss-stage black screen and reconnect loop.**
+- **[stable and paired server deployed; live playtest validation pending] Hideout boss-stage black screen and reconnect loop.**
   (2026-08-12, Bryce.) Live logs tied the loop to a player disconnect during the hideout: the server retained
   the hideout map event as reconnectable even though the mission/boss-stage state could not be resumed. Commit
   `2dfdf38dd` now requests authoritative finalization for that disconnected hideout event and parks the party
   after the existing finalization callback; ordinary field battles and sieges retain reconnect behavior.
   Hideout tests pass (7/7), and the map-event collection passes 8 with its existing single skip.
-- **[local patch verified; not deployed] Fourberie prisoner and safehouse loot transfers did not persist.**
+- **[stable and paired server deployed; live playtest validation pending] Fourberie prisoner and safehouse loot transfers did not persist.**
   The earlier nightly moved prisoner enslavement to the server but still performed its roster/loot/skill changes
   inside `AllowedThread`, which suppresses the publishers clients need. Its generic stash route also submitted
   transient inventory-screen rosters that have no stable network identity. Commit `6e5463200` keeps replication
   enabled for prisoner removal, generated loot and Roguery XP, and adds a bounded stable item/modifier transfer
   command between the authenticated party and canonical crime-base roster. Fourberie tests pass (337/337).
-- **[local patch verified; not deployed] Send Troops skipped the loot/capture flow.**
+- **[stable and paired server deployed; live playtest validation pending] Send Troops skipped the loot/capture flow.**
   Map-event destruction was force-finishing an encounter already staged at `CaptureHeroes`, discarding the
   authoritative result rosters before the player could loot. Commit `cf20807cc` preserves that staged encounter
   while retaining cleanup for abandoned encounters. Battle-finalization tests pass (9/9); battle-result
   distribution tests pass (6/6).
-- **[local patch verified; not deployed] Tournament participants did not receive skill progression.**
+- **[stable and paired server deployed; live playtest validation pending] Tournament participants did not receive skill progression.**
   Every accepted match result marked the entire session as having live hit progression, even when no hit packet
   awarded XP; one player's accepted hit also suppressed fallback progression for every other participant.
   Commit `f6cf93d06` records accepted live progression per controller and applies completion fallback only to
   participants without accepted hit XP, preventing both missing and double awards. Tournament tests pass (89/89).
-  All four patches are runtime-only and do not create, migrate, replace, or require a new campaign save. They
-  remain local until explicit authorization to publish and deploy; the live server has not been restarted.
-- **[nightly and paired server deployed; rendered validation pending] Upstream bugfix batch.**
+  All four patches are runtime-only and do not create, migrate, replace, or require a new campaign save.
+  PR #5 published them at merge commit `5f708bcfcd78442eb653717bdbf737d8b3846ef5`. Launcher stable
+  version `2026.08.12.1816` serves the matching client payload (SHA-256
+  `1cd55a823d6dd745ee1944be3b909b2626f9ee0fcd20e5bf89a22e9a6af958ca`). The paired Serilog-2.x
+  dedicated-server build is live with core SHA-256
+  `a6f99fed984156936d5871e48e1284208a02697205f6e69bf1cea486492adf45`; the complete deployment
+  ledger passes. The host loaded the existing `friendallmods1` save, reached `SERVING` on UDP 4200,
+  and has zero restarts or fatal startup markers. The pre/post save filename inventory is identical,
+  and the live save matches the stopped-server backup byte-for-byte. Rollback snapshot:
+  `/home/bishop/bannerlord-coop/server/_mod_backups/pre-5f708bcf-20260812T182209Z`.
+- **[superseded by live 5f708bcf release] Upstream bugfix batch.**
   Nine compatible upstream nightly fixes (#2968, #2913, #2905, #2897, #2898, #2899, #2884,
   #2855, and #2768) shipped through launcher client version `2026.08.12.1517` and the matching
   Serilog-2.x dedicated-server build. Server source release `d90c6a020` is paired to core SHA-256

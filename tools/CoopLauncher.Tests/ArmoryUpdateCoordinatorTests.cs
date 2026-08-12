@@ -114,6 +114,57 @@ public sealed class ArmoryUpdateCoordinatorTests
         Assert.NotEqual(ArmoryPrimaryAction.Launch, result.Snapshot.PrimaryAction);
     }
 
+    [Theory]
+    [InlineData(ArmoryPrimaryAction.Launch, "MARCH TO WAR")]
+    [InlineData(ArmoryPrimaryAction.Prepare, "PREPARE YOUR ARMY")]
+    [InlineData(ArmoryPrimaryAction.RetryCheck, "TRY THE JESTER AGAIN")]
+    public void PrimaryButtonCopy_MatchesAggregateAction(
+        ArmoryPrimaryAction action,
+        string expected)
+    {
+        Assert.Equal(expected, MainWindow.PrimaryButtonText(action));
+    }
+
+    [Fact]
+    public void UnverifiedSnapshot_ShowsSleepingJesterInsteadOfLaunchCopy()
+    {
+        ArmorySnapshot snapshot = Snapshot(
+            ComponentUpdateState.Current,
+            ComponentUpdateState.Unverified,
+            ComponentUpdateState.Current);
+
+        Assert.Equal("THE COURT JESTER IS ASLEEP", MainWindow.ArmoryHeadlineFor(snapshot));
+        Assert.Contains("royal update scrolls", MainWindow.ArmoryDetailFor(snapshot),
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("TRY THE JESTER AGAIN", MainWindow.PrimaryButtonText(snapshot.PrimaryAction));
+    }
+
+    [Fact]
+    public void UpdateStatusCopy_NamesInstalledAndAvailableVersions()
+    {
+        ComponentUpdateStatus update = Status(
+            ArmoryComponent.CoopClient,
+            "Co-op client",
+            ComponentUpdateState.UpdateAvailable);
+        ComponentUpdateStatus missing = update with { InstalledVersion = null };
+
+        Assert.Equal("1.0  →  2.0", MainWindow.ComponentStatusText(update));
+        Assert.Equal("Not installed  →  2.0", MainWindow.ComponentStatusText(missing));
+    }
+
+    [Fact]
+    public void ActiveOperation_BlocksRepeatedPrimaryDispatch()
+    {
+        ArmorySnapshot current = Snapshot(
+            ComponentUpdateState.Current,
+            ComponentUpdateState.Current,
+            ComponentUpdateState.Current);
+
+        Assert.False(MainWindow.CanDispatchPrimaryAction(operationActive: true, current));
+        Assert.False(MainWindow.CanDispatchPrimaryAction(operationActive: false, snapshot: null));
+        Assert.True(MainWindow.CanDispatchPrimaryAction(operationActive: false, current));
+    }
+
     private static ArmorySnapshot Snapshot(
         ComponentUpdateState launcher,
         ComponentUpdateState suite,

@@ -263,17 +263,6 @@ public sealed class ModUpdaterTests
         Assert.Equal("suite failed", result.Message);
     }
 
-    [Theory]
-    [InlineData(UpdateOutcome.Failed, false)]
-    [InlineData(UpdateOutcome.Offline, true)]
-    [InlineData(UpdateOutcome.Updated, true)]
-    [InlineData(UpdateOutcome.UpToDate, true)]
-    [InlineData(UpdateOutcome.Disabled, true)]
-    public void JoinGate_BlocksOnlyFailedRequiredUpdate(UpdateOutcome outcome, bool expected)
-    {
-        Assert.Equal(expected, MainWindow.CanJoinAfterUpdate(new UpdateResult(outcome, "status")));
-    }
-
     private sealed class UpdateFixture : IDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), $"coop-updater-test-{Guid.NewGuid():N}");

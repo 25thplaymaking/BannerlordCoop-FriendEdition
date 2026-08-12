@@ -265,18 +265,6 @@ public sealed class LauncherSelfUpdaterTests
         Assert.Equal(5, started.ArgumentList.Count);
     }
 
-    [Theory]
-    [InlineData(LauncherUpdateOutcome.Failed, false)]
-    [InlineData(LauncherUpdateOutcome.Offline, true)]
-    [InlineData(LauncherUpdateOutcome.UpToDate, true)]
-    [InlineData(LauncherUpdateOutcome.Disabled, true)]
-    public void StartupGate_BlocksOnlyFailedLauncherUpdate(
-        LauncherUpdateOutcome outcome, bool expected)
-    {
-        Assert.Equal(expected, MainWindow.CanContinueAfterLauncherUpdate(
-            new LauncherUpdateResult(outcome, "status")));
-    }
-
     [Fact]
     public void RollbackSkipMarker_SuppressesOnlyExplicitOneShotLaunch()
     {

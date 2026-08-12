@@ -142,11 +142,55 @@
                                        Foreground="{StaticResource Steel}" Text="Scouting the host…" />
                         </StackPanel>
 
-                        <!-- Orientation for a first-time rider: names the loadout, sets expectations -->
-                        <TextBlock Grid.Row="4" VerticalAlignment="Top" Margin="0,20,0,0" TextWrapping="Wrap"
-                                   FontSize="12.5" LineHeight="19" LineStackingStrategy="BlockLineHeight"
-                                   Foreground="{StaticResource Steel}"
-                                   Text="One click loads the campaign mod set — Diplomacy, Improved Garrisons, Fourberie, Player Settlements — and rides straight to the host. No module list, no manual connect." />
+                        <!-- Armory ledger: three independent receipts; never collapse them into one build label. -->
+                        <Border Grid.Row="4" Margin="0,14,0,12" Padding="12,9"
+                                VerticalAlignment="Center" Background="#66170F0C"
+                                BorderBrush="#55C9A24B" BorderThickness="1">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="6" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="96" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <TextBlock x:Name="ArmoryHeadline" Grid.Row="0" Grid.ColumnSpan="2"
+                                           FontFamily="{StaticResource Display}" FontSize="12"
+                                           FontWeight="Bold" Foreground="{StaticResource Gold}"
+                                           Text="CHECKING THE ARMORY" />
+                                <TextBlock x:Name="ArmoryDetail" Grid.Row="1" Grid.ColumnSpan="2"
+                                           Margin="0,2,0,0" FontSize="10.5" TextWrapping="Wrap"
+                                           Foreground="{StaticResource Steel}"
+                                           Text="Reading all three royal update scrolls." />
+
+                                <TextBlock Grid.Row="3" Text="LAUNCHER" FontFamily="{StaticResource Dispatch}"
+                                           FontSize="10.5" Foreground="{StaticResource Steel}" />
+                                <TextBlock x:Name="LauncherUpdateValue" Grid.Row="3" Grid.Column="1"
+                                           FontFamily="{StaticResource Dispatch}" FontSize="10.5"
+                                           Foreground="{StaticResource Steel}" Text="Checking…"
+                                           TextTrimming="CharacterEllipsis" />
+
+                                <TextBlock Grid.Row="4" Text="MOD SUITE" FontFamily="{StaticResource Dispatch}"
+                                           FontSize="10.5" Foreground="{StaticResource Steel}" />
+                                <TextBlock x:Name="SuiteUpdateValue" Grid.Row="4" Grid.Column="1"
+                                           FontFamily="{StaticResource Dispatch}" FontSize="10.5"
+                                           Foreground="{StaticResource Steel}" Text="Checking…"
+                                           TextTrimming="CharacterEllipsis" />
+
+                                <TextBlock Grid.Row="5" Text="CO-OP CLIENT" FontFamily="{StaticResource Dispatch}"
+                                           FontSize="10.5" Foreground="{StaticResource Steel}" />
+                                <TextBlock x:Name="ClientUpdateValue" Grid.Row="5" Grid.Column="1"
+                                           FontFamily="{StaticResource Dispatch}" FontSize="10.5"
+                                           Foreground="{StaticResource Steel}" Text="Checking…"
+                                           TextTrimming="CharacterEllipsis" />
+                            </Grid>
+                        </Border>
 
                         <!-- Private host credential: never persisted by the UI or written to logs. -->
                         <Grid Grid.Row="5" Margin="0,0,0,12">

@@ -63,8 +63,9 @@ public partial class App : Application
             return;
         }
 
-        bool skipLauncherUpdate = LauncherUpdateApplier.ShouldSkipSelfUpdate(e.Args);
-        new MainWindow(shootMode: false, skipLauncherUpdate).Show();
+        bool continuePreparation = completion?.ContinuePreparation == true &&
+                                   !LauncherUpdateApplier.ShouldSkipSelfUpdate(e.Args);
+        new MainWindow(shootMode: false, continuePreparation).Show();
         if (completion is not null)
             _ = Task.Run(() => LauncherUpdateApplier.CleanupAfterStartup(completion));
     }

@@ -8,6 +8,9 @@
 
 **Tech Stack:** .NET 8, C# 12, WPF, `HttpClient`, xUnit, GitHub Actions rolling release manifests.
 
+**Execution status:** Tasks 1–4 are implemented and committed. Task 5 verification and publication are
+in progress. The game server and its existing save have not been touched.
+
 ## Global Constraints
 
 - Startup queries manifests automatically but downloads no executable or zip payload.

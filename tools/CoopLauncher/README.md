@@ -102,7 +102,8 @@ The mod/client `updateManifestUrl` contract is:
 
 The launcher extracts each verified zip into a private staging directory on the same volume, then
 exact-replaces the zip's top-level module directories. Stale files are removed by replacement, and
-any move/version-write failure restores every previous module directory. A malformed manifest, an HTTP
+transient access/sharing locks from filesystem scanners are retried for up to five seconds. Any
+non-transient move or version-write failure restores every previous module directory. A malformed manifest, an HTTP
 error from a reached feed, integrity failure, unsafe archive path, or failed install disables **MARCH TO
 WAR** until the required update succeeds. A genuinely unreachable feed also blocks: the launcher will
 not claim the installed files match the server when GitHub cannot confirm their required versions.

@@ -298,6 +298,10 @@ rolls back canonical Fourberie state and created parties on failure, and returns
       transport outage from an HTTP error returned by the configured update feed. Missing, forbidden,
       or failed manifests keep **MARCH TO WAR** disabled instead of being mislabeled as offline; the
       self-contained publish, XAML guard, and all 17 launcher tests pass.
+- [x] **Transient scanner locks no longer abort client updates (2026-08-12).** Exact-replacement
+      directory moves retry access-denied, sharing-violation, and lock-violation failures for a bounded
+      five-second window before using the existing rollback path. A regression test holds a freshly
+      extracted staged DLL open and proves the verified payload installs after the lock is released.
 - [x] **Nightly test composition repaired (2026-08-11).** The shared Coop.Tests client/server
       container now registers the same real Workshop capability registry supplied by the production
       GameInterface module; all 614 Coop.Tests cases build their containers again (613 pass, 1 skipped).

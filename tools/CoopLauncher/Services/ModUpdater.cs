@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
@@ -345,7 +346,7 @@ public sealed class ModUpdater : IModUpdateService
                 bool hadExisting = Directory.Exists(destination);
                 replacements.Add((destination, backup, hadExisting));
                 if (hadExisting) Directory.Move(destination, backup);
-                Directory.Move(stagedModule, destination);
+                MoveStagedDirectoryWithRetry(stagedModule, destination);
             }
 
             WriteText(versionFull, version);
@@ -411,6 +412,31 @@ public sealed class ModUpdater : IModUpdateService
         string directoryWithSeparator = Path.GetFullPath(directory)
             .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
         return Path.GetFullPath(path).StartsWith(directoryWithSeparator, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void MoveStagedDirectoryWithRetry(string source, string destination)
+    {
+        var timeout = TimeSpan.FromSeconds(5);
+        var stopwatch = Stopwatch.StartNew();
+        while (true)
+        {
+            try
+            {
+                Directory.Move(source, destination);
+                return;
+            }
+            catch (Exception ex) when (IsTransientFileSystemContention(ex) && stopwatch.Elapsed < timeout)
+            {
+                Thread.Sleep(100);
+            }
+        }
+    }
+
+    private static bool IsTransientFileSystemContention(Exception ex)
+    {
+        int win32Error = ex.HResult & 0xffff;
+        return ex is UnauthorizedAccessException ||
+               ex is IOException && win32Error is 5 or 32 or 33;
     }
 
     private static void TryDeleteDirectory(string path)

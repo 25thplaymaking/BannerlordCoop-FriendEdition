@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text.Json;
 
@@ -48,6 +49,64 @@ public sealed class LauncherSelfUpdater
     {
         _config = config;
         _http = http;
+    }
+
+    public async Task<LauncherUpdateCheck> CheckAsync(Version currentVersion)
+    {
+        string installed = currentVersion.ToString();
+        if (!TryGetHttpsUri(_config.LauncherManifestUrl, out Uri? manifestUri))
+            return Unverified(installed, "Launcher update feed is not configured securely.");
+
+        LauncherUpdateManifest? manifest;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, manifestUri);
+            request.Headers.CacheControl = new CacheControlHeaderValue
+            {
+                NoCache = true,
+                NoStore = true,
+            };
+            using HttpResponseMessage response = await _http.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+                return Unverified(installed, $"Launcher feed returned HTTP {(int)response.StatusCode}.");
+
+            try
+            {
+                manifest = JsonSerializer.Deserialize<LauncherUpdateManifest>(
+                    await response.Content.ReadAsStringAsync());
+            }
+            catch (JsonException)
+            {
+                return Unverified(installed, "Launcher feed was malformed.");
+            }
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode is not null)
+        {
+            return Unverified(installed, $"Launcher feed returned HTTP {(int)ex.StatusCode}.");
+        }
+        catch (HttpRequestException)
+        {
+            return Unverified(installed, "Launcher feed could not be reached.");
+        }
+        catch (TaskCanceledException)
+        {
+            return Unverified(installed, "Launcher feed check timed out.");
+        }
+
+        if (!IsManifestValid(manifest))
+            return Unverified(installed, "Launcher feed was malformed.");
+
+        bool updateAvailable = IsNewer(manifest!.Version, currentVersion);
+        return new LauncherUpdateCheck(
+            new ComponentUpdateStatus(
+                ArmoryComponent.Launcher,
+                "Launcher",
+                installed,
+                manifest.Version,
+                manifest.Notes,
+                updateAvailable ? ComponentUpdateState.UpdateAvailable : ComponentUpdateState.Current,
+                updateAvailable ? "Launcher update available." : "Launcher is current."),
+            manifest);
     }
 
     public async Task<LauncherUpdateResult> CheckAndStageAsync(
@@ -175,6 +234,26 @@ public sealed class LauncherSelfUpdater
 
     internal static bool IsNewer(string remote, Version current) =>
         Version.TryParse(remote, out Version? remoteVersion) && remoteVersion > current;
+
+    private static LauncherUpdateCheck Unverified(string installed, string detail) =>
+        new(
+            new ComponentUpdateStatus(
+                ArmoryComponent.Launcher,
+                "Launcher",
+                installed,
+                null,
+                string.Empty,
+                ComponentUpdateState.Unverified,
+                detail),
+            null);
+
+    private static bool TryGetHttpsUri(string value, out Uri? uri)
+    {
+        bool valid = Uri.TryCreate(value, UriKind.Absolute, out uri) &&
+                     uri.Scheme == Uri.UriSchemeHttps;
+        if (!valid) uri = null;
+        return valid;
+    }
 
     private static async Task<string> Sha256HexAsync(string path)
     {

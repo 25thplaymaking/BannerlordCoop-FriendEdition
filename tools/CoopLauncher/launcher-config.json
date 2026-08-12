@@ -11,6 +11,9 @@
   // Empty = auto-detect the Bannerlord install from Steam.
   "gamePath": "",
 
+  // Launcher executable feed. Swap launcher-app → launcher-nightly for bleeding edge.
+  "launcherManifestUrl": "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/launcher-app/launcher.json",
+
   // Client build feed (public GitHub release). Swap client-stable → client-nightly for bleeding edge.
   "updateManifestUrl": "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/client-stable/launcher.json",
 

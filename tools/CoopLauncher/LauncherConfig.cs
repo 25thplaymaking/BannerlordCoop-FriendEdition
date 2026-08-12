@@ -40,6 +40,13 @@ public sealed class LauncherConfig
     public string GamePath { get; set; } = "";
 
     /// <summary>
+    /// Launcher executable update manifest. Empty disables launcher self-update. The stable rolling
+    /// release is the default; a private config may opt into the distinct nightly feed.
+    /// </summary>
+    public string LauncherManifestUrl { get; set; } =
+        "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/launcher-app/launcher.json";
+
+    /// <summary>
     /// Update manifest URL (raw JSON — see <see cref="UpdateManifest"/>). Empty disables updates and
     /// the launcher just runs whatever is installed. Defaults to the public stable client feed;
     /// swap <c>client-stable</c> → <c>client-nightly</c> for bleeding edge.
@@ -92,5 +99,14 @@ public sealed class UpdateManifest
     [JsonPropertyName("sha256")] public string Sha256 { get; set; } = "";
 
     /// <summary>Optional one-line changelog surfaced under the update rail.</summary>
+    [JsonPropertyName("notes")] public string Notes { get; set; } = "";
+}
+
+/// <summary>The remote feed used to update the portable launcher executable itself.</summary>
+public sealed record LauncherUpdateManifest
+{
+    [JsonPropertyName("version")] public string Version { get; set; } = "";
+    [JsonPropertyName("launcherUrl")] public string LauncherUrl { get; set; } = "";
+    [JsonPropertyName("sha256")] public string Sha256 { get; set; } = "";
     [JsonPropertyName("notes")] public string Notes { get; set; } = "";
 }

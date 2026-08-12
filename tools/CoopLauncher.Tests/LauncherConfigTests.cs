@@ -24,6 +24,30 @@ public sealed class LauncherConfigTests
         LauncherConfig config = LauncherConfig.Load(shippedConfigPath);
 
         Assert.Equal(string.Empty, config.ServerPassword);
+        Assert.Equal(
+            "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/launcher-app/launcher.json",
+            config.LauncherManifestUrl);
+    }
+
+    [Fact]
+    public void ExistingConfigWithoutLauncherFeed_InheritsStableFeed()
+    {
+        string tempPath = Path.Combine(Path.GetTempPath(), $"launcher-config-{Guid.NewGuid():N}.json");
+        try
+        {
+            File.WriteAllText(tempPath, "{ \"groupName\": \"Existing Group\" }");
+
+            LauncherConfig config = LauncherConfig.Load(tempPath);
+
+            Assert.Equal("Existing Group", config.GroupName);
+            Assert.Equal(
+                "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/launcher-app/launcher.json",
+                config.LauncherManifestUrl);
+        }
+        finally
+        {
+            File.Delete(tempPath);
+        }
     }
 
     [Fact]

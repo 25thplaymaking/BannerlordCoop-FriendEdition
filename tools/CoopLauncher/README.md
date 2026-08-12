@@ -11,7 +11,7 @@ group host — no module list, no manual connect. Replaces `Desktop\Play Friend 
    campaign is up, steel when it's down (re-probed every 12 s).
 3. **Self-updates the client build** — if `updateManifestUrl` is set, pulls a SHA-256-verified zip
    and extracts it into `Modules\`. Fails soft: an unreachable feed just launches the installed build.
-4. **Launches + auto-joins** — runs:
+4. **Launches + auto-joins** — the launcher shows a masked join-password field, then runs:
    ```
    Bannerlord.exe /singleplayer <moduleToken> /coopjoin <serverHost> <serverPort> <serverPassword>
    ```
@@ -32,7 +32,7 @@ it with the **Serilog 4.x** flip (see below), same as `GameInterface.dll`.
 |-----|---------|
 | `groupName` | launcher display title |
 | `serverHost` / `serverPort` | co-op host to join + probe (`205.209.116.114` / `4200`) |
-| `serverPassword` | group-private join token; blank in the public release, supplied only in a private local config |
+| `serverPassword` | optional default for the masked join-password field; blank in the public release |
 | `moduleToken` | `/singleplayer` launch order — full set minus RBM, in handshake order |
 | `gamePath` | explicit install root, or empty to auto-detect |
 | `updateManifestUrl` | build-feed JSON URL, or empty to disable updates |
@@ -48,8 +48,9 @@ it with the **Serilog 4.x** flip (see below), same as `GameInterface.dll`.
 # → tools/CoopLauncher/bin/Release/net8.0-windows/win-x64/publish/CalradiaCoop.exe (+ launcher-config.json)
 ```
 
-Hand a friend `CalradiaCoop.exe` plus a privately supplied `launcher-config.json` in the same
-folder. Never commit or attach a populated `serverPassword` to a public release.
+Hand a friend `CalradiaCoop.exe` plus `launcher-config.json` in the same folder. They can enter the
+private password at launch; the UI does not save it or log it. Never commit or attach a populated
+`serverPassword` to a public release.
 
 Design review render (no window shown, no focus steal): `CalradiaCoop.exe --shoot preview.png`.
 

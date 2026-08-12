@@ -13,7 +13,7 @@ public static class GameLauncher
     /// <c>/coopjoin &lt;host&gt; &lt;port&gt; &lt;password&gt;</c>. Returns the started process so the caller
     /// can notice an instant exit (a crash or a failed Steam init) instead of silently doing nothing.
     /// </summary>
-    public static Process Launch(string bannerlordExe, LauncherConfig config)
+    public static Process Launch(string bannerlordExe, LauncherConfig config, string enteredPassword)
     {
         var workingDir = Path.GetDirectoryName(bannerlordExe)!;
 
@@ -22,22 +22,7 @@ public static class GameLauncher
         // install. Writing it is harmless when it's already there.
         EnsureSteamAppId(workingDir);
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = bannerlordExe,
-            WorkingDirectory = workingDir,
-            UseShellExecute = false,
-        };
-
-        // ArgumentList quotes each element correctly, so a token with spaces or an odd password
-        // can't split into stray arguments.
-        psi.ArgumentList.Add("/singleplayer");
-        psi.ArgumentList.Add(config.ModuleToken);
-        psi.ArgumentList.Add("/coopjoin");
-        psi.ArgumentList.Add(config.ServerHost);
-        psi.ArgumentList.Add(config.ServerPort.ToString());
-        if (!string.IsNullOrEmpty(config.ServerPassword))
-            psi.ArgumentList.Add(config.ServerPassword);
+        var psi = CreateStartInfo(bannerlordExe, config, enteredPassword);
 
         // Log the command without the password.
         Log.Write($"Launching: {bannerlordExe}");
@@ -48,6 +33,30 @@ public static class GameLauncher
             ?? throw new InvalidOperationException("Process.Start returned no process");
         Log.Write($"Started Bannerlord pid {process.Id}");
         return process;
+    }
+
+    internal static ProcessStartInfo CreateStartInfo(
+        string bannerlordExe,
+        LauncherConfig config,
+        string enteredPassword)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = bannerlordExe,
+            WorkingDirectory = Path.GetDirectoryName(bannerlordExe)!,
+            UseShellExecute = false,
+        };
+
+        // ArgumentList quotes each element correctly, so a token with spaces or an odd password
+        // can't split into stray arguments.
+        psi.ArgumentList.Add("/singleplayer");
+        psi.ArgumentList.Add(config.ModuleToken);
+        psi.ArgumentList.Add("/coopjoin");
+        psi.ArgumentList.Add(config.ServerHost);
+        psi.ArgumentList.Add(config.ServerPort.ToString());
+        if (!string.IsNullOrEmpty(enteredPassword))
+            psi.ArgumentList.Add(enteredPassword);
+        return psi;
     }
 
     private static void EnsureSteamAppId(string binDir)

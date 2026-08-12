@@ -28,6 +28,7 @@ public partial class MainWindow : Window
         _config = LauncherConfig.Load(configPath);
         TitleText.Text = _config.GroupName;
         Title = _config.GroupName;
+        ServerPasswordBox.Password = _config.ServerPassword;
 
         if (shootMode)
         {
@@ -174,7 +175,7 @@ public partial class MainWindow : Window
             bool steamUp = GameLauncher.IsSteamRunning();
             if (!steamUp) Log.Write("WARNING: Steam client does not appear to be running");
 
-            var proc = GameLauncher.Launch(_bannerlordExe, _config);
+            var proc = GameLauncher.Launch(_bannerlordExe, _config, ServerPasswordBox.Password);
 
             // Catch an instant exit (failed Steam init, a crash) so the launcher explains it instead of
             // just vanishing — the classic "I hit play and nothing happened".

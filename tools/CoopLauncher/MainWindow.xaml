@@ -119,6 +119,7 @@
                             <RowDefinition Height="*" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Text="P R I V A T E   M U S T E R"
@@ -147,12 +148,30 @@
                                    Foreground="{StaticResource Steel}"
                                    Text="One click loads the campaign mod set — Diplomacy, Improved Garrisons, Fourberie, Player Settlements — and rides straight to the host. No module list, no manual connect." />
 
+                        <!-- Private host credential: never persisted by the UI or written to logs. -->
+                        <Grid Grid.Row="5" Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="116" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="JOIN PASSWORD" VerticalAlignment="Center"
+                                       FontFamily="{StaticResource Dispatch}" FontSize="11"
+                                       Foreground="{StaticResource Steel}" />
+                            <Border Grid.Column="1" Height="34" Background="{StaticResource Leather}"
+                                    BorderBrush="#66C9A24B" BorderThickness="1" Padding="8,4">
+                                <PasswordBox x:Name="ServerPasswordBox" Background="Transparent"
+                                             BorderThickness="0" Foreground="{StaticResource Parchment}"
+                                             CaretBrush="{StaticResource GoldBright}" FontSize="14"
+                                             PasswordChar="&#x25CF;" ToolTip="Enter the host password" />
+                            </Border>
+                        </Grid>
+
                         <!-- Primary action -->
-                        <Button x:Name="JoinButton" Grid.Row="5" Height="56" Style="{StaticResource WarButton}"
+                        <Button x:Name="JoinButton" Grid.Row="6" Height="56" Style="{StaticResource WarButton}"
                                 Content="MARCH TO WAR" IsEnabled="False" />
 
                         <!-- Update rail -->
-                        <StackPanel Grid.Row="6" Margin="0,14,0,0">
+                        <StackPanel Grid.Row="7" Margin="0,14,0,0">
                             <ProgressBar x:Name="UpdateBar" Style="{StaticResource RailBar}" Value="0"
                                          Visibility="Collapsed" />
                             <TextBlock x:Name="UpdateText" Margin="0,8,0,0" FontFamily="{StaticResource Dispatch}"

@@ -85,9 +85,9 @@ Defer from this batch:
 - Create: `source/GameInterface.Tests/Services/MapEvents/MapEventResultPartyRepairTests.cs`
 - Modify: `source/GameInterface/Services/MapEvents/Patches/MapEventPatches.cs`
 
-- [ ] Import the upstream regression tests before production changes and record the expected failures.
-- [ ] Apply the final reviewed production diffs from #2905 and #2855.
-- [ ] Re-run focused tests, validate the generated UI movie/template pair, and commit the verified increment.
+- [x] Import the upstream regression tests before production changes and record the expected failures.
+- [x] Apply the final reviewed production diffs from #2905 and #2855.
+- [x] Re-run focused tests, validate the generated UI movie/template pair, and commit the verified increment.
 
 ### Task 4: Clan-party disband safety
 

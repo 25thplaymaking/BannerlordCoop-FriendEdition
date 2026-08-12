@@ -17,7 +17,7 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > settlement rebellion cannot run from a client. Improved Garrisons' 723 candidates are now closed too:
 > management/settings commands carry stable selections, authenticated clan ownership, session/revision
 > concurrency, exact replay results, canonical rollback, server-created parties, and an authenticated building-
-> reserve command while clients retain the menu and roster-selection surface. Fourberie's forty-six explicit
+> reserve command while clients retain the menu and roster-selection surface. Fourberie's forty-seven explicit
 > operation families now use authenticated,
 > rollback-safe server commands, while its menus and mission setup remain role-local presentation/lifecycle.
 > Diplomacy's explicit player operations and server callbacks are routed too, including a persisted,
@@ -31,23 +31,30 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 
 ## Known playtest bugs (live)
 
-- **[nightly deployed; rendered validation pending] Safehouse prisoner and loot transfers did not persist.**
-  (2026-08-12, Bryce.) Fourberie's prisoner-enslavement completion and the safehouse inventory screen were
-  mutating client-local rosters. The compatibility startup gate also inspected only public campaign-model
-  properties, so it falsely rejected the required `FModelDamage` model and prevented the canonical crime-base
-  party from being registered for authoritative stash transactions. The runtime surface now validates the
-  complete active model set, and prisoner enslavement is an authenticated server transaction that owns the
-  prisoner removal, generated loot, slave count, and Roguery XP. The change is save-compatible and does not
-  create or migrate a campaign save. Focused Fourberie tests pass (329/329).
-- **[nightly deployed; rendered validation pending] Back-to-back hideout raids could crash the client.**
-  (2026-08-12, Bryce.) A second/third raid could launch the hideout mission before the client received the
-  server-prepared defender roster. Mission launch now waits for an acknowledged server preparation and exact
-  roster parity; failed preparation does not consume the hideout cooldown, while a successful preparation does.
-  Focused repeated-hideout E2E tests pass (6/6), including a deliberately stale client roster.
-  Both fixes shipped from `03df14dd0` to the `client-nightly` launcher feed on 2026-08-12; the downloaded
-  10,612,201-byte payload verified at SHA-256 `48b10731f32a7b3036a796d586dfdc6d478ffa26532bab5bec78bb6bececa7f7`.
-  The paired server loaded the existing `friendallmods1` save, passed its full deployment ledger and
-  release-pin check, reached `SERVING` on UDP 4200, and retained zero restarts. No new save was created.
+- **[local patch verified; not deployed] Hideout boss-stage black screen and reconnect loop.**
+  (2026-08-12, Bryce.) Live logs tied the loop to a player disconnect during the hideout: the server retained
+  the hideout map event as reconnectable even though the mission/boss-stage state could not be resumed. Commit
+  `2dfdf38dd` now requests authoritative finalization for that disconnected hideout event and parks the party
+  after the existing finalization callback; ordinary field battles and sieges retain reconnect behavior.
+  Hideout tests pass (7/7), and the map-event collection passes 8 with its existing single skip.
+- **[local patch verified; not deployed] Fourberie prisoner and safehouse loot transfers did not persist.**
+  The earlier nightly moved prisoner enslavement to the server but still performed its roster/loot/skill changes
+  inside `AllowedThread`, which suppresses the publishers clients need. Its generic stash route also submitted
+  transient inventory-screen rosters that have no stable network identity. Commit `6e5463200` keeps replication
+  enabled for prisoner removal, generated loot and Roguery XP, and adds a bounded stable item/modifier transfer
+  command between the authenticated party and canonical crime-base roster. Fourberie tests pass (337/337).
+- **[local patch verified; not deployed] Send Troops skipped the loot/capture flow.**
+  Map-event destruction was force-finishing an encounter already staged at `CaptureHeroes`, discarding the
+  authoritative result rosters before the player could loot. Commit `cf20807cc` preserves that staged encounter
+  while retaining cleanup for abandoned encounters. Battle-finalization tests pass (9/9); battle-result
+  distribution tests pass (6/6).
+- **[local patch verified; not deployed] Tournament participants did not receive skill progression.**
+  Every accepted match result marked the entire session as having live hit progression, even when no hit packet
+  awarded XP; one player's accepted hit also suppressed fallback progression for every other participant.
+  Commit `f6cf93d06` records accepted live progression per controller and applies completion fallback only to
+  participants without accepted hit XP, preventing both missing and double awards. Tournament tests pass (89/89).
+  All four patches are runtime-only and do not create, migrate, replace, or require a new campaign save. They
+  remain local until explicit authorization to publish and deploy; the live server has not been restarted.
 - **[nightly and paired server deployed; rendered validation pending] Upstream bugfix batch.**
   Nine compatible upstream nightly fixes (#2968, #2913, #2905, #2897, #2898, #2899, #2884,
   #2855, and #2768) shipped through launcher client version `2026.08.12.1517` and the matching
@@ -219,8 +226,9 @@ rolls back canonical Fourberie state and created parties on failure, and returns
       the canonical snapshot instead of independently rewriting those dictionaries.
       Safehouse prisoner enslavement now sends the selected prisoner roster to a server-owned operation; the
       server validates the pinned safehouse and current roster, then owns prisoner removal, generated loot,
-      slave strength, and Roguery XP. Canonical crime-base registration also makes ordinary loot transfers use
-      the existing authoritative inventory route. Both changes preserve the current campaign save format.
+      slave strength, and Roguery XP with Coop's mutation publishers enabled. Safehouse item transfers use a
+      dedicated stable item/modifier command because the inventory screen exposes transient rosters that the
+      generic trade route cannot identify. Both changes preserve the current campaign save format.
   14. `OnMissionBehaviorInitialize` currently preserves the mod's required peer-local setup, but its
      mission callbacks remain open until their authoritative/controller ownership is proven end to end.
   15. The exact secondary pass currently assigns metadata to 1,044/1,865 required candidates:

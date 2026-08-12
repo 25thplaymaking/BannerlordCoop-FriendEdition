@@ -3,8 +3,10 @@ using System;
 using System.IO;
 using System.IO.Compression;
 using System.Net;
-using System.Net.Sockets;
+using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Xunit;
 
 namespace CoopLauncher.Tests;
@@ -12,41 +14,163 @@ namespace CoopLauncher.Tests;
 public sealed class ModUpdaterTests
 {
     [Fact]
+    public async Task CheckOnly_QueriesBothManifestsWithoutDownloadingPayloads()
+    {
+        using var fixture = new UpdateFixture();
+        fixture.WriteInstalled("Coop", "installed-version.txt", "1.0");
+        File.WriteAllText(Path.Combine(fixture.Modules, "coop-suite-version.txt"), "1.0");
+        int manifestRequests = 0;
+        int payloadRequests = 0;
+        using var http = new HttpClient(new StubHandler(request =>
+        {
+            Assert.True(request.Headers.CacheControl?.NoCache);
+            Assert.True(request.Headers.CacheControl?.NoStore);
+            if (request.RequestUri!.AbsolutePath.EndsWith(".json"))
+            {
+                manifestRequests++;
+                string version = request.RequestUri.AbsolutePath.Contains("client") ? "2.0" : "1.0";
+                return JsonResponse(Manifest(version, request.RequestUri.AbsolutePath.Contains("client")
+                    ? "client.zip" : "suite.zip", new string('a', 64)));
+            }
+            payloadRequests++;
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }));
+        ModUpdater updater = Updater(http);
+
+        ModUpdateCheck check = await updater.CheckAsync(fixture.Modules);
+
+        Assert.Equal(ComponentUpdateState.Current, check.SuiteStatus.State);
+        Assert.Equal("1.0", check.SuiteStatus.InstalledVersion);
+        Assert.Equal(ComponentUpdateState.UpdateAvailable, check.ClientStatus.State);
+        Assert.Equal("1.0", check.ClientStatus.InstalledVersion);
+        Assert.Equal("2.0", check.ClientStatus.AvailableVersion);
+        Assert.Equal(2, manifestRequests);
+        Assert.Equal(0, payloadRequests);
+    }
+
+    [Fact]
+    public async Task CheckOnly_MissingReceiptIsReportedAsNotInstalledUpdate()
+    {
+        using var fixture = new UpdateFixture();
+        using var http = new HttpClient(new StubHandler(request =>
+            JsonResponse(Manifest("2.0", request.RequestUri!.AbsolutePath.Contains("client")
+                ? "client.zip" : "suite.zip", new string('a', 64)))));
+
+        ModUpdateCheck check = await Updater(http).CheckAsync(fixture.Modules);
+
+        Assert.Equal(ComponentUpdateState.UpdateAvailable, check.SuiteStatus.State);
+        Assert.Null(check.SuiteStatus.InstalledVersion);
+        Assert.Equal(ComponentUpdateState.UpdateAvailable, check.ClientStatus.State);
+        Assert.Null(check.ClientStatus.InstalledVersion);
+    }
+
+    [Fact]
+    public async Task CheckOnly_UnreachableRequiredFeedIsUnverified()
+    {
+        using var fixture = new UpdateFixture();
+        using var http = new HttpClient(new StubHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.Contains("client"))
+                throw new HttpRequestException("offline");
+            return JsonResponse(Manifest("1.0", "suite.zip", new string('a', 64)));
+        }));
+
+        ModUpdateCheck check = await Updater(http).CheckAsync(fixture.Modules);
+
+        Assert.Equal(ComponentUpdateState.Unverified, check.ClientStatus.State);
+        Assert.Null(check.ClientManifest);
+    }
+
+    [Fact]
+    public async Task CheckOnly_MissingRequiredFeedIsUnverified()
+    {
+        using var fixture = new UpdateFixture();
+        using var http = new HttpClient(new StubHandler(request =>
+            JsonResponse(Manifest("1.0", "client.zip", new string('a', 64)))));
+        var updater = new ModUpdater(new LauncherConfig
+        {
+            SuiteManifestUrl = "",
+            UpdateManifestUrl = "https://updates.example/client.json",
+        }, http);
+
+        ModUpdateCheck check = await updater.CheckAsync(fixture.Modules);
+
+        Assert.Equal(ComponentUpdateState.Unverified, check.SuiteStatus.State);
+        Assert.Contains("not configured", check.SuiteStatus.Detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CheckOnly_UnsafePayloadUrlIsUnverified()
+    {
+        using var fixture = new UpdateFixture();
+        using var http = new HttpClient(new StubHandler(request =>
+            JsonResponse(new UpdateManifest
+            {
+                Version = "2.0",
+                ClientZipUrl = "http://updates.example/unsafe.zip",
+                Sha256 = new string('a', 64),
+                Notes = "unsafe",
+            })));
+
+        ModUpdateCheck check = await Updater(http).CheckAsync(fixture.Modules);
+
+        Assert.Equal(ComponentUpdateState.Unverified, check.SuiteStatus.State);
+        Assert.Equal(ComponentUpdateState.Unverified, check.ClientStatus.State);
+    }
+
+    [Fact]
+    public async Task InstallCheckedPlan_DownloadsSuiteBeforeClientAndWritesReceipts()
+    {
+        using var fixture = new UpdateFixture();
+        byte[] suiteZip = CreateZipBytes(("Harmony/current.dll", "suite-new"));
+        byte[] clientZip = CreateZipBytes(("Coop/current.dll", "client-new"));
+        string suiteSha = Convert.ToHexString(SHA256.HashData(suiteZip)).ToLowerInvariant();
+        string clientSha = Convert.ToHexString(SHA256.HashData(clientZip)).ToLowerInvariant();
+        var payloadOrder = new List<string>();
+        using var http = new HttpClient(new StubHandler(request =>
+        {
+            string path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("suite.json"))
+                return JsonResponse(Manifest("2.0", "suite.zip", suiteSha));
+            if (path.EndsWith("client.json"))
+                return JsonResponse(Manifest("2.0", "client.zip", clientSha));
+            if (path.EndsWith("suite.zip"))
+            {
+                payloadOrder.Add("suite");
+                return BytesResponse(suiteZip);
+            }
+            Assert.True(File.Exists(Path.Combine(fixture.Modules, "Harmony", "current.dll")));
+            payloadOrder.Add("client");
+            return BytesResponse(clientZip);
+        }));
+        ModUpdater updater = Updater(http);
+        ModUpdateCheck check = await updater.CheckAsync(fixture.Modules);
+
+        UpdateResult result = await updater.InstallAsync(fixture.Modules, check, (_, _, _) => { });
+
+        Assert.Equal(UpdateOutcome.Updated, result.Outcome);
+        Assert.Equal(new[] { "suite", "client" }, payloadOrder);
+        Assert.Equal("2.0", File.ReadAllText(Path.Combine(fixture.Modules, "coop-suite-version.txt")));
+        Assert.Equal("2.0", File.ReadAllText(Path.Combine(fixture.Modules, "Coop", "installed-version.txt")));
+        Assert.Equal("suite-new", File.ReadAllText(Path.Combine(fixture.Modules, "Harmony", "current.dll")));
+        Assert.Equal("client-new", File.ReadAllText(Path.Combine(fixture.Modules, "Coop", "current.dll")));
+    }
+
+    [Fact]
     public async Task ReachedManifestHttpError_FailsClosed()
     {
         using var fixture = new UpdateFixture();
-        var listener = new TcpListener(IPAddress.IPv6Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        Task server = Task.Run(async () =>
+        using var http = new HttpClient(new StubHandler(request =>
         {
-            using TcpClient client = await listener.AcceptTcpClientAsync();
-            NetworkStream stream = client.GetStream();
-            using var reader = new StreamReader(
-                stream, Encoding.ASCII, detectEncodingFromByteOrderMarks: false, bufferSize: 1024, leaveOpen: true);
-            while (await reader.ReadLineAsync() is { Length: > 0 }) { }
-            byte[] response = Encoding.ASCII.GetBytes(
-                "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-            await stream.WriteAsync(response);
-        });
+            if (request.RequestUri!.AbsolutePath.Contains("suite"))
+                return JsonResponse(Manifest("1.0", "suite.zip", new string('a', 64)));
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        }));
+        ModUpdater updater = Updater(http);
 
-        try
-        {
-            var updater = new ModUpdater(new LauncherConfig
-            {
-                SuiteManifestUrl = "",
-                UpdateManifestUrl = $"http://[::1]:{port}/missing.json",
-            });
+        UpdateResult result = await updater.RunAsync(fixture.Modules, (_, _) => { });
 
-            UpdateResult result = await updater.RunAsync(fixture.Modules, (_, _) => { });
-
-            Assert.Equal(UpdateOutcome.Failed, result.Outcome);
-            await server.WaitAsync(TimeSpan.FromSeconds(5));
-        }
-        finally
-        {
-            listener.Stop();
-        }
+        Assert.Equal(UpdateOutcome.Failed, result.Outcome);
     }
 
     [Fact]
@@ -65,10 +189,17 @@ public sealed class ModUpdaterTests
             ClientZipUrl = "https://example.invalid/client.zip",
             Sha256 = new string('a', 64)
         };
+        var unsafeUrl = new UpdateManifest
+        {
+            Version = "1",
+            ClientZipUrl = "http://example.invalid/client.zip",
+            Sha256 = new string('a', 64)
+        };
 
         Assert.False(ModUpdater.IsManifestValid(missing));
         Assert.False(ModUpdater.IsManifestValid(malformed));
         Assert.True(ModUpdater.IsManifestValid(valid));
+        Assert.False(ModUpdater.IsManifestValid(unsafeUrl));
     }
 
     [Fact]
@@ -174,5 +305,52 @@ public sealed class ModUpdaterTests
         {
             if (Directory.Exists(Root)) Directory.Delete(Root, recursive: true);
         }
+    }
+
+    private static ModUpdater Updater(HttpClient http) => new(
+        new LauncherConfig
+        {
+            SuiteManifestUrl = "https://updates.example/suite.json",
+            UpdateManifestUrl = "https://updates.example/client.json",
+        }, http);
+
+    private static UpdateManifest Manifest(string version, string asset, string sha) => new()
+    {
+        Version = version,
+        ClientZipUrl = $"https://updates.example/{asset}",
+        Sha256 = sha,
+        Notes = $"{asset} notes",
+    };
+
+    private static HttpResponseMessage JsonResponse(UpdateManifest manifest) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(JsonSerializer.Serialize(manifest), Encoding.UTF8, "application/json"),
+    };
+
+    private static HttpResponseMessage BytesResponse(byte[] bytes) => new(HttpStatusCode.OK)
+    {
+        Content = new ByteArrayContent(bytes),
+    };
+
+    private static byte[] CreateZipBytes(params (string Path, string Contents)[] entries)
+    {
+        using var stream = new MemoryStream();
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach ((string path, string contents) in entries)
+            {
+                ZipArchiveEntry entry = archive.CreateEntry(path);
+                using var writer = new StreamWriter(entry.Open());
+                writer.Write(contents);
+            }
+        }
+        return stream.ToArray();
+    }
+
+    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> response) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(response(request));
     }
 }

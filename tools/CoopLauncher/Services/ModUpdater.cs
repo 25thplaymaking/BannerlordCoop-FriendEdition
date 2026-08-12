@@ -1,6 +1,7 @@
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text.Json;
 
@@ -19,83 +20,194 @@ public readonly record struct UpdateResult(UpdateOutcome Outcome, string Message
 /// </list>
 /// Each tier is a manifest + signed zip whose root entries are module folders. Updates are staged and
 /// exact-replaced under <c>Modules\</c>; any install failure restores the previous module directories.
-/// An unreachable feed still runs what's installed, but a reached-and-invalid required update fails closed.
+/// Manifest checks never download payloads. Every required feed must be verified before launch or install.
 /// </summary>
 public sealed class ModUpdater
 {
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(30) };
+    private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromMinutes(30) };
 
     private readonly LauncherConfig _config;
-    public ModUpdater(LauncherConfig config) => _config = config;
+    private readonly HttpClient _http;
 
-    /// <param name="progress">(fraction 0..1 or -1 for indeterminate, status line).</param>
-    public async Task<UpdateResult> RunAsync(string modulesDir, Action<double, string> progress)
+    public ModUpdater(LauncherConfig config) : this(config, SharedHttp) { }
+
+    internal ModUpdater(LauncherConfig config, HttpClient http)
     {
-        // Suite first: the client assemblies mean nothing if the modules they patch aren't present.
-        var suite = await InstallTierAsync(
-            _config.SuiteManifestUrl, modulesDir,
-            versionFile: Path.Combine(modulesDir, "coop-suite-version.txt"),
-            label: "mod suite", progress);
-        if (suite.Outcome == UpdateOutcome.Failed)
-            return suite;
-
-        var client = await InstallTierAsync(
-            _config.UpdateManifestUrl, modulesDir,
-            versionFile: Path.Combine(modulesDir, "Coop", "installed-version.txt"),
-            label: "co-op client", progress);
-
-        // Surface the more interesting of the two outcomes to the UI.
-        return Combine(suite, client);
+        _config = config;
+        _http = http;
     }
 
-    private async Task<UpdateResult> InstallTierAsync(
-        string manifestUrl, string modulesDir, string versionFile, string label,
-        Action<double, string> progress)
+    public async Task<ModUpdateCheck> CheckAsync(string modulesDir)
     {
-        if (string.IsNullOrWhiteSpace(manifestUrl))
-            return new(UpdateOutcome.Disabled, $"{label}: updates off");
+        Task<TierUpdateCheck> suiteTask = CheckTierAsync(
+            _config.SuiteManifestUrl,
+            Path.Combine(modulesDir, "coop-suite-version.txt"),
+            ArmoryComponent.ModSuite,
+            "Mod suite");
+        Task<TierUpdateCheck> clientTask = CheckTierAsync(
+            _config.UpdateManifestUrl,
+            Path.Combine(modulesDir, "Coop", "installed-version.txt"),
+            ArmoryComponent.CoopClient,
+            "Co-op client");
+
+        await Task.WhenAll(suiteTask, clientTask);
+        TierUpdateCheck suite = suiteTask.Result;
+        TierUpdateCheck client = clientTask.Result;
+        return new ModUpdateCheck(
+            suite.Status, suite.Manifest,
+            client.Status, client.Manifest);
+    }
+
+    private async Task<TierUpdateCheck> CheckTierAsync(
+        string manifestUrl,
+        string versionFile,
+        ArmoryComponent component,
+        string label)
+    {
+        string? installed = ReadText(versionFile);
+        if (!TryGetHttpsUri(manifestUrl, out Uri? manifestUri))
+            return Unverified(component, label, installed, $"{label} feed is not configured securely.");
 
         UpdateManifest? manifest;
         try
         {
-            progress(-1, $"Checking {label}…");
-            manifest = JsonSerializer.Deserialize<UpdateManifest>(await Http.GetStringAsync(manifestUrl));
+            using var request = new HttpRequestMessage(HttpMethod.Get, manifestUri);
+            request.Headers.CacheControl = new CacheControlHeaderValue
+            {
+                NoCache = true,
+                NoStore = true,
+            };
+            using HttpResponseMessage response = await _http.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+                return Unverified(component, label, installed,
+                    $"{label} feed returned HTTP {(int)response.StatusCode}.");
+            try
+            {
+                manifest = JsonSerializer.Deserialize<UpdateManifest>(
+                    await response.Content.ReadAsStringAsync());
+            }
+            catch (JsonException)
+            {
+                return Unverified(component, label, installed, $"{label} feed was malformed.");
+            }
         }
         catch (HttpRequestException ex) when (ex.StatusCode is not null)
         {
-            return new(UpdateOutcome.Failed,
-                $"{label} feed returned HTTP {(int)ex.StatusCode} — update required");
+            return Unverified(component, label, installed,
+                $"{label} feed returned HTTP {(int)ex.StatusCode}.");
         }
-        catch
+        catch (HttpRequestException)
         {
-            return new(UpdateOutcome.Offline, $"Couldn't reach the {label} feed — using installed");
+            return Unverified(component, label, installed, $"{label} feed could not be reached.");
+        }
+        catch (TaskCanceledException)
+        {
+            return Unverified(component, label, installed, $"{label} feed check timed out.");
         }
 
-        if (manifest is null || !IsManifestValid(manifest))
-            return new(UpdateOutcome.Failed, $"{label} feed was malformed — using installed");
+        if (!IsManifestValid(manifest))
+            return Unverified(component, label, installed, $"{label} feed was malformed.");
 
-        var installed = ReadText(versionFile);
-        if (!IsNewer(manifest.Version, installed))
-            return new(UpdateOutcome.UpToDate, $"{label}: up to date (build {installed ?? "—"})");
+        bool updateAvailable = IsNewer(manifest!.Version, installed);
+        var status = new ComponentUpdateStatus(
+            component,
+            label,
+            installed,
+            manifest.Version,
+            manifest.Notes,
+            updateAvailable ? ComponentUpdateState.UpdateAvailable : ComponentUpdateState.Current,
+            updateAvailable
+                ? installed is null ? $"{label} is not installed." : $"{label} update available."
+                : $"{label} is current.");
+        return new TierUpdateCheck(status, manifest);
+    }
 
+    /// <param name="progress">(fraction 0..1 or -1 for indeterminate, status line).</param>
+    public async Task<UpdateResult> RunAsync(string modulesDir, Action<double, string> progress)
+    {
+        ModUpdateCheck check = await CheckAsync(modulesDir);
+        if (check.SuiteStatus.State == ComponentUpdateState.Unverified)
+            return new(UpdateOutcome.Failed, check.SuiteStatus.Detail);
+        if (check.ClientStatus.State == ComponentUpdateState.Unverified)
+            return new(UpdateOutcome.Failed, check.ClientStatus.Detail);
+        return await InstallAsync(modulesDir, check, (_, fraction, message) => progress(fraction, message));
+    }
+
+    public async Task<UpdateResult> InstallAsync(
+        string modulesDir,
+        ModUpdateCheck check,
+        Action<ArmoryComponent, double, string> progress)
+    {
+        if (check.SuiteStatus.State == ComponentUpdateState.Unverified ||
+            check.ClientStatus.State == ComponentUpdateState.Unverified)
+            return new(UpdateOutcome.Failed, "Required update feeds were not verified.");
+
+        UpdateResult suite = new(UpdateOutcome.UpToDate, "mod suite current");
+        if (check.SuiteStatus.State == ComponentUpdateState.UpdateAvailable)
+        {
+            if (check.SuiteManifest is null)
+                return new(UpdateOutcome.Failed, "Mod suite update plan was incomplete.");
+            suite = await InstallTierAsync(
+                check.SuiteManifest,
+                modulesDir,
+                Path.Combine(modulesDir, "coop-suite-version.txt"),
+                ArmoryComponent.ModSuite,
+                "mod suite",
+                progress);
+            if (suite.Outcome == UpdateOutcome.Failed)
+                return suite;
+        }
+
+        UpdateResult client = new(UpdateOutcome.UpToDate, "co-op client current");
+        if (check.ClientStatus.State == ComponentUpdateState.UpdateAvailable)
+        {
+            if (check.ClientManifest is null)
+                return new(UpdateOutcome.Failed, "Co-op client update plan was incomplete.");
+            client = await InstallTierAsync(
+                check.ClientManifest,
+                modulesDir,
+                Path.Combine(modulesDir, "Coop", "installed-version.txt"),
+                ArmoryComponent.CoopClient,
+                "co-op client",
+                progress);
+        }
+
+        return Combine(suite, client);
+    }
+
+    private async Task<UpdateResult> InstallTierAsync(
+        UpdateManifest manifest,
+        string modulesDir,
+        string versionFile,
+        ArmoryComponent component,
+        string label,
+        Action<ArmoryComponent, double, string> progress)
+    {
+        if (!IsManifestValid(manifest))
+            return new(UpdateOutcome.Failed, $"{label} update plan was invalid.");
         string tempZip = Path.Combine(Path.GetTempPath(), $"coop-update-{Guid.NewGuid():N}.zip");
         try
         {
-            await DownloadAsync(manifest.ClientZipUrl, tempZip, label, progress);
+            await DownloadAsync(
+                manifest.ClientZipUrl,
+                tempZip,
+                label,
+                (fraction, message) => progress(component, fraction, message));
 
-            progress(-1, $"Verifying {label}…");
+            progress(component, -1, $"Verifying {label}…");
             var actual = await Sha256HexAsync(tempZip);
             if (!actual.Equals(manifest.Sha256.Trim(), StringComparison.OrdinalIgnoreCase))
                 return new(UpdateOutcome.Failed, $"{label} failed integrity check — installed kept");
 
-            progress(-1, $"Installing {label}…");
+            progress(component, -1, $"Installing {label}…");
             InstallExact(tempZip, modulesDir, versionFile, manifest.Version);
 
             var note = string.IsNullOrWhiteSpace(manifest.Notes) ? "" : $" — {manifest.Notes}";
             return new(UpdateOutcome.Updated, $"{label} updated to {manifest.Version}{note}");
         }
-        catch
+        catch (Exception ex)
         {
+            Log.Write($"{label} install failed: {ex}");
             return new(UpdateOutcome.Failed, $"{label} update failed — using installed");
         }
         finally
@@ -128,9 +240,9 @@ public sealed class ModUpdater
         return winner;
     }
 
-    private static async Task DownloadAsync(string url, string dest, string label, Action<double, string> progress)
+    private async Task DownloadAsync(string url, string dest, string label, Action<double, string> progress)
     {
-        using var resp = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+        using var resp = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
         resp.EnsureSuccessStatusCode();
         var total = resp.Content.Headers.ContentLength ?? -1L;
 
@@ -152,13 +264,41 @@ public sealed class ModUpdater
 
     internal static bool IsManifestValid(UpdateManifest? manifest)
     {
-        if (manifest is null || string.IsNullOrWhiteSpace(manifest.Version) ||
-            string.IsNullOrWhiteSpace(manifest.ClientZipUrl))
+        if (manifest is null || ParseParts(manifest.Version) is null ||
+            !TryGetHttpsUri(manifest.ClientZipUrl, out _))
             return false;
 
         string sha256 = manifest.Sha256?.Trim() ?? string.Empty;
         return sha256.Length == 64 && sha256.All(Uri.IsHexDigit);
     }
+
+    private static TierUpdateCheck Unverified(
+        ArmoryComponent component,
+        string label,
+        string? installed,
+        string detail) =>
+        new(
+            new ComponentUpdateStatus(
+                component,
+                label,
+                installed,
+                null,
+                string.Empty,
+                ComponentUpdateState.Unverified,
+                detail),
+            null);
+
+    private static bool TryGetHttpsUri(string value, out Uri? uri)
+    {
+        bool valid = Uri.TryCreate(value, UriKind.Absolute, out uri) &&
+                     uri.Scheme == Uri.UriSchemeHttps;
+        if (!valid) uri = null;
+        return valid;
+    }
+
+    private sealed record TierUpdateCheck(
+        ComponentUpdateStatus Status,
+        UpdateManifest? Manifest);
 
     /// <summary>
     /// Stage a zip under the destination volume, exact-replace each top-level module directory, and

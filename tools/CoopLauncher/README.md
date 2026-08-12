@@ -16,6 +16,11 @@ group host — no module list, no manual connect. Replaces `Desktop\Play Friend 
    launcher first with rollback and a one-time continuation after restart.
 5. **Fails closed when versions cannot be verified** — an unreachable, timed-out, missing, or invalid
    required feed shows **THE COURT JESTER IS ASLEEP** and blocks joining until a retry succeeds.
+   A single transient GitHub blip (HTTP 5xx/429, a dropped connection, or a slow round-trip) is ridden
+   out first: each manifest GET has a short per-attempt timeout and a few backoff retries, and while the
+   armory stays unverified the check quietly re-runs on the 12 s status timer, so a brief outage
+   self-heals without the member hammering the retry button. A genuine 404/403 or malformed feed is
+   reported immediately without retrying — those never recover on a retry.
 6. **Launches + auto-joins** — **MARCH TO WAR** appears only after every component is verified current.
    The launcher shows a masked join-password field, then runs:
    ```

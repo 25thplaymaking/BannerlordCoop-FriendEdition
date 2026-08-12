@@ -97,6 +97,40 @@ public sealed class LauncherSelfUpdaterTests
     }
 
     [Fact]
+    public async Task CheckOnly_RetriesTransientServerErrorThenSucceeds()
+    {
+        int calls = 0;
+        using var http = new HttpClient(new StubHandler(_ =>
+        {
+            calls++;
+            return calls < 3
+                ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                : JsonResponse(Manifest("1.0.0", ValidSha));
+        }));
+
+        LauncherUpdateCheck check = await Updater(http).CheckAsync(new Version(1, 0));
+
+        Assert.Equal(ComponentUpdateState.Current, check.Status.State);
+        Assert.Equal(3, calls);
+    }
+
+    [Fact]
+    public async Task CheckOnly_DoesNotRetryPermanentNotFound()
+    {
+        int calls = 0;
+        using var http = new HttpClient(new StubHandler(_ =>
+        {
+            calls++;
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        }));
+
+        LauncherUpdateCheck check = await Updater(http).CheckAsync(new Version(1, 0));
+
+        Assert.Equal(ComponentUpdateState.Unverified, check.Status.State);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
     public async Task CheckOnly_MalformedManifestIsUnverified()
     {
         using var http = new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
@@ -276,7 +310,8 @@ public sealed class LauncherSelfUpdaterTests
     }
 
     private static LauncherSelfUpdater Updater(HttpClient http) => new(
-        new LauncherConfig { LauncherManifestUrl = "https://updates.example/launcher.json" }, http);
+        new LauncherConfig { LauncherManifestUrl = "https://updates.example/launcher.json" }, http,
+        _ => Task.CompletedTask);
 
     private static LauncherUpdateManifest Manifest(string version, string sha) => new()
     {

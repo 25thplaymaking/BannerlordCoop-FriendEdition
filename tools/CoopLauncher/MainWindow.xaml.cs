@@ -63,7 +63,7 @@ public partial class MainWindow : Window
         MinButton.Click += (_, _) => WindowState = WindowState.Minimized;
         CloseButton.Click += (_, _) => Close();
         JoinButton.Click += OnPrimaryClicked;
-        _statusTimer.Tick += async (_, _) => await RefreshStatusAsync();
+        _statusTimer.Tick += async (_, _) => await OnStatusTickAsync();
 
         Loaded += OnLoaded;
     }
@@ -426,6 +426,18 @@ public partial class MainWindow : Window
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
         };
         BannerScale.BeginAnimation(ScaleTransform.ScaleYProperty, unfurl);
+    }
+
+    /// <summary>
+    /// Fires on the status timer: always refresh the server pill, and — when the last armory check
+    /// came back unverified (the jester screen, usually a transient GitHub blip) — quietly re-run it so
+    /// the launcher self-heals the moment the feeds recover, without the member clicking retry.
+    /// </summary>
+    private async Task OnStatusTickAsync()
+    {
+        await RefreshStatusAsync();
+        if (!_operationActive && _snapshot is { PrimaryAction: ArmoryPrimaryAction.RetryCheck })
+            await CheckArmoryAsync();
     }
 
     private async Task RefreshStatusAsync()

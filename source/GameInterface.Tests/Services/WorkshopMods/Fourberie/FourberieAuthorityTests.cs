@@ -3,6 +3,7 @@ using GameInterface.Services.WorkshopMods.Fourberie;
 using System;
 using System.Collections;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Roster;
 using Xunit;
 
 namespace GameInterface.Tests.Services.WorkshopMods.Fourberie;
@@ -158,6 +159,77 @@ public sealed class FourberieAuthorityTests
             valid.TargetId,
             valid.IntValue,
             new FourberieTroopSelection[FourberieOperationProtocol.MaxTroopSelections + 1])));
+    }
+
+    [Fact]
+    public void EnslavePrisoners_RequiresSafehouseAndSelectedPrisoners()
+    {
+        var valid = new NetworkRequestFourberieOperation(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            7,
+            3,
+            FourberieOperation.EnslavePrisoners,
+            "hideout_a",
+            string.Empty,
+            0,
+            new[] { new FourberieTroopSelection("looter", 2) });
+
+        Assert.True(FourberieOperationProtocol.IsRequestShapeValid(valid));
+        Assert.False(FourberieOperationProtocol.IsRequestShapeValid(new NetworkRequestFourberieOperation(
+            valid.SessionId,
+            valid.RequestId,
+            valid.ExpectedRevision,
+            valid.Operation,
+            string.Empty,
+            valid.TargetId,
+            valid.IntValue,
+            valid.Troops)));
+        Assert.False(FourberieOperationProtocol.IsRequestShapeValid(new NetworkRequestFourberieOperation(
+            valid.SessionId,
+            valid.RequestId,
+            valid.ExpectedRevision,
+            valid.Operation,
+            valid.SettlementId,
+            valid.TargetId,
+            valid.IntValue,
+            Array.Empty<FourberieTroopSelection>())));
+    }
+
+    [Fact]
+    public void EnslavePrisonersConsequence_RoutesSelectionAndOwnsPartyCommit()
+    {
+        var runtime = new CaptureRuntime();
+        var prisoner = new CharacterObject();
+        var selected = new TroopRoster();
+        selected.AddToCounts(prisoner, 2, false, 0, 0, true);
+        bool previousServer = ModInformation.IsServer;
+
+        try
+        {
+            ModInformation.IsServer = false;
+            FourberiePatchRuntime.Current = runtime;
+            FourberiePartyCommitSuppression.Reset();
+            bool result = false;
+
+            bool runOriginal = FourberieAuthorityPatches.EnslavePrisonersConsequencePrefix(
+                selected,
+                ref result);
+
+            Assert.False(runOriginal);
+            Assert.True(result);
+            Assert.Equal(FourberieOperation.EnslavePrisoners, runtime.LastOperation.Operation);
+            var selection = Assert.Single(runtime.LastOperation.Troops);
+            Assert.Same(prisoner, selection.Troop);
+            Assert.Equal(2, selection.Count);
+            Assert.True(FourberiePartyCommitSuppression.Consume());
+            Assert.False(FourberiePartyCommitSuppression.Consume());
+        }
+        finally
+        {
+            FourberiePartyCommitSuppression.Reset();
+            FourberiePatchRuntime.Current = null;
+            ModInformation.IsServer = previousServer;
+        }
     }
 
     [Theory]

@@ -351,6 +351,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.EnlistLadsConsequence:
                 method = nameof(FourberieAuthorityPatches.EnlistLadsConsequencePrefix);
                 break;
+            case FourberiePatchKind.EnslavePrisonersConsequence:
+                method = nameof(FourberieAuthorityPatches.EnslavePrisonersConsequencePrefix);
+                break;
             case FourberiePatchKind.RecruitBanditsConsequence:
                 method = nameof(FourberieAuthorityPatches.RecruitBanditsConsequencePrefix);
                 break;

@@ -54,6 +54,7 @@ internal enum FourberieOperation
     StartSafehouseWait = 43,
     StopSafehouseWait = 44,
     CompleteSafehouseReturn = 45,
+    EnslavePrisoners = 46,
 }
 
 internal enum FourberieOperationStatus
@@ -242,6 +243,9 @@ internal static class FourberieOperationProtocol
             FourberieOperation.RecruitBandits =>
                 !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
                 request.IntValue > 0 && selected > 0 && selected <= request.IntValue,
+            FourberieOperation.EnslavePrisoners =>
+                !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
+                request.IntValue == 0 && request.Troops.Length > 0,
             FourberieOperation.StartInsuranceScam =>
                 !string.IsNullOrEmpty(request.SettlementId) &&
                 !string.IsNullOrEmpty(request.TargetId) &&

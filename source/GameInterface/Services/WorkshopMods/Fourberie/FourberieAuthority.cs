@@ -207,6 +207,22 @@ internal static class FourberieAuthorityPatches
         return false;
     }
 
+    public static bool EnslavePrisonersConsequencePrefix(TroopRoster leftPrisonRoster, ref bool __result)
+    {
+        if (!ModInformation.IsClient) return true;
+
+        bool submitted = FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+            FourberieOperation.EnslavePrisoners,
+            CurrentPlayerSettlement(),
+            null,
+            null,
+            0,
+            Selections(leftPrisonRoster))) == true;
+        FourberiePartyCommitSuppression.Request();
+        __result = submitted;
+        return false;
+    }
+
     public static bool RecruitBanditsConsequencePrefix(TroopRoster leftMemberRoster, ref bool __result)
     {
         if (!ModInformation.IsClient) return true;
@@ -970,6 +986,18 @@ internal static class FourberieAuthorityPatches
             if (troop != null && count > 0) selected.Add(new FourberieLocalTroopSelection(troop, count));
         }
         return selected.ToArray();
+    }
+
+    private static Settlement CurrentPlayerSettlement()
+    {
+        try
+        {
+            return MobileParty.MainParty?.CurrentSettlement;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static FourberieLocalTroopSelection[] Difference(TroopRoster baseline, TroopRoster remaining)

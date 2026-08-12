@@ -4,6 +4,7 @@ using GameInterface.Policies;
 using GameInterface.Services.Barters;
 using GameInterface.Services.ObjectManager;
 using HarmonyLib;
+using Helpers;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -71,6 +72,8 @@ internal sealed class FourberieOperationExecutor
         MobileParty sourceParty = null;
         Dictionary<CharacterObject, int> sourceCounts = null;
         Dictionary<CharacterObject, int> actorCounts = null;
+        Dictionary<CharacterObject, int> actorPrisonCounts = null;
+        ItemRosterElement[] actorItems = null;
         MobileParty previousCaravan = GetStaticField("_insucaraF") as MobileParty;
         MobileParty previousBandits = GetStaticField("_insubandF") as MobileParty;
         MobileParty previousAgents = GetStaticField("_agentsParty") as MobileParty;
@@ -101,6 +104,11 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.RecruitBandits:
                     actorCounts = CaptureCounts(actorParty.MemberRoster, request.Troops);
                     ApplyBanditRecruitment(actor, actorParty, request);
+                    break;
+                case FourberieOperation.EnslavePrisoners:
+                    actorPrisonCounts = CaptureCounts(actorParty.PrisonRoster, request.Troops);
+                    actorItems = CaptureAllItems(actorParty.ItemRoster);
+                    ApplyPrisonerEnslavement(actor, actorParty, request);
                     break;
                 case FourberieOperation.StartInsuranceScam:
                     ApplyInsuranceScam(actor, actorParty, request);
@@ -202,6 +210,10 @@ internal sealed class FourberieOperationExecutor
             catch (Exception rollback) { rollbackErrors.Add("source roster: " + rollback.Message); }
             try { RestoreCounts(actorParty.MemberRoster, actorCounts); }
             catch (Exception rollback) { rollbackErrors.Add("actor roster: " + rollback.Message); }
+            try { RestoreCounts(actorParty.PrisonRoster, actorPrisonCounts); }
+            catch (Exception rollback) { rollbackErrors.Add("actor prisoner roster: " + rollback.Message); }
+            try { RestoreItems(actorParty.ItemRoster, actorItems); }
+            catch (Exception rollback) { rollbackErrors.Add("actor item roster: " + rollback.Message); }
             try
             {
                 if (previousAgents?.IsActive == true)
@@ -247,6 +259,58 @@ internal sealed class FourberieOperationExecutor
     }
 
     public void Reset() => grudgeQuotes.Clear();
+
+    private void ApplyPrisonerEnslavement(
+        Hero actor,
+        MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        if (!TryResolveCurrentSettlement(actorParty, request.SettlementId, out Settlement settlement) ||
+            GetStaticField("_crimeBase") is not Settlement currentBase ||
+            currentBase != settlement ||
+            GetStaticField("_crimeBaseParty") is not MobileParty baseParty ||
+            baseParty.IsActive != true)
+            throw new InvalidOperationException("the controller is no longer at the active Fourberie safehouse");
+
+        var selected = ResolveTroops(request.Troops).ToArray();
+        if (selected.Length == 0)
+            throw new InvalidOperationException("no prisoners were selected");
+
+        foreach ((CharacterObject troop, int count) in selected)
+        {
+            if ((int)troop.Occupation == 3)
+                throw new InvalidOperationException("selected prisoner is not eligible for enslavement");
+            if (actorParty.PrisonRoster.GetTroopCount(troop) < count)
+                throw new InvalidOperationException("selected prisoner roster changed before enslavement");
+        }
+
+        var casualties = selected
+            .Select(selection => new TroopRosterElement(selection.Troop) { Number = selection.Count })
+            .ToArray();
+        var lootFactor = new ExplainedNumber(1f, false, null);
+        CharacterObject leader = SkillHelper.GetEffectivePartyLeaderForSkill(actorParty.Party);
+        if (leader != null)
+            SkillHelper.AddSkillBonusForCharacter(
+                DefaultSkillEffects.RogueryLootBonus,
+                leader,
+                ref lootFactor);
+
+        var lootMethod = RequiredMethod(BehaviorTypeName, "LootCasualties", parameterCount: 2);
+        var loot = (lootMethod.Invoke(null, new object[] { casualties, lootFactor.ResultNumber })
+                    as IEnumerable<ItemRosterElement>)?.ToArray()
+                   ?? Array.Empty<ItemRosterElement>();
+        int total = selected.Sum(selection => selection.Count);
+
+        using (new BarterPlayerContext(actor, actorParty))
+        using (new AllowedThread())
+        {
+            foreach ((CharacterObject troop, int count) in selected)
+                actorParty.PrisonRoster.AddToCounts(troop, -count, false, 0, 0, true, -1);
+            actorParty.ItemRoster.Add(loot);
+            Increment(GetDictionary("_crimeValue"), 1500, total);
+            actor.AddSkillXp(DefaultSkills.Roguery, 100f);
+        }
+    }
 
     private void ApplySafehouseReturn(MobileParty actorParty, string settlementId)
     {
@@ -1197,6 +1261,23 @@ internal sealed class FourberieOperationExecutor
 
     private static Dictionary<CharacterObject, int> CaptureAllCounts(TroopRoster roster) =>
         roster?.GetTroopRoster().ToDictionary(element => element.Character, element => element.Number);
+
+    private static ItemRosterElement[] CaptureAllItems(ItemRoster roster) =>
+        roster == null
+            ? null
+            : Enumerable.Range(0, roster.Count)
+                .Select(roster.GetElementCopyAtIndex)
+                .ToArray();
+
+    private static void RestoreItems(ItemRoster roster, ItemRosterElement[] elements)
+    {
+        if (roster == null || elements == null) return;
+        using (new AllowedThread())
+        {
+            roster.Clear();
+            roster.Add(elements);
+        }
+    }
 
     private static void RestoreGold(Hero actor, int previousGold)
     {

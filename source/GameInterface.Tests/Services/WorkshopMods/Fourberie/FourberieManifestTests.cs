@@ -76,6 +76,7 @@ public sealed class FourberieManifestTests
     [InlineData("Fourberie.CriminalVM", "AgentsEnlistRoutine", "ClientOperationPresentation")]
     [InlineData("Fourberie.CriminalVM", "EnlistFromPartyDone", "EnlistPartyConsequence")]
     [InlineData("Fourberie.CriminalVM", "EnlistFromLadsDone", "EnlistLadsConsequence")]
+    [InlineData("Fourberie.FourberieBehavior", "OnDoneEnslaved", "EnslavePrisonersConsequence")]
     [InlineData("Fourberie.FourbBanditBehavior", "FourbRecruitBandit", "ClientOperationPresentation")]
     [InlineData("Fourberie.FourbBanditBehavior", "RecruitLadsOnDoneClicked", "RecruitBanditsConsequence")]
     [InlineData("Fourberie.HelperSubInsuScam+<>c__DisplayClass0_0", "<Menu>b__4", "InsuranceScamConsequence")]

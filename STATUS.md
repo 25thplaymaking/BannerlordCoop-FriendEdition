@@ -17,7 +17,7 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > settlement rebellion cannot run from a client. Improved Garrisons' 723 candidates are now closed too:
 > management/settings commands carry stable selections, authenticated clan ownership, session/revision
 > concurrency, exact replay results, canonical rollback, server-created parties, and an authenticated building-
-> reserve command while clients retain the menu and roster-selection surface. Fourberie's forty-five explicit
+> reserve command while clients retain the menu and roster-selection surface. Fourberie's forty-six explicit
 > operation families now use authenticated,
 > rollback-safe server commands, while its menus and mission setup remain role-local presentation/lifecycle.
 > Diplomacy's explicit player operations and server callbacks are routed too, including a persisted,
@@ -31,6 +31,19 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 
 ## Known playtest bugs (live)
 
+- **[candidate fixed; nightly validation pending] Safehouse prisoner and loot transfers did not persist.**
+  (2026-08-12, Bryce.) Fourberie's prisoner-enslavement completion and the safehouse inventory screen were
+  mutating client-local rosters. The compatibility startup gate also inspected only public campaign-model
+  properties, so it falsely rejected the required `FModelDamage` model and prevented the canonical crime-base
+  party from being registered for authoritative stash transactions. The runtime surface now validates the
+  complete active model set, and prisoner enslavement is an authenticated server transaction that owns the
+  prisoner removal, generated loot, slave count, and Roguery XP. The change is save-compatible and does not
+  create or migrate a campaign save. Focused Fourberie tests pass (329/329).
+- **[candidate fixed; nightly validation pending] Back-to-back hideout raids could crash the client.**
+  (2026-08-12, Bryce.) A second/third raid could launch the hideout mission before the client received the
+  server-prepared defender roster. Mission launch now waits for an acknowledged server preparation and exact
+  roster parity; failed preparation does not consume the hideout cooldown, while a successful preparation does.
+  Focused repeated-hideout E2E tests pass (6/6), including a deliberately stale client roster.
 - **[candidate fixed; live validation pending] Auto-resolve vs bandit party loops the encounter menu.**
   (2026-08-11, Bryce, Sea Raiders.)
   Choosing **"Send your troops to attack"** (auto-resolve) instead of **"Attack!"** (manual) against a
@@ -47,7 +60,7 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
   Sea Raider path before this can be called live-fixed.
   **Current-live workaround:** use **"Attack!"** (manual battle) until the candidate is rendered and promoted.
 
-## Where we are (2026-08-11)
+## Where we are (2026-08-12)
 
 Modded co-op **joins and loads**: server hosts the full campaign, validation +
 mod-config barrier + 34 MB save transfer succeed, and the client reaches a playable **world map**
@@ -126,9 +139,9 @@ rolls back canonical Fourberie state and created parties on failure, and returns
   rolls back failed clan moves. Compatibility policy boundaries are directly tested, and configured
   settlement rebellion is forced off on clients.
 - **Fourberie** — integrated in increments:
-  1. `BehaviorsWithoutModels` kind: `InitializeBehaviorsOnlyPrefix` adds the 8 gameplay
-     behaviors, skips the 14 model replacements; `FourberieRuntimeSurface` now rejects only
-     active MODELS, not behaviors.
+  1. Coop owns Fourberie's behavior/model initialization and requires its exact eight-behavior,
+     fourteen-model composition. `FourberieRuntimeSurface` enumerates the active model manager directly,
+     including mission-scoped models that are not exposed as public `CampaignModels` properties.
   2. `RegisterEvents` un-gated (runs on both) so behaviors wire client menus.
   3. Menu builders (`AddGameMenus`/`*OnGaMenOpened`/contact/escape/spawn) → `ClientPresentation`.
   → Menus + simple actions confirmed working live.
@@ -190,6 +203,10 @@ rolls back canonical Fourberie state and created parties on failure, and returns
       continues through the exact audited Coop replacement.
       The initialization replacement now rebuilds replicated hero dictionaries only on the server; clients consume
       the canonical snapshot instead of independently rewriting those dictionaries.
+      Safehouse prisoner enslavement now sends the selected prisoner roster to a server-owned operation; the
+      server validates the pinned safehouse and current roster, then owns prisoner removal, generated loot,
+      slave strength, and Roguery XP. Canonical crime-base registration also makes ordinary loot transfers use
+      the existing authoritative inventory route. Both changes preserve the current campaign save format.
   14. `OnMissionBehaviorInitialize` currently preserves the mod's required peer-local setup, but its
      mission callbacks remain open until their authoritative/controller ownership is proven end to end.
   15. The exact secondary pass currently assigns metadata to 1,044/1,865 required candidates:

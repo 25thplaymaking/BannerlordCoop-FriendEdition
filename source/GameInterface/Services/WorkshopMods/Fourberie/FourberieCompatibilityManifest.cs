@@ -26,6 +26,7 @@ internal enum FourberiePatchKind
     ClientOperationPresentation,
     EnlistPartyConsequence,
     EnlistLadsConsequence,
+    EnslavePrisonersConsequence,
     RecruitBanditsConsequence,
     InsuranceScamConsequence,
     BusinessStartConsequence,
@@ -355,6 +356,10 @@ internal static class FourberieCompatibilityManifest
             FlattenedTroopRoster, FlattenedTroopRoster, "System.Boolean", PartyBase, PartyBase);
         Add("Fourberie.CriminalVM", "EnlistFromLadsDone", FourberiePatchKind.EnlistLadsConsequence,
             PartyBase, TroopRoster, TroopRoster, PartyBase, TroopRoster, TroopRoster, "System.Boolean");
+        AddReturning("Fourberie.FourberieBehavior", "OnDoneEnslaved", "System.Boolean",
+            FourberiePatchKind.EnslavePrisonersConsequence,
+            TroopRoster, TroopRoster, TroopRoster, TroopRoster,
+            FlattenedTroopRoster, FlattenedTroopRoster, "System.Boolean", PartyBase, PartyBase);
         Add("Fourberie.FourbBanditBehavior", "FourbRecruitBandit",
             FourberiePatchKind.ClientOperationPresentation, "System.Int32");
         AddReturning("Fourberie.FourbBanditBehavior", "RecruitLadsOnDoneClicked", "System.Boolean",

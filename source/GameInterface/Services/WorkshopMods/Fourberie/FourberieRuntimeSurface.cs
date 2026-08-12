@@ -47,26 +47,19 @@ internal static class FourberieRuntimeSurface
 
         try
         {
-            var active = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var property in models.GetType().GetProperties(
-                         BindingFlags.Instance | BindingFlags.Public))
-            {
-                if (property.GetIndexParameters().Length != 0 || property.GetMethod == null) continue;
-                var value = property.GetValue(models);
-                if (value?.GetType().Assembly != null &&
-                    ReferenceEquals(value.GetType().Assembly, fourberieAssembly))
-                    active[value.GetType().FullName] = property.Name;
-            }
+            // CampaignSystem.GameModels exposes campaign calculation models as properties, but
+            // mission-scoped models (notably AgentApplyDamageModel/FModelDamage) only appear in
+            // the underlying GameModelsManager collection. Validate that complete collection so
+            // an installed FModelDamage is not falsely reported missing on every loaded save.
+            var active = models.GetGameModels()
+                .Where(value => value?.GetType().Assembly != null &&
+                                ReferenceEquals(value.GetType().Assembly, fourberieAssembly))
+                .Select(value => value.GetType().FullName)
+                .Where(name => !string.IsNullOrEmpty(name))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
 
-            if (active.Count == 0) return true;
-            var unexpected = active.Keys.Except(ExpectedModels, StringComparer.Ordinal).ToArray();
-            var missing = ExpectedModels.Except(active.Keys, StringComparer.Ordinal).ToArray();
-            if (unexpected.Length == 0 && missing.Length == 0) return true;
-            failure =
-                "Fourberie model composition was incomplete (missing: " +
-                string.Join(", ", missing) + "; unexpected: " + string.Join(", ", unexpected) +
-                "). Coop startup was aborted before calculations could diverge.";
-            return false;
+            return TryAssertExactActiveModelNames(active, out failure);
         }
         catch (Exception exception)
         {
@@ -74,5 +67,26 @@ internal static class FourberieRuntimeSurface
                       exception.GetType().Name + ": " + exception.Message;
             return false;
         }
+    }
+
+    internal static bool TryAssertExactActiveModelNames(
+        IEnumerable<string> activeModelNames,
+        out string failure)
+    {
+        failure = null;
+        var active = new HashSet<string>(
+            activeModelNames ?? Array.Empty<string>(),
+            StringComparer.Ordinal);
+        if (active.Count == 0) return true;
+
+        var unexpected = active.Except(ExpectedModels, StringComparer.Ordinal).ToArray();
+        var missing = ExpectedModels.Except(active, StringComparer.Ordinal).ToArray();
+        if (unexpected.Length == 0 && missing.Length == 0) return true;
+
+        failure =
+            "Fourberie model composition was incomplete (missing: " +
+            string.Join(", ", missing) + "; unexpected: " + string.Join(", ", unexpected) +
+            "). Coop startup was aborted before calculations could diverge.";
+        return false;
     }
 }

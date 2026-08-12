@@ -82,6 +82,7 @@ public sealed class LauncherUpdateApplierTests
     {
         using var fixture = new ApplyFixture();
         var starts = new List<ProcessStartInfo>();
+        var messages = new List<string>();
         var request = new LauncherApplyRequest(
             fixture.StagedExe, fixture.TargetExe, 123, fixture.StagedSha);
 
@@ -93,9 +94,12 @@ public sealed class LauncherUpdateApplierTests
                 starts.Add(info);
                 if (starts.Count == 1) throw new InvalidOperationException("new launcher would not start");
                 return new Process();
-            });
+            },
+            messages.Add);
 
         Assert.False(result.Succeeded);
+        Assert.Single(messages);
+        Assert.Contains("new launcher would not start", messages[0]);
         Assert.Equal(fixture.OldBytes, File.ReadAllBytes(fixture.TargetExe));
         Assert.Equal(fixture.ConfigBytes, File.ReadAllBytes(fixture.ConfigPath));
         Assert.Equal(2, starts.Count);

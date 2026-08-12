@@ -210,13 +210,13 @@ public partial class MainWindow : Window
 
             if (result.Outcome == ArmoryPreparationOutcome.Completed)
             {
-                RenderSnapshot(result.Snapshot);
+                CompletePreparation(result.Snapshot);
                 return;
             }
 
             if (result.Outcome == ArmoryPreparationOutcome.Unverified)
             {
-                RenderSnapshot(result.Snapshot);
+                CompletePreparation(result.Snapshot);
                 return;
             }
 
@@ -245,6 +245,12 @@ public partial class MainWindow : Window
                 UpdateBar.IsIndeterminate = false;
             }
         }
+    }
+
+    internal void CompletePreparation(ArmorySnapshot snapshot)
+    {
+        _operationActive = false;
+        RenderSnapshot(snapshot);
     }
 
     private void SetCheckingState()

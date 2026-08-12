@@ -66,15 +66,18 @@ public static class LauncherUpdateApplier
     public static LauncherApplyResult ApplyAndRelaunch(
         LauncherApplyRequest request,
         Func<int, bool>? waitForExit = null,
-        Func<ProcessStartInfo, Process?>? startProcess = null)
+        Func<ProcessStartInfo, Process?>? startProcess = null,
+        Action<string>? writeLog = null)
     {
         if (!IsSafeApplyLayout(request))
             return new(false, "Launcher update paths were unsafe.");
         Func<int, bool> wait = waitForExit ?? WaitForProcessExit;
         Func<ProcessStartInfo, Process?> start = startProcess ?? (info => Process.Start(info));
+        Action<string> log = writeLog ?? Log.Write;
         if (!HashMatches(request.StagedExecutablePath, request.ExpectedSha256))
         {
-            if (wait(request.PreviousProcessId)) TryStartRollback(request.TargetExecutablePath, start);
+            if (wait(request.PreviousProcessId))
+                TryStartRollback(request.TargetExecutablePath, start, log);
             return new(false, "Launcher update failed its final integrity check.");
         }
 
@@ -104,10 +107,10 @@ public static class LauncherUpdateApplier
         }
         catch (Exception ex)
         {
-            Log.Write($"Launcher apply failed: {ex}");
-            if (replaced) TryRestoreBackup(backup, target);
+            log($"Launcher apply failed: {ex}");
+            if (replaced) TryRestoreBackup(backup, target, log);
             TryDeleteFile(pending);
-            TryStartRollback(target, start);
+            TryStartRollback(target, start, log);
             return new(false, $"Launcher update could not be applied: {ex.Message}");
         }
     }
@@ -251,7 +254,7 @@ public static class LauncherUpdateApplier
         }
     }
 
-    private static void TryRestoreBackup(string backup, string target)
+    private static void TryRestoreBackup(string backup, string target, Action<string> log)
     {
         try
         {
@@ -259,11 +262,14 @@ public static class LauncherUpdateApplier
         }
         catch (Exception ex)
         {
-            Log.Write($"Launcher rollback failed: {ex}");
+            log($"Launcher rollback failed: {ex}");
         }
     }
 
-    private static void TryStartRollback(string target, Func<ProcessStartInfo, Process?> start)
+    private static void TryStartRollback(
+        string target,
+        Func<ProcessStartInfo, Process?> start,
+        Action<string> log)
     {
         try
         {
@@ -271,7 +277,7 @@ public static class LauncherUpdateApplier
         }
         catch (Exception ex)
         {
-            Log.Write($"Restored launcher could not restart: {ex.Message}");
+            log($"Restored launcher could not restart: {ex.Message}");
         }
     }
 

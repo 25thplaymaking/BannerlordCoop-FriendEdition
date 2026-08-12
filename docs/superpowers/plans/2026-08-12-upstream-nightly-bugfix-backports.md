@@ -96,9 +96,9 @@ Defer from this batch:
 - Create: `source/GameInterface.Tests/Services/Clans/ClanPartiesVMPatchesTests.cs`
 - Modify: #2768 production files under `source/GameInterface/Services/Clans`, `MobileParties/Patches`, and `Party/Handlers`.
 
-- [ ] Import the upstream clan-party regression tests before production changes and record the expected failures.
-- [ ] Apply the final reviewed #2768 production diff, preserving existing Friend Edition coalescer integration.
-- [ ] Re-run focused tests and commit the verified increment.
+- [x] Import the upstream clan-party regression tests before production changes and record the expected failures.
+- [x] Apply the final reviewed #2768 production diff, preserving existing Friend Edition coalescer integration.
+- [x] Re-run focused tests and commit the verified increment.
 
 ### Task 5: Combined verification and nightly handoff
 

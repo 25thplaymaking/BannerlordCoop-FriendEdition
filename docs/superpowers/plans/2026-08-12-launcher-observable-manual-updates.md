@@ -8,8 +8,10 @@
 
 **Tech Stack:** .NET 8, C# 12, WPF, `HttpClient`, xUnit, GitHub Actions rolling release manifests.
 
-**Execution status:** Tasks 1–4 are implemented and committed. Task 5 verification and publication are
-in progress. The game server and its existing save have not been touched.
+**Execution status:** Tasks 1–5 are complete. Stable launcher `2026.8.12.9` was published from
+`789bf4f94`; its public manifest, executable version/hash, and blank public password were independently
+verified. The active local installation matches the published executable. The game server and its
+existing save were not touched.
 
 ## Global Constraints
 

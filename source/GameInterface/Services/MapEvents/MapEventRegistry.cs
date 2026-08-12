@@ -147,6 +147,18 @@ internal class MapEventRegistry : AutoRegistryBase<MapEvent>
             return;
         }
 
+        // Authoritative battle results detach/destroy the MapEvent before PlayerEncounter.Update
+        // advances through CaptureHeroes, loot, prisoners, and members. This is the normal Send
+        // Troops path (there is no active mission to protect it), so do not mistake its deliberately
+        // staged encounter for an abandoned dead-menu encounter and force-finish its rewards away.
+        if (PlayerEncounter.Current?.EncounterState == PlayerEncounterState.CaptureHeroes)
+        {
+            Logger.Debug(
+                "Preserving staged battle-results encounter while MapEvent {MapEventId} is destroyed",
+                mapEventId);
+            return;
+        }
+
         if (!HasEncounterMenuToClose())
         {
             return;

@@ -137,6 +137,19 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             troops.Add(new FourberieTroopSelection(troopId, troop.Count));
         }
 
+        var items = new List<FourberieItemSelection>();
+        foreach (FourberieLocalItemSelection item in operation.Items)
+        {
+            ItemObject itemObject = item?.EquipmentElement.Item;
+            ItemModifier modifier = item?.EquipmentElement.ItemModifier;
+            if (itemObject == null || !objectManager.TryGetId(itemObject, out string itemId))
+                return false;
+            string modifierId = string.Empty;
+            if (modifier != null && !objectManager.TryGetId(modifier, out modifierId))
+                return false;
+            items.Add(new FourberieItemSelection(itemId, modifierId, item.DeltaToSafehouse));
+        }
+
         long requestId = Interlocked.Increment(ref nextRequestId);
         var request = new NetworkRequestFourberieOperation(
             config.SessionId,
@@ -147,7 +160,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             targetId,
             secondaryTargetId,
             operation.IntValue,
-            troops.ToArray());
+            troops.ToArray(),
+            items.ToArray());
         if (!FourberieOperationProtocol.IsRequestShapeValid(request)) return false;
 
         pendingOperations[requestId] = operation.Operation;

@@ -76,7 +76,9 @@ internal sealed partial class TournamentSessionHandler
                 data.Charging,
                 data.SneakAttack);
             acceptedHitProgression.Add(dedupeKey);
-            liveCombatSessions.Add(data.SessionId);
+            liveProgressionControllers.Add(ProgressionControllerKey(
+                data.SessionId,
+                data.DamageOriginControllerId));
         }, context: nameof(Handle_HitProgression));
     }
 
@@ -139,6 +141,24 @@ internal sealed partial class TournamentSessionHandler
     {
         acceptedProgression.RemoveWhere(key =>
             key.StartsWith($"{sessionId}\n", StringComparison.Ordinal));
+    }
+
+    internal static string ProgressionControllerKey(string sessionId, string controllerId) =>
+        $"{sessionId}\n{controllerId}";
+
+    internal static bool NeedsSimulationProgression(
+        string sessionId,
+        TournamentContestantData contestant,
+        HashSet<string> liveProgressionControllers)
+    {
+        return contestant == null ||
+            !contestant.IsHuman ||
+            contestant.IsReplaced ||
+            string.IsNullOrEmpty(contestant.ControllerId) ||
+            liveProgressionControllers == null ||
+            !liveProgressionControllers.Contains(ProgressionControllerKey(
+                sessionId,
+                contestant.ControllerId));
     }
 
     private static bool IsFinite(float value)

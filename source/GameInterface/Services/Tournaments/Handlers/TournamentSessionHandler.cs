@@ -41,7 +41,7 @@ internal sealed partial class TournamentSessionHandler : IHandler
     private readonly Dictionary<string, BetLedgerEntry> betLedger = new();
     private readonly Dictionary<string, TournamentCompletionTransaction> completionTransactions = new();
     private readonly HashSet<string> completionInProgress = new();
-    private readonly HashSet<string> liveCombatSessions = new();
+    private readonly HashSet<string> liveProgressionControllers = new();
     private readonly HashSet<string> acceptedHitProgression = new();
     private readonly System.Collections.Concurrent.ConcurrentDictionary<NetPeer, string> tournamentPeerControllers = new();
 
@@ -596,7 +596,6 @@ internal sealed partial class TournamentSessionHandler : IHandler
                 return;
             }
 
-            liveCombatSessions.Add(result.SessionId);
             ResolveBets(current, bracket.MatchWinnerSlotIds);
             BroadcastSnapshot(snapshot);
             if (bracket.IsCompleted)
@@ -1112,8 +1111,19 @@ internal sealed partial class TournamentSessionHandler : IHandler
         transaction.Run(TournamentCompletionStep.BetSettlement, () => { });
         transaction.Run(TournamentCompletionStep.SimulationProgression, () =>
         {
-            if (!liveCombatSessions.Contains(snapshot.SessionId))
-                ApplyTournamentProgression(game.Town, participants);
+            var participantsNeedingProgression = new MBList<CharacterObject>();
+            for (int index = 0; index < participants.Count; index++)
+            {
+                TournamentContestantData contestant = index < snapshot.Contestants.Length
+                    ? snapshot.Contestants[index]
+                    : null;
+                if (NeedsSimulationProgression(
+                        snapshot.SessionId,
+                        contestant,
+                        liveProgressionControllers))
+                    participantsNeedingProgression.Add(participants[index]);
+            }
+            ApplyTournamentProgression(game.Town, participantsNeedingProgression);
         });
     }
 

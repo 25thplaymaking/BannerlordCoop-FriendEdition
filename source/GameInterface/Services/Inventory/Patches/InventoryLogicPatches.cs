@@ -3,11 +3,15 @@ using Common.Messaging;
 using Common.Util;
 using GameInterface.Services.Inventory.Messages;
 using GameInterface.Services.MapEvents.PlayerPartyInteractions;
+using GameInterface.Services.WorkshopMods.Fourberie;
 using HarmonyLib;
+using Helpers;
+using System;
 using Serilog;
 using System.Collections.Generic;
 using TaleWorlds.CampaignSystem.Inventory;
 using TaleWorlds.CampaignSystem.Party;
+using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.Core;
 
 namespace GameInterface.Services.Inventory.Patches;
@@ -31,6 +35,12 @@ internal class InventoryLogicPatches
         if (__instance.IsPreviewingItem)
         {
             __result = false;
+            return false;
+        }
+
+        if (FourberieSafehouseTransferContext.TryHandleDone(__instance, out bool fourberieResult))
+        {
+            __result = fourberieResult;
             return false;
         }
 
@@ -98,4 +108,24 @@ internal class InventoryLogicPatches
     //{
     //    PlayerPartyTradeContext.PublishOfferChanged(__instance);
     //}
+}
+
+[HarmonyPatch(
+    typeof(InventoryScreenHelper),
+    nameof(InventoryScreenHelper.OpenScreenAsStash),
+    new[] { typeof(ItemRoster) })]
+internal static class FourberieStashOpenPatch
+{
+    [HarmonyPrefix]
+    private static void Prefix(ItemRoster __0) => FourberieSafehouseTransferContext.Begin(__0);
+}
+
+[HarmonyPatch(typeof(InventoryScreenHelper), nameof(InventoryScreenHelper.CloseScreen))]
+internal static class FourberieStashClosePatch
+{
+    [HarmonyPrefix]
+    private static void Prefix(bool fromCancel)
+    {
+        if (fromCancel) FourberieSafehouseTransferContext.Cancel();
+    }
 }

@@ -1,5 +1,6 @@
 using Common.Messaging;
 using Common.Network;
+using Common.Network.Messages;
 using Common.Util;
 using Coop.Core.Server.Services.MobileParties.Messages;
 using E2E.Tests.Environment.Instance;
@@ -454,6 +455,58 @@ public class HideoutMapEventTests : MapEventTestBase
                 Assert.True(component.IsSendTroops);
             }, MapEventDisabledMethods);
         }
+    }
+
+    [Fact]
+    public void PlayerDisconnectsFromHideout_ServerAbortsUnresumableMapEventAndParksParty()
+    {
+        const string controllerId = "hideout-disconnect";
+        var (_, playerPartyId) = CreatePlayerHeroParty(controllerId);
+        var requester = Clients.First();
+        TestEnvironment.ConnectRegisteredPlayer(requester, controllerId);
+        string? mapEventId = null;
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(playerPartyId, out var playerParty));
+
+            var settlement = GameObjectCreator.CreateInitializedObject<Settlement>();
+            settlement.SetSettlementComponent(GameObjectCreator.CreateInitializedObject<Hideout>());
+            EnterSettlementAction.ApplyForParty(playerParty, settlement);
+
+            var mapEvent = GameObjectCreator.CreateInitializedObject<MapEvent>();
+            mapEvent.MapEventVisual = MockMapEventVisual();
+            mapEvent.Initialize(
+                playerParty.Party,
+                settlement.Party,
+                new HideoutEventComponent(mapEvent, isSendTroops: false),
+                MapEvent.BattleTypes.Hideout);
+            mapEvent.MapEventVisual = null;
+
+            if (!Campaign.Current.MapEventManager.MapEvents.Contains(mapEvent))
+                Campaign.Current.MapEventManager.OnMapEventCreated(mapEvent);
+
+            Assert.True(Server.ObjectManager.TryGetId(mapEvent, out mapEventId));
+            Assert.Same(mapEvent, playerParty.MapEvent);
+            Assert.True(playerParty.IsActive);
+        }, MapEventDisabledMethods);
+
+        Server.Call(() =>
+        {
+            Server.Resolve<IPlayerManager>().SetPeer(controllerId, requester.NetPeer);
+            Server.Resolve<IMessageBroker>().Publish(
+                this,
+                new PlayerDisconnected(requester.NetPeer, default));
+        }, MapEventDisabledMethods);
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(playerPartyId, out var playerParty));
+            Assert.Null(playerParty.MapEvent);
+            Assert.False(playerParty.IsActive);
+            Assert.False(playerParty.IsVisible);
+            Assert.False(Server.ObjectManager.TryGetObject<MapEvent>(mapEventId!, out _));
+        }, MapEventDisabledMethods);
     }
 
     [Fact]

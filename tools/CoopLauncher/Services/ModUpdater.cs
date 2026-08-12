@@ -22,7 +22,7 @@ public readonly record struct UpdateResult(UpdateOutcome Outcome, string Message
 /// exact-replaced under <c>Modules\</c>; any install failure restores the previous module directories.
 /// Manifest checks never download payloads. Every required feed must be verified before launch or install.
 /// </summary>
-public sealed class ModUpdater
+public sealed class ModUpdater : IModUpdateService
 {
     private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromMinutes(30) };
 
@@ -208,7 +208,7 @@ public sealed class ModUpdater
         catch (Exception ex)
         {
             Log.Write($"{label} install failed: {ex}");
-            return new(UpdateOutcome.Failed, $"{label} update failed — using installed");
+            return new(UpdateOutcome.Failed, $"{label} update failed — installed kept");
         }
         finally
         {

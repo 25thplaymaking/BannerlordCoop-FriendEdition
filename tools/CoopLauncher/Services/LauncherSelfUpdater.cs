@@ -205,11 +205,11 @@ public sealed class LauncherSelfUpdater : ILauncherUpdateService
         }
         catch (HttpRequestException)
         {
-            return new(LauncherUpdateOutcome.Offline, "Couldn't download launcher — using installed");
+            return new(LauncherUpdateOutcome.Offline, "Couldn't download launcher — installed kept");
         }
         catch (TaskCanceledException)
         {
-            return new(LauncherUpdateOutcome.Offline, "Launcher download timed out — using installed");
+            return new(LauncherUpdateOutcome.Offline, "Launcher download timed out — installed kept");
         }
         catch (Exception ex)
         {

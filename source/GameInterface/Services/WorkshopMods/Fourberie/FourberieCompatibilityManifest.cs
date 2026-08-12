@@ -430,8 +430,8 @@ internal static class FourberieCompatibilityManifest
             "System.Boolean", "System.Int32");
         Add("Fourberie.FourbContractBehavior", "ContractComplete", FourberiePatchKind.ServerOnly,
             Clan, "System.Int32");
-        Add("Fourberie.FourbContractBehavior", "fb_contract_hint", FourberiePatchKind.ClientPresentation,
-            "TaleWorlds.Localization.TextObject&");
+        AddReturning("Fourberie.FourbContractBehavior", "fb_contract_hint", "System.Boolean",
+            FourberiePatchKind.ClientPresentation, "TaleWorlds.Localization.TextObject&");
         Add("Fourberie.FourbContractBehavior+<>c", "<AddGameMenus>b__5_0",
             FourberiePatchKind.ContractProposalLegacyConsequence);
         Add("Fourberie.FourbContractBehavior+<>c", "<AddGameMenus>b__5_1",
@@ -490,7 +490,8 @@ internal static class FourberieCompatibilityManifest
         Add("Fourberie.FourbSafeHouseBehavior", "SHOnGaMenOpened",
             FourberiePatchKind.SafehouseReturnLifecycle, MenuCallbackArgs);
         Add("Fourberie.CriminalVM", "ClanGruFdilter", FourberiePatchKind.ClientPresentation);
-        Add("Fourberie.CriminalVM", "CanPlayerPay", FourberiePatchKind.ClientPresentation);
+        AddReturning("Fourberie.CriminalVM", "CanPlayerPay",
+            "System.ValueTuple`2[System.Boolean,System.String]", FourberiePatchKind.ClientPresentation);
         Add("Fourberie.CriminalVM", "<ClanGruFdilter>b__149_0",
             FourberiePatchKind.GrudgeSelectionConsequence, InquiryElements);
         Add("Fourberie.CriminalVM+<>c__DisplayClass149_1", "<ClanGruFdilter>b__4",

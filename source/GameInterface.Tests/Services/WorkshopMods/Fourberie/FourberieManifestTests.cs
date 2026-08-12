@@ -1,5 +1,9 @@
 using GameInterface.Services.WorkshopMods.Fourberie;
+using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text.Json;
 using Xunit;
 
 namespace GameInterface.Tests.Services.WorkshopMods.Fourberie;
@@ -12,6 +16,37 @@ public sealed class FourberieManifestTests
         {
         }
     }
+
+    [Fact]
+    public void CompatibilityManifest_MethodShapesMatchPinnedCreatorInventory()
+    {
+        string inventoryPath = FindRepositoryFile("doc", "generated", "workshop-function-inventory.json");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(inventoryPath));
+        JsonElement assembly = Assert.Single(
+            document.RootElement.GetProperty("assemblies").EnumerateArray(),
+            candidate => candidate.GetProperty("moduleId").GetString() == "Fourberie" &&
+                         candidate.GetProperty("sha256").GetString() ==
+                         FourberieCompatibilityManifest.SupportedSha256.ToLowerInvariant());
+        var pinnedShapes = assembly.GetProperty("methods").EnumerateArray()
+            .Select(method =>
+                $"{method.GetProperty("declaringType").GetString()}::" +
+                $"{method.GetProperty("name").GetString()}(" +
+                string.Join(",", method.GetProperty("parameterTypes").EnumerateArray()
+                    .Select(parameter => NormalizeInventoryTypeName(parameter.GetString()))) +
+                $"):{NormalizeInventoryTypeName(method.GetProperty("returnType").GetString())}")
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (FourberieMethodSpec spec in FourberieCompatibilityManifest.Methods)
+        {
+            string requestedShape =
+                $"{spec.TypeName}::{spec.MethodName}({string.Join(",", spec.ParameterTypeNames)}):{spec.ReturnTypeName}";
+            Assert.True(pinnedShapes.Contains(requestedShape),
+                $"Compatibility manifest requests a method shape absent from the pinned Fourberie binary: {requestedShape}");
+        }
+    }
+
+    private static string NormalizeInventoryTypeName(string? typeName) =>
+        (typeName ?? string.Empty).Replace('<', '[').Replace('>', ']');
 
     [Theory]
     [InlineData("v1.4.7.5", "FD1C02158817FAE5B90E3C121DA474096CAA368CB35495D83CE81EA49D860C71", true)]
@@ -177,4 +212,21 @@ public sealed class FourberieManifestTests
         Assert.DoesNotContain(
             FourberieCompatibilityManifest.Methods,
             spec => spec.TypeName == "Fourberie.Main" && spec.MethodName == method);
+
+    private static string FindRepositoryFile(params string[] pathParts)
+    {
+        foreach (string start in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+        {
+            var directory = new DirectoryInfo(start);
+            while (directory != null)
+            {
+                string path = Path.Combine(directory.FullName, Path.Combine(pathParts));
+                if (File.Exists(path)) return path;
+                directory = directory.Parent;
+            }
+        }
+
+        throw new FileNotFoundException(
+            $"Unable to find {Path.Combine(pathParts)} from {Directory.GetCurrentDirectory()} or {AppContext.BaseDirectory}");
+    }
 }

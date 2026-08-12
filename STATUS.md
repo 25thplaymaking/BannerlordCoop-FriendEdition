@@ -31,7 +31,7 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 
 ## Known playtest bugs (live)
 
-- **[candidate fixed; nightly validation pending] Safehouse prisoner and loot transfers did not persist.**
+- **[nightly deployed; rendered validation pending] Safehouse prisoner and loot transfers did not persist.**
   (2026-08-12, Bryce.) Fourberie's prisoner-enslavement completion and the safehouse inventory screen were
   mutating client-local rosters. The compatibility startup gate also inspected only public campaign-model
   properties, so it falsely rejected the required `FModelDamage` model and prevented the canonical crime-base
@@ -39,11 +39,15 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
   complete active model set, and prisoner enslavement is an authenticated server transaction that owns the
   prisoner removal, generated loot, slave count, and Roguery XP. The change is save-compatible and does not
   create or migrate a campaign save. Focused Fourberie tests pass (329/329).
-- **[candidate fixed; nightly validation pending] Back-to-back hideout raids could crash the client.**
+- **[nightly deployed; rendered validation pending] Back-to-back hideout raids could crash the client.**
   (2026-08-12, Bryce.) A second/third raid could launch the hideout mission before the client received the
   server-prepared defender roster. Mission launch now waits for an acknowledged server preparation and exact
   roster parity; failed preparation does not consume the hideout cooldown, while a successful preparation does.
   Focused repeated-hideout E2E tests pass (6/6), including a deliberately stale client roster.
+  Both fixes shipped from `03df14dd0` to the `client-nightly` launcher feed on 2026-08-12; the downloaded
+  10,612,201-byte payload verified at SHA-256 `48b10731f32a7b3036a796d586dfdc6d478ffa26532bab5bec78bb6bececa7f7`.
+  The paired server loaded the existing `friendallmods1` save, passed its full deployment ledger and
+  release-pin check, reached `SERVING` on UDP 4200, and retained zero restarts. No new save was created.
 - **[candidate fixed; live validation pending] Auto-resolve vs bandit party loops the encounter menu.**
   (2026-08-11, Bryce, Sea Raiders.)
   Choosing **"Send your troops to attack"** (auto-resolve) instead of **"Attack!"** (manual) against a
@@ -88,7 +92,8 @@ superseded by the authority-routing work; it is not eligible for stable promotio
   GameInterface 1,153 + 11 skipped, Integration 146 + 2 skipped, E2E 1,367 + 4 skipped;
   3,383 passed, 18 skipped, 0 failed overall. Build, release safety, XAML, launcher (16),
   server-kit (6), packaging, function-inventory, and native hook gates are green.
-- Publication state: superseded RC only. It was not installed, deployed, uploaded, or promoted.
+- Publication state: the superseded RC remains unpromoted. The save-compatible `03df14dd0` bugfix is live
+  on the nightly launcher feed and paired dedicated server; stable remains held for rendered validation.
 
 ## Decisions (locked)
 

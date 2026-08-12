@@ -15,11 +15,11 @@ internal sealed partial class TournamentSessionHandler
             if (sessionRegistry.TryGet(snapshot.SessionId, out _))
                 return false;
 
-            RemoveSessionTracking(liveCombatSessions, acceptedHitProgression, snapshot.SessionId);
+            RemoveSessionTracking(liveProgressionControllers, acceptedHitProgression, snapshot.SessionId);
             return true;
         }
 
-        RemoveSessionTracking(liveCombatSessions, acceptedHitProgression, snapshot.SessionId);
+        RemoveSessionTracking(liveProgressionControllers, acceptedHitProgression, snapshot.SessionId);
 
         var removal = new NetworkTournamentSessionRemoved(snapshot.SessionId, snapshot.TownId);
         network.SendAll(removal);
@@ -28,11 +28,12 @@ internal sealed partial class TournamentSessionHandler
     }
 
     internal static void RemoveSessionTracking(
-        HashSet<string> liveCombatSessions,
+        HashSet<string> liveProgressionControllers,
         HashSet<string> acceptedHitProgression,
         string sessionId)
     {
-        liveCombatSessions.Remove(sessionId);
+        liveProgressionControllers.RemoveWhere(key =>
+            key.StartsWith($"{sessionId}\n", System.StringComparison.Ordinal));
         RemoveAcceptedHitProgression(acceptedHitProgression, sessionId);
     }
 }

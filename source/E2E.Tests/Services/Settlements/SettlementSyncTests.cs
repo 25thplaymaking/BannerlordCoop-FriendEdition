@@ -1,4 +1,5 @@
 ﻿using E2E.Tests.Util;
+using HarmonyLib;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Party.PartyComponents;
@@ -70,7 +71,6 @@ namespace E2E.Tests.Services.Settlements
             TestEnvironment.AssertProperty<Settlement, int>(nameof(Settlement.BribePaid), 43);
             //TestEnvironment.AssertReferenceProperty<Settlement, SiegeEvent>(nameof(Settlement.SiegeEvent)); // Need SiegeEvent from constructor to be successful
             TestEnvironment.AssertProperty<Settlement, bool>(nameof(Settlement.IsActive), false, defaultValue: settlement.IsActive);
-            TestEnvironment.AssertProperty<Settlement, bool>(nameof(Settlement.IsVisible), false, defaultValue: settlement.IsVisible);
             TestEnvironment.AssertProperty<Settlement, Settlement.SiegeState>(nameof(Settlement.CurrentSiegeState), Settlement.SiegeState.OnTheWalls);
             TestEnvironment.AssertProperty<Settlement, CampaignVec2>(nameof(Settlement.GatePosition), new CampaignVec2(new Vec2(1, 2), false), settlement.GatePosition);
 
@@ -78,6 +78,25 @@ namespace E2E.Tests.Services.Settlements
             TestEnvironment.AssertProperty<Settlement, float>(nameof(Settlement.NearbyNavalThreatIntensity), 235f);
             //TestEnvironment.AssertProperty<Settlement, float>(nameof(Settlement.NearbyLandAllyIntensity), 1f, defaultValue: settlement.NearbyLandAllyIntensity); // Expected: 1 Actual: 0
             TestEnvironment.AssertProperty<Settlement, float>(nameof(Settlement.NearbyNavalAllyIntensity), 10f);
+        }
+
+        [Fact]
+        public void Server_SettlementVisibility_IsCalculatedLocallyAndNotNetworked()
+        {
+            Server.NetworkSentMessages.Clear();
+
+            Server.Call(() =>
+            {
+                Assert.True(Server.ObjectManager.TryGetObject(settlementId, out Settlement settlement));
+                var property = AccessTools.Property(typeof(Settlement), nameof(Settlement.IsVisible));
+                property.SetValue(settlement, !settlement.IsVisible);
+            });
+
+            TestEnvironment.FlushCoalescer();
+
+            Assert.DoesNotContain(
+                Server.NetworkSentMessages,
+                message => message.GetType().Name == "Settlement_IsVisible_SetNetworkMessage");
         }
     }
 }

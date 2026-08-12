@@ -68,10 +68,10 @@ Defer from this batch:
 - Modify: `source/GameInterface/Services/MobilePartyAIs/Patches/PartiesThinkPatch.cs`
 - Test: focused GameInterface/E2E regression coverage for the imported behavior.
 
-- [ ] Add regression coverage for the desired roster XP normalization, player-garrison authority guard, local settlement visibility, and client escort tick behavior.
-- [ ] Run the focused tests and record the expected failures.
-- [ ] Apply the final reviewed production diffs from #2897, #2898, #2899, and #2884.
-- [ ] Re-run focused tests and commit the verified increment.
+- [x] Add regression coverage for the desired roster XP normalization, player-garrison authority guard, local settlement visibility, and client escort tick behavior.
+- [x] Run the focused tests and record the expected failures.
+- [x] Apply the final reviewed production diffs from #2897, #2898, #2899, and #2884.
+- [x] Re-run focused tests and commit the verified increment.
 
 ### Task 3: Chat and map-event crash fixes
 

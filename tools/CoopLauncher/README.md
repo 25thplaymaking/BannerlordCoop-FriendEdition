@@ -9,9 +9,11 @@ group host — no module list, no manual connect. Replaces `Desktop\Play Friend 
    (`libraryfolders.vdf`, app `261550`).
 2. **Shows host status** — TCP-probes `serverHost:serverPort`; the banner sigil glows gold when the
    campaign is up, steel when it's down (re-probed every 12 s).
-3. **Self-updates the client build** — if `updateManifestUrl` is set, pulls a SHA-256-verified zip
-   and extracts it into `Modules\`. Fails soft: an unreachable feed just launches the installed build.
-4. **Launches + auto-joins** — the launcher shows a masked join-password field, then runs:
+3. **Self-updates the launcher** — checks the configured GitHub Release when it opens, verifies the
+   replacement executable by SHA-256, atomically swaps it with rollback, and restarts once.
+4. **Updates the mod suite and client** — pulls SHA-256-verified release zips and exact-replaces their
+   `Modules\` payload. A truly unreachable feed uses the installed build; a reached-invalid feed blocks.
+5. **Launches + auto-joins** — the launcher shows a masked join-password field, then runs:
    ```
    Bannerlord.exe /singleplayer <moduleToken> /coopjoin <serverHost> <serverPort> <serverPassword>
    ```
@@ -35,7 +37,9 @@ it with the **Serilog 4.x** flip (see below), same as `GameInterface.dll`.
 | `serverPassword` | optional default for the masked join-password field; blank in the public release |
 | `moduleToken` | `/singleplayer` launch order — full set minus RBM, in handshake order |
 | `gamePath` | explicit install root, or empty to auto-detect |
+| `launcherManifestUrl` | launcher executable feed; stable by default, empty to disable |
 | `updateManifestUrl` | build-feed JSON URL, or empty to disable updates |
+| `suiteManifestUrl` | byte-exact framework/workshop-mod suite feed, or empty to disable |
 
 ## Build & distribute
 
@@ -50,11 +54,29 @@ it with the **Serilog 4.x** flip (see below), same as `GameInterface.dll`.
 
 Hand a friend `CalradiaCoop.exe` plus `launcher-config.json` in the same folder. They can enter the
 private password at launch; the UI does not save it or log it. Never commit or attach a populated
-`serverPassword` to a public release.
+`serverPassword` to a public release. Launchers downloaded before self-update was added need this one
+manual replacement; after that, the executable updates itself and preserves the adjacent config.
 
 Design review render (no window shown, no focus steal): `CalradiaCoop.exe --shoot preview.png`.
 
 ## Update-feed contract (for the P6 GitHub-sync build feed)
+
+`launcherManifestUrl` uses a separate executable manifest:
+
+```json
+{
+  "version": "2026.8.11.1",
+  "launcherUrl": "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/launcher-app/CalradiaCoop.exe",
+  "sha256": "<lowercase hex of the executable>",
+  "notes": "Launcher source <commit>"
+}
+```
+
+The stable feed is `launcher-app/launcher.json`. Development pushes publish only to
+`launcher-nightly/launcher.json`; opt in by changing that segment in the local config. Stable publishing
+is manual. Launcher replacement never writes `launcher-config.json`, logs, passwords, or unrelated files.
+
+The mod/client `updateManifestUrl` contract is:
 
 `updateManifestUrl` must return this JSON:
 
@@ -79,5 +101,3 @@ any move/version-write failure restores every previous module directory. A malfo
 error from a reached feed, integrity failure, unsafe archive path, or failed install disables **MARCH TO
 WAR** until the required update succeeds; a genuinely unreachable feed still permits the already-installed
 build.
-
-Wire this to the nightly build output when P6 lands; until then leave `updateManifestUrl` empty.

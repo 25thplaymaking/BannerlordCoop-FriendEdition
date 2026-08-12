@@ -1,12 +1,25 @@
 name: Launcher App Release
 
 # Builds the Calradia Co-op launcher itself (the WPF app, tools/CoopLauncher) as a self-contained
-# single-file Windows .exe and publishes it to a rolling `launcher-app` release in this repo, so a
-# friend can download and run it with no .NET install. The app then auto-updates the game client from
-# the Launcher Client Release feed (see launcher-release.yml).
+# single-file Windows .exe and publishes it with a SHA-256 manifest. Development pushes refresh the
+# opt-in `launcher-nightly` feed; stable `launcher-app` publication remains an explicit manual choice.
 
 on:
+  push:
+    branches: [development]
+    paths:
+      - 'tools/CoopLauncher/**'
+      - 'tools/CoopLauncher.Tests/**'
+      - '.github/workflows/launcher-app-release.yml'
+      - '.github/scripts/verify-release-safety.py'
   workflow_dispatch:
+    inputs:
+      channel:
+        description: Launcher release channel
+        required: true
+        type: choice
+        options: [nightly, stable]
+        default: nightly
 
 permissions:
   contents: write
@@ -50,11 +63,30 @@ jobs:
       - name: Check XAML resources
         run: python tools/CoopLauncher/check-xaml-resources.py
 
+      - name: Select channel and version
+        id: release
+        shell: bash
+        env:
+          REQUESTED_CHANNEL: ${{ github.event_name == 'push' && 'nightly' || inputs.channel }}
+        run: |
+          set -eu
+          channel="${REQUESTED_CHANNEL:-nightly}"
+          case "$channel" in
+            nightly) tag="launcher-nightly" ;;
+            stable)  tag="launcher-app" ;;
+            *) echo "unsupported channel: $channel" >&2; exit 1 ;;
+          esac
+          version="$(date -u +'%Y.%-m.%-d').${GITHUB_RUN_NUMBER}"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Publish single-file launcher
         shell: bash
         run: |
           set -eu
-          dotnet publish tools/CoopLauncher/CoopLauncher.csproj -c Release -p:NuGetAudit=false
+          dotnet publish tools/CoopLauncher/CoopLauncher.csproj -c Release -p:NuGetAudit=false \
+            -p:Version="${{ steps.release.outputs.version }}"
           out="tools/CoopLauncher/bin/Release/net8.0-windows/win-x64/publish"
           test -s "$out/CalradiaCoop.exe"
           test -s "$out/launcher-config.json"
@@ -64,16 +96,31 @@ jobs:
           # Distribution bundle: the .exe reads launcher-config.json from beside it.
           powershell -Command "Compress-Archive -Path dist/CalradiaCoop.exe,dist/launcher-config.json -DestinationPath dist/CalradiaCoop-Launcher.zip -Force"
 
-      - name: Publish to the rolling launcher-app release
+      - name: Generate self-update manifest
+        shell: bash
+        run: |
+          set -eu
+          sha="$(sha256sum dist/CalradiaCoop.exe | awk '{print $1}')"
+          tag="${{ steps.release.outputs.tag }}"
+          version="${{ steps.release.outputs.version }}"
+          url="https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/$tag/CalradiaCoop.exe"
+          printf '{"version":"%s","launcherUrl":"%s","sha256":"%s","notes":"Launcher source %s"}\n' \
+            "$version" "$url" "$sha" "$GITHUB_SHA" > dist/launcher.json
+          test "$(wc -c < dist/launcher.json)" -gt 100
+
+      - name: Publish rolling launcher release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
-          if ! gh release view launcher-app >/dev/null 2>&1; then
-            gh release create launcher-app \
-              --title "Calradia Co-op — launcher app" \
-              --notes "One-click launcher. Download CalradiaCoop-Launcher.zip, extract, run CalradiaCoop.exe. It auto-updates the game client and rides straight into the co-op host."
+          tag="${{ steps.release.outputs.tag }}"
+          channel="${{ steps.release.outputs.channel }}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --title "Calradia Co-op — $channel launcher" \
+              --notes "Portable launcher feed. Stable is manual; nightly follows verified development builds."
           fi
-          gh release upload launcher-app \
-            dist/CalradiaCoop.exe dist/launcher-config.json dist/CalradiaCoop-Launcher.zip --clobber
+          gh release upload "$tag" \
+            dist/CalradiaCoop.exe dist/launcher-config.json \
+            dist/CalradiaCoop-Launcher.zip dist/launcher.json --clobber

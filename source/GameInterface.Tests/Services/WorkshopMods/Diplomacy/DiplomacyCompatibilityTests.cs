@@ -879,8 +879,7 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
     public void SnapshotRequest_BeforePlayerMapping_StillReceivesAuthoritativeSnapshot()
     {
         ModInformation.IsServer = true;
-        int previousGameThread = GameThread.Instance.GameThreadId;
-        GameThread.Instance.MarkGameThread();
+        RuntimeHelpers.RunModuleConstructor(typeof(Coop.Tests.Mocks.TestNetwork).Module.ModuleHandle);
         var peer = (NetPeer)FormatterServices.GetUninitializedObject(typeof(NetPeer));
         int peerSnapshotSends = 0;
         var network = new Mock<INetwork>(MockBehavior.Strict);
@@ -888,19 +887,19 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
         network.Setup(value => value.Send(peer, It.IsAny<NetworkDiplomacySnapshot>()))
             .Callback(() => peerSnapshotSends++);
         var handler = CreateHandler(new CountingRuntime(), network.Object);
-        try
+
+        // This assembly owns a continuously pumping game-loop thread. Re-marking GameThread from
+        // the xUnit worker races that pump and can kill the entire test host with "Wrong thread!".
+        // Marshal the server callbacks onto the real test pump, which also matches production.
+        GameThread.Run(() =>
         {
             handler.HandleCampaignReady(new MessagePayload<CampaignReady>(this, new CampaignReady()));
             handler.HandleSnapshotRequest(new MessagePayload<NetworkRequestDiplomacySnapshot>(
                 peer,
                 new NetworkRequestDiplomacySnapshot(CurrentConfigSnapshot())));
+        }, blocking: true);
 
-            Assert.Equal(1, peerSnapshotSends);
-        }
-        finally
-        {
-            GameThread.Instance.RestoreGameThread(previousGameThread);
-        }
+        Assert.Equal(1, peerSnapshotSends);
     }
 
     [Fact]

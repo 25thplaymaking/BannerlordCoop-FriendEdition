@@ -29,6 +29,25 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > the rendered install/join and Sea Raider auto-resolve gates after functional closure. Foundation
 > verification is green: 3,392 passed, 18 skipped, 0 failed; build completed with 0 errors.
 
+> **2026-08-13 live Kingdom regression correction — replacement release pending (`bd425fa09`,
+> `7fb31d007`).** The stable `315be775e` deployment did not fix the Kingdom tab. The 10:28 EDT client
+> log proves `Diplomacy.Settings.Instance` was present, then `KingdomWarItemVMMixin` dereferenced a null
+> `WarExhaustionManager.Instance`; the resulting native `GauntletKingdomScreen.OnFrameTick` null reference
+> repeated 2,197 times and left the tab black. The matching server journal proves the client requested its
+> Diplomacy snapshot from `CampaignReady` before `NetworkPlayerCampaignEntered` created its player mapping,
+> so the server silently rejected the only request and never sent the manager/settings snapshot. `bd425fa09`
+> authenticates that early request with the already accepted host-config session/revision/SHA instead of the
+> not-yet-possible player mapping, retains the trusted snapshot, verifies the complete host MCM fingerprint and
+> all four required manager shapes at `KingdomDiplomacyVM.RefreshValues`, repairs a lost singleton from that
+> trusted snapshot, and blocks native row construction if the state is still unsafe. `7fb31d007` fixes a second
+> real army divergence: the siege follower **Leave Army** consequence previously cleared only the client field;
+> it now sends the authoritative army removal and converges the server plus every client before continuing.
+> The pre-existing `44f6405f5` reserve-expansion and retreat-menu fixes remain in this candidate. Incremental
+> gates are green with zero failures: 111 Diplomacy unit tests and 81 E2E tests spanning Diplomacy patching and
+> commands, siege leave, army wait/create/destroy, mission-ready election, reserve building/reconnect,
+> reinforcement spawn/quotas, retreat, and unstuck recovery; both affected test projects build with zero errors.
+> Publication, paired server deployment, same-save reconciliation, and rendered Kingdom proof are not yet claimed.
+
 > **2026-08-13 corrective release — SHIPPED from source `315be775e`.** The overnight
 > Kingdom/Diplomacy, raid, encounter, and army fixes were re-audited against fresh client/server evidence
 > instead of retained as symptom patches. The candidate consists of four verified commits:

@@ -14,25 +14,27 @@ Branch: `25vid/fix-kingdom-tab-diplomacy-managers` (base: `development`)
 
 > **2026-08-13 correction:** the live reports showed that A1/A2 did not fix their user-visible defects.
 > A1's scratch-roster removal reduced one replication storm but its per-row item dictionary still overwrote
-> distinct modifier stacks. A2 fabricated null internal managers, while the actual Kingdom-tab exception was
-> the client-null MCM `GlobalSettings<Diplomacy.Settings>.Instance` read during VM construction. The Phase-D
-> fixes below supersede those mechanisms; do not restore the A1/A2 symptom patches.
+> distinct modifier stacks. A2 fabricated null internal managers. Phase D fixed the then-observed client-null
+> MCM `GlobalSettings<Diplomacy.Settings>.Instance`, but the next live run exposed the remaining transport race:
+> the settings read succeeded and `WarExhaustionManager.Instance` was null because the server discarded the
+> client's only snapshot request before its player mapping existed. Phase E supersedes both symptom mechanisms.
 
 | # | Bug | Fix | Commit |
 |---|-----|-----|--------|
 | A1 | Raid softlock + loot "numbers don't add up" + ~1 MB/s server storm | Superseded: scratch-roster removal was retained, but the item delta required aggregation across modifier stacks (`4434f7505`). | 30a2e38a |
-| A2 | Kingdom→Diplomacy tab black-screen + input freeze (+ war-vote / all diplomacy actions) | Superseded: manager fabrication was removed; a client settings fallback and snapshot-gated UI lifecycle now address the actual constructor exception (`9105c7cc8`). | c786b1ad / 013a9cb6 |
+| A2 | Kingdom→Diplomacy tab black-screen + input freeze (+ war-vote / all diplomacy actions) | Superseded twice: Phase D fixed the missing settings instance; Phase E fixes the dropped authoritative snapshot and guards native row construction (`bd425fa09`). | c786b1ad / 013a9cb6 |
 | A3 | 4 more `new ItemRoster()` sync storms (BattleRetreat.RemoveGoods, VillageHostileAction.ApplyForceSupplies, ItemRosterInterface.GetItemRosterFromData, Workshops warehouse ×2) | `ToList()` / `AllowedThread`. TroopRoster scratch rosters checked + excluded (publish is registration-gated). | 013a9cb6 |
 | A5 | #2776 parties stuck in abandoned map events / stuck lords (softlock; upstream #2704/#2933) | Reinstated (revert-the-revert). Confirmed Separatism-safe: full E2E green with it. | a2a952e7 |
 
 **Historical verification:** build-green + full E2E green, but subsequent live use disproved the raid and
-Kingdom-tab completion claims. Phase D owns their replacement verification.
+Kingdom-tab completion claims. Phase D fixed the raid path; Phase E owns the remaining Kingdom correction.
 
 ## Phase D — evidence-driven corrective release — SHIPPED ✅ (2026-08-13; source `315be775e`)
 
 - **Kingdom/Diplomacy (`9105c7cc8`):** provides a client-only per-campaign settings fallback when MCM has no
   `GlobalSettings` instance, enables the exact UIExtender group only after an authoritative snapshot commits,
-  and removes the broad manager-fabrication/readiness patches.
+  and removes the broad manager-fabrication/readiness patches. **Superseded for completion by Phase E:** the
+  snapshot request itself was still dropped by an impossible early player-mapping prerequisite.
 - **Encounter completion (`435385a1f`):** replaces broad bandit scanning/exception swallowing with an
   authenticated typed capture command, server-derived party validation, and an idempotent native
   `BattleResultsReady` signal before synchronized MapEvent destruction.
@@ -53,6 +55,35 @@ Kingdom-tab completion claims. Phase D owns their replacement verification.
   `friendallmods1` world, reached `SERVING` on UDP 4200, emitted repeated pulses, and remained at zero restarts
   with no pin-verification or unhandled-fatal marker. Byte-verified rollback snapshot:
   `/home/bishop/bannerlord-coop/server/_mod_backups/pre-315be775e-20260813T141932Z`.
+
+## Phase E — Kingdom handshake + siege army convergence — VERIFIED LOCALLY, RELEASE PENDING
+
+- **Latest live Kingdom evidence:** client run 21140 reached `KingdomState`, successfully read the Diplomacy
+  settings, then failed in `DetermineInfluenceCostForMakingPeace` because
+  `WarExhaustionManager.Instance` was null. Native frame tick then repeated its null reference 2,197 times.
+  The server journal contains no `NetworkDiplomacySnapshot` delivery for that join: `CampaignReady` sent the
+  request before `NetworkPlayerCampaignEntered`, and the old handler rejected peers without a player mapping.
+- **Handshake repair (`bd425fa09`):** the request carries the exact already accepted mod-config protocol,
+  session, revision, and SHA-256. The server validates that identity and can reply before player registration;
+  malformed or mismatched requests fail closed. The protobuf wire shape and the pre-mapping delivery path have
+  direct regressions.
+- **Kingdom boundary (`bd425fa09`):** the client retains only a validated authoritative snapshot. Before native
+  `KingdomDiplomacyVM.RefreshValues` calls `RefreshDiplomacyList` and constructs Diplomacy UIExtender rows, Coop
+  verifies `Settings.Instance`, the complete host MCM fingerprint, and all four manager singleton/dictionary
+  shapes. A lost singleton is rebuilt only by reapplying the retained trusted snapshot; otherwise row
+  construction is blocked instead of allowing the black-screen exception loop.
+- **MCM contract:** the server's complete Diplomacy settings set is authoritative. Clients apply it, compare an
+  exact fingerprint immediately, and compare it again at the Kingdom UI boundary; local client MCM drift cannot
+  silently own campaign calculations.
+- **Siege army leave (`7fb31d007`):** the follower **Leave Army** siege menu no longer assigns
+  `MobileParty.MainParty.Army = null` client-only. It publishes the standard authoritative removal and mirrors it
+  locally; the E2E regression proves the server and every client remove the same party from the same army.
+- **Incremental verification:** affected projects build Release with zero errors. Diplomacy compatibility is
+  111/111; 81 E2E cases pass across Diplomacy patch/command authority, siege leave, army lifecycle/waiting,
+  mission-ready election, full reserve construction/reconnect, reinforcement spawning/quotas, retreat teardown,
+  and unstuck recovery. The prior `44f6405f5` reserve-expansion and retreat fixes remain included.
+- **Not yet claimed:** launcher publication, paired server deployment, same-save restart/reconciliation, and
+  rendered Kingdom/large-army/retreat verification.
 
 ## Deferred — reverted upstream fixes that break Separatism (need dedicated compat work, NOT bundled)
 

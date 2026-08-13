@@ -63,6 +63,7 @@ public partial class MainWindow : Window
         MinButton.Click += (_, _) => WindowState = WindowState.Minimized;
         CloseButton.Click += (_, _) => Close();
         JoinButton.Click += OnPrimaryClicked;
+        GatherLogsButton.Click += OnGatherLogsClicked;
         _statusTimer.Tick += async (_, _) => await OnStatusTickAsync();
 
         Loaded += OnLoaded;
@@ -415,6 +416,38 @@ public partial class MainWindow : Window
             case ArmoryPrimaryAction.Launch:
                 await LaunchGameAsync();
                 break;
+        }
+    }
+
+    private async void OnGatherLogsClicked(object sender, RoutedEventArgs e)
+    {
+        GatherLogsButton.IsEnabled = false;
+        object previous = GatherLogsButton.Content;
+        GatherLogsButton.Content = "GATHERING LOGS…";
+        try
+        {
+            LogPackageResult result = await Task.Run(() => LogPackager.Package(_bannerlordExe));
+            UpdateText.Foreground = result.Success ? Gold : Steel;
+            if (result.Success && result.ZipPath is not null)
+            {
+                LogPackager.RevealInExplorer(result.ZipPath);
+                UpdateText.Text = $"Packaged {result.FileCount} log(s) → {result.ZipPath}  —  send this zip to Bishop.";
+            }
+            else
+            {
+                UpdateText.Text = result.Message;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"Gather logs threw: {ex}");
+            UpdateText.Foreground = Steel;
+            UpdateText.Text = $"Couldn't gather logs — {ex.Message}";
+        }
+        finally
+        {
+            GatherLogsButton.Content = previous;
+            GatherLogsButton.IsEnabled = true;
         }
     }
 

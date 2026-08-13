@@ -55,6 +55,36 @@
             </Setter>
         </Style>
 
+        <!-- ══ Secondary action: a quiet bordered button (e.g. gather logs) ══ -->
+        <Style x:Key="GhostButton" TargetType="Button">
+            <Setter Property="Foreground" Value="{StaticResource Steel}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="FontFamily" Value="{StaticResource Dispatch}" />
+            <Setter Property="FontSize" Value="10.5" />
+            <Setter Property="Padding" Value="11,6" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bg" Background="{TemplateBinding Background}"
+                                BorderBrush="#55C9A24B" BorderThickness="1"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bg" Property="Background" Value="{StaticResource LeatherLight}" />
+                                <Setter Property="Foreground" Value="{StaticResource GoldBright}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- ══ Primary call-to-action: the war button ══ -->
         <Style x:Key="WarButton" TargetType="Button">
             <Setter Property="Foreground" Value="{StaticResource Parchment}" />

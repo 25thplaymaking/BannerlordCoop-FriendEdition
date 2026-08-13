@@ -17,12 +17,19 @@ public class ItemRosterInterface : IItemRosterInterface
 {
     public ItemRoster GetItemRosterFromData(ItemRosterElement[] itemRosterData)
     {
-        ItemRoster itemRoster = new();
-        if (itemRosterData != null) // Empty array transferred as null object, guard against NRE if empty
+        // Build inside AllowedThread, matching the sibling OpenPartyLootScreen: an unguarded ctor trips the
+        // global ItemRoster lifetime patch (server publish / client "Failed to get id" log spam) for what is
+        // a locally-reconstructed roster from received data.
+        ItemRoster itemRoster;
+        using (new AllowedThread())
         {
-            foreach (var itemRosterElement in itemRosterData)
+            itemRoster = new ItemRoster();
+            if (itemRosterData != null) // Empty array transferred as null object, guard against NRE if empty
             {
-                itemRoster.Add(itemRosterElement);
+                foreach (var itemRosterElement in itemRosterData)
+                {
+                    itemRoster.Add(itemRosterElement);
+                }
             }
         }
 

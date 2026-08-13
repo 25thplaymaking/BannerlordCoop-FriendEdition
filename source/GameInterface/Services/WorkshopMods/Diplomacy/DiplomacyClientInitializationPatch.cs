@@ -97,8 +97,13 @@ internal static class DiplomacyClientInitializationPatch
     /// reusing the same <c>DiplomacyRuntime.EnsureManager</c> path the snapshot apply uses; the snapshot
     /// then repopulates that same instance. Client-only (server-side Diplomacy behaviours create them
     /// themselves). The <c>DiplomacyUiReadinessPatch</c> finalizers remain as the belt-and-braces net.
+    ///
+    /// Also invoked on-demand by <see cref="DiplomacyUiManagerReadinessPatch"/> immediately before the
+    /// Diplomacy UI surfaces read these managers, because this map-init pass fires only for the initial
+    /// character-creation → map handoff and not again after the client loads the host's save into a fresh
+    /// campaign, where the singletons are null once more.
     /// </summary>
-    private static void EnsureClientManagers()
+    internal static void EnsureClientManagers()
     {
         if (!ModInformation.IsClient) return;
         foreach (string typeName in ClientManagerTypeNames)

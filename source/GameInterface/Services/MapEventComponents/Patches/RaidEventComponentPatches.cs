@@ -42,6 +42,34 @@ internal class RaidEventComponentPatches
             MessageBroker.Instance.Publish(__instance, new RaidLootedItemsUpdated(leaderParty.MobileParty, lootedItems));
     }
 
+    // Returns the per-item loot delta as a plain list. It must NOT build a scratch ItemRoster: the global
+    // ItemRoster ctor/AddToCounts patches broadcast NetworkCreateItemRoster + NetworkItemRosterUpdate and
+    // log "Failed to get id" for every unregistered throwaway, which — fired once per raid tick per item —
+    // produced a ~1 MB/s server packet storm that softlocked clients and desynced loot (see
+    // RaidLootedItemsUpdated).
+    private static List<(ItemObject Item, int Amount)> GetAddedItems(Dictionary<ItemObject, int> before, ItemRoster after)
+    {
+        var result = new List<(ItemObject, int)>();
+        if (after == null)
+            return result;
+
+        foreach (var element in after)
+        {
+            var item = element.EquipmentElement.Item;
+            if (item == null)
+                continue;
+
+            before.TryGetValue(item, out var previousAmount);
+            var added = element.Amount - previousAmount;
+            if (added <= 0)
+                continue;
+
+            result.Add((item, added));
+        }
+
+        return result;
+    }
+
     private static Dictionary<ItemObject, int> CaptureItems(ItemRoster roster)
     {
         var result = new Dictionary<ItemObject, int>();
@@ -65,29 +93,6 @@ internal class RaidEventComponentPatches
         return rewards == null
             ? new Dictionary<ItemObject, float>()
             : new Dictionary<ItemObject, float>(rewards);
-    }
-
-    private static ItemRoster GetAddedItems(Dictionary<ItemObject, int> before, ItemRoster after)
-    {
-        var result = new ItemRoster();
-        if (after == null)
-            return result;
-
-        foreach (var element in after)
-        {
-            var item = element.EquipmentElement.Item;
-            if (item == null)
-                continue;
-
-            before.TryGetValue(item, out var previousAmount);
-            var added = element.Amount - previousAmount;
-            if (added <= 0)
-                continue;
-
-            result.AddToCounts(element.EquipmentElement, added);
-        }
-
-        return result;
     }
 
     private static bool RewardsChanged(Dictionary<ItemObject, float> before, Dictionary<ItemObject, float> after)

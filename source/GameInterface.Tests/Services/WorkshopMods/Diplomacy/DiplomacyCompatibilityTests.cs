@@ -4,9 +4,9 @@ using Common.Network;
 using GameInterface.Configuration;
 using GameInterface.Services.CampaignService.Messages;
 using GameInterface.Services.GameState.Messages;
-using GameInterface.Services.Players;
 using GameInterface.Services.WorkshopMods.Diplomacy;
 using HarmonyLib;
+using LiteNetLib;
 using Moq;
 using ProtoBuf;
 using System;
@@ -16,6 +16,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.Serialization;
 using Xunit;
 
 namespace GameInterface.Tests.Services.WorkshopMods.Diplomacy;
@@ -448,6 +449,21 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
         Assert.Equal(12.5f, Assert.Single(copy.State).Value1);
     }
 
+    [Fact]
+    public void SnapshotRequest_ProtobufRoundTripsAcceptedConfigIdentity()
+    {
+        var acceptedConfig = CurrentConfigSnapshot();
+        var original = new NetworkRequestDiplomacySnapshot(acceptedConfig);
+
+        using var stream = new MemoryStream();
+        Serializer.Serialize(stream, original);
+        stream.Position = 0;
+        var copy = Serializer.Deserialize<NetworkRequestDiplomacySnapshot>(stream);
+
+        Assert.True(copy.TryValidateWireShape(out var failure), failure);
+        Assert.True(copy.Matches(acceptedConfig));
+    }
+
     [Theory]
     [InlineData((int)DiplomacySnapshotApplyStatus.VersionMismatch)]
     [InlineData((int)DiplomacySnapshotApplyStatus.ConfigurationMismatch)]
@@ -566,6 +582,34 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
         Assert.True(lifecycle.IsReady);
         Assert.Equal(2, lifecycle.MarkReadyCalls);
         Assert.Equal(1, runtime.ApplyCount);
+    }
+
+    [Fact]
+    public void Handler_ReappliesTrustedSnapshotWhenKingdomUiManagerWasLost()
+    {
+        ModInformation.IsServer = false;
+        var runtime = new ReadinessRuntime();
+        var lifecycle = new RecordingUiLifecycle();
+        var handler = CreateHandler(runtime, lifecycle: lifecycle);
+        var snapshot = ValidEmptySnapshot(revision: 3);
+
+        handler.ApplySnapshot(snapshot);
+        runtime.DropUiDependencies();
+
+        Assert.True(handler.TryEnsureClientUiReady(out var failure), failure);
+        Assert.True(runtime.UiDependenciesReady);
+        Assert.Equal(2, runtime.ApplyCount);
+        Assert.True(lifecycle.IsReady);
+    }
+
+    [Fact]
+    public void Handler_BlocksKingdomUiWithoutTrustedSnapshot()
+    {
+        ModInformation.IsServer = false;
+        var handler = CreateHandler(new ReadinessRuntime());
+
+        Assert.False(handler.TryEnsureClientUiReady(out var failure));
+        Assert.Contains("snapshot", failure, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -832,6 +876,34 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
     }
 
     [Fact]
+    public void SnapshotRequest_BeforePlayerMapping_StillReceivesAuthoritativeSnapshot()
+    {
+        ModInformation.IsServer = true;
+        int previousGameThread = GameThread.Instance.GameThreadId;
+        GameThread.Instance.MarkGameThread();
+        var peer = (NetPeer)FormatterServices.GetUninitializedObject(typeof(NetPeer));
+        int peerSnapshotSends = 0;
+        var network = new Mock<INetwork>(MockBehavior.Strict);
+        network.Setup(value => value.SendAll(It.IsAny<NetworkDiplomacySnapshot>()));
+        network.Setup(value => value.Send(peer, It.IsAny<NetworkDiplomacySnapshot>()))
+            .Callback(() => peerSnapshotSends++);
+        var handler = CreateHandler(new CountingRuntime(), network.Object);
+        try
+        {
+            handler.HandleCampaignReady(new MessagePayload<CampaignReady>(this, new CampaignReady()));
+            handler.HandleSnapshotRequest(new MessagePayload<NetworkRequestDiplomacySnapshot>(
+                peer,
+                new NetworkRequestDiplomacySnapshot(CurrentConfigSnapshot())));
+
+            Assert.Equal(1, peerSnapshotSends);
+        }
+        finally
+        {
+            GameThread.Instance.RestoreGameThread(previousGameThread);
+        }
+    }
+
+    [Fact]
     public void DiplomacyConfigBarrier_SubscribesOnlyToPostCommitAuthorityEvent()
     {
         var broker = new Mock<IMessageBroker>();
@@ -840,7 +912,6 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
             new Mock<INetwork>().Object,
             new CountingRuntime(),
             new TestConfigAuthority(CurrentConfigSnapshot()),
-            new Mock<IPlayerManager>().Object,
             new RecordingUiLifecycle());
 
         broker.Verify(value => value.Subscribe(
@@ -922,6 +993,8 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
         public string AssemblyVersion => "1.4.7.0";
         public NetworkDiplomacySnapshot CaptureSnapshot() => new();
         public DiplomacySnapshotApplyResult ApplySnapshot(NetworkDiplomacySnapshot snapshot) => result;
+        public DiplomacySnapshotApplyResult ValidateUiReadiness(NetworkDiplomacySnapshot snapshot) =>
+            new(DiplomacySnapshotApplyStatus.AlreadyCurrent);
         public void ResetSnapshotRevision() { }
     }
 
@@ -936,6 +1009,8 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
             ApplyCount++;
             return new DiplomacySnapshotApplyResult(DiplomacySnapshotApplyStatus.Applied);
         }
+        public DiplomacySnapshotApplyResult ValidateUiReadiness(NetworkDiplomacySnapshot snapshot) =>
+            new(DiplomacySnapshotApplyStatus.AlreadyCurrent);
         public void ResetSnapshotRevision() { }
     }
 
@@ -946,6 +1021,31 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
         public NetworkDiplomacySnapshot CaptureSnapshot() => null;
         public DiplomacySnapshotApplyResult ApplySnapshot(NetworkDiplomacySnapshot snapshot) =>
             new(DiplomacySnapshotApplyStatus.ApplyFailed);
+        public DiplomacySnapshotApplyResult ValidateUiReadiness(NetworkDiplomacySnapshot snapshot) =>
+            new(DiplomacySnapshotApplyStatus.ApplyFailed);
+        public void ResetSnapshotRevision() { }
+    }
+
+    private sealed class ReadinessRuntime : IDiplomacyRuntime
+    {
+        public int ApplyCount { get; private set; }
+        public bool UiDependenciesReady { get; private set; }
+        public bool IsAvailable => true;
+        public string AssemblyVersion => DiplomacyCompatibilityPolicy.SupportedAssemblyVersion;
+        public NetworkDiplomacySnapshot CaptureSnapshot() => ValidEmptySnapshot(revision: 0);
+        public DiplomacySnapshotApplyResult ApplySnapshot(NetworkDiplomacySnapshot snapshot)
+        {
+            ApplyCount++;
+            UiDependenciesReady = true;
+            return new DiplomacySnapshotApplyResult(DiplomacySnapshotApplyStatus.Applied);
+        }
+        public DiplomacySnapshotApplyResult ValidateUiReadiness(NetworkDiplomacySnapshot snapshot) =>
+            UiDependenciesReady
+                ? new DiplomacySnapshotApplyResult(DiplomacySnapshotApplyStatus.AlreadyCurrent)
+                : new DiplomacySnapshotApplyResult(
+                    DiplomacySnapshotApplyStatus.ApplyFailed,
+                    "required manager singleton is missing");
+        public void DropUiDependencies() => UiDependenciesReady = false;
         public void ResetSnapshotRevision() { }
     }
 
@@ -1014,7 +1114,6 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
             network ?? new Mock<INetwork>().Object,
             runtime,
             configAuthority ?? new TestConfigAuthority(CurrentConfigSnapshot()),
-            new Mock<IPlayerManager>().Object,
             lifecycle ?? new RecordingUiLifecycle());
     }
 

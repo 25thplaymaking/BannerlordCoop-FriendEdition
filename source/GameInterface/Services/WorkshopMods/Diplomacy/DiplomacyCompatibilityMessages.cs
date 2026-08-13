@@ -1,5 +1,7 @@
 using Common.Messaging;
+using GameInterface.Configuration;
 using ProtoBuf;
+using System;
 using System.Collections.Generic;
 
 namespace GameInterface.Services.WorkshopMods.Diplomacy;
@@ -7,6 +9,51 @@ namespace GameInterface.Services.WorkshopMods.Diplomacy;
 [ProtoContract(SkipConstructor = true)]
 internal readonly struct NetworkRequestDiplomacySnapshot : ICommand
 {
+    [ProtoMember(1)] public readonly int ConfigProtocolVersion;
+    [ProtoMember(2)] public readonly string ConfigSessionId;
+    [ProtoMember(3)] public readonly long ConfigRevision;
+    [ProtoMember(4)] public readonly string ConfigSha256;
+
+    public NetworkRequestDiplomacySnapshot(ModConfigSnapshot acceptedConfig)
+    {
+        ConfigProtocolVersion = acceptedConfig?.ProtocolVersion ?? 0;
+        ConfigSessionId = acceptedConfig?.SessionId;
+        ConfigRevision = acceptedConfig?.Revision ?? 0;
+        ConfigSha256 = acceptedConfig?.Sha256;
+    }
+
+    internal bool TryValidateWireShape(out string failure)
+    {
+        if (ConfigProtocolVersion != ModConfigSnapshot.CurrentProtocolVersion ||
+            ConfigRevision <= 0 ||
+            ConfigSessionId == null ||
+            ConfigSessionId.Length != ModConfigSnapshot.SessionIdLength ||
+            !Guid.TryParseExact(ConfigSessionId, "N", out _) ||
+            ConfigSha256 == null ||
+            ConfigSha256.Length != ModConfigSnapshot.Sha256Length ||
+            !IsLowerHex(ConfigSha256))
+        {
+            failure = "Malformed accepted mod-config identity.";
+            return false;
+        }
+
+        failure = null;
+        return true;
+    }
+
+    internal bool Matches(ModConfigSnapshot acceptedConfig) =>
+        acceptedConfig != null &&
+        ConfigProtocolVersion == acceptedConfig.ProtocolVersion &&
+        ConfigRevision == acceptedConfig.Revision &&
+        string.Equals(ConfigSessionId, acceptedConfig.SessionId, StringComparison.Ordinal) &&
+        string.Equals(ConfigSha256, acceptedConfig.Sha256, StringComparison.Ordinal);
+
+    private static bool IsLowerHex(string value)
+    {
+        foreach (char c in value)
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+        return true;
+    }
 }
 
 [ProtoContract]

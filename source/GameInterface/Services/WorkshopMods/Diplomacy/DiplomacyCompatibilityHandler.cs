@@ -7,7 +7,6 @@ using GameInterface.Configuration;
 using GameInterface.Services;
 using GameInterface.Services.CampaignService.Messages;
 using GameInterface.Services.GameState.Messages;
-using GameInterface.Services.Players;
 using LiteNetLib;
 using Serilog;
 using System;
@@ -25,16 +24,17 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
     private readonly INetwork network;
     private readonly IDiplomacyRuntime runtime;
     private readonly IModConfigAuthority configAuthority;
-    private readonly IPlayerManager playerManager;
     private readonly IDiplomacyClientUiLifecycle uiLifecycle;
     private readonly object snapshotApplyGate = new();
     private readonly DiplomacyRevisionGate revisionGate = new();
     private readonly DiplomacySnapshotRequestGate<NetPeer> requestGate = new();
     private NetworkDiplomacySnapshot pendingSnapshot;
     private NetPeer pendingSnapshotPeer;
+    private NetworkDiplomacySnapshot trustedSnapshot;
     private ModConfigSnapshot acceptedHostConfig;
     private bool campaignReady;
     private bool hostConfigLoaded;
+    private bool loggedClientUiReadiness;
 
     internal DiplomacySnapshotApplyResult LastApplyResult { get; private set; }
 
@@ -43,14 +43,12 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
         INetwork network,
         IDiplomacyRuntime runtime,
         IModConfigAuthority configAuthority,
-        IPlayerManager playerManager,
         IDiplomacyClientUiLifecycle uiLifecycle)
     {
         this.messageBroker = messageBroker;
         this.network = network;
         this.runtime = runtime;
         this.configAuthority = configAuthority;
-        this.playerManager = playerManager;
         this.uiLifecycle = uiLifecycle;
 
         messageBroker.Subscribe<CampaignReady>(HandleCampaignReady);
@@ -73,10 +71,13 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
         requestGate.Reset();
         pendingSnapshot = null;
         pendingSnapshotPeer = null;
+        trustedSnapshot = null;
         acceptedHostConfig = null;
         hostConfigLoaded = false;
+        loggedClientUiReadiness = false;
         campaignReady = true;
         if (ModInformation.IsServer) runtime.ResetSnapshotRevision();
+        uiLifecycle.ResetForCampaign();
 
         // Handler subscription order is not a trust boundary. If configuration authority already
         // committed the campaign snapshot, consume it; otherwise HostModConfigAccepted will resume
@@ -92,12 +93,38 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
     internal void HandleSnapshotRequest(MessagePayload<NetworkRequestDiplomacySnapshot> payload)
     {
         if (!ModInformation.IsServer || !campaignReady || !HasCurrentHostConfig() ||
-            payload?.Who is not NetPeer peer ||
-            playerManager == null || !playerManager.TryGetPlayer(peer, out _) ||
-            !requestGate.TryAccept(peer))
+            payload?.Who is not NetPeer peer)
         {
             return;
         }
+
+        // CampaignReady is raised on the joining client before NetworkPlayerCampaignEntered creates
+        // its server-side Player mapping. The accepted mod-config identity is already pinned by the
+        // module handshake, so use that completed barrier instead of a mapping that cannot exist yet.
+        if (!payload.What.TryValidateWireShape(out string requestFailure))
+        {
+            Logger.Warning(
+                "Disconnecting peer {Peer} after malformed Diplomacy snapshot request: {Failure}",
+                peer.Id,
+                requestFailure);
+            peer.Disconnect();
+            return;
+        }
+        if (!payload.What.Matches(acceptedHostConfig))
+        {
+            Logger.Warning(
+                "Disconnecting peer {Peer} whose Diplomacy request did not match the accepted host configuration",
+                peer.Id);
+            peer.Disconnect();
+            return;
+        }
+        if (!requestGate.TryAccept(peer)) return;
+
+        Logger.Information(
+            "Accepted pre-campaign Diplomacy snapshot request from peer {Peer}: config session={Session}, revision={Revision}",
+            peer.Id,
+            payload.What.ConfigSessionId,
+            payload.What.ConfigRevision);
 
         GameThread.RunSafe(
             () => SendCurrentSnapshot(peer),
@@ -208,7 +235,11 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
             return;
         }
 
-        network.SendAll(new NetworkRequestDiplomacySnapshot());
+        Logger.Information(
+            "Requesting authoritative Diplomacy snapshot: config session={Session}, revision={Revision}",
+            acceptedHostConfig.SessionId,
+            acceptedHostConfig.Revision);
+        network.SendAll(new NetworkRequestDiplomacySnapshot(acceptedHostConfig));
     }
 
     private bool HasCurrentHostConfig() =>
@@ -283,8 +314,9 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
                 LogRejected();
                 return;
             }
+            trustedSnapshot = snapshot;
             if (!MarkClientUiReady()) return;
-            Logger.Debug(
+            Logger.Information(
                 "Applied Diplomacy {Version} host settings/state snapshot revision {Revision} ({Fingerprint}).",
                 snapshot.AssemblyVersion,
                 snapshot.Revision,
@@ -301,6 +333,67 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
             "Diplomacy UI could not be enabled after the authoritative snapshot committed: " + failure);
         LogRejected();
         return false;
+    }
+
+    internal bool TryEnsureClientUiReady(out string failure)
+    {
+        lock (snapshotApplyGate)
+        {
+            if (!ModInformation.IsClient)
+            {
+                failure = null;
+                return true;
+            }
+            if (trustedSnapshot == null)
+            {
+                failure = "No trusted authoritative Diplomacy snapshot has been applied for this campaign.";
+                return false;
+            }
+
+            var readiness = runtime.ValidateUiReadiness(trustedSnapshot);
+            if (!readiness.Succeeded)
+            {
+                Logger.Warning(
+                    "Repairing Diplomacy client state before Kingdom UI construction ({Status}): {Detail}",
+                    readiness.Status,
+                    readiness.Detail);
+                var repair = runtime.ApplySnapshot(trustedSnapshot);
+                if (!repair.Succeeded)
+                {
+                    LastApplyResult = repair;
+                    failure = "Authoritative Diplomacy client-state repair failed: " + repair.Detail;
+                    return false;
+                }
+
+                readiness = runtime.ValidateUiReadiness(trustedSnapshot);
+                if (!readiness.Succeeded)
+                {
+                    LastApplyResult = readiness;
+                    failure = "Diplomacy client state was still unsafe after repair: " + readiness.Detail;
+                    return false;
+                }
+
+                Logger.Information(
+                    "Reapplied authoritative Diplomacy snapshot revision {Revision} before Kingdom UI construction",
+                    trustedSnapshot.Revision);
+            }
+
+            if (!MarkClientUiReady())
+            {
+                failure = LastApplyResult.Detail;
+                return false;
+            }
+
+            if (!loggedClientUiReadiness)
+            {
+                loggedClientUiReadiness = true;
+                Logger.Information(
+                    "Diplomacy Kingdom UI dependencies verified for authoritative revision {Revision}",
+                    trustedSnapshot.Revision);
+            }
+            failure = null;
+            return true;
+        }
     }
 
     internal bool ApplyTrustedSnapshot(
@@ -356,8 +449,23 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
             return;
         }
 
-        if (peer == null) network.SendAll(snapshot);
-        else network.Send(peer, snapshot);
+        if (peer == null)
+        {
+            Logger.Information(
+                "Broadcasting authoritative Diplomacy snapshot revision {Revision} ({Fingerprint})",
+                snapshot.Revision,
+                snapshot.StateFingerprint);
+            network.SendAll(snapshot);
+        }
+        else
+        {
+            Logger.Information(
+                "Sending authoritative Diplomacy snapshot revision {Revision} ({Fingerprint}) to peer {Peer}",
+                snapshot.Revision,
+                snapshot.StateFingerprint,
+                peer.Id);
+            network.Send(peer, snapshot);
+        }
     }
 
     private static void DenyPeerOrAbortSession(NetPeer peer, string failure)

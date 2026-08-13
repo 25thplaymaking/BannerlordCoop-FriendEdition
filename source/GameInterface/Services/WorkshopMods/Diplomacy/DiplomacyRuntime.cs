@@ -21,6 +21,7 @@ internal interface IDiplomacyRuntime : IGameAbstraction
     string AssemblyVersion { get; }
     NetworkDiplomacySnapshot CaptureSnapshot();
     DiplomacySnapshotApplyResult ApplySnapshot(NetworkDiplomacySnapshot snapshot);
+    DiplomacySnapshotApplyResult ValidateUiReadiness(NetworkDiplomacySnapshot snapshot);
     void ResetSnapshotRevision();
 }
 
@@ -212,6 +213,57 @@ internal sealed class DiplomacyRuntime : IDiplomacyRuntime
             return RollBack(
                 transaction,
                 new DiplomacySnapshotApplyResult(DiplomacySnapshotApplyStatus.ApplyFailed, ex.Message));
+        }
+    }
+
+    public DiplomacySnapshotApplyResult ValidateUiReadiness(NetworkDiplomacySnapshot snapshot)
+    {
+        if (!DiplomacySnapshotCodec.TryValidate(snapshot, out var malformedFailure))
+            return new DiplomacySnapshotApplyResult(
+                DiplomacySnapshotApplyStatus.MalformedSnapshot,
+                malformedFailure);
+        if (!IsAvailable)
+            return new DiplomacySnapshotApplyResult(
+                DiplomacySnapshotApplyStatus.ModNotLoaded,
+                DiplomacyCompatibilityPolicy.CompatibilityFailure);
+
+        try
+        {
+            var settingsType = DiplomacyCompatibilityPolicy.ResolveType(
+                DiplomacyCompatibilityPolicy.SettingsTypeName);
+            if (GetStaticInstance(settingsType) == null)
+            {
+                return new DiplomacySnapshotApplyResult(
+                    DiplomacySnapshotApplyStatus.SettingsMismatch,
+                    "Diplomacy Settings.Instance is unavailable at the Kingdom UI boundary.");
+            }
+
+            var appliedSettings = new List<DiplomacySettingEntry>();
+            CaptureSettings(appliedSettings);
+            if (!string.Equals(
+                    FingerprintSettings(appliedSettings),
+                    snapshot.SettingsFingerprint,
+                    StringComparison.Ordinal))
+            {
+                return new DiplomacySnapshotApplyResult(
+                    DiplomacySnapshotApplyStatus.SettingsMismatch,
+                    "Diplomacy MCM settings no longer match the authoritative host snapshot.");
+            }
+
+            if (!TryValidateRequiredManagerShape(out var managerFailure))
+            {
+                return new DiplomacySnapshotApplyResult(
+                    DiplomacySnapshotApplyStatus.ApplyFailed,
+                    managerFailure);
+            }
+
+            return new DiplomacySnapshotApplyResult(DiplomacySnapshotApplyStatus.AlreadyCurrent);
+        }
+        catch (Exception ex)
+        {
+            return new DiplomacySnapshotApplyResult(
+                DiplomacySnapshotApplyStatus.ApplyFailed,
+                "Diplomacy Kingdom UI readiness validation threw: " + ex.Message);
         }
     }
 

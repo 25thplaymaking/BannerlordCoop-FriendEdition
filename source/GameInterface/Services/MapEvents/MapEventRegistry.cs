@@ -75,6 +75,7 @@ internal class MapEventRegistry : AutoRegistryBase<MapEvent>
         if (Campaign.Current == null) return;
 
         bool localPartyWasInvolved = IsLocalPartyInMapEvent(obj);
+        BattlePresentationTeardown.PrepareBeforeDestroy(obj, localPartyWasInvolved, Logger);
         if (localPartyWasInvolved) CaptureMainPartyBattleRewards(obj);
         var preservedParty = localPartyWasInvolved && IsBattleMissionActive()
             ? MobileParty.MainParty?.Party

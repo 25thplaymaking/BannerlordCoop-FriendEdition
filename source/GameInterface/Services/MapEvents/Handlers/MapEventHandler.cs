@@ -3,13 +3,17 @@ using Common.Logging;
 using Common.Messaging;
 using Common.Network;
 using GameInterface.Services.MapEvents;
+using GameInterface.Services.MapEvents.Extensions;
 using GameInterface.Services.MapEvents.Logging;
 using GameInterface.Services.MapEvents.Messages;
+using GameInterface.Services.MobileParties.Extensions;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
 using LiteNetLib;
 using Serilog;
 using System;
+using System.Linq;
+using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.Core;
 
@@ -39,6 +43,8 @@ internal class MapEventHandler : IHandler
         messageBroker.Subscribe<MapEventBattleStateChangeAttempted>(Handle_MapEventBattleStateChangeAttempted);
         messageBroker.Subscribe<NetworkChangeBattleState>(Handle_NetworkChangeBattleState);
         messageBroker.Subscribe<AuthoritativeBattleConclusionRequested>(Handle_AuthoritativeBattleConclusionRequested);
+        messageBroker.Subscribe<CaptureDefeatedEnemyAttempted>(Handle_CaptureDefeatedEnemyAttempted);
+        messageBroker.Subscribe<NetworkCaptureDefeatedEnemy>(Handle_NetworkCaptureDefeatedEnemy);
 
         messageBroker.Subscribe<MapEventSurrenderAttempted>(Handle_MapEventSurrenderAttempted);
         messageBroker.Subscribe<NetworkMapEventSurrender>(Handle_NetworkMapEventSurrender);
@@ -50,6 +56,8 @@ internal class MapEventHandler : IHandler
         messageBroker.Unsubscribe<MapEventBattleStateChangeAttempted>(Handle_MapEventBattleStateChangeAttempted);
         messageBroker.Unsubscribe<NetworkChangeBattleState>(Handle_NetworkChangeBattleState);
         messageBroker.Unsubscribe<AuthoritativeBattleConclusionRequested>(Handle_AuthoritativeBattleConclusionRequested);
+        messageBroker.Unsubscribe<CaptureDefeatedEnemyAttempted>(Handle_CaptureDefeatedEnemyAttempted);
+        messageBroker.Unsubscribe<NetworkCaptureDefeatedEnemy>(Handle_NetworkCaptureDefeatedEnemy);
 
         messageBroker.Unsubscribe<MapEventSurrenderAttempted>(Handle_MapEventSurrenderAttempted);
         messageBroker.Unsubscribe<NetworkMapEventSurrender>(Handle_NetworkMapEventSurrender);
@@ -95,6 +103,100 @@ internal class MapEventHandler : IHandler
             null,
             true);
     }
+
+    private void Handle_CaptureDefeatedEnemyAttempted(
+        MessagePayload<CaptureDefeatedEnemyAttempted> payload)
+    {
+        if (!ModInformation.IsClient ||
+            !objectManager.TryGetIdWithLogging(payload.What.MapEvent, out string mapEventId) ||
+            !objectManager.TryGetIdWithLogging(payload.What.PlayerParty, out _))
+        {
+            return;
+        }
+
+        network.SendAll(new NetworkCaptureDefeatedEnemy(mapEventId));
+    }
+
+    private void Handle_NetworkCaptureDefeatedEnemy(
+        MessagePayload<NetworkCaptureDefeatedEnemy> payload)
+    {
+        if (ModInformation.IsClient) return;
+
+        NetPeer sender = payload.Who as NetPeer;
+        string mapEventId = payload.What.MapEventId;
+        GameThread.Run(() =>
+        {
+            if (sender == null ||
+                !playerManager.TryGetPlayer(sender, out var player) ||
+                !objectManager.TryGetObject(player.MobilePartyId, out MobileParty playerParty) ||
+                !objectManager.TryGetObject(mapEventId, out MapEvent mapEvent) ||
+                mapEvent.FindMapEventParty(playerParty.Party) == null)
+            {
+                Logger.Information(
+                    "Refused defeated-enemy capture for {MapEventId}: sender or registered party was not a participant",
+                    mapEventId);
+                return;
+            }
+
+            if (ServerBattleModeArbiter.IsClaimed(mapEventId) || hostRegistry.TryGet(mapEventId, out _))
+            {
+                Logger.Information(
+                    "Refused defeated-enemy capture for {MapEventId}: a mission or simulation still owns the battle",
+                    mapEventId);
+                return;
+            }
+
+            if (!TryGetCaptureWinner(mapEvent, playerParty, out BattleState winner))
+            {
+                Logger.Information(
+                    "Refused defeated-enemy capture for {MapEventId}: authoritative battle state was not eligible",
+                    mapEventId);
+                return;
+            }
+
+            messageBroker.Publish(
+                this,
+                new AuthoritativeBattleConclusionRequested(mapEventId, winner, 0));
+        });
+    }
+
+    private bool TryGetCaptureWinner(
+        MapEvent mapEvent,
+        MobileParty playerParty,
+        out BattleState winner)
+    {
+        MapEventSide attacker = mapEvent.AttackerSide;
+        MapEventSide defender = mapEvent.DefenderSide;
+        PartyBase playerPartyBase = playerParty.Party;
+
+        bool playerIsAttacker = SideContains(attacker, playerPartyBase);
+        bool playerIsDefender = SideContains(defender, playerPartyBase);
+        MapEventSide friendly = playerIsAttacker ? attacker : defender;
+        MapEventSide enemy = playerIsAttacker ? defender : attacker;
+
+        var enemyParties = enemy?.Parties?
+            .Where(value => value?.Party != null)
+            .Select(value => value.Party)
+            .ToArray() ?? Array.Empty<PartyBase>();
+
+        var state = new CaptureDefeatedEnemyState(
+            mapEvent.IsFieldBattle,
+            mapEvent.MapEventSettlement != null,
+            mapEvent.IsFinalized,
+            mapEvent.BattleState,
+            playerIsAttacker,
+            playerIsDefender,
+            friendly?.Parties?.Any(value => value?.Party?.NumberOfHealthyMembers > 0) == true,
+            enemyParties.Length,
+            enemyParties.Any(value => value.IsSettlement),
+            enemyParties.Any(value => value.MobileParty != null && playerManager.Contains(value.MobileParty)),
+            enemyParties.Any(value => value.NumberOfHealthyMembers > 0));
+
+        return CaptureDefeatedEnemyValidator.TryGetWinner(state, out winner);
+    }
+
+    private static bool SideContains(MapEventSide side, PartyBase party) =>
+        side?.Parties?.Any(value => value?.Party == party) == true;
 
     private void ApplyBattleStateChange(
         string mapEventId,

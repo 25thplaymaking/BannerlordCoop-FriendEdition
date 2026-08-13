@@ -35,6 +35,7 @@ public class MissionModule : Module
     internal const string ShieldDamagePatchCategory = "CoopShieldDamagePatches";
     internal const string CombatHitPresentationPatchCategory = "CoopCombatHitPresentationPatches";
     internal const string AgentVoicePatchCategory = "CoopAgentVoicePatches";
+    internal const string WeaponDropPatchCategory = "CoopWeaponDropPatches";
     internal const string WeaponPickupPatchCategory = "CoopWeaponPickupPatches";
     internal const string MountAiSafetyPatchCategory = "CoopMountAiSafetyPatches";
 
@@ -245,6 +246,9 @@ public class MissionModule : Module
         yield return new HarmonyPatchCategoryRegistration(
             typeof(AgentVoicePatch).Assembly,
             AgentVoicePatchCategory);
+        yield return new HarmonyPatchCategoryRegistration(
+            typeof(AgentDropPatch).Assembly,
+            WeaponDropPatchCategory);
         yield return new HarmonyPatchCategoryRegistration(
             typeof(AgentPickupPatch).Assembly,
             WeaponPickupPatchCategory);

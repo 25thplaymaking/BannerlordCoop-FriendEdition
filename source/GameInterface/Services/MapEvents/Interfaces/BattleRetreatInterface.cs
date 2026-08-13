@@ -364,7 +364,11 @@ internal class BattleRetreatInterface : IBattleRetreatInterface
         var roster = requester.Party?.ItemRoster;
         if (roster == null) return;
 
-        foreach (var element in new ItemRoster(roster))
+        // Snapshot to a plain list, never `new ItemRoster(roster)`: the copy-ctor trips the global
+        // ItemRoster lifetime patch (server-side, authoritative retreat) → broadcasts a NetworkCreateItemRoster
+        // for a throwaway that is never registered and then spams "Failed to get id". A List snapshot lets us
+        // safely mutate `roster` in the loop with no synced-container construction.
+        foreach (var element in roster.ToList())
         {
             var item = element.EquipmentElement.Item;
             if (item == null || item.NotMerchandise || item.IsBannerItem) continue;

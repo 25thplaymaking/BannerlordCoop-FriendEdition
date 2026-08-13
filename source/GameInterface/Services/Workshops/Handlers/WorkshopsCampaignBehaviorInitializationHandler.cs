@@ -130,13 +130,20 @@ namespace GameInterface.Services.Workshops.Handlers
 
                         if (!objectManager.TryGetObjectWithLogging<Settlement>(settlementRoster.Key, out var settlement)) continue;
 
-                        var itemRoster = new ItemRoster();
-                        foreach (var elementData in settlementRoster.Value)
+                        // AllowedThread: client-side reconstruction from received/saved data; an unguarded
+                        // ItemRoster ctor + Add loop otherwise logs "Client created managed ItemRoster" per
+                        // owned-workshop settlement at load.
+                        ItemRoster itemRoster;
+                        using (new AllowedThread())
                         {
-                            ItemRosterElement rosterElement = sessionWorkshopPlayerDataInterface.GetItemRosterElementFromData(elementData);
-                            if (rosterElement.EquipmentElement.Item == null) continue;
+                            itemRoster = new ItemRoster();
+                            foreach (var elementData in settlementRoster.Value)
+                            {
+                                ItemRosterElement rosterElement = sessionWorkshopPlayerDataInterface.GetItemRosterElementFromData(elementData);
+                                if (rosterElement.EquipmentElement.Item == null) continue;
 
-                            itemRoster.Add(rosterElement);
+                                itemRoster.Add(rosterElement);
+                            }
                         }
 
                         warehouseRosterPerSettlement[settlement] = itemRoster;
@@ -158,7 +165,10 @@ namespace GameInterface.Services.Workshops.Handlers
                 Settlement settlement = workshop?.Settlement;
                 if (settlement != null && !warehouseRosters.ContainsKey(settlement))
                 {
-                    warehouseRosters[settlement] = new ItemRoster();
+                    using (new AllowedThread())
+                    {
+                        warehouseRosters[settlement] = new ItemRoster();
+                    }
                 }
             }
         }

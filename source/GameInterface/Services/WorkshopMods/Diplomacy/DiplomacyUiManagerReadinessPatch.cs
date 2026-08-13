@@ -50,6 +50,16 @@ internal static class DiplomacyUiManagerReadinessPatch
         ("Diplomacy.ViewModelMixin.EncyclopediaFactionPageVMMixin", "OnRefresh"),
     };
 
+    // Belt-and-braces: the only Diplomacy mixins that read the manager singletons (verified against
+    // Bannerlord.Diplomacy 1.4.7 — WarExhaustion/Agreement managers) are these three. Guarding their
+    // constructors directly guarantees the managers exist no matter which VM refresh path builds them.
+    private static readonly string[] GuardedMixinConstructors =
+    {
+        "Diplomacy.ViewModelMixin.KingdomWarItemVMMixin",
+        "Diplomacy.ViewModelMixin.KingdomTruceItemVMMixin",
+        "Diplomacy.ViewModelMixin.EncyclopediaFactionPageVMMixin",
+    };
+
     private static IEnumerable<MethodBase> TargetMethods()
     {
         foreach ((string typeName, string methodName) in Guarded)
@@ -57,6 +67,15 @@ internal static class DiplomacyUiManagerReadinessPatch
             Type type = AccessTools.TypeByName(typeName);
             MethodBase method = type == null ? null : AccessTools.Method(type, methodName);
             if (method != null) yield return method;
+        }
+
+        foreach (string typeName in GuardedMixinConstructors)
+        {
+            Type type = AccessTools.TypeByName(typeName);
+            MethodBase ctor = type == null
+                ? null
+                : AccessTools.GetDeclaredConstructors(type)?.FirstOrDefault(c => !c.IsStatic);
+            if (ctor != null) yield return ctor;
         }
     }
 

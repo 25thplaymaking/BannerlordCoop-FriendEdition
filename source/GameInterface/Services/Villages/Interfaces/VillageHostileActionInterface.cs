@@ -403,7 +403,14 @@ internal class VillageHostileActionInterface : IVillageHostileActionInterface
     {
         var village = settlement.Village;
         var rewardUnits = MathF.Max((int)(village.Hearth * 0.15f), 20);
-        var lootedItems = new ItemRoster();
+        // Construct inside AllowedThread like every other roster op in this method: an unguarded ctor
+        // publishes a NetworkCreateItemRoster + "Failed to get id" for this pure throwaway (consumed only
+        // by SkillLevelingManager.OnForceSupplies below) on every force-supplies action.
+        ItemRoster lootedItems;
+        using (new AllowedThread())
+        {
+            lootedItems = new ItemRoster();
+        }
 
         var productions = village.VillageType?.Productions;
         if ((productions == null || productions.Count == 0) && village.VillageType?._productions != null)

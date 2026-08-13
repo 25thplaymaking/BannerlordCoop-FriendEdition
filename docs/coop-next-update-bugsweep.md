@@ -28,7 +28,7 @@ Branch: `25vid/fix-kingdom-tab-diplomacy-managers` (base: `development`)
 **Historical verification:** build-green + full E2E green, but subsequent live use disproved the raid and
 Kingdom-tab completion claims. Phase D owns their replacement verification.
 
-## Phase D — evidence-driven corrective release (2026-08-13; deployment in progress)
+## Phase D — evidence-driven corrective release — SHIPPED ✅ (2026-08-13; source `315be775e`)
 
 - **Kingdom/Diplomacy (`9105c7cc8`):** provides a client-only per-campaign settings fallback when MCM has no
   `GlobalSettings` instance, enables the exact UIExtender group only after an authoritative snapshot commits,
@@ -44,6 +44,15 @@ Kingdom-tab completion claims. Phase D owns their replacement verification.
   feeds sent but never queued; after departure, two stale mission-start retries were rejected.
 - **Verification:** build 0 errors; 2,491 unit/integration tests + 1,412 E2E tests passed, with 18 documented
   skips total. Explicit Fourberie 337/337, Separatism 59/59, launcher 65/65.
+- **Client release:** stable workflow `31708916585` passed on exact source `315be775e`; launcher manifest
+  `2026.08.13.1416` serves `Coop-client.zip` SHA-256
+  `1bc2bed1ebaa1370e9784de256f50357cdac1435ed5a03ceddb727a406c0365f`.
+- **Server release:** the matching Serilog-2.x assemblies and both paired core copies passed their release pins
+  and deployment ledger. Paired core SHA-256 is
+  `058c2646b5d5685305a7965cd3de984a7c2ae4918ae8281eaa4a55c7cf36c404`. The service loaded the existing
+  `friendallmods1` world, reached `SERVING` on UDP 4200, emitted repeated pulses, and remained at zero restarts
+  with no pin-verification or unhandled-fatal marker. Byte-verified rollback snapshot:
+  `/home/bishop/bannerlord-coop/server/_mod_backups/pre-315be775e-20260813T141932Z`.
 
 ## Deferred — reverted upstream fixes that break Separatism (need dedicated compat work, NOT bundled)
 
@@ -69,7 +78,7 @@ Kingdom-tab completion claims. Phase D owns their replacement verification.
 - Fixed a **pre-existing flaky launcher test** (`ExactInstall_RetriesWhileScannerTemporarilyLocksStagedFile`) that blocked the stable publish: scanner now polls on a dedicated LongRunning thread instead of the saturated thread pool.
 - Not done (optional follow-ups): locate-game folder picker, open-log button, `shootMode` fake-data guard.
 
-## LIVE verification still owed after Phase-D deployment
+## LIVE rendered verification still owed after Phase-D deployment
 The local gates are green; rendered verification must use the Phase-D client/server pair:
 1. Raid a village/town → no softlock, loot totals sane, no server storm.
 2. Open Kingdom→Diplomacy, declare war / make peace → no black screen.
@@ -81,4 +90,3 @@ The local gates are green; rendered verification must use the Phase-D client/ser
 - `dotnet` on PATH is SDK-less x86 → use `"C:\Program Files\dotnet\dotnet.exe"`.
 - 127.0.0.1 loopback broken here → `dotnet test` can't run locally; CI is the gate.
 - Client↔server join: no version reject at connection layer, but the in-game lobby browser gates on EXACT build version → client+server must deploy in lockstep.
-- Server storm still spinning on old build with no players; Phase-B restart clears it.

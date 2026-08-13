@@ -4,7 +4,7 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
-> **AUTHORITY ROUTING IN PROGRESS (2026-08-11): prior RC superseded; stable held.** The exact function
+> **AUTHORITY ROUTING IN PROGRESS (2026-08-11): prior RC superseded; corrective stable live.** The exact function
 > ledger covers 41,050 methods across the ten active Workshop modules, retired RBM, and integrated
 > Separatism. Deterministic IL evidence now includes static shared-state writes and collection mutations,
 > identifying 13,729 authority candidates; 8,151 exact records are classified and release validation
@@ -29,7 +29,7 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > the rendered install/join and Sea Raider auto-resolve gates after functional closure. Foundation
 > verification is green: 3,392 passed, 18 skipped, 0 failed; build completed with 0 errors.
 
-> **2026-08-13 corrective release candidate — verified locally, deployment in progress.** The overnight
+> **2026-08-13 corrective release — SHIPPED from source `315be775e`.** The overnight
 > Kingdom/Diplomacy, raid, encounter, and army fixes were re-audited against fresh client/server evidence
 > instead of retained as symptom patches. The candidate consists of four verified commits:
 > `9105c7cc8` restores Diplomacy client settings/UI lifecycle without fabricating internal managers;
@@ -45,9 +45,15 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > skips; the E2E assembly executed 1,412 tests with four intentional skips (the lone first-pass failure was a
 > runner-relative XML fixture and passed once the repository fixture was exposed); Fourberie is 337/337,
 > Separatism is 59/59, the launcher is 65/65, and the complete solution builds with zero errors. These changes
-> are runtime-only and do not create, replace, or migrate a campaign save. Stable publication, paired server
-> deployment, and same-save restart proof remain in progress and must be recorded below before this candidate
-> is called live.
+> are runtime-only and did not create, replace, or migrate a campaign save. GitHub run `31708916585` published
+> stable client `2026.08.13.1416` (zip SHA-256 `1bc2bed1ebaa1370e9784de256f50357cdac1435ed5a03ceddb727a406c0365f`).
+> The matching Serilog-2.x server build is paired to dedicated-core SHA-256
+> `058c2646b5d5685305a7965cd3de984a7c2ae4918ae8281eaa4a55c7cf36c404`; every release-pin and deployment-ledger
+> entry passed. The stopped-server save and JSON sidecar matched their pre-stop hashes, were copied byte-for-byte
+> to `/home/bishop/bannerlord-coop/server/_mod_backups/pre-315be775e-20260813T141932Z`, and remained the configured
+> `friendallmods1` files on restart. The host loaded that world, reached `SERVING` on UDP 4200, emitted repeated
+> pulses, and reports `NRestarts=0` with no release-verification or unhandled-fatal marker. Rendered gameplay
+> validation of the four corrected paths remains a playtest gate, not a deployment claim.
 
 ## Known playtest bugs (live)
 

@@ -29,6 +29,26 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > the rendered install/join and Sea Raider auto-resolve gates after functional closure. Foundation
 > verification is green: 3,392 passed, 18 skipped, 0 failed; build completed with 0 errors.
 
+> **2026-08-13 corrective release candidate — verified locally, deployment in progress.** The overnight
+> Kingdom/Diplomacy, raid, encounter, and army fixes were re-audited against fresh client/server evidence
+> instead of retained as symptom patches. The candidate consists of four verified commits:
+> `9105c7cc8` restores Diplomacy client settings/UI lifecycle without fabricating internal managers;
+> `435385a1f` routes enemy-capture completion through authenticated server validation and signals native
+> battle presentation before synchronized graph teardown; `4434f7505` aggregates raid loot by item across
+> modifier stacks before computing the net delta; and `44f6405f5` signals the initial host's expansion from
+> own-party to full army reserves and closes the retreating player's stale encounter menu. Auburn's live
+> `MapEvent_Created_70760` proved both army defects: the server sent 815-vs-2,736 reserves after initially
+> assigning only the player's 81 troops, but no ownership-expansion transition reached the client; after the
+> retreat the server removed the party and rejected two stale-menu mission-start retries.
+>
+> Local release gates are green: the unit/integration assemblies executed 2,491 tests with 14 intentional
+> skips; the E2E assembly executed 1,412 tests with four intentional skips (the lone first-pass failure was a
+> runner-relative XML fixture and passed once the repository fixture was exposed); Fourberie is 337/337,
+> Separatism is 59/59, the launcher is 65/65, and the complete solution builds with zero errors. These changes
+> are runtime-only and do not create, replace, or migrate a campaign save. Stable publication, paired server
+> deployment, and same-save restart proof remain in progress and must be recorded below before this candidate
+> is called live.
+
 ## Known playtest bugs (live)
 
 - **[stable and paired server deployed; live playtest validation pending] Hideout boss-stage black screen and reconnect loop.**

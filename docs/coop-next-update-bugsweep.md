@@ -12,14 +12,38 @@ Branch: `25vid/fix-kingdom-tab-diplomacy-managers` (base: `development`)
 
 ## Phase A — fixes shipping on PR #14 (all CI-green: build + unit + 8 E2E incl. Separatism)
 
+> **2026-08-13 correction:** the live reports showed that A1/A2 did not fix their user-visible defects.
+> A1's scratch-roster removal reduced one replication storm but its per-row item dictionary still overwrote
+> distinct modifier stacks. A2 fabricated null internal managers, while the actual Kingdom-tab exception was
+> the client-null MCM `GlobalSettings<Diplomacy.Settings>.Instance` read during VM construction. The Phase-D
+> fixes below supersede those mechanisms; do not restore the A1/A2 symptom patches.
+
 | # | Bug | Fix | Commit |
 |---|-----|-----|--------|
-| A1 | Raid softlock + loot "numbers don't add up" + ~1 MB/s server storm | `RaidEventComponentPatches.GetAddedItems` no longer builds a throwaway `new ItemRoster()`/tick (tripped the global ItemRoster ctor/AddToCounts sync); delta now `List<(ItemObject,int)>`; client roster wrapped in `AllowedThread`. | 30a2e38a |
-| A2 | Kingdom→Diplomacy tab black-screen + input freeze (+ war-vote / all diplomacy actions) | `DiplomacyUiManagerReadinessPatch` ensures the null-on-client Diplomacy managers before `KingdomDiplomacyVM.RefreshValues`, the encyclopedia mixin, **and** in the 3 mixin ctors that read them (War/Truce item + EncyclopediaFaction). | c786b1ad / 013a9cb6 |
+| A1 | Raid softlock + loot "numbers don't add up" + ~1 MB/s server storm | Superseded: scratch-roster removal was retained, but the item delta required aggregation across modifier stacks (`4434f7505`). | 30a2e38a |
+| A2 | Kingdom→Diplomacy tab black-screen + input freeze (+ war-vote / all diplomacy actions) | Superseded: manager fabrication was removed; a client settings fallback and snapshot-gated UI lifecycle now address the actual constructor exception (`9105c7cc8`). | c786b1ad / 013a9cb6 |
 | A3 | 4 more `new ItemRoster()` sync storms (BattleRetreat.RemoveGoods, VillageHostileAction.ApplyForceSupplies, ItemRosterInterface.GetItemRosterFromData, Workshops warehouse ×2) | `ToList()` / `AllowedThread`. TroopRoster scratch rosters checked + excluded (publish is registration-gated). | 013a9cb6 |
 | A5 | #2776 parties stuck in abandoned map events / stuck lords (softlock; upstream #2704/#2933) | Reinstated (revert-the-revert). Confirmed Separatism-safe: full E2E green with it. | a2a952e7 |
 
-**Verification:** build-green + full E2E green. Live (raid + kingdom tab on the server) confirmed at Phase-B deploy.
+**Historical verification:** build-green + full E2E green, but subsequent live use disproved the raid and
+Kingdom-tab completion claims. Phase D owns their replacement verification.
+
+## Phase D — evidence-driven corrective release (2026-08-13; deployment in progress)
+
+- **Kingdom/Diplomacy (`9105c7cc8`):** provides a client-only per-campaign settings fallback when MCM has no
+  `GlobalSettings` instance, enables the exact UIExtender group only after an authoritative snapshot commits,
+  and removes the broad manager-fabrication/readiness patches.
+- **Encounter completion (`435385a1f`):** replaces broad bandit scanning/exception swallowing with an
+  authenticated typed capture command, server-derived party validation, and an idempotent native
+  `BattleResultsReady` signal before synchronized MapEvent destruction.
+- **Raid accounting (`4434f7505`):** sums the before/after item counts by `ItemObject`, so modifier variants no
+  longer overwrite each other and each item produces one net positive loot delta.
+- **Army battles + retreat (`44f6405f5`):** initial host election now signals reserve-ownership expansion before
+  full side feeds; an unresolved mission retreat now closes the requester's encounter instead of returning to a
+  stale attack menu. Live Auburn evidence: 815 attackers vs 2,736 defenders, initial own reserve 81, full host
+  feeds sent but never queued; after departure, two stale mission-start retries were rejected.
+- **Verification:** build 0 errors; 2,491 unit/integration tests + 1,412 E2E tests passed, with 18 documented
+  skips total. Explicit Fourberie 337/337, Separatism 59/59, launcher 65/65.
 
 ## Deferred — reverted upstream fixes that break Separatism (need dedicated compat work, NOT bundled)
 
@@ -37,7 +61,7 @@ Branch: `25vid/fix-kingdom-tab-diplomacy-managers` (base: `development`)
 - Re-paired `DedicatedServer.Core` → paired sha `189d7c9e1bf2b37d…`; pinned GameInterface `aee3ab47…`, Coop.Core `8e1b6d40…`, Common `b76a527b…`, Coop.Steam `a27674a3…`. Loader-input core `8b67ff34…` (unchanged).
 - Deployed to grain.silo (`engine-mods/Modules/Coop/bin/Win64_Shipping_Server` + both core dirs). **NRestarts=0, no exit-4**, `CAMPAIGN LOADED` → `SERVING`, UDP 4200 up, `friendallmods1`. Backup: `_mod_backups/pre-eae6d14e2-20260813T074627Z`.
 - Client-stable published `2026.08.13.0740` (sha d056c366…). Friends direct-connect via launcher `/coopjoin` (no build-version gate) → join fine despite server keeping its prior Common version stamp.
-- **Left to confirm LIVE (needs a friend):** raid a settlement (no storm/softlock), open Kingdom→Diplomacy tab + do a war/peace action (no black screen).
+- **Historical live claim superseded by Phase D:** raid and Kingdom/Diplomacy remained broken after this deploy.
 
 ## Phase C — launcher sweep — SHIPPED ✅ (stable `launcher-app` 2026.8.13.21, source 830f9ec2e)
 - **Logo:** added `Frontir.ico` (white shield crest cropped from the brand lockup, on the dark Ink tile + gold ring; multi-size 16→256) wired via `<ApplicationIcon>` + embedded `<Resource>` + Window `Icon=`. Verified offscreen render — frontend intact, server showed ONLINE.
@@ -45,10 +69,13 @@ Branch: `25vid/fix-kingdom-tab-diplomacy-managers` (base: `development`)
 - Fixed a **pre-existing flaky launcher test** (`ExactInstall_RetriesWhileScannerTemporarilyLocksStagedFile`) that blocked the stable publish: scanner now polls on a dedicated LongRunning thread instead of the saturated thread pool.
 - Not done (optional follow-ups): locate-game folder picker, open-log button, `shootMode` fake-data guard.
 
-## LIVE verification still owed (needs a friend on the updated client)
-Everything is build/CI-green + the server is serving, but the ultimate proof needs a player:
+## LIVE verification still owed after Phase-D deployment
+The local gates are green; rendered verification must use the Phase-D client/server pair:
 1. Raid a village/town → no softlock, loot totals sane, no server storm.
 2. Open Kingdom→Diplomacy, declare war / make peace → no black screen.
+3. Enter a large allied-army field battle → the host fields the full proportional army reserve, not only its
+   own entry-time party allocation.
+4. Retreat from an unresolved battle mission → the encounter closes and does not offer a stale attack retry.
 
 ## Notes / gotchas
 - `dotnet` on PATH is SDK-less x86 → use `"C:\Program Files\dotnet\dotnet.exe"`.

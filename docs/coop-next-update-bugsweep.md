@@ -39,10 +39,16 @@ Branch: `25vid/fix-kingdom-tab-diplomacy-managers` (base: `development`)
 - Client-stable published `2026.08.13.0740` (sha d056c366…). Friends direct-connect via launcher `/coopjoin` (no build-version gate) → join fine despite server keeping its prior Common version stamp.
 - **Left to confirm LIVE (needs a friend):** raid a settlement (no storm/softlock), open Kingdom→Diplomacy tab + do a war/peace action (no black screen).
 
-## Phase C — launcher sweep (CalradiaCoop, WPF .NET 8)
-- **Logo (biggest gap):** no app/window `.ico`. Add Frontir icon (`C:/Users/Bryce/Desktop/frontir_logo_2_horizontal.png` — white shield crest, crop left ~126px, composite on dark Ink tile) → `<ApplicationIcon>` in csproj + `Icon=` on MainWindow; optionally swap the "F R O N T I R" text wordmark for the brand image.
-- UI quick-wins: reset `UpdateText.Foreground` per render (stale color bleed), locate-game folder picker when Bannerlord not found, tooltips on trimmed ledger/update rows, open-log ghost button.
-- Ship via `launcher-app-release.yml`.
+## Phase C — launcher sweep — SHIPPED ✅ (stable `launcher-app` 2026.8.13.21, source 830f9ec2e)
+- **Logo:** added `Frontir.ico` (white shield crest cropped from the brand lockup, on the dark Ink tile + gold ring; multi-size 16→256) wired via `<ApplicationIcon>` + embedded `<Resource>` + Window `Icon=`. Verified offscreen render — frontend intact, server showed ONLINE.
+- Fixed `UpdateText.Foreground` colour-bleed (reset to Steel in RenderSnapshot/RenderProgress); added hover tooltip revealing the trimmed dispatch line (suppressed when empty).
+- Fixed a **pre-existing flaky launcher test** (`ExactInstall_RetriesWhileScannerTemporarilyLocksStagedFile`) that blocked the stable publish: scanner now polls on a dedicated LongRunning thread instead of the saturated thread pool.
+- Not done (optional follow-ups): locate-game folder picker, open-log button, `shootMode` fake-data guard.
+
+## LIVE verification still owed (needs a friend on the updated client)
+Everything is build/CI-green + the server is serving, but the ultimate proof needs a player:
+1. Raid a village/town → no softlock, loot totals sane, no server storm.
+2. Open Kingdom→Diplomacy, declare war / make peace → no black screen.
 
 ## Notes / gotchas
 - `dotnet` on PATH is SDK-less x86 → use `"C:\Program Files\dotnet\dotnet.exe"`.

@@ -103,7 +103,7 @@ Kingdom-tab completion claims. Phase D fixed the raid path; Phase E owns the rem
 - **Still requires a player action:** rendered Kingdom/large-army/retreat verification. This is not inferred
   from headless deployment health.
 
-## Phase F — exact runtime wiring and battle teardown — CANDIDATE (2026-08-13)
+## Phase F — exact runtime wiring and battle teardown — SHIPPED (2026-08-13)
 
 - **Kingdom failure, corrected diagnosis:** the latest client log first throws
   `TypeLoadException: Diplomacy.ViewModelMixin.DiplomacyPanelPrefabExtension` from
@@ -158,9 +158,14 @@ Kingdom-tab completion claims. Phase D fixed the raid path; Phase E owns the rem
 - **Verification/deployment:** focused Diplomacy (120/120) and Player Settlement (24/24) regressions are green,
   as are the registry, reserve, mission-lifecycle, retreat, component, launcher, server-kit, Workshop authority,
   role-policy, XAML, and release-safety gates. The sustained host proof reached `CAMPAIGN LOADED`, authoritative
-  snapshots, and `[RegistryAudit] PASS` with the same save. Full E2E, exact-source build, stable client publication,
-  and final paired same-save server deployment are still running; their final identifiers belong here only after
-  direct verification.
+  snapshots, and `[RegistryAudit] PASS` with the same save. The full correct-location E2E result is 1,419 total,
+  1,415 passed, four known skips, and zero failures. Source `4b731ead5bdc551086436cf5c353e6038b7c5ffc`
+  published stable client `2026.08.13.2231` through workflow `31750036220`; its ZIP SHA-256 is
+  `daa22eb6a031e3a198974493f45b0a41b2d1d6c7cf42d77ad063c242129d8aae`. The server-paired core is
+  `7ab11dddbdc9a4b883eca944f6653a1a085d366fc395ab3cf4fde56e06fd9171`. Production stayed active with zero
+  restarts through the post-serving window, emitted three pulses, bound UDP 4200, and left the unchanged
+  `friendallmods1` save and sidecar at their original hashes. Rollback snapshot:
+  `/home/bishop/bannerlord-coop/server/_mod_backups/pre-4b731ead5-20260813T224028Z`.
 
 ## Deferred — reverted upstream fixes that break Separatism (need dedicated compat work, NOT bundled)
 

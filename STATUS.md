@@ -29,7 +29,7 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > the rendered install/join and Sea Raider auto-resolve gates after functional closure. Foundation
 > verification is green: 3,392 passed, 18 skipped, 0 failed; build completed with 0 errors.
 
-> **2026-08-13 second live correction — release candidate, deployment pending.** Fresh evidence from the
+> **2026-08-13 second live correction — SHIPPED from source `4b731ead5`.** Fresh evidence from the
 > post-`d11ab502e` client and the retained server journal disproves the prior Kingdom and army completion
 > claims. The Kingdom tab is not failing in its Gauntlet layout: Diplomacy first throws a `TypeLoadException`
 > while Coop binds its unversioned loader assembly instead of the fingerprinted `Bannerlord.Diplomacy.1.4.7`
@@ -73,7 +73,13 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > validating/capturing their dictionaries. A 35-second post-serving same-save run then stayed active, broadcast
 > authoritative Player Settlement and Diplomacy snapshots, and completed a registry audit of 11,343 critical
 > objects (1,550 parties, seven armies, five map events, and 4,650 rosters). This is server health evidence, not
-> rendered Kingdom-tab or live battle proof; final publication/deployment gates are still in progress.
+> rendered Kingdom-tab or live battle proof. The exact client is stable version `2026.08.13.2231`
+> (workflow `31750036220`, ZIP SHA-256
+> `daa22eb6a031e3a198974493f45b0a41b2d1d6c7cf42d77ad063c242129d8aae`). The paired dedicated core is
+> `7ab11dddbdc9a4b883eca944f6653a1a085d366fc395ab3cf4fde56e06fd9171`. Production passed a sustained
+> post-serving gate with zero restarts, three pulses, UDP 4200 bound, and both unchanged `friendallmods1`
+> files still matching their pre-deploy hashes. Rollback snapshot:
+> `/home/bishop/bannerlord-coop/server/_mod_backups/pre-4b731ead5-20260813T224028Z`.
 
 > **2026-08-13 live Kingdom regression correction — SHIPPED from source `4c711e778`.** The stable
 > `315be775e` deployment did not fix the Kingdom tab. The 10:28 EDT client

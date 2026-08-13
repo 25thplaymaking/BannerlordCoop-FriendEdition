@@ -1,6 +1,8 @@
 using Common;
+using Common.Logging;
 using GameInterface.Services;
 using HarmonyLib;
+using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -22,6 +24,7 @@ internal interface IDiplomacyClientUiLifecycle : IGameAbstraction
 /// </summary>
 internal sealed class DiplomacyClientUiLifecycle : IDiplomacyClientUiLifecycle
 {
+    private static readonly ILogger Logger = LogManager.GetLogger<DiplomacyClientUiLifecycle>();
     internal static readonly IReadOnlyList<string> SnapshotGatedUiTypeNames = new[]
     {
         "Diplomacy.ViewModelMixin.DiplomacyPanelPrefabExtension",
@@ -31,6 +34,9 @@ internal sealed class DiplomacyClientUiLifecycle : IDiplomacyClientUiLifecycle
         "Diplomacy.ViewModelMixin.KingdomClanVMMixin",
         "Diplomacy.ViewModelMixin.EncyclopediaHeroPagePrefabExtension",
         "Diplomacy.ViewModelMixin.EncyclopediaHeroPageVMMixin",
+        "Diplomacy.ViewModelMixin.PartyNameplateVMMixin",
+        "Diplomacy.ViewModelMixin.PlayerPartyNameplateVMMixin",
+        "Diplomacy.ViewModelMixin.SettlementNameplatesVMMixin",
     };
 
     internal static readonly IReadOnlyList<string> PermanentlyRetiredUiTypeNames = new[]
@@ -43,18 +49,26 @@ internal sealed class DiplomacyClientUiLifecycle : IDiplomacyClientUiLifecycle
         "Diplomacy.ViewModelMixin.EncyclopediaFactionPageVMMixin",
     };
 
-    private readonly Action<string, bool> applyUiType;
+    private readonly Func<string, Type> resolveUiType;
+    private readonly Action<Type, bool> applyUiType;
+    private readonly Action<bool> applyWholeUi;
+    private IReadOnlyDictionary<string, Type> resolvedUiTypes;
 
     public bool IsReady { get; private set; }
 
     public DiplomacyClientUiLifecycle()
-        : this(ApplyUiType)
+        : this(DiplomacyCompatibilityPolicy.ResolveType, ApplyUiType, ApplyWholeUi)
     {
     }
 
-    internal DiplomacyClientUiLifecycle(Action<string, bool> applyUiType)
+    internal DiplomacyClientUiLifecycle(
+        Func<string, Type> resolveUiType,
+        Action<Type, bool> applyUiType,
+        Action<bool> applyWholeUi)
     {
+        this.resolveUiType = resolveUiType ?? throw new ArgumentNullException(nameof(resolveUiType));
         this.applyUiType = applyUiType ?? throw new ArgumentNullException(nameof(applyUiType));
+        this.applyWholeUi = applyWholeUi ?? throw new ArgumentNullException(nameof(applyWholeUi));
     }
 
     public void ResetForCampaign()
@@ -62,9 +76,24 @@ internal sealed class DiplomacyClientUiLifecycle : IDiplomacyClientUiLifecycle
         IsReady = ModInformation.IsServer;
         if (ModInformation.IsServer) return;
 
+        // Disable the registered extension as one operation before resolving any implementation
+        // type. This is the fail-closed boundary: even a loader/candidate failure below cannot leave
+        // a Diplomacy mixin active while campaign state is still waiting on the host snapshot.
+        applyWholeUi(false);
+
         var failures = new List<Exception>();
-        DisableAll(SnapshotGatedUiTypeNames, failures);
-        DisableAll(PermanentlyRetiredUiTypeNames, failures);
+        try
+        {
+            ResolveUiTypes();
+            Logger.Information(
+                "Diplomacy UI lifecycle reset: disabled all extensions and resolved {Count} exact UI types from {Assembly}",
+                resolvedUiTypes.Count,
+                resolvedUiTypes.Values.First().Assembly.FullName);
+        }
+        catch (Exception ex)
+        {
+            failures.Add(ex);
+        }
         if (failures.Count > 0)
             throw new AggregateException("Diplomacy UI could not be disabled before campaign startup.", failures);
     }
@@ -82,58 +111,89 @@ internal sealed class DiplomacyClientUiLifecycle : IDiplomacyClientUiLifecycle
 
         try
         {
+            ResolveUiTypes();
             foreach (string typeName in PermanentlyRetiredUiTypeNames)
-                applyUiType(typeName, false);
+                applyUiType(resolvedUiTypes[typeName], false);
             foreach (string typeName in SnapshotGatedUiTypeNames)
-                applyUiType(typeName, true);
+                applyUiType(resolvedUiTypes[typeName], true);
 
             IsReady = true;
+            Logger.Information(
+                "Diplomacy UI lifecycle ready: enabled {EnabledCount} snapshot-backed extensions; " +
+                "kept {RetiredCount} retired extensions disabled",
+                SnapshotGatedUiTypeNames.Count,
+                PermanentlyRetiredUiTypeNames.Count);
             return true;
         }
         catch (Exception ex)
         {
-            var rollbackFailures = new List<Exception>();
-            DisableAll(SnapshotGatedUiTypeNames, rollbackFailures);
+            Exception rollbackFailure = null;
+            try
+            {
+                applyWholeUi(false);
+            }
+            catch (Exception rollback)
+            {
+                rollbackFailure = rollback;
+            }
             IsReady = false;
             failure = ex.GetBaseException().Message;
-            if (rollbackFailures.Count > 0)
-                failure += " UI rollback also failed: " + string.Join("; ", rollbackFailures.Select(value => value.GetBaseException().Message));
+            if (rollbackFailure != null)
+                failure += " UI rollback also failed: " + rollbackFailure.GetBaseException().Message;
+            Logger.Error(
+                "Diplomacy UI lifecycle activation failed and was rolled back: {Failure}",
+                failure);
             return false;
         }
     }
 
-    private void DisableAll(IEnumerable<string> typeNames, ICollection<Exception> failures)
+    private void ResolveUiTypes()
     {
-        foreach (string typeName in typeNames)
+        if (resolvedUiTypes != null) return;
+
+        var resolved = new Dictionary<string, Type>(StringComparer.Ordinal);
+        foreach (string typeName in SnapshotGatedUiTypeNames.Concat(PermanentlyRetiredUiTypeNames))
         {
-            try
-            {
-                applyUiType(typeName, false);
-            }
-            catch (Exception ex)
-            {
-                failures.Add(ex);
-            }
+            Type type = resolveUiType(typeName) ?? throw new TypeLoadException(
+                typeName + ". " + DiplomacyCompatibilityPolicy.DescribeResolutionFailure());
+            resolved[typeName] = type;
         }
+
+        resolvedUiTypes = resolved;
     }
 
-    private static void ApplyUiType(string typeName, bool enabled)
+    private static object ResolveExtender(out Type extenderType)
     {
-        Type extenderType = AccessTools.TypeByName("Bannerlord.UIExtenderEx.UIExtender") ??
-                            throw new TypeLoadException("Bannerlord.UIExtenderEx.UIExtender");
+        extenderType = AccessTools.TypeByName("Bannerlord.UIExtenderEx.UIExtender") ??
+                       throw new TypeLoadException("Bannerlord.UIExtenderEx.UIExtender");
         MethodInfo getExtender = AccessTools.Method(
             extenderType,
             "GetUIExtenderFor",
             new[] { typeof(string) }) ??
                                  throw new MissingMethodException(extenderType.FullName, "GetUIExtenderFor");
-        object extender = getExtender.Invoke(null, new object[] { "Diplomacy" }) ??
-                          throw new InvalidOperationException("Diplomacy UIExtender runtime was not registered.");
+        return getExtender.Invoke(null, new object[] { "Diplomacy" }) ??
+               throw new InvalidOperationException("Diplomacy UIExtender runtime was not registered.");
+    }
+
+    private static void ApplyWholeUi(bool enabled)
+    {
+        object extender = ResolveExtender(out Type extenderType);
+        MethodInfo transition = AccessTools.Method(
+            extenderType,
+            enabled ? "Enable" : "Disable",
+            Type.EmptyTypes) ??
+                                throw new MissingMethodException(extenderType.FullName, enabled ? "Enable()" : "Disable()");
+        transition.Invoke(extender, Array.Empty<object>());
+    }
+
+    private static void ApplyUiType(Type uiType, bool enabled)
+    {
+        object extender = ResolveExtender(out Type extenderType);
         MethodInfo transition = AccessTools.Method(
             extenderType,
             enabled ? "Enable" : "Disable",
             new[] { typeof(Type) }) ??
                                 throw new MissingMethodException(extenderType.FullName, enabled ? "Enable(Type)" : "Disable(Type)");
-        Type uiType = DiplomacyCompatibilityPolicy.ResolveType(typeName) ?? throw new TypeLoadException(typeName);
         transition.Invoke(extender, new object[] { uiType });
     }
 }

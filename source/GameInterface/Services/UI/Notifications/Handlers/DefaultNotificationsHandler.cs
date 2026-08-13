@@ -843,11 +843,19 @@ internal class DefaultNotificationsHandler : IHandler
         var shouldShowScene =
             (clan == Clan.PlayerClan && detail == ChangeKingdomAction.ChangeKingdomActionDetail.JoinKingdom) ||
             (Clan.PlayerClan?.Kingdom == newKingdom && detail == ChangeKingdomAction.ChangeKingdomActionDetail.JoinKingdomByDefection);
-        if (!shouldShowScene || !TryRestoreSceneCharacterCulture(clan.Leader)) return;
+        if (!shouldShowScene) return;
+
+        // A joined kingdom's audience can contain a partially synchronized or mod-created hero whose
+        // individual Hero/Clan culture has not arrived yet. Aborting the whole notification on that one
+        // audience member leaves an otherwise valid defection with no scene (and used to make this path
+        // order-dependent in the full runtime). The scene already represents this kingdom, so its/clan's
+        // culture is the deterministic rendering fallback for every participant.
+        var sceneCulture = newKingdom.Culture ?? clan.Culture ?? clan.Leader?.Culture ?? Clan.PlayerClan?.Culture;
+        if (!TryRestoreSceneCharacterCulture(clan.Leader, sceneCulture)) return;
 
         foreach (var hero in CampaignSceneNotificationHelper.GetMilitaryAudienceForKingdom(newKingdom).Take(5))
         {
-            if (!TryRestoreSceneCharacterCulture(hero)) return;
+            if (!TryRestoreSceneCharacterCulture(hero, sceneCulture)) return;
         }
 
         MBInformationManager.ShowSceneNotification(new JoinKingdomSceneNotificationItem(clan, newKingdom));
@@ -1111,13 +1119,13 @@ internal class DefaultNotificationsHandler : IHandler
             new MarriageSceneNotificationItem(husband, husband.Spouse, CampaignTime.Now, default));
     }
 
-    private static bool TryRestoreSceneCharacterCulture(Hero hero)
+    private static bool TryRestoreSceneCharacterCulture(Hero hero, CultureObject fallbackCulture = null)
     {
         BasicCharacterObject character = hero.CharacterObject;
         if (character.Culture != null) return true;
 
         using (new AllowedThread())
-            character.Culture = hero.Culture ?? hero.Clan?.Culture;
+            character.Culture = hero.Culture ?? hero.Clan?.Culture ?? fallbackCulture;
 
         if (character.Culture != null) return true;
 

@@ -1,0 +1,14 @@
+{
+  "serverRuntimeModules": [
+    "PlayerSettlement",
+    "ImprovedGarrisons",
+    "DismembermentPlus",
+    "Fourberie",
+    "Bannerlord.Diplomacy",
+    "UnblockableThrust"
+  ],
+  "clientPresentationModules": [
+    "Bannerlord.UIExtenderEx",
+    "Bannerlord.MBOptionScreen"
+  ]
+}

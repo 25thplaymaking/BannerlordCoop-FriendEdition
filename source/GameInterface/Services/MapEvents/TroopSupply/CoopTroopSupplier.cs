@@ -146,6 +146,24 @@ public class CoopTroopSupplier : IMissionTroopSupplier
         return dropped;
     }
 
+    /// <summary>
+    /// [Network thread] An ownership expansion is about to replace both sides with their complete
+    /// authoritative reserves. Keep the current reserve and its monotonic supplied pointers, but make the
+    /// supplier unavailable to mission sizing until its replacement arrives. Without this barrier, the
+    /// attacker replacement can make both suppliers look populated while the defender still contains only
+    /// the entry-time player party, permanently latching a tiny owned share for that side.
+    /// </summary>
+    public void BeginAuthoritativeRefresh()
+    {
+        lock (gate)
+            populated = false;
+
+        Logger.Information(
+            "[TroopSupply] Supplier {MapEvent} side {Side}: awaiting complete ownership reserve refresh",
+            MapEventId,
+            Side);
+    }
+
     /// <summary>How many troops have been supplied per party — reported back to the server for the ledger.</summary>
     public IReadOnlyList<(string partyId, int supplied)> GetSuppliedByParty()
     {

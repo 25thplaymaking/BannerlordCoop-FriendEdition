@@ -8,6 +8,7 @@ using GameInterface.Services.MapEvents.Messages.Leave;
 using GameInterface.Services.MapEvents.Messages.Retreat;
 using GameInterface.Services.Players;
 using HarmonyLib;
+using Missions.Messages;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.GameComponents;
 using TaleWorlds.CampaignSystem.MapEvents;
@@ -134,6 +135,22 @@ public class BattleMissionRetreatTests : MapEventTestBase
         var leave = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkPartyLeftBattle>()
             .Where(message => message.PartyId == requesterPartyBaseId));
         Assert.True(leave.FinishLocalMenus);
+    }
+
+    [Fact]
+    public void UnresolvedBattleMissionLeft_AtomicallyDetachesCampaignParty()
+    {
+        var setup = SetupTwoOpposingPlayers();
+        JoinNewServerPartyToSide(setup.Ctx.MapEventId, BattleSideEnum.Attacker);
+        var requester = Clients.First();
+
+        Server.SimulateMessage(
+            requester.NetPeer,
+            new NetworkMissionLeft("ignored-spoofable-controller", setup.Ctx.MapEventId,
+                leaveUnresolvedBattle: true));
+
+        AssertNotInAnyBattle(Server, setup.Ctx.AttackerPartyId);
+        AssertInBattle(Server, setup.Ctx.DefenderPartyId, setup.Ctx.MapEventId);
     }
 
     /// <summary>

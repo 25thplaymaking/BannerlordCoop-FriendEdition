@@ -17,9 +17,18 @@ public readonly struct NetworkMissionLeft : IEvent
     [ProtoMember(2)]
     public readonly string InstanceId;
 
-    public NetworkMissionLeft(string controllerId, string instanceId)
+    /// <summary>
+    /// True only for a battle mission that ended without an accepted attacker/defender victory. The server
+    /// uses the same authenticated departure packet to detach the peer's campaign party from the map event;
+    /// this makes campaign cleanup inseparable from mission-membership cleanup.
+    /// </summary>
+    [ProtoMember(3)]
+    public readonly bool LeaveUnresolvedBattle;
+
+    public NetworkMissionLeft(string controllerId, string instanceId, bool leaveUnresolvedBattle = false)
     {
         ControllerId = controllerId;
         InstanceId = instanceId;
+        LeaveUnresolvedBattle = leaveUnresolvedBattle;
     }
 }

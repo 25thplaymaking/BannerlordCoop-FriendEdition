@@ -143,6 +143,19 @@ internal static class DiplomacyCompatibilityPolicy
         "Diplomacy.ViewModelMixin.KingdomManagementPrefabExtension",
         "Diplomacy.ViewModelMixin.KingdomManagementScalingPatch",
         "Diplomacy.ViewModelMixin.KingdomManagementVMMixin",
+        "Diplomacy.ViewModelMixin.DiplomacyPanelPrefabExtension",
+        "Diplomacy.ViewModelMixin.KingdomDiplomacyVMMixin",
+        "Diplomacy.ViewModelMixin.KingdomWarItemVMMixin",
+        "Diplomacy.ViewModelMixin.KingdomTruceItemVMMixin",
+        "Diplomacy.ViewModelMixin.KingdomClanVMMixin",
+        "Diplomacy.ViewModelMixin.EncyclopediaHeroPagePrefabExtension",
+        "Diplomacy.ViewModelMixin.EncyclopediaHeroPageVMMixin",
+        "Diplomacy.ViewModelMixin.FactionsButtonExtension",
+        "Diplomacy.ViewModelMixin.EncyclopediaFactionPagePrefabExtension",
+        "Diplomacy.ViewModelMixin.EncyclopediaFactionPageVMMixin",
+        "Diplomacy.ViewModelMixin.PartyNameplateVMMixin",
+        "Diplomacy.ViewModelMixin.PlayerPartyNameplateVMMixin",
+        "Diplomacy.ViewModelMixin.SettlementNameplatesVMMixin",
     };
 
     private static readonly IReadOnlyDictionary<string, string[]> SharedMutationMethods =
@@ -302,11 +315,24 @@ internal static class DiplomacyCompatibilityPolicy
 
     internal static bool IsPotentialDiplomacyAssembly(string assemblyName, bool hasSubModule) =>
         hasSubModule ||
-        string.Equals(assemblyName, "Bannerlord.Diplomacy", StringComparison.Ordinal) ||
         (assemblyName?.StartsWith("Bannerlord.Diplomacy.", StringComparison.Ordinal) ?? false);
 
     internal static bool TryResolveSupportedAssembly(out Assembly assembly, out string failure)
     {
+        // A successfully audited Assembly cannot unload from Bannerlord's default AppDomain. Reuse
+        // that exact object instead of re-running a broad AppDomain candidate scan at each UI
+        // transition. Later helper/dynamic assemblies must not invalidate the identity already
+        // fingerprinted and used to install this campaign's Harmony compatibility category.
+        lock (AssemblyGate)
+        {
+            if (cachedCandidateSupported && cachedCandidate != null)
+            {
+                assembly = cachedCandidate;
+                failure = null;
+                return true;
+            }
+        }
+
         var candidates = ResolveCandidateAssemblies();
         if (candidates.Count == 0)
         {
@@ -344,6 +370,27 @@ internal static class DiplomacyCompatibilityPolicy
             TryResolveSupportedAssembly(out _, out var failure);
             return failure;
         }
+    }
+
+    internal static string DescribeResolutionFailure()
+    {
+        TryResolveSupportedAssembly(out _, out string failure);
+        string candidates = string.Join(", ", ResolveCandidateAssemblies().Select(candidate =>
+        {
+            var name = candidate.GetName();
+            string location;
+            try
+            {
+                location = string.IsNullOrWhiteSpace(candidate.Location) ? "<no location>" : candidate.Location;
+            }
+            catch (Exception)
+            {
+                location = "<location unavailable>";
+            }
+            return $"{name.Name} {name.Version} at {location}";
+        }));
+        return (failure ?? "Diplomacy implementation resolution failed.") +
+               (string.IsNullOrEmpty(candidates) ? " Candidates: <none>." : " Candidates: " + candidates + ".");
     }
 
     internal static bool IsExpectedAssemblyIdentity(string name, string version, string sha256) =>

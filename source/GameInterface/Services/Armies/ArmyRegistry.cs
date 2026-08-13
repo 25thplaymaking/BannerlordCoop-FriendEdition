@@ -43,27 +43,43 @@ internal class ArmyRegistry : AutoRegistryBase<Army>
         {
             foreach (var army in kingdom.Armies)
             {
-                RegisterExistingObject(kingdom.StringId, army);
-                registeredArmies.Add(army);
+                RegisterLoadedArmy(army, registeredArmies);
             }
         }
 
         // Voluntary player travel groups deliberately have no kingdom. They are still referenced by
-        // their member parties in a save, so discover and register them by their stable leader-party id.
+        // their member parties in a save, so discover them there as well. This second pass also catches a
+        // malformed/modded kingdom army omitted from Kingdom.Armies.
         foreach (var party in (IEnumerable<MobileParty>)MobileParty.All ?? Enumerable.Empty<MobileParty>())
         {
             var army = party?.Army;
-            if (!TryTrackKingdomFreeArmy(army, registeredArmies)) continue;
-
-            var leaderPartyId = army.LeaderParty?.StringId;
-            if (string.IsNullOrEmpty(leaderPartyId))
-            {
-                Logger.Warning("Unable to register kingdom-free army because its leader party has no StringId");
-                continue;
-            }
-
-            RegisterExistingObject($"travel_{leaderPartyId}", army);
+            RegisterLoadedArmy(army, registeredArmies);
         }
+    }
+
+    private void RegisterLoadedArmy(Army army, ISet<Army> registeredArmies)
+    {
+        if (army == null || !registeredArmies.Add(army)) return;
+
+        if (!TryGetRegistrationKey(army, out var key))
+        {
+            Logger.Error("Unable to register loaded army because its leader party has no StringId");
+            return;
+        }
+
+        RegisterExistingObject(key, army);
+    }
+
+    /// <summary>
+    /// A loaded army's stable identity is its leader party, not its kingdom. The old kingdom key admitted only
+    /// one army per kingdom: every subsequent army collided and stayed unregistered, which surfaced later as
+    /// Army id failures during battle/army teardown.
+    /// </summary>
+    internal static bool TryGetRegistrationKey(Army army, out string key)
+    {
+        var leaderPartyId = army?.LeaderParty?.StringId;
+        key = string.IsNullOrEmpty(leaderPartyId) ? null : $"leader_{leaderPartyId}";
+        return key != null;
     }
 
     internal static bool TryTrackKingdomFreeArmy(Army army, ISet<Army> registeredArmies)

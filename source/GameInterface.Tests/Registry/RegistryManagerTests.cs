@@ -35,8 +35,14 @@ public class RegistryManagerTests
         IAutoRegistryFactory autoRegistryFactory,
         IMessageBroker messageBroker)
     {
+        var objectManager = new Mock<IObjectManager>();
+        // Other GameInterface fixtures can leave Campaign.Current populated in the shared test process.
+        // This ordering test models a completed registration pass, so every object reached by the new
+        // post-registration completeness audit must already be present.
+        objectManager.Setup(manager => manager.Contains(It.IsAny<object>())).Returns(true);
+
         return new RegistryManager(
-            Mock.Of<IObjectManager>(),
+            objectManager.Object,
             Mock.Of<IRegistryCollection>(),
             messageBroker,
             autoRegistryFactory,

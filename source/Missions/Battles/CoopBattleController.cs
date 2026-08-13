@@ -515,9 +515,28 @@ public class CoopBattleController : CoopMissionController
         // Retry the result-ready report before tearing the instance down. Duplicate reports are idempotent.
         ResultCommitter.ReportResolvedResult(missionResult);
 
-        ReportMissionRetreatIfUnresolved(missionResult);
+        // BattleResolved is not a safe retreat discriminator: native can mark the mission resolved while its
+        // BattleState is still None (the live scoreboard-retreat case). Only a winner state accepted by the
+        // result committer belongs to the completion barrier; every other mission exit must detach the party.
+        bool hasAcceptedResult = ResultCommitter.TryGetResolvedState(out var acceptedState);
+        Logger.Information(
+            "[BattleSync] Leaving battle mission {Instance}: missionResult={HasMissionResult} " +
+            "battleResolved={BattleResolved} missionState={MissionState} acceptedState={AcceptedState} " +
+            "leaveUnresolvedBattle={LeaveUnresolvedBattle}",
+            Session.InstanceId,
+            missionResult != null,
+            missionResult?.BattleResolved ?? false,
+            missionResult?.BattleState ?? BattleState.None,
+            hasAcceptedResult ? acceptedState : BattleState.None,
+            !hasAcceptedResult);
 
-        lifecycle.Leave();
+        if (!hasAcceptedResult)
+            ReportMissionRetreat();
+
+        // The same authenticated packet that removes mission membership also carries the campaign-retreat
+        // intent. The separate command above remains an early path, but cleanup no longer depends on it being
+        // constructed or handled before the mission socket is torn down.
+        lifecycle.Leave(leaveUnresolvedBattle: !hasAcceptedResult);
     }
 
     /// <summary>
@@ -534,14 +553,19 @@ public class CoopBattleController : CoopMissionController
     /// A resolved result is deliberately excluded: that battle concludes through the completion barrier, which
     /// is the path that forfeits rosters and captures the losers.
     /// </remarks>
-    private void ReportMissionRetreatIfUnresolved(MissionResult missionResult)
+    private void ReportMissionRetreat()
     {
-        if (missionResult?.BattleResolved == true) return;
-
         // The mission is always the local player's, so MainParty is the party that just walked out of it.
         var mainParty = MobileParty.MainParty;
         var battle = mainParty?.MapEvent;
-        if (battle == null) return;
+        if (battle == null)
+        {
+            Logger.Warning(
+                "[BattleSync] Could not send early mission-retreat command for {Instance}: main party has no local map event; " +
+                "the atomic MissionLeft fallback will still request server cleanup",
+                Session.InstanceId);
+            return;
+        }
 
         messageBroker.Publish(this, new BattleMissionRetreatAttempted(mainParty, battle));
     }

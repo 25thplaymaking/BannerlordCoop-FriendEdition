@@ -17,6 +17,7 @@ public static class CoopTroopSupplierRegistry
     private static readonly Dictionary<string, CoopTroopSupplier> Suppliers = new Dictionary<string, CoopTroopSupplier>();
     private static readonly Dictionary<string, (PartyReserve[] Reserve, int SideTotal, int PlayerParties)> Pending =
         new Dictionary<string, (PartyReserve[], int, int)>();
+    private static readonly HashSet<string> AwaitingRefresh = new HashSet<string>();
 
     private static string Key(string mapEventId, BattleSideEnum side) => mapEventId + "|" + (int)side;
 
@@ -33,6 +34,31 @@ public static class CoopTroopSupplierRegistry
                 supplier.SetReserve(buffered.Reserve, buffered.SideTotal, buffered.PlayerParties);
                 Pending.Remove(key);
             }
+
+            // The ownership-expanded signal can arrive before mission construction. An older entry-time
+            // reserve may already be buffered; applying it preserves its pointers, but it must not make the
+            // new supplier eligible for sizing until this side's post-signal full reserve has arrived.
+            if (AwaitingRefresh.Contains(key))
+                supplier.BeginAuthoritativeRefresh();
+        }
+    }
+
+    /// <summary>
+    /// The server is expanding this receiver from its entry-time party to complete ownership of the battle.
+    /// Both sides are deliberately made unpopulated together; each becomes ready only after its own full
+    /// reserve message arrives. This prevents mission sizing between the first and second side messages.
+    /// </summary>
+    public static void BeginCompleteRefresh(string mapEventId)
+    {
+        lock (Gate)
+        {
+            foreach (var side in new[] { BattleSideEnum.Attacker, BattleSideEnum.Defender })
+            {
+                var key = Key(mapEventId, side);
+                AwaitingRefresh.Add(key);
+                if (Suppliers.TryGetValue(key, out var supplier))
+                    supplier.BeginAuthoritativeRefresh();
+            }
         }
     }
 
@@ -48,6 +74,7 @@ public static class CoopTroopSupplierRegistry
         lock (Gate)
         {
             var key = Key(mapEventId, side);
+            AwaitingRefresh.Remove(key);
             if (Suppliers.TryGetValue(key, out var supplier))
                 return supplier.SetReserve(reserve, sideTotalTroops, playerOwnedPartyCount);
 
@@ -80,6 +107,8 @@ public static class CoopTroopSupplierRegistry
                 if (key.StartsWith(prefix)) Suppliers.Remove(key);
             foreach (var key in new List<string>(Pending.Keys))
                 if (key.StartsWith(prefix)) Pending.Remove(key);
+            foreach (var key in new List<string>(AwaitingRefresh))
+                if (key.StartsWith(prefix)) AwaitingRefresh.Remove(key);
         }
     }
 }

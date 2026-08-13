@@ -27,7 +27,7 @@ public interface IBattleInstanceLifecycle : IDisposable
     /// announce MissionLeft over the relay, stop the mesh socket, and clear the local mission-membership
     /// mirror so a stale roster cannot survive into a later re-entry.
     /// </summary>
-    void Leave();
+    void Leave(bool leaveUnresolvedBattle = false);
 }
 
 /// <inheritdoc cref="IBattleInstanceLifecycle"/>
@@ -107,15 +107,21 @@ public class BattleInstanceLifecycle : IBattleInstanceLifecycle
         Logger.Information("[Relay] Announced MissionEntered for battle instance {Instance}", mapEventId);
     }
 
-    public void Leave()
+    public void Leave(bool leaveUnresolvedBattle = false)
     {
         BattleSpawnGate.EndBattle();
 
         if (session.HasInstance)
         {
             CoopTroopSupplierRegistry.ClearBattle(session.InstanceId);
-            relayNetwork.SendAll(new NetworkMissionLeft(session.OwnControllerId, session.InstanceId));
-            Logger.Information("[Relay] Announced MissionLeft for battle instance {Instance}", session.InstanceId);
+            relayNetwork.SendAll(new NetworkMissionLeft(
+                session.OwnControllerId,
+                session.InstanceId,
+                leaveUnresolvedBattle));
+            Logger.Information(
+                "[Relay] Announced MissionLeft for battle instance {Instance}; unresolvedBattle={UnresolvedBattle}",
+                session.InstanceId,
+                leaveUnresolvedBattle);
         }
 
         network.Stop();

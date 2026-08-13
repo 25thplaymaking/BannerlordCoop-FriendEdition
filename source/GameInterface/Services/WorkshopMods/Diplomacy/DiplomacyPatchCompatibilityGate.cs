@@ -244,9 +244,9 @@ internal static class DiplomacyCampaignPatchCleanup
     [HarmonyPrefix]
     private static void Prefix()
     {
+        DiplomacyClientSettingsBridge.Reset();
         if (!ModInformation.IsClient) return;
 
-        DiplomacyClientSettingsBridge.Reset();
         if (!ContainerProvider.TryResolve<IDiplomacyClientUiLifecycle>(out var uiLifecycle))
             throw new InvalidOperationException("Diplomacy client UI lifecycle was unavailable at campaign startup.");
         uiLifecycle.ResetForCampaign();

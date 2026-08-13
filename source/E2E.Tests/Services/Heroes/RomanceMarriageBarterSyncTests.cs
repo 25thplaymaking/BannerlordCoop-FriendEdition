@@ -125,6 +125,13 @@ public class RomanceMarriageBarterSyncTests : MapEventTestBase
         }
         finally
         {
+            harmony.Unpatch(
+                AccessTools.Method(
+                    typeof(MBInformationManager),
+                    nameof(MBInformationManager.ShowSceneNotification),
+                    new[] { typeof(SceneNotificationData) }),
+                HarmonyPatchType.Prefix,
+                harmony.Id);
             harmony.UnpatchAll(harmony.Id);
         }
     }
@@ -172,6 +179,13 @@ public class RomanceMarriageBarterSyncTests : MapEventTestBase
         }
         finally
         {
+            harmony.Unpatch(
+                AccessTools.Method(
+                    typeof(MBInformationManager),
+                    nameof(MBInformationManager.ShowSceneNotification),
+                    new[] { typeof(SceneNotificationData) }),
+                HarmonyPatchType.Prefix,
+                harmony.Id);
             harmony.UnpatchAll(harmony.Id);
         }
     }

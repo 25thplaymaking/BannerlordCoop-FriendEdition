@@ -31,12 +31,21 @@ internal class BattleTroopReserveHandler : IHandler
     {
         this.messageBroker = messageBroker;
         this.network = network;
+        messageBroker.Subscribe<NetworkBattleReserveOwnershipExpanded>(Handle_OwnershipExpanded);
         messageBroker.Subscribe<NetworkBattleTroopReserve>(Handle_NetworkBattleTroopReserve);
     }
 
     public void Dispose()
     {
+        messageBroker.Unsubscribe<NetworkBattleReserveOwnershipExpanded>(Handle_OwnershipExpanded);
         messageBroker.Unsubscribe<NetworkBattleTroopReserve>(Handle_NetworkBattleTroopReserve);
+    }
+
+    private static void Handle_OwnershipExpanded(MessagePayload<NetworkBattleReserveOwnershipExpanded> payload)
+    {
+        if (ModInformation.IsServer) return;
+
+        CoopTroopSupplierRegistry.BeginCompleteRefresh(payload.What.MapEventId);
     }
 
     private void Handle_NetworkBattleTroopReserve(MessagePayload<NetworkBattleTroopReserve> payload)

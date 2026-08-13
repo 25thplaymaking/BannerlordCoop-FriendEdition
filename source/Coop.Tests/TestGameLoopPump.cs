@@ -21,25 +21,34 @@ internal static class TestGameLoopPump
     [ModuleInitializer]
     public static void Initialize()
     {
-        var ready = new ManualResetEventSlim(false);
-
-        var thread = new Thread(() =>
+        // xUnit's in-process console runner can load this test assembly into more than one
+        // AssemblyLoadContext. Static fields are not shared across those copies, so use the CLR
+        // intern pool as the process-wide lock and never start a second pump against the same
+        // Common.GameThread singleton.
+        lock (string.Intern("Coop.Tests.TestGameLoopPump.ProcessGate"))
         {
-            GameThread.Instance.MarkGameThread();
-            ready.Set();
+            if (GameThread.Instance.IsInitialized) return;
 
-            while (true)
+            var ready = new ManualResetEventSlim(false);
+
+            var thread = new Thread(() =>
             {
-                GameThread.Instance.Update(TimeSpan.FromMilliseconds(16));
-                Thread.Sleep(1);
-            }
-        })
-        {
-            IsBackground = true,
-            Name = "TestGameLoopPump",
-        };
+                GameThread.Instance.MarkGameThread();
+                ready.Set();
 
-        thread.Start();
-        ready.Wait();
+                while (true)
+                {
+                    GameThread.Instance.Update(TimeSpan.FromMilliseconds(16));
+                    Thread.Sleep(1);
+                }
+            })
+            {
+                IsBackground = true,
+                Name = "TestGameLoopPump",
+            };
+
+            thread.Start();
+            ready.Wait();
+        }
     }
 }

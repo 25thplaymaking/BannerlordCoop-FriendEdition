@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using CoopServerModKit.ButterLib;
 using CoopServerModKit.DedicatedServer;
+using CoopServerModKit.TaleWorlds;
 using DedicatedServerCompatibilityPatcher;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -79,6 +80,45 @@ public sealed class ServerKitPatcherTests : IDisposable
             instruction.Operand is MethodReference reference && reference.Name == "GetAssemblies");
         Assert.DoesNotContain(method.Body.Instructions, instruction =>
             instruction.Operand is string value && value.Contains("ensure.log", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TaleWorldsAssemblyLoaderPatch_RequiresOneExactLoadFromSignature()
+    {
+        string input = Path.Combine(root, "TaleWorlds.Library.dll");
+        string output = Path.Combine(root, "TaleWorlds.Library.patched.dll");
+        CreateTaleWorldsAssemblyLoaderFixture(input, duplicateTarget: true);
+
+        InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
+            TaleWorldsAssemblyLoaderPatcher.Patch(input, output, Sha256(input)));
+
+        Assert.Contains("exactly one", error.Message);
+        Assert.False(File.Exists(output));
+    }
+
+    [Fact]
+    public void TaleWorldsAssemblyLoaderPatch_ResolvesMissingBareDependenciesBeforeShowingAnEngineMessageBox()
+    {
+        string input = Path.Combine(root, "TaleWorlds.Library.dll");
+        string output = Path.Combine(root, "TaleWorlds.Library.patched.dll");
+        CreateTaleWorldsAssemblyLoaderFixture(input);
+
+        TaleWorldsAssemblyLoaderPatcher.Patch(input, output, Sha256(input));
+
+        using AssemblyDefinition patched = AssemblyDefinition.ReadAssembly(output);
+        TypeDefinition type = patched.MainModule.GetType("TaleWorlds.Library.AssemblyLoader");
+        MethodDefinition target = type.Methods.Single(method => method.Name == "LoadFrom");
+        MethodDefinition resolver = type.Methods.Single(method => method.Name == "TryResolveMissingDependency");
+        Assert.Contains(target.Body.Instructions, instruction =>
+            instruction.Operand is MethodReference reference && reference.Name == resolver.Name);
+        Assert.Contains(target.Body.Instructions, instruction =>
+            instruction.Operand is MethodReference reference && reference.FullName == "System.Boolean System.IO.File::Exists(System.String)");
+        Assert.Contains(resolver.Body.Instructions, instruction =>
+            instruction.Operand is MethodReference reference && reference.FullName == "System.Boolean System.IO.File::Exists(System.String)");
+        Assert.Contains(resolver.Body.Instructions, instruction =>
+            instruction.Operand is MethodReference reference && reference.FullName == "System.Reflection.Assembly System.Reflection.Assembly::Load(System.Reflection.AssemblyName)");
+        Assert.Contains(resolver.Body.ExceptionHandlers, handler =>
+            handler.CatchType?.FullName == "System.Exception");
     }
 
     [Fact]
@@ -180,6 +220,41 @@ public sealed class ServerKitPatcherTests : IDisposable
         AddEnsureLoaded(type, assembly.MainModule);
         if (duplicateTarget) AddEnsureLoaded(type, assembly.MainModule);
         assembly.Write(path);
+    }
+
+    private static void CreateTaleWorldsAssemblyLoaderFixture(string path, bool duplicateTarget = false)
+    {
+        using AssemblyDefinition assembly = AssemblyDefinition.CreateAssembly(
+            new AssemblyNameDefinition("TaleWorlds.Library", new Version(1, 0, 0, 0)),
+            "TaleWorlds.Library", ModuleKind.Dll);
+        TypeDefinition type = AddType(assembly.MainModule, "TaleWorlds.Library.AssemblyLoader");
+        TypeDefinition result = new(
+            string.Empty,
+            "AssemblyLoadResult",
+            TypeAttributes.NestedPublic | TypeAttributes.Sealed,
+            assembly.MainModule.ImportReference(typeof(Enum)));
+        result.Fields.Add(new FieldDefinition(
+            "value__",
+            FieldAttributes.Public | FieldAttributes.SpecialName | FieldAttributes.RTSpecialName,
+            assembly.MainModule.TypeSystem.Int32));
+        type.NestedTypes.Add(result);
+        AddTaleWorldsLoadFrom(type, result, assembly.MainModule);
+        if (duplicateTarget) AddTaleWorldsLoadFrom(type, result, assembly.MainModule);
+        assembly.Write(path);
+    }
+
+    private static void AddTaleWorldsLoadFrom(TypeDefinition type, TypeDefinition result, ModuleDefinition module)
+    {
+        MethodDefinition method = new(
+            "LoadFrom",
+            MethodAttributes.Public | MethodAttributes.Static,
+            module.ImportReference(typeof(System.Reflection.Assembly)));
+        method.Parameters.Add(new ParameterDefinition("assemblyFile", ParameterAttributes.None, module.TypeSystem.String));
+        method.Parameters.Add(new ParameterDefinition("result", ParameterAttributes.Out, new ByReferenceType(result)));
+        method.Parameters.Add(new ParameterDefinition("showError", ParameterAttributes.Optional, module.TypeSystem.Boolean));
+        method.Body.Instructions.Add(Instruction.Create(OpCodes.Ldnull));
+        method.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+        type.Methods.Add(method);
     }
 
     private static void AddEnsureLoaded(TypeDefinition type, ModuleDefinition module)

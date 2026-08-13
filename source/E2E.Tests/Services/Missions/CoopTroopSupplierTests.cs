@@ -188,6 +188,76 @@ public class CoopTroopSupplierTests
     }
 
     [Fact]
+    public void OwnershipExpansion_WaitsForBothCompleteSideReserves_BeforeSizingCanResume()
+    {
+        const string mapEventId = "M-refresh-existing";
+        var attacker = new CoopTroopSupplier(mapEventId, BattleSideEnum.Attacker, null, new BattleAgentBudget());
+        var defender = new CoopTroopSupplier(mapEventId, BattleSideEnum.Defender, null, new BattleAgentBudget());
+
+        try
+        {
+            CoopTroopSupplierRegistry.Register(attacker);
+            CoopTroopSupplierRegistry.Register(defender);
+            CoopTroopSupplierRegistry.Feed(mapEventId, BattleSideEnum.Attacker,
+                new[] { Party("entry-attacker", 40) }, sideTotalTroops: 815);
+            CoopTroopSupplierRegistry.Feed(mapEventId, BattleSideEnum.Defender,
+                new[] { Party("entry-defender", 81, seedBase: 2000) }, sideTotalTroops: 2736);
+            Assert.True(attacker.IsPopulated);
+            Assert.True(defender.IsPopulated);
+
+            CoopTroopSupplierRegistry.BeginCompleteRefresh(mapEventId);
+            Assert.False(attacker.IsPopulated);
+            Assert.False(defender.IsPopulated);
+
+            // This is the live packet order. The first complete side must not expose the stale entry-time
+            // defender reserve to CoopBattleMissionSpawnHandler as if the pair were ready.
+            CoopTroopSupplierRegistry.Feed(mapEventId, BattleSideEnum.Attacker,
+                new[] { Party("all-attackers", 815) }, sideTotalTroops: 815);
+            Assert.True(attacker.IsPopulated);
+            Assert.False(defender.IsPopulated);
+
+            CoopTroopSupplierRegistry.Feed(mapEventId, BattleSideEnum.Defender,
+                new[] { Party("all-defenders", 2736, seedBase: 4000) }, sideTotalTroops: 2736);
+            Assert.True(attacker.IsPopulated);
+            Assert.True(defender.IsPopulated);
+            Assert.Equal(2736, defender.TotalTroops);
+        }
+        finally
+        {
+            CoopTroopSupplierRegistry.ClearBattle(mapEventId);
+        }
+    }
+
+    [Fact]
+    public void OwnershipExpansionBeforeMissionRegistration_KeepsStalePendingSideUnpopulated()
+    {
+        const string mapEventId = "M-refresh-pending";
+
+        try
+        {
+            // Entry-time reserve arrives first, followed by host election, all before mission suppliers exist.
+            CoopTroopSupplierRegistry.Feed(mapEventId, BattleSideEnum.Defender,
+                new[] { Party("entry-defender", 81) }, sideTotalTroops: 2736);
+            CoopTroopSupplierRegistry.BeginCompleteRefresh(mapEventId);
+
+            var defender = new CoopTroopSupplier(mapEventId, BattleSideEnum.Defender, null, new BattleAgentBudget());
+            CoopTroopSupplierRegistry.Register(defender);
+
+            Assert.False(defender.IsPopulated);
+            Assert.Equal(81, defender.TotalTroops); // retained only to preserve state until replacement
+
+            CoopTroopSupplierRegistry.Feed(mapEventId, BattleSideEnum.Defender,
+                new[] { Party("all-defenders", 2736, seedBase: 4000) }, sideTotalTroops: 2736);
+            Assert.True(defender.IsPopulated);
+            Assert.Equal(2736, defender.TotalTroops);
+        }
+        finally
+        {
+            CoopTroopSupplierRegistry.ClearBattle(mapEventId);
+        }
+    }
+
+    [Fact]
     public void SupplyOneTroopFromParty_AdvancesOnlyTheSelectedParty()
     {
         var supplier = new CoopTroopSupplier("M1", BattleSideEnum.Attacker, null, new BattleAgentBudget());

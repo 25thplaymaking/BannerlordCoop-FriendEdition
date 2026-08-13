@@ -22,6 +22,7 @@ public static class ReflectionExtensions
         namespacePrefix = namespacePrefix == null ? string.Empty : namespacePrefix;
 
         List<Type> types = new List<Type>();
+        HashSet<string> identities = new HashSet<string>(StringComparer.Ordinal);
 
         Assembly[] assemblies = domain.GetAssemblies();
         foreach (Assembly _assembly in assemblies)
@@ -32,6 +33,12 @@ public static class ReflectionExtensions
                 {
                     if (type.Namespace == null) continue;
                     if (type.Namespace.StartsWith(namespacePrefix) == false) continue;
+                    // A module or test host can load the same assembly identity into multiple
+                    // AssemblyLoadContexts. Discovery is about logical runtime contracts, not Type-object
+                    // identity, so enumerate an assembly-qualified type once. Without this boundary a
+                    // serializer/registry is falsely reported as a duplicate of itself.
+                    string identity = type.AssemblyQualifiedName ?? type.FullName;
+                    if (identity != null && !identities.Add(identity)) continue;
 
                     types.Add(type);
                 }

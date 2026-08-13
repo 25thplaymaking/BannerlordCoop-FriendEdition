@@ -1,18 +1,23 @@
 using Common;
+using Common.Logging;
 using GameInterface.Services.WorkshopMods.Core;
 using HarmonyLib;
+using Serilog;
 using System;
 using System.Reflection;
 
 namespace GameInterface.Services.WorkshopMods.Diplomacy;
 
 /// <summary>
-/// Supplies the audited Diplomacy settings object on a client when MCM's provider did not register it.
-/// A real provider result always wins; the fallback exists for one campaign and is then populated by
-/// the authoritative Diplomacy snapshot before any gated UI is enabled.
+/// Supplies the audited Diplomacy settings object when MCM's provider did not register it. The
+/// dedicated host intentionally does not initialize MCM's presentation submodule, so it uses the
+/// same one-campaign fallback as clients and publishes those canonical values in its snapshot. A
+/// real provider result always wins; clients populate the fallback from that host snapshot before
+/// any gated Diplomacy UI is enabled.
 /// </summary>
 internal static class DiplomacyClientSettingsBridge
 {
+    private static readonly ILogger Logger = LogManager.GetLogger(typeof(DiplomacyClientSettingsBridge));
     private static readonly object Gate = new();
     private static object fallback;
 
@@ -21,15 +26,22 @@ internal static class DiplomacyClientSettingsBridge
         lock (Gate) fallback = null;
     }
 
-    internal static object Resolve(bool isClient, object providerValue, Func<object> fallbackFactory)
+    internal static object Resolve(object providerValue, Func<object> fallbackFactory)
     {
-        if (providerValue != null || !isClient) return providerValue;
+        if (providerValue != null) return providerValue;
         if (fallbackFactory == null) throw new ArgumentNullException(nameof(fallbackFactory));
 
         lock (Gate)
         {
-            fallback ??= fallbackFactory() ??
-                         throw new InvalidOperationException("Diplomacy client settings fallback factory returned null.");
+            if (fallback == null)
+            {
+                fallback = fallbackFactory() ??
+                           throw new InvalidOperationException("Diplomacy settings fallback factory returned null.");
+                Logger.Information(
+                    "Created canonical Diplomacy settings fallback for role {Role} ({SettingsType})",
+                    ModInformation.IsServer ? "server" : "client",
+                    fallback.GetType().AssemblyQualifiedName);
+            }
             return fallback;
         }
     }
@@ -67,7 +79,7 @@ internal static class DiplomacyClientSettingsBridge
         [HarmonyPostfix]
         private static void Postfix(ref object __result)
         {
-            __result = Resolve(ModInformation.IsClient, __result, CreateFallback);
+            __result = Resolve(__result, CreateFallback);
         }
     }
 }

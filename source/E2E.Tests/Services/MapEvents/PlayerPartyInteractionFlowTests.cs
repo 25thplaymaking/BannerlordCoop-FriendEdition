@@ -3122,6 +3122,7 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
         var banditMobilePartyId = CreateBanditParty("E2EBanditPostApplyFailure");
         var banditPartyId = GetPartyBaseId(Server, banditMobilePartyId);
         var harmony = new Harmony($"e2e.bandit-post-apply.{Guid.NewGuid():N}");
+        MethodBase patchedMethod = null;
 
         Server.Resolve<IPlayerManager>().SetPeer("PlayerOne", client.NetPeer);
         Server.Call(() =>
@@ -3146,31 +3147,34 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
 
         if (failBeforeSafePassageIsInstalled)
         {
+            patchedMethod = AccessTools.Method(
+                typeof(DefaultMobilePartyAIModelPatches),
+                nameof(DefaultMobilePartyAIModelPatches.PreventAttacksUntil));
             harmony.Patch(
-                AccessTools.Method(
-                    typeof(DefaultMobilePartyAIModelPatches),
-                    nameof(DefaultMobilePartyAIModelPatches.PreventAttacksUntil)),
+                patchedMethod,
                 prefix: new HarmonyMethod(
                     typeof(PlayerPartyInteractionFlowTests),
                     nameof(ThrowBeforeBanditSafePassageMutation)));
         }
         else if (failDuringGoldDispatch)
         {
+            patchedMethod = AccessTools.Method(
+                typeof(CampaignEventDispatcher),
+                nameof(CampaignEventDispatcher.OnHeroOrPartyTradedGold));
             harmony.Patch(
-                AccessTools.Method(
-                    typeof(CampaignEventDispatcher),
-                    nameof(CampaignEventDispatcher.OnHeroOrPartyTradedGold)),
+                patchedMethod,
                 prefix: new HarmonyMethod(
                     typeof(PlayerPartyInteractionFlowTests),
                     nameof(ThrowDuringBanditGoldDispatch)));
         }
         else
         {
+            patchedMethod = AccessTools.Method(
+                typeof(ConversationPartyHold),
+                nameof(ConversationPartyHold.EndEngagement),
+                new[] { typeof(ConversationPartyTracker), typeof(object) });
             harmony.Patch(
-                AccessTools.Method(
-                    typeof(ConversationPartyHold),
-                    nameof(ConversationPartyHold.EndEngagement),
-                    new[] { typeof(ConversationPartyTracker), typeof(object) }),
+                patchedMethod,
                 prefix: new HarmonyMethod(
                     typeof(PlayerPartyInteractionFlowTests),
                     nameof(ThrowAfterBanditBarterMutation)));
@@ -3226,6 +3230,11 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
         }
         finally
         {
+            // Harmony's global owner sweep has leaked this prefix under full-suite load on the
+            // duplicate test AssemblyLoadContexts. Remove the exact original first so a synthetic
+            // failure in this regression cannot poison unrelated barter tests later in the process.
+            if (patchedMethod != null)
+                harmony.Unpatch(patchedMethod, HarmonyPatchType.Prefix, harmony.Id);
             harmony.UnpatchAll(harmony.Id);
             Server.Call(() =>
             {

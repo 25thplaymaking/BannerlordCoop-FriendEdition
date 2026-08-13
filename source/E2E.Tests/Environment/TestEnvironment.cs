@@ -13,6 +13,7 @@ using GameInterface.Policies;
 using Missions;
 using Missions.Agents.Handlers;
 using GameInterface.Services.WorkshopMods.Core;
+using GameInterface.Services.WorkshopMods.Diplomacy;
 using FriendEdition.WorkshopCompatibility;
 using IModConfig = GameInterface.Configuration.IModConfig;
 using Xunit.Abstractions;
@@ -129,6 +130,12 @@ public class TestEnvironment
         builder.RegisterType<MockGuardReactionActionResolver>()
             .As<IGuardReactionActionResolver>()
             .InstancePerDependency();
+        builder.RegisterType<MockDiplomacyRuntime>()
+            .As<IDiplomacyRuntime>()
+            .InstancePerLifetimeScope();
+        builder.RegisterType<MockDiplomacyClientUiLifecycle>()
+            .As<IDiplomacyClientUiLifecycle>()
+            .InstancePerLifetimeScope();
 
         builder.RegisterType<TestMessageBroker>().AsSelf().As<IMessageBroker>().InstancePerLifetimeScope();
         builder.RegisterType<TestPolicy>().As<ISyncPolicy>().InstancePerLifetimeScope();

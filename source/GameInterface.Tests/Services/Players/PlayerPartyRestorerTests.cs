@@ -3,6 +3,7 @@ using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
 using GameInterface.Services.Players.Data;
 using GameInterface.Tests.Bootstrap;
+using HarmonyLib;
 using Moq;
 using Serilog;
 using System;
@@ -166,7 +167,24 @@ public class PlayerPartyRestorerTests
             },
             _ => throw new InvalidOperationException("A registered recovery party should not be removed"));
 
-        Assert.True(restorer.TryRestore(player, out var restored));
+        var harmony = new Harmony($"gameinterface.player-restorer-position.{Guid.NewGuid():N}");
+        var positionValidity = AccessTools.Method(typeof(CampaignVec2), nameof(CampaignVec2.IsValid));
+        harmony.Patch(
+            positionValidity,
+            prefix: new HarmonyMethod(
+                typeof(PlayerPartyRestorerTests),
+                nameof(AcceptSyntheticCampaignPosition)));
+
+        Player restored;
+        try
+        {
+            Assert.True(restorer.TryRestore(player, out restored));
+        }
+        finally
+        {
+            harmony.Unpatch(positionValidity, HarmonyPatchType.Prefix, harmony.Id);
+            harmony.UnpatchAll(harmony.Id);
+        }
 
         Assert.Equal(player.HeroId, restored.HeroId);
         Assert.Equal(partyId, restored.MobilePartyId);
@@ -177,6 +195,12 @@ public class PlayerPartyRestorerTests
         Assert.Equal(captivePosition, party.Position);
         Assert.False(party.IsActive);
         Assert.Equal(new[] { "register", "lookup" }, registrationOrder);
+    }
+
+    private static bool AcceptSyntheticCampaignPosition(ref bool __result)
+    {
+        __result = true;
+        return false;
     }
 
     [Fact]

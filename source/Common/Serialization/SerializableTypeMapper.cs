@@ -151,6 +151,15 @@ public class SerializableTypeMapper : ISerializableTypeMapper
             Register(type);
             id = fullNameToId[fullName];
         }
+        else if (idToType.TryGetValue(id, out var registeredType) && registeredType != type)
+        {
+            // Test hosts and some module loaders can expose the same assembly identity in more than one
+            // AssemblyLoadContext. A startup scan may then retain a type object from a sibling context.
+            // Prefer the exact runtime type being serialized so a local round-trip cannot deserialize into
+            // an object that has the same assembly-qualified name but is not assignable to the caller's type.
+            // The wire id remains unchanged because it is derived only from the stable full name.
+            idToType[id] = type;
+        }
 
         return true;
     }

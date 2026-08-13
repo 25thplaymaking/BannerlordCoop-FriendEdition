@@ -75,9 +75,16 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
         acceptedHostConfig = null;
         hostConfigLoaded = false;
         loggedClientUiReadiness = false;
-        campaignReady = true;
+        campaignReady = false;
+        if (!runtime.IsAvailable)
+        {
+            throw new System.InvalidOperationException(
+                "Diplomacy runtime is unavailable for an enabled Friend Edition campaign. " +
+                DiplomacyCompatibilityPolicy.DescribeResolutionFailure());
+        }
         if (ModInformation.IsServer) runtime.ResetSnapshotRevision();
         uiLifecycle.ResetForCampaign();
+        campaignReady = true;
 
         // Handler subscription order is not a trust boundary. If configuration authority already
         // committed the campaign snapshot, consume it; otherwise HostModConfigAccepted will resume
@@ -317,9 +324,11 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
             trustedSnapshot = snapshot;
             if (!MarkClientUiReady()) return;
             Logger.Information(
-                "Applied Diplomacy {Version} host settings/state snapshot revision {Revision} ({Fingerprint}).",
+                "Applied Diplomacy {Version} host settings/state snapshot revision {Revision}; " +
+                "settings={SettingsFingerprint}, state={StateFingerprint}.",
                 snapshot.AssemblyVersion,
                 snapshot.Revision,
+                snapshot.SettingsFingerprint,
                 snapshot.StateFingerprint);
         }
     }
@@ -423,8 +432,7 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
     {
         if (!runtime.IsAvailable)
         {
-            if (DiplomacyCompatibilityPolicy.ResolveCandidateAssembly() == null) return;
-            DenyPeerOrAbortSession(peer, DiplomacyCompatibilityPolicy.CompatibilityFailure);
+            DenyPeerOrAbortSession(peer, DiplomacyCompatibilityPolicy.DescribeResolutionFailure());
             return;
         }
 
@@ -452,16 +460,20 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
         if (peer == null)
         {
             Logger.Information(
-                "Broadcasting authoritative Diplomacy snapshot revision {Revision} ({Fingerprint})",
+                "Broadcasting authoritative Diplomacy snapshot revision {Revision}; " +
+                "settings={SettingsFingerprint}, state={StateFingerprint}",
                 snapshot.Revision,
+                snapshot.SettingsFingerprint,
                 snapshot.StateFingerprint);
             network.SendAll(snapshot);
         }
         else
         {
             Logger.Information(
-                "Sending authoritative Diplomacy snapshot revision {Revision} ({Fingerprint}) to peer {Peer}",
+                "Sending authoritative Diplomacy snapshot revision {Revision}; " +
+                "settings={SettingsFingerprint}, state={StateFingerprint} to peer {Peer}",
                 snapshot.Revision,
+                snapshot.SettingsFingerprint,
                 snapshot.StateFingerprint,
                 peer.Id);
             network.Send(peer, snapshot);
@@ -572,8 +584,9 @@ internal sealed class DiplomacySnapshotPublisher : IDiplomacySnapshotPublisher
         {
             if (!runtime.IsAvailable)
             {
-                if (DiplomacyCompatibilityPolicy.ResolveCandidateAssembly() == null) return;
-                throw new System.InvalidOperationException(DiplomacyCompatibilityPolicy.CompatibilityFailure);
+                throw new System.InvalidOperationException(
+                    "Diplomacy runtime is unavailable: " +
+                    DiplomacyCompatibilityPolicy.DescribeResolutionFailure());
             }
 
             var snapshot = runtime.CaptureSnapshot();

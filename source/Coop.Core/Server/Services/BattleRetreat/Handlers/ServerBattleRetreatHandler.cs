@@ -10,6 +10,7 @@ using GameInterface.Services.MapEvents.Messages.Retreat;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
 using LiteNetLib;
+using Missions.Messages;
 using Serilog;
 using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Party;
@@ -45,6 +46,7 @@ internal class ServerBattleRetreatHandler : IHandler
         messageBroker.Subscribe<NetworkRequestBattleRetreat>(Handle);
         messageBroker.Subscribe<NetworkRequestBattleMissionRetreat>(HandleMissionRetreat);
         messageBroker.Subscribe<BattleMissionRetreatAttempted>(HandleHostMissionRetreat);
+        messageBroker.Subscribe<NetworkMissionLeft>(HandleMissionDeparture);
         messageBroker.Subscribe<NetworkRequestBreakInCasualties>(HandleBreakInCasualties);
     }
 
@@ -68,10 +70,87 @@ internal class ServerBattleRetreatHandler : IHandler
                 return;
             }
 
-            if (!objectManager.TryGetObject<MapEvent>(obj.MapEventId, out var battle)) return;
+            if (!objectManager.TryGetObject<MapEvent>(obj.MapEventId, out var battle))
+            {
+                Logger.Warning(
+                    "Mission-retreat request for party {PartyId} could not resolve battle {BattleId}",
+                    obj.PartyId,
+                    obj.MapEventId);
+                return;
+            }
 
-            retreatInterface.TryLeaveBattleAfterMissionRetreat(requested, battle);
+            if (!retreatInterface.TryLeaveBattleAfterMissionRetreat(requested, battle))
+            {
+                Logger.Warning(
+                    "Mission-retreat request did not detach party {PartyId} from battle {BattleId}; " +
+                    "battleState={BattleState} finalized={Finalized} currentMapEvent={CurrentMapEvent}",
+                    obj.PartyId,
+                    obj.MapEventId,
+                    battle.BattleState,
+                    battle.IsFinalized,
+                    requested.MapEvent?.StringId ?? "none");
+            }
         });
+    }
+
+    /// <summary>
+    /// Atomic fallback carried by the authenticated mission-departure packet. The live Auburn failure proved
+    /// that removing instance membership alone is not campaign cleanup: the party remained on MapEvent 70760
+    /// after the only mission member was removed. This handler makes the two teardowns part of one request.
+    /// </summary>
+    private void HandleMissionDeparture(MessagePayload<NetworkMissionLeft> payload)
+    {
+        var obj = payload.What;
+        if (!obj.LeaveUnresolvedBattle || payload.Who is not NetPeer peer) return;
+
+        GameThread.RunSafe(() =>
+        {
+            if (!playerManager.TryGetPlayer(peer, out var player) ||
+                !objectManager.TryGetObject<MobileParty>(player.MobilePartyId, out var owned))
+            {
+                Logger.Warning(
+                    "Unresolved battle departure for {BattleId} could not resolve the authenticated peer's party",
+                    obj.InstanceId);
+                return;
+            }
+
+            if (!objectManager.TryGetObject<MapEvent>(obj.InstanceId, out var battle))
+            {
+                Logger.Warning(
+                    "Unresolved battle departure for party {PartyId} could not resolve battle {BattleId}",
+                    player.MobilePartyId,
+                    obj.InstanceId);
+                return;
+            }
+
+            if (retreatInterface.TryLeaveBattleAfterMissionRetreat(owned, battle))
+            {
+                Logger.Information(
+                    "Atomic mission departure detached party {PartyId} from unresolved battle {BattleId}",
+                    player.MobilePartyId,
+                    obj.InstanceId);
+                return;
+            }
+
+            // The early NetworkRequestBattleMissionRetreat may already have done the work. Distinguish that
+            // idempotent success from a genuine teardown failure in the server log.
+            if (owned.MapEvent != battle)
+            {
+                Logger.Information(
+                    "Atomic mission departure found party {PartyId} already detached from battle {BattleId}",
+                    player.MobilePartyId,
+                    obj.InstanceId);
+                return;
+            }
+
+            Logger.Warning(
+                "Atomic mission departure FAILED to detach party {PartyId} from battle {BattleId}; " +
+                "battleState={BattleState} finalized={Finalized}",
+                player.MobilePartyId,
+                obj.InstanceId,
+                battle.BattleState,
+                battle.IsFinalized);
+        }, context: nameof(HandleMissionDeparture));
     }
 
     /// <summary>
@@ -153,6 +232,7 @@ internal class ServerBattleRetreatHandler : IHandler
         messageBroker.Unsubscribe<NetworkRequestBattleRetreat>(Handle);
         messageBroker.Unsubscribe<NetworkRequestBattleMissionRetreat>(HandleMissionRetreat);
         messageBroker.Unsubscribe<BattleMissionRetreatAttempted>(HandleHostMissionRetreat);
+        messageBroker.Unsubscribe<NetworkMissionLeft>(HandleMissionDeparture);
         messageBroker.Unsubscribe<NetworkRequestBreakInCasualties>(HandleBreakInCasualties);
     }
 }

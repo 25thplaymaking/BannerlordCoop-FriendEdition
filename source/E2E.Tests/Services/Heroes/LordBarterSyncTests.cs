@@ -24,6 +24,7 @@ using TaleWorlds.CampaignSystem.SceneInformationPopupTypes;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.CampaignSystem.Siege;
 using TaleWorlds.Core;
+using TaleWorlds.Library;
 using Xunit.Abstractions;
 
 namespace E2E.Tests.Services.Heroes;
@@ -828,6 +829,7 @@ public class LordBarterSyncTests : MapEventTestBase
         var client = Clients.First();
         var player = CreatePartyWithRegisteredLeader();
         var target = CreatePartyWithRegisteredLeader();
+        var incompleteAudience = CreatePartyWithRegisteredLeader();
         var kingdomId = TestEnvironment.CreateRegisteredObject<Kingdom>();
         var harmony = new Harmony($"e2e.join-kingdom-scene.{Guid.NewGuid():N}");
         string? targetClanId = null;
@@ -838,6 +840,7 @@ public class LordBarterSyncTests : MapEventTestBase
         {
             Assert.True(client.ObjectManager.TryGetObject<Hero>(player.HeroId, out var playerHero));
             Assert.True(client.ObjectManager.TryGetObject<Hero>(target.HeroId, out var targetHero));
+            Assert.True(client.ObjectManager.TryGetObject<Hero>(incompleteAudience.HeroId, out var audienceHero));
             Assert.True(client.ObjectManager.TryGetObject<Kingdom>(kingdomId, out var kingdom));
             Assert.True(client.ObjectManager.TryGetId(targetHero.Clan, out targetClanId));
             Assert.NotNull(playerHero.Culture);
@@ -848,9 +851,18 @@ public class LordBarterSyncTests : MapEventTestBase
                 Campaign.Current.PlayerDefaultFaction = playerHero.Clan;
                 playerHero.Clan._kingdom = kingdom;
                 targetHero.Clan._kingdom = kingdom;
+                audienceHero.Clan = playerHero.Clan;
+                kingdom._clans = new MBList<Clan>
+                {
+                    targetHero.Clan,
+                    playerHero.Clan,
+                };
                 kingdom._rulingClan = playerHero.Clan;
                 ((BasicCharacterObject)playerHero.CharacterObject).Culture = null;
                 ((BasicCharacterObject)targetHero.CharacterObject).Culture = null;
+                ((BasicCharacterObject)audienceHero.CharacterObject).Culture = null;
+                AccessTools.Field(typeof(Hero), nameof(Hero.Culture)).SetValue(audienceHero, null);
+                playerHero.Clan.Culture = null;
             }
 
             harmony.Patch(
@@ -879,8 +891,10 @@ public class LordBarterSyncTests : MapEventTestBase
             {
                 Assert.True(client.ObjectManager.TryGetObject<Hero>(player.HeroId, out var playerHero));
                 Assert.True(client.ObjectManager.TryGetObject<Hero>(target.HeroId, out var targetHero));
+                Assert.True(client.ObjectManager.TryGetObject<Hero>(incompleteAudience.HeroId, out var audienceHero));
                 Assert.Same(playerHero.Culture, ((BasicCharacterObject)playerHero.CharacterObject).Culture);
                 Assert.Same(targetHero.Culture, ((BasicCharacterObject)targetHero.CharacterObject).Culture);
+                Assert.NotNull(((BasicCharacterObject)audienceHero.CharacterObject).Culture);
                 var scene = Assert.IsType<JoinKingdomSceneNotificationItem>(shownJoinKingdomScene);
                 Assert.All(
                     scene.GetSceneNotificationCharacters(),
@@ -889,6 +903,13 @@ public class LordBarterSyncTests : MapEventTestBase
         }
         finally
         {
+            harmony.Unpatch(
+                AccessTools.Method(
+                    typeof(MBInformationManager),
+                    nameof(MBInformationManager.ShowSceneNotification),
+                    new[] { typeof(SceneNotificationData) }),
+                HarmonyPatchType.Prefix,
+                harmony.Id);
             harmony.UnpatchAll(harmony.Id);
         }
     }
@@ -944,6 +965,13 @@ public class LordBarterSyncTests : MapEventTestBase
         }
         finally
         {
+            harmony.Unpatch(
+                AccessTools.Method(
+                    typeof(MBInformationManager),
+                    nameof(MBInformationManager.ShowSceneNotification),
+                    new[] { typeof(SceneNotificationData) }),
+                HarmonyPatchType.Prefix,
+                harmony.Id);
             harmony.UnpatchAll(harmony.Id);
         }
     }

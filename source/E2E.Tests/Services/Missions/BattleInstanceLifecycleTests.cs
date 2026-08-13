@@ -50,10 +50,12 @@ public class BattleInstanceLifecycleTests : MissionTestEnvironment
                 session: session,
                 missionContext: context);
 
-            lifecycle.Leave();
+            lifecycle.Leave(leaveUnresolvedBattle: true);
 
             Assert.Empty(context.ControllersInMission);
             Assert.Equal(1, worldItemRegistry.ClearCalls);
+            var left = Assert.Single(client.NetworkSentMessages.GetMessages<NetworkMissionLeft>());
+            Assert.True(left.LeaveUnresolvedBattle);
         });
     }
 

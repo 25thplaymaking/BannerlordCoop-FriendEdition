@@ -15,6 +15,7 @@ internal class ServiceModule : Module
     private static readonly ILogger Logger = LogManager.GetLogger<ServiceModule>();
 
     private const string NAMESPACE = "GameInterface";
+    private static readonly System.Reflection.Assembly RuntimeAssembly = typeof(ServiceModule).Assembly;
 
     protected override void Load(ContainerBuilder builder)
     {
@@ -53,7 +54,7 @@ internal class ServiceModule : Module
     // Namespace is needed to separate client and server handlers being registered with DI
     private IEnumerable<Type> GetHandlers()
     {
-        var handlers = InterfaceCollector.GetInterfaces<IHandler>(NAMESPACE);
+        var handlers = InterfaceCollector.GetInterfaces<IHandler>(NAMESPACE, RuntimeAssembly);
 
         // When dynamic sync generates its code at runtime, the generated handlers are created by
         // AutoSyncPatcher.BindHandlers and must NOT also be activated by the container: the
@@ -69,11 +70,12 @@ internal class ServiceModule : Module
     }
 
     // Namespace is needed to separate client and server handlers being registered with DI
-    private IEnumerable<Type> GetGameAbstractions() => InterfaceCollector.GetInterfaces<IGameAbstraction>(NAMESPACE);
+    private IEnumerable<Type> GetGameAbstractions() =>
+        InterfaceCollector.GetInterfaces<IGameAbstraction>(NAMESPACE, RuntimeAssembly);
 
     // Namespace is needed to separate client and server handlers being registered with DI
     private IEnumerable<Type> GetAuditors() =>
-        InterfaceCollector.GetInterfaces<IAuditor>(NAMESPACE);
+        InterfaceCollector.GetInterfaces<IAuditor>(NAMESPACE, RuntimeAssembly);
 
     
 }

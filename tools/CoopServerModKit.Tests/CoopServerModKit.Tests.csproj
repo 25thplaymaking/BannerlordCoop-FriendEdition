@@ -20,6 +20,7 @@
   <ItemGroup>
     <ProjectReference Include="..\CoopServerModKit\butterlib-patcher\butterlib-patcher.csproj" />
     <ProjectReference Include="..\CoopServerModKit\dspatch\dspatch.csproj" />
+    <ProjectReference Include="..\CoopServerModKit\assemblyloader-patcher\assemblyloader-patcher.csproj" />
     <ProjectReference Include="..\DedicatedServerCompatibilityPatcher\DedicatedServerCompatibilityPatcher.csproj" />
   </ItemGroup>
 </Project>

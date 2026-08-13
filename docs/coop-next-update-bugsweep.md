@@ -31,11 +31,13 @@ Branch: `25vid/fix-kingdom-tab-diplomacy-managers` (base: `development`)
 - **`NetworkUpdatePartyBehavior`** storm (960 KB/10s during raids): `MobilePartyBehaviorHandler` publishes on every `RecalculateShortTermBehavior` with no server-side delta check. Safe fix = gate publish on serialized snapshot being byte-identical to last sent — BUT if that channel is unreliable the redundant sends may mask packet loss; needs live profiling before shipping. Raid softlock's *primary* cause (A1) already fixed.
 - `TownMarketData__itemDict_Upsert` raid flood — cause unconfirmed (AutoSync of `_itemDict` during raid recalculation); investigate later.
 
-## Phase B — ship (Phase A is green)
-- Merge #14 → `development`.
-- Build server DLLs (Serilog **2.x** for the .NET-Core server), re-pair `DedicatedServer.Core` SHA-pin via `DedicatedServerCompatibilityPatcher` (clears the stuck raid loop on restart).
-- Deploy to grain.silo (`bannerlord-coop-seven` --user service; live Coop at `server/engine-mods/Modules/Coop`, core in the two `Win64_Shipping_Server/bin` dirs; stage via `upload-here/`, back up to `_mod_backups/`). Same `friendallmods1` save. Observe uptime.
-- Dispatch client-stable + confirm launcher advertises the new build.
+## Phase B — SHIPPED ✅ (merge eae6d14e2)
+- Merged #14 → `development`.
+- Server DLLs rebuilt Serilog-2.x (flip Common.csproj→2.12.0 + drop Sinks.Seq + LogManager Seq line; GameInterface/Coop.Core are netstandard2.0, ref Serilog 2.0.0.0 verified). Only GameInterface.dll + Coop.Core.dll changed (Common/Coop.Steam pulled live + reused).
+- Re-paired `DedicatedServer.Core` → paired sha `189d7c9e1bf2b37d…`; pinned GameInterface `aee3ab47…`, Coop.Core `8e1b6d40…`, Common `b76a527b…`, Coop.Steam `a27674a3…`. Loader-input core `8b67ff34…` (unchanged).
+- Deployed to grain.silo (`engine-mods/Modules/Coop/bin/Win64_Shipping_Server` + both core dirs). **NRestarts=0, no exit-4**, `CAMPAIGN LOADED` → `SERVING`, UDP 4200 up, `friendallmods1`. Backup: `_mod_backups/pre-eae6d14e2-20260813T074627Z`.
+- Client-stable published `2026.08.13.0740` (sha d056c366…). Friends direct-connect via launcher `/coopjoin` (no build-version gate) → join fine despite server keeping its prior Common version stamp.
+- **Left to confirm LIVE (needs a friend):** raid a settlement (no storm/softlock), open Kingdom→Diplomacy tab + do a war/peace action (no black screen).
 
 ## Phase C — launcher sweep (CalradiaCoop, WPF .NET 8)
 - **Logo (biggest gap):** no app/window `.ico`. Add Frontir icon (`C:/Users/Bryce/Desktop/frontir_logo_2_horizontal.png` — white shield crest, crop left ~126px, composite on dark Ink tile) → `<ApplicationIcon>` in csproj + `Icon=` on MainWindow; optionally swap the "F R O N T I R" text wordmark for the brand image.

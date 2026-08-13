@@ -273,6 +273,9 @@ public partial class MainWindow : Window
 
     private void RenderSnapshot(ArmorySnapshot snapshot)
     {
+        // Reset the dispatch colour to its default: a prior gather-logs success/failure sets it to
+        // Gold/Steel and neither RenderSnapshot nor RenderProgress restored it, so the tint bled between states.
+        UpdateText.Foreground = Steel;
         RenderComponent(LauncherUpdateValue, snapshot.Launcher.Status);
         RenderComponent(SuiteUpdateValue, snapshot.Mods.SuiteStatus);
         RenderComponent(ClientUpdateValue, snapshot.Mods.ClientStatus);
@@ -321,6 +324,7 @@ public partial class MainWindow : Window
 
     private void RenderProgress(ArmoryComponent component, double fraction, string message)
     {
+        UpdateText.Foreground = Steel;
         UpdateBar.Visibility = Visibility.Visible;
         UpdateBar.IsIndeterminate = fraction < 0;
         if (fraction >= 0) UpdateBar.Value = fraction;

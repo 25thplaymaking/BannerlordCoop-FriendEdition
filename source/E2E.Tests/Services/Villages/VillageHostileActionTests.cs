@@ -909,8 +909,7 @@ public class VillageHostileActionTests : MapEventTestBase
             Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(mobilePartyId, out var mobileParty));
             Assert.True(Server.ObjectManager.TryGetObject<ItemObject>(itemId, out var item));
 
-            var lootedItems = new ItemRoster();
-            lootedItems.AddToCounts(new EquipmentElement(item), 2);
+            var lootedItems = new List<(ItemObject Item, int Amount)> { (item, 2) };
             MessageBroker.Instance.Publish(this, new RaidLootedItemsUpdated(mobileParty, lootedItems));
         });
 

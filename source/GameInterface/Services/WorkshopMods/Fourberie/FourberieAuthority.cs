@@ -402,13 +402,16 @@ internal static class FourberieAuthorityPatches
         var merchant = HarmonyLib.AccessTools.Field(type, "merchtarg")?.GetValue(__instance) as Hero;
         var settlement = HarmonyLib.AccessTools.Field(type, "currentSet")?.GetValue(__instance) as Settlement;
         var destination = HarmonyLib.AccessTools.Field(type, "settofrom")?.GetValue(__instance) as Settlement;
-        FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+        bool submitted = FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
             FourberieOperation.StartInsuranceScam,
             settlement,
             merchant,
             destination,
             0,
-            Array.Empty<FourberieLocalTroopSelection>()));
+            Array.Empty<FourberieLocalTroopSelection>())) == true;
+        // Tell the player when the route is unavailable instead of the button silently doing nothing,
+        // matching EnslavePrisoners / the safehouse item transfer.
+        if (!submitted) FourberieSafehouseTransferContext.ShowUnavailable();
         return false;
     }
 

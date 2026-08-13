@@ -653,8 +653,13 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             {
                 using (new AllowedThread())
                 {
-                    PlayerEncounter.LeaveSettlement();
-                    PlayerEncounter.Finish(true);
+                    // The result is a network round-trip: by the time it lands the player may have
+                    // already left the encounter, so finishing an already-null one would NRE the tick.
+                    if (PlayerEncounter.Current != null)
+                    {
+                        PlayerEncounter.LeaveSettlement();
+                        PlayerEncounter.Finish(true);
+                    }
                 }
             }
             if (operation == FourberieOperation.AbandonTownCrimeBase)
@@ -709,10 +714,16 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
 
         using (new AllowedThread())
         {
-            PlayerEncounter.LeaveSettlement();
-            PlayerEncounter.Finish(false);
+            // Deferred network result: guard the encounter/party the same way StopSafehouseWait does,
+            // so a player who already left the safehouse menu doesn't NRE the tick on finish/re-encounter.
+            if (PlayerEncounter.Current != null)
+            {
+                PlayerEncounter.LeaveSettlement();
+                PlayerEncounter.Finish(false);
+            }
             AccessTools.Method(safehouse.GetType(), "SetOwnerComplex")?.Invoke(safehouse, new object[] { null });
-            EncounterManager.StartSettlementEncounter(MobileParty.MainParty, crimeBase);
+            if (MobileParty.MainParty != null)
+                EncounterManager.StartSettlementEncounter(MobileParty.MainParty, crimeBase);
         }
     }
 

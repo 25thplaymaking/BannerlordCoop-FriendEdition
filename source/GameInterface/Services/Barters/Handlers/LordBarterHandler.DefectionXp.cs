@@ -37,8 +37,13 @@ internal sealed partial class LordBarterHandler
     {
         try
         {
-            var breakdown = string.Join(", ", barter.GetOfferedBarterables()
-                .Select(b => $"{b.GetType().Name}x{b.CurrentAmount}={b.GetValueForFaction(targetHero.Clan)}"));
+            // targetHero can be unresolved on the server (e.g. a defection barter where the target
+            // isn't mapped yet); guard it so this diagnostic never throws an NRE into the reject path.
+            var targetClan = targetHero?.Clan;
+            var breakdown = targetHero == null
+                ? "(target hero unresolved)"
+                : string.Join(", ", barter.GetOfferedBarterables()
+                    .Select(b => $"{b.GetType().Name}x{b.CurrentAmount}={b.GetValueForFaction(targetClan)}"));
 
             // The requesting player, NOT Hero.MainHero / Clan.PlayerClan: this runs on the server,
             // where those are null on a dedicated host and are the HOST's own hero and clan on a
@@ -51,7 +56,7 @@ internal sealed partial class LordBarterHandler
                 breakdown,
                 playerHero?.StringId,
                 playerHero?.Clan?.StringId,
-                targetHero.Clan?.StringId,
+                targetHero?.Clan?.StringId,
                 targetKingdom?.StringId,
                 targetKingdom?.Clans?.Count,
                 targetKingdom?.Fiefs?.Count);

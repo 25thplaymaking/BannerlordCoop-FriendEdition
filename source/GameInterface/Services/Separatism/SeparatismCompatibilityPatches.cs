@@ -18,6 +18,9 @@ internal static class SeparatismCompatibilityPatches
     {
         var options = ModConfigProvider.ModOptions.Separatism;
         if (!options.Enabled) return true;
+        // This replaces the global Hero.IsFriend; a null otherHero (which vanilla tolerates) would NRE
+        // GetHeroRelation, so defer to the original for that case.
+        if (otherHero == null) return true;
         __result = SeparatismCompatibilityPolicy.IsFriend(
             CharacterRelationManager.GetHeroRelation(__instance, otherHero),
             options.FriendThreshold);
@@ -30,6 +33,7 @@ internal static class SeparatismCompatibilityPatches
     {
         var options = ModConfigProvider.ModOptions.Separatism;
         if (!options.Enabled) return true;
+        if (otherHero == null) return true;
         __result = SeparatismCompatibilityPolicy.IsEnemy(
             CharacterRelationManager.GetHeroRelation(__instance, otherHero),
             options.EnemyThreshold);

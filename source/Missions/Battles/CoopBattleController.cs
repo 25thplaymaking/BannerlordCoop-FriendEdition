@@ -91,6 +91,7 @@ public class CoopBattleController : CoopMissionController
         IObjectManager objectManager,
         IPlayerManager playerManager,
         ICoopMissionComponent coopMissionComponent,
+        INetworkWorldItemRegistry worldItemRegistry,
         IBattleHostRegistry hostRegistry,
         IAgentFormationAssigner formationAssigner,
         IMissionContext missionContext,
@@ -106,7 +107,17 @@ public class CoopBattleController : CoopMissionController
 
         var deployment = new BattleDeploymentCoordinator(network, messageBroker, session);
 
-        lifecycle = new BattleInstanceLifecycle(network, relayNetwork, messageBroker, objectManager, coopMissionComponent, session, missionContext);
+        // Merge: upstream #2908 adds worldItemRegistry to BattleInstanceLifecycle (weapon-pickup desync
+        // fix); the fork's missionContext stays on both ctors (OwnedAgentReplicator is untouched by #2908).
+        lifecycle = new BattleInstanceLifecycle(
+            network,
+            relayNetwork,
+            messageBroker,
+            objectManager,
+            coopMissionComponent,
+            worldItemRegistry,
+            session,
+            missionContext);
         replicator = new OwnedAgentReplicator(
             network,
             messageBroker,

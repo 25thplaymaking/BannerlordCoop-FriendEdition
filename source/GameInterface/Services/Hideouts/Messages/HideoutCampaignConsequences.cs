@@ -26,7 +26,7 @@ internal readonly struct HideoutCampaignConsequenceRequested : IEvent
     }
 }
 
-[ProtoContract]
+[ProtoContract(SkipConstructor = true)]
 internal readonly struct NetworkHideoutCampaignConsequenceRequested : ICommand
 {
     [ProtoMember(1)]

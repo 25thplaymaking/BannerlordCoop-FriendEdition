@@ -228,12 +228,17 @@ public sealed class ModUpdaterTests
         string versionFile = Path.Combine(fixture.Modules, "Coop", "installed-version.txt");
         using var scannerStarted = new ManualResetEventSlim();
         using var lockAcquired = new ManualResetEventSlim();
-        Task scanner = HoldStagedFileOpenAsync(
-            fixture.Modules,
-            "locked-by-scanner.dll",
-            scannerStarted,
-            lockAcquired,
-            TimeSpan.FromMilliseconds(750));
+        // Run the scanner on a dedicated (LongRunning) thread, not the thread pool: xUnit executes tests
+        // in parallel and can saturate the pool, so a Task.Delay-based poll loop may never be scheduled
+        // during InstallExact's extraction window and would miss the staged file (flaky timeout in CI).
+        Task scanner = Task.Factory.StartNew(
+            () => HoldStagedFileOpen(
+                fixture.Modules,
+                "locked-by-scanner.dll",
+                scannerStarted,
+                lockAcquired,
+                TimeSpan.FromMilliseconds(750)),
+            TaskCreationOptions.LongRunning);
         Assert.True(scannerStarted.Wait(TimeSpan.FromSeconds(5)));
 
         Exception? failure = Record.Exception(() =>
@@ -366,7 +371,7 @@ public sealed class ModUpdaterTests
         return stream.ToArray();
     }
 
-    private static async Task HoldStagedFileOpenAsync(
+    private static void HoldStagedFileOpen(
         string modules,
         string fileName,
         ManualResetEventSlim scannerStarted,
@@ -374,7 +379,7 @@ public sealed class ModUpdaterTests
         TimeSpan holdDuration)
     {
         scannerStarted.Set();
-        DateTime deadline = DateTime.UtcNow.AddSeconds(10);
+        DateTime deadline = DateTime.UtcNow.AddSeconds(30);
         while (DateTime.UtcNow < deadline)
         {
             string? path = Directory
@@ -388,7 +393,7 @@ public sealed class ModUpdaterTests
                 {
                     using FileStream held = new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
                     lockAcquired.Set();
-                    await Task.Delay(holdDuration);
+                    Thread.Sleep(holdDuration);
                     return;
                 }
                 catch (IOException)
@@ -397,7 +402,7 @@ public sealed class ModUpdaterTests
                 }
             }
 
-            await Task.Delay(1);
+            Thread.Sleep(1);
         }
 
         throw new TimeoutException("The staged lock target was not observed in time.");

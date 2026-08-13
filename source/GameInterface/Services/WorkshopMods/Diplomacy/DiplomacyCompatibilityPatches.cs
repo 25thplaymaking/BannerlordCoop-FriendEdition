@@ -451,17 +451,24 @@ internal static class DiplomacyPlayerKingdomActionGuardPatch
         var pactType = DiplomacyCompatibilityPolicy.ResolveType(
             "Diplomacy.DiplomaticAction.NonAggressionPact.FormNonAggressionPactAction");
         // TryApply is inherited from the closed generic action base and is the normal entry point.
-        // ApplyInternal is the audited state-mutation sink; patching both prevents a cheat/plugin
-        // or future internal caller from bypassing the singleton-dependent outer path.
+        // It is declared on AbstractDiplomaticAction<T> — a constructed generic type — which the
+        // .NET Framework client CLR refuses to patch (see HarmonyGenericTargetPolicy; yielding it
+        // there aborted the whole Diplomacy category inside the join handshake and froze every
+        // joining client, 2026-08-13). The server's .NET Core runtime patches it fine, and its
+        // automated-context injection wants the outer entry, so it stays a server-runtime target.
+        // Clients remain guarded through the concrete overrides: ApplyInternal is the audited
+        // state-mutation sink and AssessCosts the gold/influence sink TryApply funnels into.
         var pactTryApply = pactType == null ? null : AccessTools.Method(pactType, "TryApply");
-        if (pactTryApply != null) yield return pactTryApply;
+        if (HarmonyGenericTargetPolicy.CanPatch(pactTryApply)) yield return pactTryApply;
         var pactApplyInternal = pactType == null ? null : AccessTools.Method(pactType, "ApplyInternal");
-        if (pactApplyInternal != null) yield return pactApplyInternal;
+        if (HarmonyGenericTargetPolicy.CanPatch(pactApplyInternal)) yield return pactApplyInternal;
+        var pactAssessCosts = pactType == null ? null : AccessTools.Method(pactType, "AssessCosts");
+        if (HarmonyGenericTargetPolicy.CanPatch(pactAssessCosts)) yield return pactAssessCosts;
 
         var peaceType = DiplomacyCompatibilityPolicy.ResolveType(
             "Diplomacy.DiplomaticAction.WarPeace.KingdomPeaceAction");
         var peaceMethod = peaceType == null ? null : AccessTools.Method(peaceType, "ApplyPeace");
-        if (peaceMethod != null) yield return peaceMethod;
+        if (HarmonyGenericTargetPolicy.CanPatch(peaceMethod)) yield return peaceMethod;
     }
 
     // See DiplomacySharedMutationAuthorityPatch.Prepare.

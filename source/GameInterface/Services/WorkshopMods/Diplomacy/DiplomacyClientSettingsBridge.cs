@@ -67,7 +67,28 @@ internal static class DiplomacyClientSettingsBridge
                     "Instance",
                     BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
                     ?.GetGetMethod(nonPublic: true);
-                if (getter != null) return getter;
+                if (getter == null) continue;
+
+                // Diplomacy.Settings never redeclares Instance; this walk lands on MCM's
+                // GlobalSettings<Diplomacy.Settings>.Instance — a constructed generic declaring
+                // type the .NET Framework client CLR refuses to patch (the second of the two
+                // targets behind the 2026-08-13 join freeze; see HarmonyGenericTargetPolicy).
+                // Skipping it on clients is safe: their full MCM registers the real settings
+                // object, so the provider result this postfix would defer to is already non-null,
+                // and the snapshot-apply boundaries fail loudly if it ever is not. The MCM-less
+                // dedicated host, where the fallback is actually needed, runs .NET Core and keeps
+                // the patch.
+                if (!HarmonyGenericTargetPolicy.CanPatch(getter))
+                {
+                    Logger.Information(
+                        "Diplomacy settings fallback getter patch skipped on this runtime; " +
+                        "relying on MCM's registered settings ({Getter} on {DeclaringType})",
+                        getter.Name,
+                        getter.DeclaringType);
+                    return null;
+                }
+
+                return getter;
             }
 
             return null;

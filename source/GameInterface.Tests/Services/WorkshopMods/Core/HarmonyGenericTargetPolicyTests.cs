@@ -87,6 +87,28 @@ public sealed class HarmonyGenericTargetPolicyTests
         Assert.False(HarmonyGenericTargetPolicy.CanPatch(null, CoreRuntime));
     }
 
+    [Fact]
+    public void StaticGetterInheritedFromClosedGenericBase_IsRejectedOnFrameworkRuntime()
+    {
+        // Mirrors DiplomacyClientSettingsBridge's declared-only base walk over
+        // Diplomacy.Settings : AttributeGlobalSettings<Settings> : MCM GlobalSettings<T>,
+        // which lands on the generic base's static Instance getter.
+        MethodBase getter = null;
+        for (var current = typeof(ConcreteSettings); current != null; current = current.BaseType)
+        {
+            getter = current.GetProperty(
+                "Instance",
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+                ?.GetGetMethod(nonPublic: true);
+            if (getter != null) break;
+        }
+
+        Assert.NotNull(getter);
+        Assert.True(getter.DeclaringType.IsGenericType);
+        Assert.False(HarmonyGenericTargetPolicy.CanPatch(getter, FrameworkRuntime));
+        Assert.True(HarmonyGenericTargetPolicy.CanPatch(getter, CoreRuntime));
+    }
+
     // Mirrors Diplomacy.DiplomaticAction.AbstractDiplomaticAction<T>: TryApply declared on the
     // generic base and NOT overridden; ApplyInternal abstract on the base, overridden concretely.
     private abstract class AbstractAction<T> where T : AbstractAction<T>, new()
@@ -101,6 +123,17 @@ public sealed class HarmonyGenericTargetPolicyTests
         protected override void ApplyInternal()
         {
         }
+    }
+
+    // Mirrors MCM's GlobalSettings<T> shape: the static Instance getter lives on the generic
+    // base and the concrete settings type never redeclares it.
+    private abstract class GenericSettingsBase<T> where T : GenericSettingsBase<T>, new()
+    {
+        public static T Instance { get; } = new T();
+    }
+
+    private sealed class ConcreteSettings : GenericSettingsBase<ConcreteSettings>
+    {
     }
 
     // Mirrors Diplomacy.DiplomaticAction.WarPeace.KingdomPeaceAction (non-generic static entry).

@@ -47,30 +47,29 @@ internal class RaidEventComponentPatches
     // log "Failed to get id" for every unregistered throwaway, which — fired once per raid tick per item —
     // produced a ~1 MB/s server packet storm that softlocked clients and desynced loot (see
     // RaidLootedItemsUpdated).
-    private static List<(ItemObject Item, int Amount)> GetAddedItems(Dictionary<ItemObject, int> before, ItemRoster after)
+    internal static List<(ItemObject Item, int Amount)> GetAddedItems(
+        Dictionary<ItemObject, int> before,
+        ItemRoster after)
     {
         var result = new List<(ItemObject, int)>();
         if (after == null)
             return result;
 
-        foreach (var element in after)
+        foreach (var current in CaptureItems(after))
         {
-            var item = element.EquipmentElement.Item;
-            if (item == null)
-                continue;
-
-            before.TryGetValue(item, out var previousAmount);
-            var added = element.Amount - previousAmount;
+            int previousAmount = 0;
+            before?.TryGetValue(current.Key, out previousAmount);
+            var added = current.Value - previousAmount;
             if (added <= 0)
                 continue;
 
-            result.Add((item, added));
+            result.Add((current.Key, added));
         }
 
         return result;
     }
 
-    private static Dictionary<ItemObject, int> CaptureItems(ItemRoster roster)
+    internal static Dictionary<ItemObject, int> CaptureItems(ItemRoster roster)
     {
         var result = new Dictionary<ItemObject, int>();
         if (roster == null)
@@ -82,7 +81,8 @@ internal class RaidEventComponentPatches
             if (item == null)
                 continue;
 
-            result[item] = element.Amount;
+            result.TryGetValue(item, out int existingAmount);
+            result[item] = existingAmount + element.Amount;
         }
 
         return result;

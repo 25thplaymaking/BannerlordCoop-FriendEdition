@@ -63,7 +63,8 @@ public partial class MainWindow : Window
         MinButton.Click += (_, _) => WindowState = WindowState.Minimized;
         CloseButton.Click += (_, _) => Close();
         JoinButton.Click += OnPrimaryClicked;
-        _statusTimer.Tick += async (_, _) => await RefreshStatusAsync();
+        GatherLogsButton.Click += OnGatherLogsClicked;
+        _statusTimer.Tick += async (_, _) => await OnStatusTickAsync();
 
         Loaded += OnLoaded;
     }
@@ -418,6 +419,38 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void OnGatherLogsClicked(object sender, RoutedEventArgs e)
+    {
+        GatherLogsButton.IsEnabled = false;
+        object previous = GatherLogsButton.Content;
+        GatherLogsButton.Content = "GATHERING LOGS…";
+        try
+        {
+            LogPackageResult result = await Task.Run(() => LogPackager.Package(_bannerlordExe));
+            UpdateText.Foreground = result.Success ? Gold : Steel;
+            if (result.Success && result.ZipPath is not null)
+            {
+                LogPackager.RevealInExplorer(result.ZipPath);
+                UpdateText.Text = $"Packaged {result.FileCount} log(s) → {result.ZipPath}  —  send this zip to Bishop.";
+            }
+            else
+            {
+                UpdateText.Text = result.Message;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"Gather logs threw: {ex}");
+            UpdateText.Foreground = Steel;
+            UpdateText.Text = $"Couldn't gather logs — {ex.Message}";
+        }
+        finally
+        {
+            GatherLogsButton.Content = previous;
+            GatherLogsButton.IsEnabled = true;
+        }
+    }
+
     private void UnfurlBanner()
     {
         if (!SystemParameters.ClientAreaAnimation) return;
@@ -426,6 +459,18 @@ public partial class MainWindow : Window
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
         };
         BannerScale.BeginAnimation(ScaleTransform.ScaleYProperty, unfurl);
+    }
+
+    /// <summary>
+    /// Fires on the status timer: always refresh the server pill, and — when the last armory check
+    /// came back unverified (the jester screen, usually a transient GitHub blip) — quietly re-run it so
+    /// the launcher self-heals the moment the feeds recover, without the member clicking retry.
+    /// </summary>
+    private async Task OnStatusTickAsync()
+    {
+        await RefreshStatusAsync();
+        if (!_operationActive && _snapshot is { PrimaryAction: ArmoryPrimaryAction.RetryCheck })
+            await CheckArmoryAsync();
     }
 
     private async Task RefreshStatusAsync()

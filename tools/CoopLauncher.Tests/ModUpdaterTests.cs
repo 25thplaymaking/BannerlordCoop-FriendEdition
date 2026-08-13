@@ -331,7 +331,7 @@ public sealed class ModUpdaterTests
         {
             SuiteManifestUrl = "https://updates.example/suite.json",
             UpdateManifestUrl = "https://updates.example/client.json",
-        }, http);
+        }, http, _ => Task.CompletedTask);
 
     private static UpdateManifest Manifest(string version, string asset, string sha) => new()
     {

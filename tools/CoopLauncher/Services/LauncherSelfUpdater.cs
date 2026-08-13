@@ -45,13 +45,15 @@ public sealed class LauncherSelfUpdater : ILauncherUpdateService
 
     private readonly LauncherConfig _config;
     private readonly HttpClient _http;
+    private readonly Func<TimeSpan, Task> _retryDelay;
 
     public LauncherSelfUpdater(LauncherConfig config) : this(config, SharedHttp) { }
 
-    internal LauncherSelfUpdater(LauncherConfig config, HttpClient http)
+    internal LauncherSelfUpdater(LauncherConfig config, HttpClient http, Func<TimeSpan, Task>? retryDelay = null)
     {
         _config = config;
         _http = http;
+        _retryDelay = retryDelay ?? Task.Delay;
     }
 
     public async Task<LauncherUpdateCheck> CheckAsync(Version currentVersion)
@@ -60,40 +62,18 @@ public sealed class LauncherSelfUpdater : ILauncherUpdateService
         if (!TryGetHttpsUri(_config.LauncherManifestUrl, out Uri? manifestUri))
             return Unverified(installed, "Launcher update feed is not configured securely.");
 
+        FeedFetchResult fetch = await FeedFetch.GetStringAsync(_http, manifestUri!, "Launcher", _retryDelay);
+        if (fetch.Status != FeedFetchStatus.Success)
+            return Unverified(installed, fetch.Detail);
+
         LauncherUpdateManifest? manifest;
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, manifestUri);
-            request.Headers.CacheControl = new CacheControlHeaderValue
-            {
-                NoCache = true,
-                NoStore = true,
-            };
-            using HttpResponseMessage response = await _http.SendAsync(request);
-            if (!response.IsSuccessStatusCode)
-                return Unverified(installed, $"Launcher feed returned HTTP {(int)response.StatusCode}.");
-
-            try
-            {
-                manifest = JsonSerializer.Deserialize<LauncherUpdateManifest>(
-                    await response.Content.ReadAsStringAsync());
-            }
-            catch (JsonException)
-            {
-                return Unverified(installed, "Launcher feed was malformed.");
-            }
+            manifest = JsonSerializer.Deserialize<LauncherUpdateManifest>(fetch.Body!);
         }
-        catch (HttpRequestException ex) when (ex.StatusCode is not null)
+        catch (JsonException)
         {
-            return Unverified(installed, $"Launcher feed returned HTTP {(int)ex.StatusCode}.");
-        }
-        catch (HttpRequestException)
-        {
-            return Unverified(installed, "Launcher feed could not be reached.");
-        }
-        catch (TaskCanceledException)
-        {
-            return Unverified(installed, "Launcher feed check timed out.");
+            return Unverified(installed, "Launcher feed was malformed.");
         }
 
         if (!IsManifestValid(manifest))

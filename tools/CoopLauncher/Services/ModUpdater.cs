@@ -29,13 +29,15 @@ public sealed class ModUpdater : IModUpdateService
 
     private readonly LauncherConfig _config;
     private readonly HttpClient _http;
+    private readonly Func<TimeSpan, Task> _retryDelay;
 
     public ModUpdater(LauncherConfig config) : this(config, SharedHttp) { }
 
-    internal ModUpdater(LauncherConfig config, HttpClient http)
+    internal ModUpdater(LauncherConfig config, HttpClient http, Func<TimeSpan, Task>? retryDelay = null)
     {
         _config = config;
         _http = http;
+        _retryDelay = retryDelay ?? Task.Delay;
     }
 
     public async Task<ModUpdateCheck> CheckAsync(string modulesDir)
@@ -69,41 +71,18 @@ public sealed class ModUpdater : IModUpdateService
         if (!TryGetHttpsUri(manifestUrl, out Uri? manifestUri))
             return Unverified(component, label, installed, $"{label} feed is not configured securely.");
 
+        FeedFetchResult fetch = await FeedFetch.GetStringAsync(_http, manifestUri!, label, _retryDelay);
+        if (fetch.Status != FeedFetchStatus.Success)
+            return Unverified(component, label, installed, fetch.Detail);
+
         UpdateManifest? manifest;
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, manifestUri);
-            request.Headers.CacheControl = new CacheControlHeaderValue
-            {
-                NoCache = true,
-                NoStore = true,
-            };
-            using HttpResponseMessage response = await _http.SendAsync(request);
-            if (!response.IsSuccessStatusCode)
-                return Unverified(component, label, installed,
-                    $"{label} feed returned HTTP {(int)response.StatusCode}.");
-            try
-            {
-                manifest = JsonSerializer.Deserialize<UpdateManifest>(
-                    await response.Content.ReadAsStringAsync());
-            }
-            catch (JsonException)
-            {
-                return Unverified(component, label, installed, $"{label} feed was malformed.");
-            }
+            manifest = JsonSerializer.Deserialize<UpdateManifest>(fetch.Body!);
         }
-        catch (HttpRequestException ex) when (ex.StatusCode is not null)
+        catch (JsonException)
         {
-            return Unverified(component, label, installed,
-                $"{label} feed returned HTTP {(int)ex.StatusCode}.");
-        }
-        catch (HttpRequestException)
-        {
-            return Unverified(component, label, installed, $"{label} feed could not be reached.");
-        }
-        catch (TaskCanceledException)
-        {
-            return Unverified(component, label, installed, $"{label} feed check timed out.");
+            return Unverified(component, label, installed, $"{label} feed was malformed.");
         }
 
         if (!IsManifestValid(manifest))

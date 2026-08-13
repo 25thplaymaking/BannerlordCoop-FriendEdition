@@ -124,7 +124,7 @@ jobs:
           apk add --no-cache 7zip >/dev/null
           module=release-stage/Coop
           binary="$module/bin/Win64_Shipping_Client"
-          mkdir -p "$binary" "$module/GUI/Prefabs" "$module/WorkshopSuite"
+          mkdir -p "$binary" "$module/GUI/Prefabs" "$module/ModuleData" "$module/WorkshopSuite"
 
           # Ship Coop's own assemblies (incl. Serilog 4.x); never the game's own DLLs.
           for file in source/Coop/bin/Release/*.dll; do
@@ -142,6 +142,8 @@ jobs:
           strings "$binary/Serilog.dll" | grep -q '4\.2\.0\.0' || { echo "shipped Serilog is not 4.x" >&2; exit 1; }
 
           cp 'deploy/Server Instructions.md' deploy/mod-config.default.json "$module/"
+          cp deploy/workshop-mods.json "$module/workshop-mods.json"
+          cp -R deploy/ModuleData/. "$module/ModuleData/"
           cp -R UIMovies/. "$module/GUI/Prefabs/"
 
           coop_version=$(sed -n 's/.*<CoopVersion>\([^<]*\)<\/CoopVersion>.*/\1/p' source/Directory.Build.props)
@@ -156,6 +158,9 @@ jobs:
             deploy/SubModule.xml > "$module/SubModule.xml"
 
           cp deploy/WorkshopSuite/MANIFEST.json "$module/WorkshopSuite/MANIFEST.json"
+          test -s "$module/workshop-mods.json"
+          test -s "$module/ModuleData/global_strings.xml"
+          test -s "$module/ModuleData/tournament_spectator_throwables.xml"
           test -s "$module/WorkshopSuite/MANIFEST.json"
 
           mkdir -p artifact

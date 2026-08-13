@@ -7,6 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import xml.etree.ElementTree as ET
 
 import yaml
 
@@ -76,6 +77,22 @@ def validate_workshop_receipt() -> None:
     )
 
 
+def validate_module_data_references() -> None:
+    module = ET.parse(ROOT / "deploy" / "SubModule.xml").getroot()
+    references = {
+        xml_name.attrib["path"]
+        for xml_name in module.findall("./Xmls/XmlNode/XmlName")
+        if xml_name.attrib.get("path")
+    }
+    require(references, "SubModule.xml must declare at least one ModuleData XML reference")
+    missing = [
+        str(ROOT / "deploy" / "ModuleData" / f"{reference}.xml")
+        for reference in sorted(references)
+        if not (ROOT / "deploy" / "ModuleData" / f"{reference}.xml").is_file()
+    ]
+    require(not missing, f"SubModule.xml references missing ModuleData files: {missing}")
+
+
 def main() -> None:
     client = load_workflow("launcher-release.yml")
     client_triggers = client["on"]
@@ -99,6 +116,17 @@ def main() -> None:
         and '"$module/WorkshopSuite/MANIFEST.json"' in client_workflow_text,
         "client release must package the managed Workshop receipt",
     )
+    require(
+        "deploy/ModuleData/." in client_workflow_text
+        and '"$module/ModuleData/"' in client_workflow_text,
+        "client release must package all required ModuleData XML files",
+    )
+    require(
+        "deploy/workshop-mods.json" in client_workflow_text
+        and '"$module/workshop-mods.json"' in client_workflow_text,
+        "client release must package the Workshop suite specification",
+    )
+    validate_module_data_references()
     validate_workshop_receipt()
 
     app = load_workflow("launcher-app-release.yml")
@@ -147,7 +175,8 @@ def main() -> None:
 
     print(
         "PASS: stable feeds are manual, pushes are nightly-only, launcher manifests are pinned, "
-        "the managed Workshop receipt is pinned, and public config has no password"
+        "required ModuleData and Workshop metadata are packaged, the managed Workshop receipt is "
+        "pinned, and public config has no password"
     )
 
 

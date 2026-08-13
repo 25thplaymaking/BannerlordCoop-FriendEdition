@@ -9,7 +9,6 @@ using GameInterface.Configuration;
 using GameInterface.Registry;
 using GameInterface.Serialization;
 using GameInterface.Services;
-using GameInterface.Services.Armies;
 using GameInterface.Services.Bandits;
 using GameInterface.Services.Barters;
 using GameInterface.Services.Chat;
@@ -101,8 +100,6 @@ public class GameInterfaceModule : Module
         builder.RegisterType<BattleHostRegistry>().As<IBattleHostRegistry>().InstancePerLifetimeScope();
         builder.RegisterType<BattleAgentBudget>().As<IBattleAgentBudget>().InstancePerDependency();
         builder.RegisterType<MapEventContributionBarrier>().As<IMapEventContributionBarrier>().InstancePerDependency();
-        builder.RegisterType<ArmyDisbander>().As<IArmyDisbander>().InstancePerDependency();
-        builder.RegisterType<MapEventLoadCleaner>().As<IMapEventLoadCleaner>().InstancePerDependency();
         builder.RegisterType<EncounterMenuConditionRefresher>().As<IEncounterMenuConditionRefresher>().InstancePerDependency();
         builder.RegisterType<PartyScreenRosterRefresher>().As<IPartyScreenRosterRefresher>().InstancePerDependency();
         builder.RegisterType<PrisonerSaleValidator>().As<IPrisonerSaleValidator>().InstancePerDependency();

@@ -55,17 +55,6 @@ internal class EquipmentRegistry : AutoRegistryBase<Equipment>
                 RegisterExistingObject(id, equipment);
             }
         }
-
-        foreach (var hero in Hero.AllAliveHeroes)
-        {
-            var heroBattleEquipment = hero.BattleEquipment;
-            var heroCivilianEquipment = hero.CivilianEquipment;
-            var heroStealthEquipment = hero.StealthEquipment;
-
-            RegisterExistingObject($"{hero.StringId}_BattleEquipment", heroBattleEquipment);
-            RegisterExistingObject($"{hero.StringId}_CivilianEquipment", heroCivilianEquipment);
-            RegisterExistingObject($"{hero.StringId}_StealthEquipment", heroStealthEquipment);
-        }
     }
 
     public override void OnClientCreated(Equipment obj, string id)

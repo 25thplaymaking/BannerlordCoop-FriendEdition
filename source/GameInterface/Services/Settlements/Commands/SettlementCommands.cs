@@ -9,7 +9,6 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
-using TaleWorlds.ObjectSystem;
 using static TaleWorlds.CampaignSystem.Settlements.Settlement;
 using static TaleWorlds.Library.CommandLineFunctionality;
 
@@ -572,19 +571,21 @@ internal class SettlementCommands
     {
         if (ModInformation.IsClient) return "Command can only be run on the server.";
 
-        if (strings.Count != 2) return "Invalid usage, expected \"set_ownerclan <settlementId|settlementName> <heroId>\"";
+        if (strings.Count != 2) return "Invalid usage, expected \"set_ownerclan <settlementName> <heroId>\"";
 
         StringBuilder stringBuilder = new StringBuilder();
         foreach (var settlement in Settlement.All)
         {
-            if (settlement.Name.ToString() == strings[0] || settlement.StringId == strings[0])
+            if (settlement.Name.ToString() == strings[0])
             {
-                var hero = Campaign.Current.CampaignObjectManager.Find<Hero>(strings[1]);
-
-                if (hero == null) return $"Unable to find hero by id: {strings[1]}";
-
-                ChangeOwnerOfSettlementAction.ApplyByGift(settlement, hero);
-                stringBuilder.AppendLine($"{settlement.Name} ({settlement.StringId}) transferred to {hero.Name} ({hero.StringId}).");
+                foreach (var hero in Hero.AllAliveHeroes)
+                {
+                    if (hero.StringId == strings[1])
+                    {
+                        ChangeOwnerOfSettlementAction.ApplyByGift(settlement, hero);
+                        stringBuilder.AppendLine("Settlement has a new owner.");
+                    }
+                }
             }
         }
 

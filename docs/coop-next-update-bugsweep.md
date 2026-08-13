@@ -56,7 +56,7 @@ Kingdom-tab completion claims. Phase D fixed the raid path; Phase E owns the rem
   with no pin-verification or unhandled-fatal marker. Byte-verified rollback snapshot:
   `/home/bishop/bannerlord-coop/server/_mod_backups/pre-315be775e-20260813T141932Z`.
 
-## Phase E — Kingdom handshake + siege army convergence — VERIFIED LOCALLY, RELEASE PENDING
+## Phase E — Kingdom handshake + siege army convergence — SHIPPED ✅ (2026-08-13; source `4c711e778`)
 
 - **Latest live Kingdom evidence:** client run 21140 reached `KingdomState`, successfully read the Diplomacy
   settings, then failed in `DetermineInfluenceCostForMakingPeace` because
@@ -82,8 +82,20 @@ Kingdom-tab completion claims. Phase D fixed the raid path; Phase E owns the rem
   111/111; 81 E2E cases pass across Diplomacy patch/command authority, siege leave, army lifecycle/waiting,
   mission-ready election, full reserve construction/reconnect, reinforcement spawning/quotas, retreat teardown,
   and unstuck recovery. The prior `44f6405f5` reserve-expansion and retreat fixes remain included.
-- **Not yet claimed:** launcher publication, paired server deployment, same-save restart/reconciliation, and
-  rendered Kingdom/large-army/retreat verification.
+- **Release gate:** `4c711e778` fixes the test-only game-thread ownership race caught by the first workflow.
+  Stable workflow `31714742241` then passed 2,481 unit/integration tests with 14 intentional skips, built the
+  exact-source Serilog-4.x client with zero errors, and published launcher manifest `2026.08.13.1523` with ZIP
+  SHA-256 `67ec252e8f00d25691e8a3ef1ff238aa6dee4616a6dbe6c0d8d8bc5772b0679d`. Independent ZIP inspection
+  confirms the four Coop assemblies identify source `4c711e778` and reference Serilog 4.2.
+- **Server release:** the four exact-source Serilog-2.x assemblies are pinned to paired core SHA-256
+  `296dfc03969512e9df9a92e2b9ac07360302717158a2cc0bb8e2fd2498339a19`; both physical core copies, the pairing
+  receipt, and every deployment-ledger entry verify. The stopped `friendallmods1` save set was inventoried and
+  copied byte-for-byte to `/home/bishop/bannerlord-coop/server/_mod_backups/pre-4c711e778-20260813T152718Z`.
+  The live save and JSON still match that backup. The same Summer 15, 1093 world loaded, reached `SERVING` on
+  UDP 4200, emitted repeated pulses, and remains active at `NRestarts=0` without a pin-verification,
+  null-reference, or unhandled-fatal marker.
+- **Still requires a player action:** rendered Kingdom/large-army/retreat verification. This is not inferred
+  from headless deployment health.
 
 ## Deferred — reverted upstream fixes that break Separatism (need dedicated compat work, NOT bundled)
 
@@ -109,8 +121,8 @@ Kingdom-tab completion claims. Phase D fixed the raid path; Phase E owns the rem
 - Fixed a **pre-existing flaky launcher test** (`ExactInstall_RetriesWhileScannerTemporarilyLocksStagedFile`) that blocked the stable publish: scanner now polls on a dedicated LongRunning thread instead of the saturated thread pool.
 - Not done (optional follow-ups): locate-game folder picker, open-log button, `shootMode` fake-data guard.
 
-## LIVE rendered verification still owed after Phase-D deployment
-The local gates are green; rendered verification must use the Phase-D client/server pair:
+## LIVE rendered verification still owed on the current Phase-E pair
+The local and deployment gates are green; rendered verification must use launcher client `2026.08.13.1523`:
 1. Raid a village/town → no softlock, loot totals sane, no server storm.
 2. Open Kingdom→Diplomacy, declare war / make peace → no black screen.
 3. Enter a large allied-army field battle → the host fields the full proportional army reserve, not only its

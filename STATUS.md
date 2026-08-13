@@ -29,8 +29,8 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > the rendered install/join and Sea Raider auto-resolve gates after functional closure. Foundation
 > verification is green: 3,392 passed, 18 skipped, 0 failed; build completed with 0 errors.
 
-> **2026-08-13 live Kingdom regression correction — replacement release pending (`bd425fa09`,
-> `7fb31d007`).** The stable `315be775e` deployment did not fix the Kingdom tab. The 10:28 EDT client
+> **2026-08-13 live Kingdom regression correction — SHIPPED from source `4c711e778`.** The stable
+> `315be775e` deployment did not fix the Kingdom tab. The 10:28 EDT client
 > log proves `Diplomacy.Settings.Instance` was present, then `KingdomWarItemVMMixin` dereferenced a null
 > `WarExhaustionManager.Instance`; the resulting native `GauntletKingdomScreen.OnFrameTick` null reference
 > repeated 2,197 times and left the tab black. The matching server journal proves the client requested its
@@ -42,11 +42,23 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > trusted snapshot, and blocks native row construction if the state is still unsafe. `7fb31d007` fixes a second
 > real army divergence: the siege follower **Leave Army** consequence previously cleared only the client field;
 > it now sends the authoritative army removal and converges the server plus every client before continuing.
-> The pre-existing `44f6405f5` reserve-expansion and retreat-menu fixes remain in this candidate. Incremental
+> The pre-existing `44f6405f5` reserve-expansion and retreat-menu fixes remain included. Incremental
 > gates are green with zero failures: 111 Diplomacy unit tests and 81 E2E tests spanning Diplomacy patching and
 > commands, siege leave, army wait/create/destroy, mission-ready election, reserve building/reconnect,
 > reinforcement spawn/quotas, retreat, and unstuck recovery; both affected test projects build with zero errors.
-> Publication, paired server deployment, same-save reconciliation, and rendered Kingdom proof are not yet claimed.
+> The first stable workflow correctly caught a test-only pump ownership race; `4c711e778` makes that regression
+> use the real continuous test game thread. Exact-source workflow `31714742241` then passed 2,481 unit/integration
+> tests with 14 intentional skips, built with zero errors, and published launcher client `2026.08.13.1523`
+> (ZIP SHA-256 `67ec252e8f00d25691e8a3ef1ff238aa6dee4616a6dbe6c0d8d8bc5772b0679d`). The matching
+> Serilog-2.x server assemblies are release-paired to core SHA-256
+> `296dfc03969512e9df9a92e2b9ac07360302717158a2cc0bb8e2fd2498339a19`. Both core locations, all four module
+> hashes, the complete deployment ledger, and the pairing receipt verify. The stopped `friendallmods1` save and
+> JSON sidecar were copied byte-for-byte to
+> `/home/bishop/bannerlord-coop/server/_mod_backups/pre-4c711e778-20260813T152718Z`; the live files still match
+> those stopped-server hashes. The host loaded the same Summer 15, 1093 world, reached `SERVING` on UDP 4200,
+> emitted repeated zero-player pulses, and remains at `NRestarts=0` with no release-verification, null-reference,
+> or unhandled-fatal startup marker. Rendered Kingdom/large-army/retreat proof still requires a player action and
+> is not inferred from headless server health.
 
 > **2026-08-13 corrective release — SHIPPED from source `315be775e`.** The overnight
 > Kingdom/Diplomacy, raid, encounter, and army fixes were re-audited against fresh client/server evidence

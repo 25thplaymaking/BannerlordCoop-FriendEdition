@@ -241,56 +241,21 @@ internal static class DiplomacyCampaignPatchCleanup
             : AccessTools.Method(type, "OnGameStart");
     }
 
+    [HarmonyPrefix]
+    private static void Prefix()
+    {
+        if (!ModInformation.IsClient) return;
+
+        DiplomacyClientSettingsBridge.Reset();
+        if (!ContainerProvider.TryResolve<IDiplomacyClientUiLifecycle>(out var uiLifecycle))
+            throw new InvalidOperationException("Diplomacy client UI lifecycle was unavailable at campaign startup.");
+        uiLifecycle.ResetForCampaign();
+    }
+
     [HarmonyPostfix]
     private static void Postfix()
     {
         DiplomacyPatchCompatibilityGate.RemoveAndAssert(
             removeEveryDiplomacyPatch: ModInformation.IsClient);
-        DiplomacyCivilWarUiRetirement.Disable();
-    }
-}
-
-/// <summary>
-/// Friend Edition Separatism owns rebellion gameplay, so the three UIExtender types that expose
-/// Diplomacy's duplicate faction tab are removed before a kingdom screen can be created. Other
-/// Diplomacy relationship, war-exhaustion, messenger, and direct-action UI remains enabled.
-/// </summary>
-internal static class DiplomacyCivilWarUiRetirement
-{
-    internal static readonly IReadOnlyList<string> UiTypeNames = new[]
-    {
-        "Diplomacy.ViewModelMixin.KingdomManagementPrefabExtension",
-        "Diplomacy.ViewModelMixin.KingdomManagementScalingPatch",
-        "Diplomacy.ViewModelMixin.KingdomManagementVMMixin",
-    };
-
-    internal static bool ShouldDisableUiType(string typeName) =>
-        UiTypeNames.Contains(typeName, StringComparer.Ordinal);
-
-    internal static void Disable()
-    {
-        if (!ModInformation.IsClient) return;
-
-        Type extenderType = AccessTools.TypeByName("Bannerlord.UIExtenderEx.UIExtender") ??
-                            throw new TypeLoadException("Bannerlord.UIExtenderEx.UIExtender");
-        MethodInfo getExtender = AccessTools.Method(
-            extenderType,
-            "GetUIExtenderFor",
-            new[] { typeof(string) }) ??
-                                 throw new MissingMethodException(extenderType.FullName, "GetUIExtenderFor");
-        object extender = getExtender.Invoke(null, new object[] { "Diplomacy" }) ??
-                          throw new InvalidOperationException("Diplomacy UIExtender runtime was not registered.");
-        MethodInfo disable = AccessTools.Method(
-            extenderType,
-            "Disable",
-            new[] { typeof(Type) }) ??
-                             throw new MissingMethodException(extenderType.FullName, "Disable(Type)");
-
-        foreach (string typeName in UiTypeNames)
-        {
-            Type type = DiplomacyCompatibilityPolicy.ResolveType(typeName) ??
-                        throw new TypeLoadException(typeName);
-            disable.Invoke(extender, new object[] { type });
-        }
     }
 }

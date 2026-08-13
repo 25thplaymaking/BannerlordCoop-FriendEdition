@@ -41,26 +41,11 @@ internal static class DiplomacyClientInitializationPatch
     private static bool _resolved;
 
     /// <summary>
-    /// The Diplomacy manager singletons the co-op client only otherwise gets from the join-handshake
-    /// snapshot apply (<c>DiplomacyRuntime.ApplySnapshot</c> → <c>EnsureManager</c>). Diplomacy's UI
-    /// mixins read these directly — the encyclopedia faction page reads the agreement manager, and the
-    /// kingdom-tab war/truce item mixins read war-exhaustion / expansionism / cooldown — so any of them
-    /// being null before the snapshot lands NREs the surface and (via the screen-tick abort) breaks it.
-    /// </summary>
-    private static readonly string[] ClientManagerTypeNames =
-    {
-        "Diplomacy.DiplomaticAction.DiplomaticAgreementManager",
-        "Diplomacy.WarExhaustion.WarExhaustionManager",
-        "Diplomacy.ExpansionismManager",
-        "Diplomacy.CooldownManager",
-    };
-
     [HarmonyPatch(typeof(MapScreen), nameof(MapScreen.OnInitialize))]
     [HarmonyPrefix]
     private static void EnsureDiplomacyClientSingletonsInitialized()
     {
         EnsureDiplomacyEvents();
-        EnsureClientManagers();
     }
 
     private static void EnsureDiplomacyEvents()
@@ -91,31 +76,4 @@ internal static class DiplomacyClientInitializationPatch
         }
     }
 
-    /// <summary>
-    /// Pre-create every Diplomacy manager the client UI reads, at map build, so their <c>Instance</c> is
-    /// never null before the join-handshake snapshot lands. Each is created empty and idempotently,
-    /// reusing the same <c>DiplomacyRuntime.EnsureManager</c> path the snapshot apply uses; the snapshot
-    /// then repopulates that same instance. Client-only (server-side Diplomacy behaviours create them
-    /// themselves). The <c>DiplomacyUiReadinessPatch</c> finalizers remain as the belt-and-braces net.
-    ///
-    /// Also invoked on-demand by <see cref="DiplomacyUiManagerReadinessPatch"/> immediately before the
-    /// Diplomacy UI surfaces read these managers, because this map-init pass fires only for the initial
-    /// character-creation → map handoff and not again after the client loads the host's save into a fresh
-    /// campaign, where the singletons are null once more.
-    /// </summary>
-    internal static void EnsureClientManagers()
-    {
-        if (!ModInformation.IsClient) return;
-        foreach (string typeName in ClientManagerTypeNames)
-        {
-            try
-            {
-                DiplomacyRuntime.EnsureManager(typeName);
-            }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, "Failed to pre-initialize Diplomacy manager {Manager} on client", typeName);
-            }
-        }
-    }
 }

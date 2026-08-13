@@ -167,18 +167,77 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
     }
 
     [Fact]
-    public void DiplomacyCivilWarUiExtensions_AreRetiredWithTheDuplicateRebellionEngine()
+    public void DiplomacyUiLifecycle_SeparatesSnapshotGatedAndPermanentlyRetiredExtensions()
     {
+        Assert.Equal(new[]
+        {
+            "Diplomacy.ViewModelMixin.DiplomacyPanelPrefabExtension",
+            "Diplomacy.ViewModelMixin.KingdomDiplomacyVMMixin",
+            "Diplomacy.ViewModelMixin.KingdomWarItemVMMixin",
+            "Diplomacy.ViewModelMixin.KingdomTruceItemVMMixin",
+            "Diplomacy.ViewModelMixin.KingdomClanVMMixin",
+            "Diplomacy.ViewModelMixin.EncyclopediaHeroPagePrefabExtension",
+            "Diplomacy.ViewModelMixin.EncyclopediaHeroPageVMMixin",
+        }, DiplomacyClientUiLifecycle.SnapshotGatedUiTypeNames);
         Assert.Equal(new[]
         {
             "Diplomacy.ViewModelMixin.KingdomManagementPrefabExtension",
             "Diplomacy.ViewModelMixin.KingdomManagementScalingPatch",
             "Diplomacy.ViewModelMixin.KingdomManagementVMMixin",
-        }, DiplomacyCivilWarUiRetirement.UiTypeNames);
-        Assert.All(DiplomacyCivilWarUiRetirement.UiTypeNames,
-            typeName => Assert.True(DiplomacyCivilWarUiRetirement.ShouldDisableUiType(typeName)));
-        Assert.False(DiplomacyCivilWarUiRetirement.ShouldDisableUiType(
-            "Diplomacy.ViewModelMixin.KingdomWarItemVMMixin"));
+            "Diplomacy.ViewModelMixin.FactionsButtonExtension",
+            "Diplomacy.ViewModelMixin.EncyclopediaFactionPagePrefabExtension",
+            "Diplomacy.ViewModelMixin.EncyclopediaFactionPageVMMixin",
+        }, DiplomacyClientUiLifecycle.PermanentlyRetiredUiTypeNames);
+    }
+
+    [Fact]
+    public void DiplomacyUiLifecycle_FailsClosedUntilEveryGatedExtensionEnables()
+    {
+        ModInformation.IsServer = false;
+        var transitions = new List<(string TypeName, bool Enabled)>();
+        var lifecycle = new DiplomacyClientUiLifecycle((typeName, enabled) =>
+        {
+            transitions.Add((typeName, enabled));
+            if (enabled && typeName.EndsWith("KingdomWarItemVMMixin", StringComparison.Ordinal))
+                throw new InvalidOperationException("test enable failure");
+        });
+
+        lifecycle.ResetForCampaign();
+        Assert.False(lifecycle.IsReady);
+        Assert.All(DiplomacyClientUiLifecycle.SnapshotGatedUiTypeNames,
+            typeName => Assert.Contains((typeName, false), transitions));
+        Assert.All(DiplomacyClientUiLifecycle.PermanentlyRetiredUiTypeNames,
+            typeName => Assert.Contains((typeName, false), transitions));
+
+        Assert.False(lifecycle.TryMarkSnapshotReady(out var failure));
+        Assert.Contains("test enable failure", failure);
+        Assert.False(lifecycle.IsReady);
+        Assert.All(DiplomacyClientUiLifecycle.SnapshotGatedUiTypeNames,
+            typeName => Assert.Equal(false, transitions.Last(value => value.TypeName == typeName).Enabled));
+    }
+
+    [Fact]
+    public void DiplomacyClientSettingsBridge_PreservesProviderAndCachesOneClientFallbackPerCampaign()
+    {
+        DiplomacyClientSettingsBridge.Reset();
+        var providerValue = new object();
+        var firstFallback = new object();
+        int factoryCalls = 0;
+
+        Assert.Same(providerValue, DiplomacyClientSettingsBridge.Resolve(
+            isClient: true, providerValue, () => throw new InvalidOperationException()));
+        Assert.Same(firstFallback, DiplomacyClientSettingsBridge.Resolve(
+            isClient: true, providerValue: null, () => { factoryCalls++; return firstFallback; }));
+        Assert.Same(firstFallback, DiplomacyClientSettingsBridge.Resolve(
+            isClient: true, providerValue: null, () => { factoryCalls++; return new object(); }));
+        Assert.Equal(1, factoryCalls);
+        Assert.Null(DiplomacyClientSettingsBridge.Resolve(
+            isClient: false, providerValue: null, () => throw new InvalidOperationException()));
+
+        DiplomacyClientSettingsBridge.Reset();
+        var secondFallback = new object();
+        Assert.Same(secondFallback, DiplomacyClientSettingsBridge.Resolve(
+            isClient: true, providerValue: null, () => secondFallback));
     }
 
     [Theory]
@@ -459,6 +518,57 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
     }
 
     [Fact]
+    public void Handler_EnablesDiplomacyUiOnlyAfterSnapshotApplyAndRevisionCommit()
+    {
+        ModInformation.IsServer = false;
+        var lifecycle = new RecordingUiLifecycle();
+        var handler = CreateHandler(new CountingRuntime(), lifecycle: lifecycle);
+
+        handler.ApplySnapshot(ValidEmptySnapshot(revision: 3));
+
+        Assert.Equal(DiplomacySnapshotApplyStatus.Applied, handler.LastApplyResult.Status);
+        Assert.Equal(1, lifecycle.MarkReadyCalls);
+        Assert.True(lifecycle.IsReady);
+    }
+
+    [Fact]
+    public void Handler_KeepsDiplomacyUiDisabledWhenSnapshotApplyFails()
+    {
+        ModInformation.IsServer = false;
+        var lifecycle = new RecordingUiLifecycle();
+        var handler = CreateHandler(
+            new StubRuntime(new DiplomacySnapshotApplyResult(DiplomacySnapshotApplyStatus.ApplyFailed, "apply failed")),
+            lifecycle: lifecycle);
+
+        handler.ApplySnapshot(ValidEmptySnapshot(revision: 3));
+
+        Assert.Equal(DiplomacySnapshotApplyStatus.ApplyFailed, handler.LastApplyResult.Status);
+        Assert.Equal(0, lifecycle.MarkReadyCalls);
+        Assert.False(lifecycle.IsReady);
+    }
+
+    [Fact]
+    public void Handler_RetriesUiEnableForAlreadyCommittedSnapshotWithoutReapplyingState()
+    {
+        ModInformation.IsServer = false;
+        var runtime = new CountingRuntime();
+        var lifecycle = new RecordingUiLifecycle { FailuresRemaining = 1 };
+        var handler = CreateHandler(runtime, lifecycle: lifecycle);
+        var snapshot = ValidEmptySnapshot(revision: 3);
+
+        handler.ApplySnapshot(snapshot);
+        Assert.Equal(DiplomacySnapshotApplyStatus.ApplyFailed, handler.LastApplyResult.Status);
+        Assert.False(lifecycle.IsReady);
+
+        handler.ApplySnapshot(ValidEmptySnapshot(revision: 3));
+
+        Assert.Equal(DiplomacySnapshotApplyStatus.AlreadyCurrent, handler.LastApplyResult.Status);
+        Assert.True(lifecycle.IsReady);
+        Assert.Equal(2, lifecycle.MarkReadyCalls);
+        Assert.Equal(1, runtime.ApplyCount);
+    }
+
+    [Fact]
     public void AuthoritativePublisher_SendsEachChangedRevisionOnce()
     {
         ModInformation.IsServer = true;
@@ -730,7 +840,8 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
             new Mock<INetwork>().Object,
             new CountingRuntime(),
             new TestConfigAuthority(CurrentConfigSnapshot()),
-            new Mock<IPlayerManager>().Object);
+            new Mock<IPlayerManager>().Object,
+            new RecordingUiLifecycle());
 
         broker.Verify(value => value.Subscribe(
             It.IsAny<Action<MessagePayload<HostModConfigAccepted>>>()), Times.Once);
@@ -838,6 +949,36 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
         public void ResetSnapshotRevision() { }
     }
 
+    private sealed class RecordingUiLifecycle : IDiplomacyClientUiLifecycle
+    {
+        public bool IsReady { get; private set; }
+        public int ResetCalls { get; private set; }
+        public int MarkReadyCalls { get; private set; }
+        public int FailuresRemaining { get; set; }
+
+        public void ResetForCampaign()
+        {
+            ResetCalls++;
+            IsReady = false;
+        }
+
+        public bool TryMarkSnapshotReady(out string failure)
+        {
+            MarkReadyCalls++;
+            if (FailuresRemaining > 0)
+            {
+                FailuresRemaining--;
+                failure = "test UI enable failure";
+                IsReady = false;
+                return false;
+            }
+
+            failure = null;
+            IsReady = true;
+            return true;
+        }
+    }
+
     private static NetworkDiplomacySnapshot ValidEmptySnapshot(long revision)
     {
         var snapshot = new NetworkDiplomacySnapshot
@@ -865,14 +1006,16 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
     private static DiplomacyCompatibilityHandler CreateHandler(
         IDiplomacyRuntime runtime,
         INetwork network = null,
-        IModConfigAuthority configAuthority = null)
+        IModConfigAuthority configAuthority = null,
+        IDiplomacyClientUiLifecycle lifecycle = null)
     {
         return new DiplomacyCompatibilityHandler(
             new Mock<IMessageBroker>().Object,
             network ?? new Mock<INetwork>().Object,
             runtime,
             configAuthority ?? new TestConfigAuthority(CurrentConfigSnapshot()),
-            new Mock<IPlayerManager>().Object);
+            new Mock<IPlayerManager>().Object,
+            lifecycle ?? new RecordingUiLifecycle());
     }
 
     private static ModConfigSnapshot CurrentConfigSnapshot() => new(

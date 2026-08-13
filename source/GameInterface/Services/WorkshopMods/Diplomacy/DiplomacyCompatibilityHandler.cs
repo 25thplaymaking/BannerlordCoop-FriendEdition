@@ -26,6 +26,7 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
     private readonly IDiplomacyRuntime runtime;
     private readonly IModConfigAuthority configAuthority;
     private readonly IPlayerManager playerManager;
+    private readonly IDiplomacyClientUiLifecycle uiLifecycle;
     private readonly object snapshotApplyGate = new();
     private readonly DiplomacyRevisionGate revisionGate = new();
     private readonly DiplomacySnapshotRequestGate<NetPeer> requestGate = new();
@@ -42,13 +43,15 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
         INetwork network,
         IDiplomacyRuntime runtime,
         IModConfigAuthority configAuthority,
-        IPlayerManager playerManager)
+        IPlayerManager playerManager,
+        IDiplomacyClientUiLifecycle uiLifecycle)
     {
         this.messageBroker = messageBroker;
         this.network = network;
         this.runtime = runtime;
         this.configAuthority = configAuthority;
         this.playerManager = playerManager;
+        this.uiLifecycle = uiLifecycle;
 
         messageBroker.Subscribe<CampaignReady>(HandleCampaignReady);
         messageBroker.Subscribe<NetworkRequestDiplomacySnapshot>(HandleSnapshotRequest);
@@ -243,6 +246,7 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
         {
             case DiplomacyRevisionDecision.AlreadyCurrent:
                 LastApplyResult = new DiplomacySnapshotApplyResult(DiplomacySnapshotApplyStatus.AlreadyCurrent);
+                MarkClientUiReady();
                 return;
             case DiplomacyRevisionDecision.Stale:
                 LastApplyResult = new DiplomacySnapshotApplyResult(
@@ -279,12 +283,24 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
                 LogRejected();
                 return;
             }
+            if (!MarkClientUiReady()) return;
             Logger.Debug(
                 "Applied Diplomacy {Version} host settings/state snapshot revision {Revision} ({Fingerprint}).",
                 snapshot.AssemblyVersion,
                 snapshot.Revision,
                 snapshot.StateFingerprint);
         }
+    }
+
+    private bool MarkClientUiReady()
+    {
+        if (uiLifecycle.TryMarkSnapshotReady(out var failure)) return true;
+
+        LastApplyResult = new DiplomacySnapshotApplyResult(
+            DiplomacySnapshotApplyStatus.ApplyFailed,
+            "Diplomacy UI could not be enabled after the authoritative snapshot committed: " + failure);
+        LogRejected();
+        return false;
     }
 
     internal bool ApplyTrustedSnapshot(

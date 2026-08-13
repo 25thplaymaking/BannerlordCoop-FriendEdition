@@ -217,6 +217,7 @@ internal class BattleHostHandler : IHandler
 
             MarkPresent(mapEventId, requesterId);
 
+            bool electedNow = false;
             if (hostRegistry.TryGet(mapEventId, out var existing))
             {
                 // Host already elected. Record this player in the successor line in join order (idempotent),
@@ -239,10 +240,19 @@ internal class BattleHostHandler : IHandler
                 var epoch = NextEpoch(mapEventId);
                 var assignment = new BattleHostAssignment(requesterId, Array.Empty<string>(), epoch);
                 SetServerAssignment(mapEventId, assignment);
+                electedNow = true;
 
                 Logger.Information("[BattleHost] Elected host {Host} (first mission-ready) for battle {MapEventId} at epoch {Epoch}",
                     requesterId, mapEventId, epoch);
             }
+
+            // Entry-time reserves contain only this player's parties. The first host election expands that
+            // ownership to every unowned army party, just like a later host migration or member drop. Signal
+            // the transition after the assignment (so the client already knows it is host) and before either
+            // side's full reliable-ordered reserve feed (so ReinforcementFielder snapshots the own-party
+            // supplier revisions and can identify/field the newly inherited army parties).
+            if (electedNow && requester != null)
+                network.Send(requester, new NetworkBattleReserveOwnershipExpanded(mapEventId));
 
             // A request from a member that had DROPPED is its return: re-scope the reserves (its parties
             // leave the host's scope) before serving, and refresh the shrunk holder. Normally a no-op here —

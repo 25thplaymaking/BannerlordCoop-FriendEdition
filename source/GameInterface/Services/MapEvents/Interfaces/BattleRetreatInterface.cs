@@ -129,7 +129,11 @@ internal class BattleRetreatInterface : IBattleRetreatInterface
         // Other parties are still fighting on this side, so the battle goes on without this one.
         var left = new List<PartyBase>();
         if (Detach(requester.Party)) left.Add(requester.Party);
-        BroadcastLeft(left, requester.Party);
+        // Unlike the encounter-menu "Try to get away" flow, a mission retreat has no later
+        // NetworkBattleRetreatResolved verdict to close the requester's encounter. Make this authoritative
+        // party-left message own that teardown; otherwise the player returns from the mission to a stale attack
+        // menu and its next click is rejected because the party has already left the map event.
+        BroadcastLeft(left, requester.Party, finishRequesterMenus: true);
 
         Logger.Debug("Applied mission retreat for {PartyId}: left battle {BattleId}",
             requester.StringId, battle.StringId);
@@ -217,9 +221,11 @@ internal class BattleRetreatInterface : IBattleRetreatInterface
     /// Tells every client to drop the parties that just retreated from their copy of the battle.
     /// </summary>
     /// <remarks>
-    /// FinishLocalMenus is per-party, and the requester is the exception rather than the rule. The retreating
-    /// player's own teardown is driven by the NetworkBattleRetreatResolved that follows, so asking for menus to
-    /// be finished here as well would close a menu that client has already moved past - hence false for it.
+    /// FinishLocalMenus is per-party. For the encounter-menu "Try to get away" flow, the requester is the
+    /// exception: its own teardown is driven by NetworkBattleRetreatResolved, so asking for menus to be finished
+    /// here as well would close a menu that client has already moved past. Mission retreat has no such verdict,
+    /// so its caller explicitly sets <paramref name="finishRequesterMenus"/> and this broadcast closes the stale
+    /// encounter the ended mission returns to.
     ///
     /// Every OTHER party gets true. A commanded or attached party is dropped from the map event by the
     /// cascade, but nothing else tells its owner: NetworkBattleRetreatResolved only closes the REQUESTER's
@@ -230,7 +236,10 @@ internal class BattleRetreatInterface : IBattleRetreatInterface
     /// LeaveSiege stays false throughout: the retreat clears its own besieger camps and reports them through
     /// campClearedPartyIds, so re-running the siege leave would clear them a second time.
     /// </remarks>
-    private static void BroadcastLeft(List<PartyBase> left, PartyBase requester)
+    private static void BroadcastLeft(
+        List<PartyBase> left,
+        PartyBase requester,
+        bool finishRequesterMenus = false)
     {
         if (left.Count == 0) return;
         if (!ContainerProvider.TryResolve<INetwork>(out var network)) return;
@@ -243,7 +252,7 @@ internal class BattleRetreatInterface : IBattleRetreatInterface
             network.SendAll(new NetworkPartyLeftBattle(
                 partyId,
                 leaveSiege: false,
-                finishLocalMenus: party != requester));
+                finishLocalMenus: finishRequesterMenus || party != requester));
         }
     }
 

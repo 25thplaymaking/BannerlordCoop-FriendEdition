@@ -56,6 +56,34 @@ public class MissionReadyElectionTests : MissionTestEnvironment
     }
 
     /// <summary>
+    /// BR-010: entry-time reserves contain only the player's own parties. When that same player becomes the
+    /// first host, the server must mark the following full reserve feeds as an ownership expansion so the
+    /// client snapshots the own-party suppliers and queues the newly inherited army parties for fielding.
+    /// Without this transition a large army battle remains clamped to the host player's small entry share even
+    /// though the server subsequently sends every NPC party to that host.
+    /// </summary>
+    [Fact]
+    [Trait("Requirement", "BR-010")]
+    public void FirstHostElection_SignalsReserveOwnershipExpansionBeforeFullArmyFeeds()
+    {
+        var (mapEventId, _) = SetupCoopBattle("host-ctrl", "other-ctrl");
+        var host = Clients.First();
+
+        EnterBattle(host, mapEventId, missionReady: false);
+
+        Assert.DoesNotContain(
+            host.InternalMessages.GetMessages<NetworkBattleReserveOwnershipExpanded>(),
+            message => message.MapEventId == mapEventId);
+
+        MakeMissionReady(host, mapEventId);
+
+        var expansions = host.InternalMessages.GetMessages<NetworkBattleReserveOwnershipExpanded>()
+            .Where(message => message.MapEventId == mapEventId)
+            .ToArray();
+        Assert.Single(expansions);
+    }
+
+    /// <summary>
     /// BR-013: the server's per-battle connection order contains only MISSION-READY players. A player that
     /// has entered (opened the mission) but not finished loading does not appear in the successor line; it
     /// appends — at the tail — once it becomes ready.

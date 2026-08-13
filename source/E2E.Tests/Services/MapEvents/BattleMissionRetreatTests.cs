@@ -4,6 +4,7 @@ using Common.Messaging;
 using Coop.Core.Client.Services.BattleRetreat.Messages;
 using E2E.Tests.Environment.Instance;
 using GameInterface.Services.MapEvents.Messages;
+using GameInterface.Services.MapEvents.Messages.Leave;
 using GameInterface.Services.MapEvents.Messages.Retreat;
 using GameInterface.Services.Players;
 using HarmonyLib;
@@ -113,6 +114,26 @@ public class BattleMissionRetreatTests : MapEventTestBase
         // And the removal replicates: every other client drops it from its own copy of the battle.
         foreach (var client in Clients)
             AssertNotInAnyBattle(client, setup.Ctx.AttackerPartyId);
+    }
+
+    /// <summary>
+    /// A mission retreat has no later menu-retreat verdict. Its party-left broadcast must therefore request
+    /// local menu teardown for the retreating player; otherwise it returns from the mission into the stale
+    /// attack menu, whose next click retries a battle start after the party has already been removed.
+    /// </summary>
+    [Fact]
+    public void AcceptedMissionRetreat_RequestsRequesterEncounterTeardown()
+    {
+        var setup = SetupTwoOpposingPlayers();
+        JoinNewServerPartyToSide(setup.Ctx.MapEventId, BattleSideEnum.Attacker);
+        var requester = Clients.First();
+        var requesterPartyBaseId = GetPartyBaseId(setup.Ctx.AttackerPartyId);
+
+        RequestMissionRetreat(requester, setup.Ctx.AttackerPartyId, setup.Ctx.MapEventId);
+
+        var leave = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkPartyLeftBattle>()
+            .Where(message => message.PartyId == requesterPartyBaseId));
+        Assert.True(leave.FinishLocalMenus);
     }
 
     /// <summary>

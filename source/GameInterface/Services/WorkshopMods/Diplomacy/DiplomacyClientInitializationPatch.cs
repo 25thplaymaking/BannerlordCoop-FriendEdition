@@ -40,12 +40,27 @@ internal static class DiplomacyClientInitializationPatch
     private static Type _diplomacyEventsType;
     private static bool _resolved;
 
+    /// <summary>
+    /// The Diplomacy manager singletons the co-op client only otherwise gets from the join-handshake
+    /// snapshot apply (<c>DiplomacyRuntime.ApplySnapshot</c> → <c>EnsureManager</c>). Diplomacy's UI
+    /// mixins read these directly — the encyclopedia faction page reads the agreement manager, and the
+    /// kingdom-tab war/truce item mixins read war-exhaustion / expansionism / cooldown — so any of them
+    /// being null before the snapshot lands NREs the surface and (via the screen-tick abort) breaks it.
+    /// </summary>
+    private static readonly string[] ClientManagerTypeNames =
+    {
+        "Diplomacy.DiplomaticAction.DiplomaticAgreementManager",
+        "Diplomacy.WarExhaustion.WarExhaustionManager",
+        "Diplomacy.ExpansionismManager",
+        "Diplomacy.CooldownManager",
+    };
+
     [HarmonyPatch(typeof(MapScreen), nameof(MapScreen.OnInitialize))]
     [HarmonyPrefix]
     private static void EnsureDiplomacyClientSingletonsInitialized()
     {
         EnsureDiplomacyEvents();
-        EnsureAgreementManager();
+        EnsureClientManagers();
     }
 
     private static void EnsureDiplomacyEvents()
@@ -77,26 +92,25 @@ internal static class DiplomacyClientInitializationPatch
     }
 
     /// <summary>
-    /// The co-op client only creates <c>DiplomaticAgreementManager</c> when the join-handshake Diplomacy
-    /// snapshot is applied (<c>DiplomacyRuntime.ApplySnapshot</c> → <c>EnsureManager</c>). Until then its
-    /// <c>Instance</c> is null, and Diplomacy's encyclopedia faction mixin dereferences it unguarded
-    /// (<c>HasNonAggressionPact</c>) — clicking a kingdom link before the snapshot lands NREs out of the
-    /// page VM and, via the screen-tick abort, bricks the map UI. Pre-create the manager (empty and
-    /// idempotently, reusing the same path the snapshot uses) at map build on the client so the read
-    /// always finds a live, empty manager; the subsequent snapshot repopulates its agreements onto that
-    /// same instance. Server-side Diplomacy behaviours create it themselves, so this is client-only.
-    /// The <c>EncyclopediaFactionPageReadinessPatch</c> finalizer remains as the belt-and-braces net.
+    /// Pre-create every Diplomacy manager the client UI reads, at map build, so their <c>Instance</c> is
+    /// never null before the join-handshake snapshot lands. Each is created empty and idempotently,
+    /// reusing the same <c>DiplomacyRuntime.EnsureManager</c> path the snapshot apply uses; the snapshot
+    /// then repopulates that same instance. Client-only (server-side Diplomacy behaviours create them
+    /// themselves). The <c>DiplomacyUiReadinessPatch</c> finalizers remain as the belt-and-braces net.
     /// </summary>
-    private static void EnsureAgreementManager()
+    private static void EnsureClientManagers()
     {
         if (!ModInformation.IsClient) return;
-        try
+        foreach (string typeName in ClientManagerTypeNames)
         {
-            DiplomacyRuntime.EnsureManager("Diplomacy.DiplomaticAction.DiplomaticAgreementManager");
-        }
-        catch (Exception ex)
-        {
-            Logger.Error(ex, "Failed to pre-initialize Diplomacy DiplomaticAgreementManager on client");
+            try
+            {
+                DiplomacyRuntime.EnsureManager(typeName);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Failed to pre-initialize Diplomacy manager {Manager} on client", typeName);
+            }
         }
     }
 }

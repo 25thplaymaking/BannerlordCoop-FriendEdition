@@ -156,24 +156,37 @@ internal class SiegeEntryFlowPatches
         return false;
     }
 
-    // The army follower "Leave Army" option clears the camp and the army in one consequence. The army
-    // write already flows through the co-op army patches, so only the camp write is rerouted.
+    // The army follower "Leave Army" option clears the camp and the army in one consequence. Native
+    // MobileParty.Army = null cannot be used on a client: the Army.OnRemovePartyInternal patch suppresses
+    // that client-local callback, so no authoritative removal is published and the server keeps the party
+    // in the army. Route the membership removal explicitly, then mirror it locally like the other army UI
+    // leave paths do.
     [HarmonyPatch(typeof(SiegeEventCampaignBehavior), nameof(SiegeEventCampaignBehavior.menu_siege_strategies_passive_wait_leave_on_consequence))]
     [HarmonyPrefix]
     private static bool PassiveWaitLeavePrefix()
     {
         if (ModInformation.IsServer) return true;
 
+        var mainParty = MobileParty.MainParty;
         GameMenu.ExitToLast();
         if (PlayerSiege.PlayerSiegeEvent != null)
         {
             PlayerSiege.FinalizePlayerSiege();
         }
 
+        var army = mainParty.Army;
+        if (army != null)
+        {
+            MessageBroker.Instance.Publish(army, new MobilePartyInArmyRemoved(army, mainParty, mainParty));
+            using (new AllowedThread())
+            {
+                ArmyPatches.RemoveMobilePartyInArmy(mainParty, army, mainParty);
+            }
+        }
+
         MessageBroker.Instance.Publish(
             null,
-            new BreakSiegeAttempted(MobileParty.MainParty, finishLocalMenus: false));
-        MobileParty.MainParty.Army = null;
+            new BreakSiegeAttempted(mainParty, finishLocalMenus: false));
         return false;
     }
 

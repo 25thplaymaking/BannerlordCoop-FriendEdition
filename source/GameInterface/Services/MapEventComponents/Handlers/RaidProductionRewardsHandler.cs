@@ -106,17 +106,16 @@ internal class RaidProductionRewardsHandler : IHandler
 
         var itemIds = new List<string>();
         var amounts = new List<int>();
-        foreach (var element in data.LootedItems)
+        foreach (var (item, amount) in data.LootedItems)
         {
-            var item = element.EquipmentElement.Item;
-            if (item == null || element.Amount <= 0)
+            if (item == null || amount <= 0)
                 continue;
 
             if (!TryGetRewardItemId(item, out var itemId))
                 continue;
 
             itemIds.Add(itemId);
-            amounts.Add(element.Amount);
+            amounts.Add(amount);
         }
 
         if (itemIds.Count == 0)
@@ -193,23 +192,30 @@ internal class RaidProductionRewardsHandler : IHandler
             if (!objectManager.TryGetObjectWithLogging<MobileParty>(data.PartyId, out var mobileParty))
                 return;
 
-            var lootedItems = new ItemRoster();
-            var count = Math.Min(data.ItemIds?.Length ?? 0, data.Amounts?.Length ?? 0);
-            for (int i = 0; i < count; i++)
+            // Build the event-argument roster inside an AllowedThread so the global ItemRoster ctor/
+            // AddToCounts patches treat it as mod-originated and neither publish it nor log "Client
+            // created/changed managed ItemRoster". This is a throwaway used only to satisfy the
+            // OnItemsLooted signature while applying loot the server already computed.
+            using (new AllowedThread())
             {
-                if (data.Amounts[i] <= 0)
-                    continue;
+                var lootedItems = new ItemRoster();
+                var count = Math.Min(data.ItemIds?.Length ?? 0, data.Amounts?.Length ?? 0);
+                for (int i = 0; i < count; i++)
+                {
+                    if (data.Amounts[i] <= 0)
+                        continue;
 
-                if (!TryGetRewardItem(data.ItemIds[i], out var item))
-                    continue;
+                    if (!TryGetRewardItem(data.ItemIds[i], out var item))
+                        continue;
 
-                lootedItems.AddToCounts(new EquipmentElement(item), data.Amounts[i]);
+                    lootedItems.AddToCounts(new EquipmentElement(item), data.Amounts[i]);
+                }
+
+                if (lootedItems.Count == 0)
+                    return;
+
+                CampaignEventDispatcher.Instance.OnItemsLooted(mobileParty, lootedItems);
             }
-
-            if (lootedItems.Count == 0)
-                return;
-
-            CampaignEventDispatcher.Instance.OnItemsLooted(mobileParty, lootedItems);
         }
         catch (Exception e)
         {

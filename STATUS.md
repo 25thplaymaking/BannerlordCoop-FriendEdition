@@ -48,14 +48,21 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > reinforcement spawn/quotas, retreat, and unstuck recovery; both affected test projects build with zero errors.
 > The first stable workflow correctly caught a test-only pump ownership race; `4c711e778` makes that regression
 > use the real continuous test game thread. Exact-source workflow `31714742241` then passed 2,481 unit/integration
-> tests with 14 intentional skips, built with zero errors, and published launcher client `2026.08.13.1523`
-> (ZIP SHA-256 `67ec252e8f00d25691e8a3ef1ff238aa6dee4616a6dbe6c0d8d8bc5772b0679d`). The matching
-> Serilog-2.x server assemblies are release-paired to core SHA-256
+> tests with 14 intentional skips and built the runtime with zero errors. Pre-install payload reconciliation found
+> that its first client ZIP omitted the tracked `ModuleData` directory and `workshop-mods.json`; that incomplete
+> package was not installed on the production client. `d11ab502e` adds a release regression that resolves every
+> `SubModule.xml` data reference and requires the complete ModuleData/Workshop metadata in the ZIP. Stable workflow
+> `31716900189` passed the full release pipeline and superseded the feed with client `2026.08.13.1547` (ZIP SHA-256
+> `9ffd0cf7844c87edf0794acd1c42104376a6b15deec668f19383772d89b519ea`). The installed client matches all 66
+> packaged files byte-for-byte plus only its version receipt, identifies package source `d11ab502e`, and uses
+> Serilog 4.2. The matching runtime changes remain those in `4c711e778`; its Serilog-2.x server assemblies are
+> release-paired to core SHA-256
 > `296dfc03969512e9df9a92e2b9ac07360302717158a2cc0bb8e2fd2498339a19`. Both core locations, all four module
 > hashes, the complete deployment ledger, and the pairing receipt verify. The stopped `friendallmods1` save and
 > JSON sidecar were copied byte-for-byte to
-> `/home/bishop/bannerlord-coop/server/_mod_backups/pre-4c711e778-20260813T152718Z`; the live files still match
-> those stopped-server hashes. The host loaded the same Summer 15, 1093 world, reached `SERVING` on UDP 4200,
+> `/home/bishop/bannerlord-coop/server/_mod_backups/pre-4c711e778-20260813T152718Z`; the initial live files matched
+> those stopped-server hashes before configured autosaves resumed. The host loaded the same Summer 15, 1093 world,
+> reached `SERVING` on UDP 4200,
 > emitted repeated zero-player pulses, and remains at `NRestarts=0` with no release-verification, null-reference,
 > or unhandled-fatal startup marker. Rendered Kingdom/large-army/retreat proof still requires a player action and
 > is not inferred from headless server health.

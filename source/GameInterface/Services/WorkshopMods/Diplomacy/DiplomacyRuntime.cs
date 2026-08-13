@@ -65,6 +65,9 @@ internal sealed class DiplomacyRuntime : IDiplomacyRuntime
             return null;
         }
         NormalizeServerUnsafeSettings(settingsType, settings);
+        DiplomacyManagerCaptureBarrier.RequireReady(
+            EnsureManager,
+            () => TryValidateRequiredManagerShape(out var failure) ? null : failure);
 
         var snapshot = new NetworkDiplomacySnapshot
         {
@@ -530,7 +533,7 @@ internal sealed class DiplomacyRuntime : IDiplomacyRuntime
             ("Diplomacy.CooldownManager", "_lastPeaceProposalTime", "TaleWorlds.CampaignSystem.Kingdom", "TaleWorlds.CampaignSystem.CampaignTime", false),
             ("Diplomacy.CooldownManager", "_lastAllianceFormedTime", "System.String", "TaleWorlds.CampaignSystem.CampaignTime", false),
             ("Diplomacy.CooldownManager", "_lastWarTime", "System.String", "TaleWorlds.CampaignSystem.CampaignTime", false),
-            ("Diplomacy.DiplomaticAction.DiplomaticAgreementManager", "Agreements", "Diplomacy.DiplomaticAction.FactionPair", "Diplomacy.DiplomaticAction.DiplomaticAgreement", true),
+            ("Diplomacy.DiplomaticAction.DiplomaticAgreementManager", "Agreements", DiplomacyManagerCaptureBarrier.AgreementKeyTypeName, "Diplomacy.DiplomaticAction.DiplomaticAgreement", true),
             ("Diplomacy.WarExhaustion.WarExhaustionManager", "_warExhaustionScores", "System.String", "Diplomacy.WarExhaustion.WarExhaustionRecord", false),
             ("Diplomacy.WarExhaustion.WarExhaustionManager", "_warExhaustionRates", "System.String", "Diplomacy.WarExhaustion.WarExhaustionRecord", false),
             ("Diplomacy.WarExhaustion.WarExhaustionManager", "_warExhaustionEventRecords", "System.String", "Diplomacy.WarExhaustion.EventRecords.WarExhaustionEventRecord", true),
@@ -1159,5 +1162,42 @@ internal sealed class DiplomacyRuntime : IDiplomacyRuntime
         var builder = new StringBuilder(bytes.Length * 2);
         foreach (var value in bytes) builder.Append(value.ToString("x2", CultureInfo.InvariantCulture));
         return builder.ToString();
+    }
+}
+
+/// <summary>
+/// Establishes Diplomacy's manager singletons before an authoritative capture. Fresh campaigns
+/// and saves first hosted with the dedicated runtime have no serialized manager instance yet;
+/// every pinned 1.4.7 manager owns an idempotent parameterless constructor for that exact case.
+/// Validation runs only after all managers have had a chance to initialize their dictionaries.
+/// </summary>
+internal static class DiplomacyManagerCaptureBarrier
+{
+    internal const string AgreementKeyTypeName = "Diplomacy.FactionPair";
+
+    internal static readonly string[] RequiredManagerTypeNames =
+    {
+        "Diplomacy.ExpansionismManager",
+        "Diplomacy.CooldownManager",
+        "Diplomacy.DiplomaticAction.DiplomaticAgreementManager",
+        "Diplomacy.WarExhaustion.WarExhaustionManager",
+    };
+
+    internal static void RequireReady(
+        Action<string> ensureManager,
+        Func<string> validateFailure)
+    {
+        if (ensureManager == null) throw new ArgumentNullException(nameof(ensureManager));
+        if (validateFailure == null) throw new ArgumentNullException(nameof(validateFailure));
+
+        foreach (var managerTypeName in RequiredManagerTypeNames)
+            ensureManager(managerTypeName);
+
+        var failure = validateFailure();
+        if (!string.IsNullOrEmpty(failure))
+        {
+            throw new InvalidOperationException(
+                "Diplomacy manager initialization failed before authoritative capture: " + failure);
+        }
     }
 }

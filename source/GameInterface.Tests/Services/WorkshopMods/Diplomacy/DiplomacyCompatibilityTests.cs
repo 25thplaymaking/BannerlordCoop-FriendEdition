@@ -848,6 +848,36 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
             snapshot.State.Select(entry => entry.Section).OrderBy(value => value));
     }
 
+    [Fact]
+    public void ServerCapture_PreparesEveryRequiredManagerBeforeShapeValidation()
+    {
+        var calls = new List<string>();
+
+        DiplomacyManagerCaptureBarrier.RequireReady(
+            manager => calls.Add("ensure:" + manager),
+            () =>
+            {
+                calls.Add("validate");
+                return null;
+            });
+
+        Assert.Equal(
+            DiplomacyManagerCaptureBarrier.RequiredManagerTypeNames
+                .Select(manager => "ensure:" + manager)
+                .Append("validate"),
+            calls);
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            DiplomacyManagerCaptureBarrier.RequireReady(_ => { }, () => "missing dictionary"));
+        Assert.Contains("missing dictionary", exception.Message);
+    }
+
+    [Fact]
+    public void AgreementCapture_UsesTheModsActualFactionPairNamespace()
+    {
+        Assert.Equal("Diplomacy.FactionPair", DiplomacyManagerCaptureBarrier.AgreementKeyTypeName);
+    }
+
     [Theory]
     [InlineData("42+731", true)]
     [InlineData("kingdom_vlandia+kingdom_battania", false)]

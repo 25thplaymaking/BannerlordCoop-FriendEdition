@@ -70,6 +70,16 @@ internal sealed class StartupHook
                     var st = ex.StackTrace ?? "";
                     // Skip the resolver's own probe misses (huge volume, benign).
                     if (ex is FileNotFoundException && st.IndexOf("ResolveFromModuleBins", StringComparison.Ordinal) >= 0) return;
+                    // Save loading intentionally probes thousands of assemblies and reflection
+                    // shapes. Preserve the finite log for faults capable of terminating the host
+                    // or crossing one of Friend Edition's runtime boundaries.
+                    if (!(ex is InvalidOperationException) &&
+                        ex.HResult != unchecked((int)0x80004005) &&
+                        st.IndexOf("BannerlordPlayerSettlement.", StringComparison.Ordinal) < 0 &&
+                        st.IndexOf("PlayerSettlementFixes.", StringComparison.Ordinal) < 0 &&
+                        st.IndexOf("GameInterface.", StringComparison.Ordinal) < 0 &&
+                        st.IndexOf("Coop.", StringComparison.Ordinal) < 0)
+                        return;
                     if (new FileInfo(LogPath).Length >= 400000) return;
                     File.AppendAllText(LogPath,
                         "\n=== FIRST-CHANCE " + DateTime.Now.ToString("HH:mm:ss.fff") + " ===\n" +

@@ -258,3 +258,37 @@ internal static class PlayerSettlementStateAdmission
         return entries;
     }
 }
+
+/// <summary>
+/// Mirrors Player Settlement's early-load fallback when CampaignBehaviorManager has not exposed
+/// its data store yet. The fallback is safe only while every source the mod itself can consume is
+/// provably empty; otherwise object registration must stop before any campaign graph is mutated.
+/// </summary>
+internal static class PlayerSettlementUnavailableStoreAdmission
+{
+    internal static void RequireEmpty(
+        bool metadataCaptureSucceeded,
+        PlayerSettlementStateEntry[] metadataEntries,
+        string metadataCaptureFailure,
+        bool legacyHasGeneratedObjects,
+        bool legacyConfigDirectoryExists)
+    {
+        PlayerSettlementStateAdmission.RequireEmpty(
+            metadataCaptureSucceeded,
+            metadataEntries,
+            metadataCaptureFailure,
+            "unavailable early-store admission");
+
+        if (legacyHasGeneratedObjects)
+        {
+            throw new InvalidOperationException(
+                "Player Settlement failed closed during unavailable early-store admission: in-process legacy metadata contains generated settlements.");
+        }
+
+        if (legacyConfigDirectoryExists)
+        {
+            throw new InvalidOperationException(
+                "Player Settlement failed closed during unavailable early-store admission: legacy external settlement metadata exists for this campaign.");
+        }
+    }
+}

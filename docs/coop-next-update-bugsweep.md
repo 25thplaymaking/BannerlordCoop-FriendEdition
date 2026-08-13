@@ -103,6 +103,65 @@ Kingdom-tab completion claims. Phase D fixed the raid path; Phase E owns the rem
 - **Still requires a player action:** rendered Kingdom/large-army/retreat verification. This is not inferred
   from headless deployment health.
 
+## Phase F — exact runtime wiring and battle teardown — CANDIDATE (2026-08-13)
+
+- **Kingdom failure, corrected diagnosis:** the latest client log first throws
+  `TypeLoadException: Diplomacy.ViewModelMixin.DiplomacyPanelPrefabExtension` from
+  `DiplomacyClientUiLifecycle.ResetForCampaign`, then continues with `campaignReady=true`, and finally throws
+  from `DiplomacyCostCalculator.DetermineInfluenceCostForMakingPeace`. Decompilation of the exact shipped
+  Diplomacy DLL shows that line dereferences `GlobalSettings<Diplomacy.Settings>.Instance`; it is not a layout
+  or missing-prefab failure. The old candidate scan accepted both the unversioned loader assembly and the
+  versioned implementation, so Coop could bind the wrong type universe and skip the settings patch.
+- **Exact Diplomacy lifecycle:** one fingerprinted implementation assembly must supply every one of the sixteen
+  supported UIExtender types. The whole group is disabled before resolution, the exact `Type` objects are cached,
+  ten snapshot-backed extensions are enabled only after settings readiness, six retired extensions stay disabled,
+  and any resolution/activation failure rolls the whole group back. Campaign readiness is published only after
+  both runtime binding and UI reset succeed.
+- **MCM/server settings contract:** MCM and UIExtenderEx remain client presentation modules and are rejected from
+  server initialization. The dedicated server creates Diplomacy's canonical 66 scalar settings directly, forces
+  the unsafe war-exhaustion debug option off, fingerprints the complete set, and sends it as campaign authority;
+  clients apply exactly that set. The startup hook logs the selected Diplomacy assembly name/version/location so
+  any future loader/implementation split is visible rather than swallowed.
+- **Workshop runtime wiring:** retained launch history proved that the production token advertised eight Workshop
+  modules while their server bins were absent. An explicit role manifest now requires server bins for
+  PlayerSettlement, ImprovedGarrisons, DismembermentPlus, Fourberie, Diplomacy, and UnblockableThrust; it treats
+  UIExtenderEx and MCM as presentation-only. The sync and verification tools compare exact file sets and hashes,
+  reject presentation submodules on the server, verify the UI support-assembly closure, and fail startup on drift.
+  Loading UIExtenderEx/MCM as server submodules was proven to cause the delayed abstract-`NewExpression`/native
+  crash. With those presentation bins held, a 35-second post-serving same-save run kept all six gameplay runtime
+  modules active and reached the complete registry audit.
+- **Player Settlement early save lifecycle:** the installed mod implements `GetStore` as the static extension
+  `CampaignExtensions.GetStore(Campaign, CampaignBehaviorBase)`; the previous reflection against a nonexistent
+  Campaign instance method could never work. The exact extension is now resolved and invoked. Because the
+  dedicated lifecycle can expose no behavior store during early object registration, the adapter admits that
+  state only after current metadata, in-process legacy state, and the campaign-specific legacy external directory
+  are all proven empty. That is the verified state of unchanged `friendallmods1`. Generated settlement graphs and
+  new construction still fail closed: the pinned mod registers XML objects locally and save/reloads, which cannot
+  be replayed safely on one peer.
+- **Diplomacy post-serving capture:** fresh hosts had no initialized manager dictionaries when the first canonical
+  snapshot ran. Capture now initializes Expansionism, Cooldown, DiplomaticAgreement, and WarExhaustion managers
+  before shape validation. The exact agreement dictionary key is `Diplomacy.FactionPair`; the prior reflected
+  namespace was wrong. The sustained same-save run broadcast the authoritative snapshot after both fixes.
+- **Large-army reserves:** the prior one-way expansion signal was insufficient. Event 70760 delivered the full
+  attacker feed while the defender still held the stale 81-troop entry allocation, so host election could latch
+  a mixed generation. Each ownership expansion now starts an authoritative refresh generation and commits only
+  after both attacker and defender reserve feeds arrive; packets arriving before supplier registration are kept.
+- **Auburn retreat:** a native retreat can report `BattleResolved=true` while having no accepted attacker/defender
+  winner. That excluded the early retreat request, and mission teardown removed membership without detaching the
+  campaign party. `NetworkMissionLeft` now carries an authenticated unresolved-battle flag; the server derives the
+  peer's party and MapEvent and performs idempotent campaign detachment in the same departure transaction.
+- **Army registry from the beginning:** the base registry keyed every kingdom army by `Kingdom.StringId`, so only
+  the first army in each kingdom could register. The repeated live `Failed to get id for object type Army` markers
+  are the direct consequence. Every loaded army is now keyed by its stable leader-party ID, with a second party
+  traversal for kingdom-free/modded armies. Before `AllGameObjectsRegistered`, a campaign-graph audit now proves
+  registration of critical parties, armies, MapEvents, sides, components, and rosters or aborts startup.
+- **Verification/deployment:** focused Diplomacy (120/120) and Player Settlement (24/24) regressions are green,
+  as are the registry, reserve, mission-lifecycle, retreat, component, launcher, server-kit, Workshop authority,
+  role-policy, XAML, and release-safety gates. The sustained host proof reached `CAMPAIGN LOADED`, authoritative
+  snapshots, and `[RegistryAudit] PASS` with the same save. Full E2E, exact-source build, stable client publication,
+  and final paired same-save server deployment are still running; their final identifiers belong here only after
+  direct verification.
+
 ## Deferred — reverted upstream fixes that break Separatism (need dedicated compat work, NOT bundled)
 
 - **#2632** (companion fiefs; closes clan-menu-black softlock #2860 + Give-Settlement #2790) — **CONFIRMED** to re-break `SeparatismCampaignFlowTests.ChaosStart…SynchronizesTheCreatedKingdom` (rebel kingdom named "Former Rebel Kingdom" vs expected "Kingdom of Rebel Clan"). Its `ClanName` sync (`ClanNameHandler`/`ClanNameChangePatch`) collides with Separatism rebel-kingdom naming. Earlier session mis-attributed this to #2867. Fixes no *user-reported* bug → dropped from this update; needs Separatism-compat rework.

@@ -1,8 +1,11 @@
 # PlayerSettlement construction — deferred (and why)
 
-**Status (2026-08-10):** PlayerSettlement **loads and displays** in co-op — existing settlements,
-its save type definitions, and read-only UI work. **Founding a new settlement is intentionally
-deferred**, and its construction entry points stay feature-blocked
+**Status (corrected 2026-08-13):** the pinned PlayerSettlement runtime, assets, save type definitions,
+and **empty-state persistence lifecycle** load in co-op. The unchanged `friendallmods1` save is in that
+verified empty state. Saves containing PlayerSettlement-generated objects do not currently load: they fail
+closed before campaign registration because their XML/object/component graph cannot yet be applied atomically
+to every peer. **Founding a new settlement is intentionally deferred**, and its construction entry points stay
+feature-blocked
 (`PlayerSettlementBehaviour.BuildTown/BuildCastle/BuildVillage/Overwrite/Rebuild`,
 `PlayerSettlementBuildVM.ExecuteCreatePlayerSettlement`, `SaveHandler.Save*`).
 
@@ -45,5 +48,7 @@ co-op-native settlement creation** that avoids the save+reload entirely:
 - It's the single largest remaining mod feature; the **launcher and Discord bot** are self-contained,
   higher-value, and unblock actually distributing/playing the working session now.
 
-Tracked in `STATUS.md` as the final program item. Until then, PlayerSettlement is present and
-loads; players just can't found new settlements.
+Tracked in `STATUS.md` as the final program item. Until then, PlayerSettlement stays present in the exact
+loadout and empty-state campaigns load; players cannot found, rebuild, overwrite, or load a previously generated
+PlayerSettlement graph. This boundary is deliberate: enabling the original local path would make only one peer
+mutate its object manager and then force a save/reload.

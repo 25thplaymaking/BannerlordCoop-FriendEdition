@@ -206,6 +206,58 @@ public sealed class PlayerSettlementCompatibilityTests : IDisposable
         Assert.Equal(expected, PlayerSettlementAuthorityPatches.ServerPersistencePrefix());
     }
 
+    [Fact]
+    public void StoreResolver_UsesThePlayerSettlementExtensionMethod()
+    {
+        var method = PlayerSettlementStoreResolver.ResolveGetStore(
+            typeof(PlayerSettlementCompatibilityTests).Assembly,
+            typeof(StoreExtensionProbe).FullName!,
+            typeof(StoreCampaignProbe),
+            typeof(StoreBehaviorProbe),
+            typeof(object));
+
+        Assert.Equal(typeof(StoreExtensionProbe), method.DeclaringType);
+        Assert.True(method.IsStatic);
+        Assert.Equal(nameof(StoreExtensionProbe.GetStore), method.Name);
+    }
+
+    [Fact]
+    public void UnavailableEarlyStore_AdmitsOnlyProvablyEmptyCampaignState()
+    {
+        PlayerSettlementUnavailableStoreAdmission.RequireEmpty(
+            metadataCaptureSucceeded: true,
+            Array.Empty<PlayerSettlementStateEntry>(),
+            metadataCaptureFailure: null,
+            legacyHasGeneratedObjects: false,
+            legacyConfigDirectoryExists: false);
+
+        var generated = new[]
+        {
+            Entry(PlayerSettlementObjectKind.Town, 0, "player_settlement_town_a", string.Empty),
+        };
+        Assert.Throws<InvalidOperationException>(() =>
+            PlayerSettlementUnavailableStoreAdmission.RequireEmpty(
+                metadataCaptureSucceeded: true,
+                generated,
+                metadataCaptureFailure: null,
+                legacyHasGeneratedObjects: false,
+                legacyConfigDirectoryExists: false));
+        Assert.Throws<InvalidOperationException>(() =>
+            PlayerSettlementUnavailableStoreAdmission.RequireEmpty(
+                metadataCaptureSucceeded: true,
+                Array.Empty<PlayerSettlementStateEntry>(),
+                metadataCaptureFailure: null,
+                legacyHasGeneratedObjects: true,
+                legacyConfigDirectoryExists: false));
+        Assert.Throws<InvalidOperationException>(() =>
+            PlayerSettlementUnavailableStoreAdmission.RequireEmpty(
+                metadataCaptureSucceeded: true,
+                Array.Empty<PlayerSettlementStateEntry>(),
+                metadataCaptureFailure: null,
+                legacyHasGeneratedObjects: false,
+                legacyConfigDirectoryExists: true));
+    }
+
     [Theory]
     [InlineData(true, 1, 1)]
     [InlineData(false, 0, 0)]
@@ -401,5 +453,13 @@ public sealed class PlayerSettlementCompatibilityTests : IDisposable
         internal static void AfterPatch()
         {
         }
+    }
+
+    private sealed class StoreCampaignProbe { }
+    private sealed class StoreBehaviorProbe { }
+    private static class StoreExtensionProbe
+    {
+        public static object GetStore(StoreCampaignProbe campaign, StoreBehaviorProbe behavior) =>
+            new object();
     }
 }

@@ -29,6 +29,52 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > the rendered install/join and Sea Raider auto-resolve gates after functional closure. Foundation
 > verification is green: 3,392 passed, 18 skipped, 0 failed; build completed with 0 errors.
 
+> **2026-08-13 second live correction — release candidate, deployment pending.** Fresh evidence from the
+> post-`d11ab502e` client and the retained server journal disproves the prior Kingdom and army completion
+> claims. The Kingdom tab is not failing in its Gauntlet layout: Diplomacy first throws a `TypeLoadException`
+> while Coop binds its unversioned loader assembly instead of the fingerprinted `Bannerlord.Diplomacy.1.4.7`
+> implementation, prematurely marks the campaign ready, and then dereferences a null
+> `GlobalSettings<Diplomacy.Settings>.Instance` in `DiplomacyCostCalculator`. The new lifecycle resolves and
+> caches all sixteen UI extension types from one exact implementation assembly, disables the complete group
+> before resolution, enables it only after settings/snapshot readiness, and rolls the group back on any error.
+> The server now creates the canonical 66-setting Diplomacy defaults without initializing MCM presentation;
+> clients apply and fingerprint that authoritative set.
+>
+> The same audit found that the Workshop module token had advertised eight mods without any dedicated-server
+> bins. Six are real server runtimes (Player Settlement, Improved Garrisons, DismembermentPlus, Fourberie,
+> Diplomacy, and Unblockable Thrust); UIExtenderEx and MCM are client presentation only. A checked role manifest,
+> exact per-file mirroring, support-assembly closure, startup diagnostics, and fail-closed preflight now make that
+> split executable instead of cosmetic. All six runtime modules booted together against the unchanged
+> `friendallmods1` save during the diagnostic run.
+>
+> Auburn's large-army failure also survived the prior expansion signal because the client could consume one
+> side's full reserve while retaining its stale 81-troop allocation for the other. Reserve refresh is now a
+> two-sided barrier that preserves both feeds until both authoritative replacements exist. Retreat now carries
+> unresolved-battle cleanup atomically in the authenticated mission-departure packet, so removing the last
+> mission member cannot leave its campaign party attached to the MapEvent. Finally, the base Army registry had
+> used `Kingdom.StringId` as the key, registering at most one army per kingdom since the beginning; armies now
+> use their stable leader-party identity, and a post-registration campaign-graph audit refuses to open the server
+> if any critical party, army, MapEvent, side, or roster is still unregistered. Focused and component gates are
+> green; the full E2E/release/deployment gates remain in progress and no new completion claim is made yet.
+>
+> Post-serving validation then exposed two more startup defects that earlier short health checks could not see.
+> Player Settlement's `GetStore` is a static extension on `CampaignExtensions`, not a `Campaign` instance method;
+> the dedicated early-load lifecycle may also legitimately return no store. The adapter now resolves the exact
+> extension contract and admits that early state only when current metadata, in-process legacy state, and the
+> campaign's legacy external directory are all empty. This is the supported shape of `friendallmods1`; generated
+> Player Settlement objects and its local XML/save-reload construction path remain fail-closed rather than being
+> allowed to diverge peers. UIExtenderEx and MCM server bins were also the source of the post-serving abstract-type
+> compiler/native crash, so the role verifier now requires their client presentation files while rejecting their
+> server submodules. The six gameplay runtimes, including Player Settlement, remain enabled on the host.
+>
+> With that role split enforced, Diplomacy's first authoritative capture exposed an uninitialized-manager barrier
+> and one wrong reflected key type (`Diplomacy.FactionPair`, not
+> `Diplomacy.DiplomaticAction.FactionPair`). The host now initializes all four exact manager singletons before
+> validating/capturing their dictionaries. A 35-second post-serving same-save run then stayed active, broadcast
+> authoritative Player Settlement and Diplomacy snapshots, and completed a registry audit of 11,343 critical
+> objects (1,550 parties, seven armies, five map events, and 4,650 rosters). This is server health evidence, not
+> rendered Kingdom-tab or live battle proof; final publication/deployment gates are still in progress.
+
 > **2026-08-13 live Kingdom regression correction — SHIPPED from source `4c711e778`.** The stable
 > `315be775e` deployment did not fix the Kingdom tab. The 10:28 EDT client
 > log proves `Diplomacy.Settings.Instance` was present, then `KingdomWarItemVMMixin` dereferenced a null
@@ -220,7 +266,10 @@ rolls back canonical Fourberie state and created parties on failure, and returns
   have live routes.
   Canonical state changes are revision-checked, exact-replay-safe, rollback-verified, and republished;
   clients retain presentation and see only their clan's valid garrison targets.
-- **PlayerSettlement** ⚠️ loads; construction/rebuild/overwrite and persistence graph remain open.
+- **PlayerSettlement** ⚠️ its pinned runtime, assets, and empty-state persistence lifecycle load on the
+  dedicated host and clients. The original construction/rebuild/overwrite and non-empty generated-object graph
+  remain blocked because they perform local XML registration plus save/reload rather than an authoritative Coop
+  transaction.
 - **UnblockableThrust** ✅ all 4 authority candidates are exact-classified under Coop's accepted
   collision owner; incompatible, swing, shield, parry, chamber, remote, foot, and mounted cases are gated.
 - **DismembermentPlus** ✅ all 17 authority candidates are exact-classified. The victim-authority peer

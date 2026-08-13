@@ -13,6 +13,7 @@ using Coop.UI.LoadGameUI;
 using GameInterface;
 using GameInterface.Services.Modules;
 using GameInterface.Services.Modules.Handlers;
+using GameInterface.Services.Diagnostics;
 using GameInterface.Services.Chat;
 using GameInterface.Services.MapEvents.PlayerPartyInteractions;
 using GameInterface.Services.Separatism;
@@ -847,8 +848,7 @@ namespace Coop
                 // live thread stack from inside a first-chance handler is what deadlocked startup
                 // while Harmony held CLR locks.
                 string stack = e.Exception?.StackTrace ?? string.Empty;
-                if (stack.IndexOf("GameInterface.", StringComparison.Ordinal) < 0 &&
-                    stack.IndexOf("Coop.", StringComparison.Ordinal) < 0)
+                if (!FirstChanceCapturePolicy.ShouldCapture(e.Exception, stack))
                     return;
                 WriteFirstChanceRecord("FIRST-CHANCE", e.Exception, stack);
             }

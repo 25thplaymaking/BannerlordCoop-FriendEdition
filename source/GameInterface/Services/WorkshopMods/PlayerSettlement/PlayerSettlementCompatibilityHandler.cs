@@ -126,14 +126,59 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             throw new InvalidOperationException(
                 "Player Settlement persistence behavior is unavailable during object registration");
 
-        var getStore = AccessTools.Method(
+        var getStore = PlayerSettlementStoreResolver.ResolveGetStore(
+            assembly,
+            PlayerSettlementStoreResolver.ExtensionTypeName,
             typeof(Campaign),
-            "GetStore",
-            new[] { typeof(CampaignBehaviorBase) });
-        var store = getStore?.Invoke(Campaign.Current, new object[] { behavior }) as IDataStore;
-        if (store == null || store.IsSaving)
+            typeof(CampaignBehaviorBase),
+            typeof(IDataStore));
+        IDataStore store;
+        try
+        {
+            // GetStore is an extension method owned by PlayerSettlement.dll. Decompiler output
+            // renders it like a Campaign instance method, but invoking Campaign.GetStore through
+            // reflection silently resolves nothing on the dedicated runtime.
+            store = getStore.Invoke(
+                null,
+                new object[] { Campaign.Current, behavior }) as IDataStore;
+        }
+        catch (TargetInvocationException exception)
+        {
             throw new InvalidOperationException(
-                "Player Settlement save metadata store could not be resolved without registering objects");
+                "Player Settlement save metadata store resolution failed",
+                exception.InnerException ?? exception);
+        }
+        if (store == null)
+        {
+            // Player Settlement's own RegisterSubModuleObjects treats an unavailable early store
+            // as "no embedded metadata" and then checks its legacy external directory. Dedicated
+            // CampaignBehaviorManager does not expose _campaignBehaviorDataStore at this point, so
+            // GetStore legitimately returns null even for a healthy saved campaign. Preserve that
+            // contract, but only after proving every other in-process/legacy source is empty.
+            var currentMetadata = metadataField.GetValue(behavior);
+            var fallbackMetadataCaptured = PlayerSettlementCanonicalState.TryCaptureMetadata(
+                currentMetadata,
+                out var fallbackMetadataEntries,
+                out _,
+                out var fallbackMetadataFailure);
+            var fallbackLegacyInfo = legacyInfoType
+                .GetProperty("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                ?.GetValue(null);
+            PlayerSettlementUnavailableStoreAdmission.RequireEmpty(
+                fallbackMetadataCaptured,
+                fallbackMetadataEntries,
+                fallbackMetadataFailure,
+                fallbackLegacyInfo != null && LegacyInfoHasGeneratedObjects(fallbackLegacyInfo),
+                LegacyConfigDirectoryExists());
+
+            Logger.Warning(
+                "Player Settlement early save store is unavailable on the dedicated host; admitted the campaign after proving embedded, in-process, and legacy generated settlement state is empty");
+            objectRegistrationValidated = true;
+            return;
+        }
+        if (store.IsSaving)
+            throw new InvalidOperationException(
+                "Player Settlement object registration received a saving data store");
 
         // Do not call Player Settlement's LoadEarlySync here: that method catches every exception
         // and would make an unreadable non-empty save look like an empty save. Invoke IDataStore's
@@ -570,4 +615,37 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
     private static Assembly FindAssembly(string name) =>
         AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(candidate =>
             string.Equals(candidate.GetName().Name, name, StringComparison.Ordinal));
+}
+
+internal static class PlayerSettlementStoreResolver
+{
+    internal const string ExtensionTypeName =
+        "BannerlordPlayerSettlement.Extensions.CampaignExtensions";
+
+    internal static MethodInfo ResolveGetStore(
+        Assembly assembly,
+        string extensionTypeName,
+        Type campaignType,
+        Type behaviorType,
+        Type storeType)
+    {
+        var extensionType = assembly?.GetType(
+            extensionTypeName,
+            throwOnError: false,
+            ignoreCase: false);
+        var method = extensionType == null
+            ? null
+            : AccessTools.Method(
+                extensionType,
+                "GetStore",
+                new[] { campaignType, behaviorType });
+        if (method == null || !method.IsStatic ||
+            !storeType.IsAssignableFrom(method.ReturnType))
+        {
+            throw new InvalidOperationException(
+                "Player Settlement co-op compatibility validation failed: exact CampaignExtensions.GetStore(Campaign, CampaignBehaviorBase) contract is unavailable");
+        }
+
+        return method;
+    }
 }

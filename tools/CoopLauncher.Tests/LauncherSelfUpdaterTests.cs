@@ -108,7 +108,9 @@ public sealed class LauncherSelfUpdaterTests
                 : JsonResponse(Manifest("1.0.0", ValidSha));
         }));
 
-        LauncherUpdateCheck check = await Updater(http).CheckAsync(new Version(1, 0));
+        // Current version must match the manifest exactly so the outcome is Current, not UpdateAvailable
+        // (new Version(1,0) has Build=-1, which compares LESS than "1.0.0" and would read as an update).
+        LauncherUpdateCheck check = await Updater(http).CheckAsync(new Version(1, 0, 0));
 
         Assert.Equal(ComponentUpdateState.Current, check.Status.State);
         Assert.Equal(3, calls);

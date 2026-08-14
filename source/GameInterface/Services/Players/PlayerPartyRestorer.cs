@@ -64,8 +64,9 @@ internal class PlayerPartyRestorer : IPlayerPartyRestorer
         if (!objectManager.TryGetIdWithLogging(hero.CharacterObject, out var characterObjectId)) return false;
 
         MobileParty party = null;
+        var isEmbedded = player.ClanMembershipMode == PlayerClanMembershipMode.Embedded;
         if (objectManager.TryGetObject(player.MobilePartyId, out MobileParty savedParty) &&
-            IsReadyPlayerParty(savedParty, hero))
+            (isEmbedded ? IsReadyEmbeddedParty(savedParty, hero) : IsReadyPlayerParty(savedParty, hero)))
         {
             party = savedParty;
         }
@@ -73,7 +74,7 @@ internal class PlayerPartyRestorer : IPlayerPartyRestorer
         {
             party = getParties()
                 .FirstOrDefault(candidate =>
-                    IsReadyPlayerParty(candidate, hero) &&
+                    (isEmbedded ? IsReadyEmbeddedParty(candidate, hero) : IsReadyPlayerParty(candidate, hero)) &&
                     objectManager.TryGetId(candidate, out _));
 
             if (party != null)
@@ -114,18 +115,27 @@ internal class PlayerPartyRestorer : IPlayerPartyRestorer
             return false;
         }
 
-        Restore(hero, party);
+        if (!isEmbedded || party.LordPartyComponent?.Owner == hero)
+            Restore(hero, party);
 
         if (partyId != player.MobilePartyId ||
             clanId != player.ClanId ||
-            characterObjectId != player.CharacterObjectId)
+            characterObjectId != player.CharacterObjectId ||
+            isEmbedded && party.LordPartyComponent?.Owner == hero)
         {
             restoredPlayer = new Player(
                 player.ControllerId,
                 player.HeroId,
                 partyId,
                 clanId,
-                characterObjectId);
+                characterObjectId,
+                player.PersonalClanId,
+                isEmbedded && party.LordPartyComponent?.Owner != hero
+                    ? PlayerClanMembershipMode.Embedded
+                    : isEmbedded
+                        ? PlayerClanMembershipMode.IndependentParty
+                        : player.ClanMembershipMode,
+                isEmbedded && party.LordPartyComponent?.Owner == hero || player.EmergencyDetached);
         }
 
         return true;
@@ -229,6 +239,25 @@ internal class PlayerPartyRestorer : IPlayerPartyRestorer
             party.PrisonRoster == null ||
             party.ItemRoster == null ||
             party.LordPartyComponent?.Owner != hero)
+        {
+            return false;
+        }
+
+        if (party.PartyComponent.MobileParty == null)
+            party.PartyComponent.MobileParty = party;
+
+        return party.PartyComponent.MobileParty == party;
+    }
+
+    private static bool IsReadyEmbeddedParty(MobileParty party, Hero hero)
+    {
+        if (party?.Party == null ||
+            party.Party.MobileParty != party ||
+            party.PartyComponent == null ||
+            party.MemberRoster == null ||
+            party.PrisonRoster == null ||
+            party.ItemRoster == null ||
+            party.MemberRoster.GetTroopCount(hero.CharacterObject) == 0)
         {
             return false;
         }

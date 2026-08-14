@@ -40,7 +40,8 @@ namespace Coop.Tests.Server.Services.Save
 
             var players = new Player[]
             {
-                new Player("MyPlayer1", "MyHero1","MyParty1", "MyClan1", "MyCharacter1"),
+                new Player("MyPlayer1", "MyHero1","MyParty1", "MyClan1", "MyCharacter1",
+                    "MyPersonalClan1", PlayerClanMembershipMode.Embedded, true),
                 new Player("MyPlayer2", "MyHero2","MyParty2", "MyClan2", "MyCharacter2"),
             };
 
@@ -116,7 +117,14 @@ namespace Coop.Tests.Server.Services.Save
                 Assert.Equal(sessionData.Players[i].HeroId, savedSession.Players[i].HeroId);
                 Assert.Equal(sessionData.Players[i].MobilePartyId, savedSession.Players[i].MobilePartyId);
                 Assert.Equal(sessionData.Players[i].ClanId, savedSession.Players[i].ClanId);
+                Assert.Equal(sessionData.Players[i].PersonalClanId, savedSession.Players[i].PersonalClanId);
+                Assert.Equal(sessionData.Players[i].ClanMembershipMode, savedSession.Players[i].ClanMembershipMode);
+                Assert.Equal(sessionData.Players[i].EmergencyDetached, savedSession.Players[i].EmergencyDetached);
             }
+
+            Assert.Equal("MyClan2", savedSession.Players[1].PersonalClanId);
+            Assert.Equal(PlayerClanMembershipMode.PersonalClan, savedSession.Players[1].ClanMembershipMode);
+            Assert.False(savedSession.Players[1].EmergencyDetached);
         }
 
         [Fact]

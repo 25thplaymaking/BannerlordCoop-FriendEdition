@@ -12,6 +12,7 @@ using System;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using TaleWorlds.CampaignSystem.Party;
+using TaleWorlds.CampaignSystem;
 using Xunit;
 
 namespace GameInterface.Tests.Services.Players;
@@ -295,6 +296,78 @@ public class PlayerManagerTests
 
         Assert.False(playerManager.ReplacePlayer(superseded, replacement));
         Assert.Same(current, Assert.Single(playerManager.Players));
+    }
+
+    [Fact]
+    public void AddPlayer_EmbeddedMember_OnlyClaimsHero()
+    {
+        var hero = ObjectHelper.SkipConstructor<Hero>();
+        var party = ObjectHelper.SkipConstructor<MobileParty>();
+        var clan = ObjectHelper.SkipConstructor<Clan>();
+        var playerManager = CreatePlayerManager(out var objectManager);
+        Hero resolvedHero = hero;
+        MobileParty resolvedParty = party;
+        Clan resolvedClan = clan;
+        objectManager.Setup(manager => manager.TryGetObjectWithLogging("Hero", out resolvedHero)).Returns(true);
+        objectManager.Setup(manager => manager.TryGetObjectWithLogging("LeaderParty", out resolvedParty)).Returns(true);
+        objectManager.Setup(manager => manager.TryGetObjectWithLogging("JoinedClan", out resolvedClan)).Returns(true);
+
+        var player = new Player(
+            ControllerId, "Hero", "LeaderParty", "JoinedClan", "Character", "PersonalClan",
+            PlayerClanMembershipMode.Embedded);
+
+        var playerObjects = GetPlayerObjects();
+        try
+        {
+            Assert.True(playerManager.AddPlayer(player));
+            Assert.True(playerManager.Contains(hero));
+            Assert.False(playerManager.Contains(party));
+            Assert.False(playerManager.Contains(clan));
+        }
+        finally
+        {
+            playerObjects.Remove(hero);
+            playerObjects.Remove(party);
+            playerObjects.Remove(clan);
+        }
+    }
+
+    [Fact]
+    public void ReplacePlayer_PersonalClanToEmbedded_ReleasesPartyAndClanClaims()
+    {
+        var hero = ObjectHelper.SkipConstructor<Hero>();
+        var party = ObjectHelper.SkipConstructor<MobileParty>();
+        var clan = ObjectHelper.SkipConstructor<Clan>();
+        var playerManager = CreatePlayerManager(out var objectManager);
+        Hero resolvedHero = hero;
+        MobileParty resolvedParty = party;
+        Clan resolvedClan = clan;
+        objectManager.Setup(manager => manager.TryGetObjectWithLogging("Hero", out resolvedHero)).Returns(true);
+        objectManager.Setup(manager => manager.TryGetObjectWithLogging("Party", out resolvedParty)).Returns(true);
+        objectManager.Setup(manager => manager.TryGetObjectWithLogging("Clan", out resolvedClan)).Returns(true);
+        objectManager.Setup(manager => manager.TryGetObject("Party", out resolvedParty)).Returns(true);
+        objectManager.Setup(manager => manager.TryGetObject("Clan", out resolvedClan)).Returns(true);
+
+        var personal = new Player(ControllerId, "Hero", "Party", "Clan", "Character");
+        var embedded = new Player(
+            ControllerId, "Hero", "Party", "Clan", "Character", "Clan",
+            PlayerClanMembershipMode.Embedded);
+
+        var playerObjects = GetPlayerObjects();
+        try
+        {
+            Assert.True(playerManager.AddPlayer(personal));
+            Assert.True(playerManager.ReplacePlayer(personal, embedded));
+            Assert.True(playerManager.Contains(hero));
+            Assert.False(playerManager.Contains(party));
+            Assert.False(playerManager.Contains(clan));
+        }
+        finally
+        {
+            playerObjects.Remove(hero);
+            playerObjects.Remove(party);
+            playerObjects.Remove(clan);
+        }
     }
 
     private static ConditionalWeakTable<object, ControlledObjectInfo> GetPlayerObjects() =>

@@ -49,6 +49,12 @@ namespace Coop.IntegrationTests.Kingdoms
             var server = TestEnvironment.Server;
             var kingdom = client1.CreateRegisteredObject<Kingdom>("kingdom1");
             server.CreateRegisteredObject<Kingdom>("kingdom1");
+            // Every client must be able to RESOLVE the kingdom: the client decision gate now
+            // fails closed on an unresolvable kingdom id (the Clan-under-a-kingdom-id cast fix).
+            foreach (var otherClient in TestEnvironment.Clients.Skip(1))
+            {
+                otherClient.CreateRegisteredObject<Kingdom>("kingdom1");
+            }
             var decision = CreateDecision(client1);
             var triggerMessage = new DecisionAdded(kingdom, decision, false, 0f);
             // Act

@@ -403,9 +403,15 @@ The local and deployment gates are green; rendered verification must use launche
 - **Channel history note:** Gemini's 2026-08-14 02:31 UTC dispatch published to BOTH channels —
   the stable feed friends run has been on Phase J source `1737916f6` since 02:35 UTC (that is the
   build on five of last night's crash reports). This update supersedes it.
-- **Ship path:** push → automatic nightly (source `d8a999910`); on CI green, dispatch
-  `launcher-release.yml` with `channels: stable` on the same source; verify manifest version +
-  ZIP SHA-256 against the workflow output.
+- **SHIPPED ✅ (2026-08-14 05:04 UTC):** push CI green (run `31771410901`, automatic nightly);
+  stable dispatch run `31771623816` passed on source `3d5c2ad63` and published launcher manifest
+  **`2026.08.14.0504`**, ZIP SHA-256
+  `20688207b4ee142b953af46a167bfc916144824ea69da40630c9813a80389a23` — independently downloaded
+  and hash-verified. Server untouched (`NRestarts` unaffected; client-only scope confirmed above).
+- **Still requires a player action (rendered verification):** loot a battle → transfer items →
+  server-side loot totals stay consistent (no `Failed to get id for Item` in the client log);
+  close inventory near an encounter (the 0xC0000005 window) — and if an AV still occurs, ACCEPT
+  the TW dump prompt this time; the preserved crash-time logs + one dump decide the diagnosis.
 
 ### Still open after this phase
 - **0xC0000005 root cause unproven** — need one accepted dump from the next occurrence.

@@ -589,6 +589,10 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
             Assert.Same(responderParty.MobileParty, initiatorHero.PartyBelongedTo);
             Assert.Equal(PlayerClanMembershipMode.Embedded, player.ClanMembershipMode);
         });
+
+        foreach (var instance in new[] { Server, client1, client2 })
+            instance.Call(() => Assert.False(
+                instance.ObjectManager.TryGetObject<MobileParty>(initiatorPartyId, out _)));
     }
 
     [Fact]

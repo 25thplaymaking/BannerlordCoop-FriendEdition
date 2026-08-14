@@ -107,15 +107,17 @@ internal sealed class PlayerClanMembershipService : IPlayerClanMembershipService
         AddHeroToPartyAction.Apply(applicantHero, targetParty);
         using (new AllowedThread())
             applicantHero.Gold = leaderHero.Gold;
-        applicantParty.MobileParty.RemoveParty();
         messageBroker.Publish(this, new PlayerRegistrationChanged(replacement));
+        DestroyPartyAction.Apply(null, applicantParty.MobileParty);
         return true;
     }
 
     public bool TrySeparate(Player member, bool emergency, out Player separated)
     {
         separated = member;
-        if (member == null || member.ClanMembershipMode != PlayerClanMembershipMode.Embedded) return false;
+        if (member == null || member.ClanMembershipMode != PlayerClanMembershipMode.Embedded ||
+            !playerManager.TryGetPlayer(member.ControllerId, out var current) || !ReferenceEquals(member, current))
+            return false;
         if (!objectManager.TryGetObjectWithLogging(member.HeroId, out Hero hero)) return false;
         if (!objectManager.TryGetObjectWithLogging(member.MobilePartyId, out MobileParty sharedParty)) return false;
         if (!objectManager.TryGetObjectWithLogging(member.ClanId, out Clan clan)) return false;
@@ -272,7 +274,7 @@ internal sealed class PlayerClanMembershipService : IPlayerClanMembershipService
                 -element.Number,
                 false,
                 -element.WoundedNumber,
-                -element.Xp,
+                0,
                 true,
                 -1);
         }

@@ -123,12 +123,18 @@ internal sealed class PlayerClanMembershipHandler : IHandler
         if (
             !playerManager.TryGetPlayer(peer, out var responder) ||
             responder.ControllerId != request.LeaderControllerId ||
-            !response.Approved ||
-            !playerManager.TryGetPlayer(request.MemberControllerId, out var member))
+            !response.Approved)
             return;
 
-        GameThread.RunSafe(
-            () => membershipService.TrySeparate(member, emergency: false, out _),
+        GameThread.RunSafe(() =>
+        {
+            if (!playerManager.TryGetPlayer(request.MemberControllerId, out var member) ||
+                !membershipService.TryGetClanLeader(member, out var currentLeader) ||
+                currentLeader.ControllerId != request.LeaderControllerId)
+                return;
+
+            membershipService.TrySeparate(member, emergency: false, out _);
+        },
             context: "Create independent player clan party");
     }
 

@@ -1,7 +1,12 @@
 ﻿using Common.Logging;
+using Common;
 using Common.Messaging;
 using GameInterface.Services.Clans.Messages;
 using GameInterface.Services.Heroes.Extensions;
+using GameInterface.Services.Players;
+using GameInterface.Services.Players.Data;
+using GameInterface.Services.Players.Messages;
+using GameInterface.Services.ObjectManager;
 using HarmonyLib;
 using Serilog;
 using System.Collections.Generic;
@@ -10,6 +15,7 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.ViewModelCollection.ClanManagement;
 using TaleWorlds.CampaignSystem.ViewModelCollection.ClanManagement.Categories;
+using TaleWorlds.Core;
 using TaleWorlds.Library;
 
 namespace GameInterface.Services.Clans.Patches;
@@ -25,6 +31,13 @@ internal class ClanPartiesVMPatches
     [HarmonyPrefix]
     public static bool CreateNewClanPartyPrefix(ClanPartiesVM __instance, Hero newLeader, int partyGoldLowerThreshold)
     {
+        if (newLeader == Hero.MainHero && TryGetLocalPlayer(out var localPlayer) &&
+            localPlayer.ClanMembershipMode == PlayerClanMembershipMode.Embedded)
+        {
+            ShowJoinedPlayerActions();
+            return false;
+        }
+
         // Reject forming a new party with a player hero
         if (newLeader != null && newLeader.IsPlayerHero())
         {
@@ -102,8 +115,23 @@ internal class ClanPartiesVMPatches
 
     [HarmonyPatch(nameof(ClanPartiesVM.OnDisbandCurrentParty))]
     [HarmonyPrefix]
-    public static bool OnDisbandCurrentPartyPrefix()
+    public static bool OnDisbandCurrentPartyPrefix(ClanPartiesVM __instance)
     {
+        if (__instance.CurrentSelectedParty?.Party?.LeaderHero == Hero.MainHero &&
+            TryGetLocalPlayer(out var localPlayer) &&
+            localPlayer.ClanMembershipMode == PlayerClanMembershipMode.IndependentParty)
+        {
+            InformationManager.ShowInquiry(new InquiryData(
+                "Leave clan",
+                "Return to your personal clan? Assets transferred when you joined will remain with this clan.",
+                true,
+                true,
+                "Leave Clan",
+                "Cancel",
+                () => MessageBroker.Instance.Publish(null, new LeavePlayerClanSelected()),
+                null));
+        }
+
         // Block and implement as part of OnPartyLeaderChanged to use correct party
         // instead of currently selected (which can switch back to the player's party)
         return false;
@@ -121,7 +149,7 @@ internal class ClanPartiesVMPatches
     public static void GetNewPartyLeaderCandidatesPostfix(ref IEnumerable<ClanCardSelectionItemInfo> __result)
     {
         // Remove player heroes from card selection
-        __result = WithoutPlayerHeroes(__result);
+        __result = WithoutPlayerHeroes(__result, allowLocalEmbeddedPlayer: true);
     }
 
     [HarmonyPatch(nameof(ClanPartiesVM.GetChangeLeaderCandidates))]
@@ -129,15 +157,80 @@ internal class ClanPartiesVMPatches
     public static void GetChangeLeaderCandidatesPostfix(ref IEnumerable<ClanCardSelectionItemInfo> __result)
     {
         // Remove player heroes from card selection
-        __result = WithoutPlayerHeroes(__result);
+        __result = WithoutPlayerHeroes(__result, allowLocalEmbeddedPlayer: false);
     }
 
-    private static IEnumerable<ClanCardSelectionItemInfo> WithoutPlayerHeroes(IEnumerable<ClanCardSelectionItemInfo> candidates)
+    [HarmonyPatch(nameof(ClanPartiesVM.GetCanDisbandParty))]
+    [HarmonyPostfix]
+    public static void GetCanDisbandPartyPostfix(ClanPartiesVM __instance, ref bool __result)
+    {
+        if (__instance.CurrentSelectedParty?.Party?.LeaderHero == Hero.MainHero &&
+            TryGetLocalPlayer(out var localPlayer) &&
+            localPlayer.ClanMembershipMode == PlayerClanMembershipMode.IndependentParty)
+            __result = true;
+    }
+
+    private static IEnumerable<ClanCardSelectionItemInfo> WithoutPlayerHeroes(
+        IEnumerable<ClanCardSelectionItemInfo> candidates,
+        bool allowLocalEmbeddedPlayer)
     {
         if (candidates == null) return candidates;
 
         return candidates
-            .Where(candidate => !(candidate.Identifier is Hero hero && hero.IsPlayerHero()))
+            .Where(candidate => !(candidate.Identifier is Hero hero && hero.IsPlayerHero()) ||
+                                allowLocalEmbeddedPlayer && hero == Hero.MainHero && IsLocalEmbeddedPlayer())
             .ToList();
+    }
+
+    private static bool IsLocalEmbeddedPlayer() =>
+        TryGetLocalPlayer(out var player) &&
+        player.ClanMembershipMode == PlayerClanMembershipMode.Embedded;
+
+    private static bool TryGetLocalPlayer(out Player player)
+    {
+        player = null;
+        if (Hero.MainHero == null ||
+            !ContainerProvider.TryResolve<IPlayerManager>(out var playerManager) ||
+            !ContainerProvider.TryResolve<IObjectManager>(out var objectManager) ||
+            !objectManager.TryGetId(Hero.MainHero, out var heroId))
+            return false;
+
+        player = playerManager.Players.SingleOrDefault(candidate => candidate.HeroId == heroId);
+        return player != null;
+    }
+
+    private static void ShowJoinedPlayerActions()
+    {
+        var choices = new List<InquiryElement>
+        {
+            new InquiryElement("party", "Request an independent party", null),
+            new InquiryElement("leave", "Leave the clan", null),
+        };
+        MBInformationManager.ShowMultiSelectionInquiry(new MultiSelectionInquiryData(
+            "Clan membership",
+            "Choose how you want to continue.",
+            choices,
+            true,
+            1,
+            1,
+            "Continue",
+            "Cancel",
+            selected =>
+            {
+                if ((string)selected.Single().Identifier == "party")
+                    MessageBroker.Instance.Publish(null, new IndependentPlayerPartySelected());
+                else
+                    InformationManager.ShowInquiry(new InquiryData(
+                        "Leave clan",
+                        "Return to your personal clan? Transferred assets will not be returned.",
+                        true,
+                        true,
+                        "Leave Clan",
+                        "Cancel",
+                        () => MessageBroker.Instance.Publish(null, new LeavePlayerClanSelected()),
+                        null));
+            },
+            null),
+            pauseGameActiveState: true);
     }
 }

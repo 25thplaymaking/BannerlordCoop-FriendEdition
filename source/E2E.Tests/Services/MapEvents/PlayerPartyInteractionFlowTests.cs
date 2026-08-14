@@ -32,6 +32,7 @@ using GameInterface.Services.MobilePartyAIs.Patches;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.PartyComponents.Messages;
 using GameInterface.Services.Players;
+using GameInterface.Services.Players.Data;
 using GameInterface.Services.Stances.Messages;
 using GameInterface.Services.Villages.Interfaces;
 using GameInterface.Services.TroopRosters.Data;
@@ -450,10 +451,18 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
         Assert.Equal(PlayerPartyInteractionOutcomeType.Left, ended.OutcomeType);
     }
 
-    [Fact]
-    public void OfferServices_WithClanLeader_ShowsJoinClanDisabledAndNevermind()
+    [Theory]
+    [InlineData(1, false)]
+    [InlineData(2, true)]
+    public void OfferServices_RequiresTierTwoClanLeader(int clanTier, bool expectedEnabled)
     {
-        var (client1, _, initiatorPartyId, responderPartyId) = CreateTwoPlayerParties();
+        var (client1, _, _, _, initiatorPartyId, responderPartyId) = CreateTwoMembershipPlayerParties();
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<PartyBase>(responderPartyId, out var responderParty));
+            responderParty.LeaderHero.Clan.Tier = clanTier;
+            responderParty.LeaderHero.Clan.SetLeader(responderParty.LeaderHero);
+        });
 
         RequestInteraction(client1, initiatorPartyId, responderPartyId);
         var sessionId = Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionStarted>().Single().SessionId;
@@ -472,7 +481,7 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
         {
             Assert.Equal(PlayerPartyInteractionPhase.OfferServices, PlayerPartyInteractionDialogState.Phase);
             Assert.True(PlayerPartyInteractionDialogState.HasOption(PlayerPartyInteractionOption.JoinClan));
-            Assert.False(PlayerPartyInteractionDialogState.IsOptionEnabled(PlayerPartyInteractionOption.JoinClan));
+            Assert.Equal(expectedEnabled, PlayerPartyInteractionDialogState.IsOptionEnabled(PlayerPartyInteractionOption.JoinClan));
             Assert.True(PlayerPartyInteractionDialogState.HasOption(PlayerPartyInteractionOption.Vassal));
             Assert.False(PlayerPartyInteractionDialogState.IsOptionEnabled(PlayerPartyInteractionOption.Vassal));
             Assert.True(PlayerPartyInteractionDialogState.HasOption(PlayerPartyInteractionOption.Leave));
@@ -540,9 +549,15 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
     }
 
     [Fact]
-    public void ClanServiceProposal_Disabled_DoesNotSubmitOrJoinResponderClan()
+    public void ClanServiceProposal_Accepted_EmbedsApplicantInLeaderParty()
     {
-        var (client1, _, initiatorPartyId, responderPartyId) = CreateTwoPlayerParties();
+        var (client1, client2, initiatorHeroId, _, initiatorPartyId, responderPartyId) = CreateTwoMembershipPlayerParties();
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<PartyBase>(responderPartyId, out var responderParty));
+            responderParty.LeaderHero.Clan.Tier = 2;
+            responderParty.LeaderHero.Clan.SetLeader(responderParty.LeaderHero);
+        });
 
         RequestInteraction(client1, initiatorPartyId, responderPartyId);
         var sessionId = Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionStarted>().Single().SessionId;
@@ -553,25 +568,129 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
 
         OpenServiceOptions(client1, initialState);
 
-        Server.NetworkSentMessages.Clear();
-        client1.NetworkSentMessages.Clear();
         SubmitCurrentDialogOption(client1, PlayerPartyInteractionOption.JoinClan);
+        var warning = Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionState>().Last(state =>
+            state.SessionId == sessionId &&
+            state.PartyId == initiatorPartyId);
+        Assert.Equal(PlayerPartyInteractionPhase.ClanJoinConfirm, warning.Phase);
+        Assert.Contains(PlayerPartyInteractionOption.ConfirmJoinClan, warning.EnabledOptions);
+        SubmitOption(client1, sessionId, initiatorPartyId, PlayerPartyInteractionOption.ConfirmJoinClan);
+        SubmitOption(client2, sessionId, responderPartyId, PlayerPartyInteractionOption.AcceptProposal);
 
-        Assert.Empty(client1.NetworkSentMessages.GetMessages<NetworkSubmitPlayerPartyInteractionOption>());
-        Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionState>());
-        Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionEnded>());
+        var ended = Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionEnded>().Single();
+        Assert.Equal(PlayerPartyInteractionOutcomeType.ClanJoinAccepted, ended.OutcomeType);
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<Hero>(initiatorHeroId, out var initiatorHero));
+            Assert.True(Server.ObjectManager.TryGetObject<PartyBase>(responderPartyId, out var responderParty));
+            Assert.True(Server.Resolve<IPlayerManager>().TryGetPlayer("PlayerOne", out var player));
 
-        SubmitOption(client1, sessionId, initiatorPartyId, PlayerPartyInteractionOption.JoinClan);
+            Assert.Same(responderParty.LeaderHero.Clan, initiatorHero.Clan);
+            Assert.Same(responderParty.MobileParty, initiatorHero.PartyBelongedTo);
+            Assert.Equal(PlayerClanMembershipMode.Embedded, player.ClanMembershipMode);
+        });
+    }
 
-        Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionState>());
-        Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionEnded>());
+    [Fact]
+    public void MarriageProposal_Accepted_MarriesPlayersWithoutMovingClans()
+    {
+        var (client1, client2, initiatorHeroId, responderHeroId, initiatorPartyId, responderPartyId) =
+            CreateTwoMembershipPlayerParties();
+        var initiatorClanLeaderId = TestEnvironment.CreateRegisteredObject<Hero>();
+        var responderClanLeaderId = TestEnvironment.CreateRegisteredObject<Hero>();
+        string? initiatorClanId = null;
+        string? responderClanId = null;
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<Hero>(initiatorHeroId, out var initiator));
+            Assert.True(Server.ObjectManager.TryGetObject<Hero>(responderHeroId, out var responder));
+            Assert.True(Server.ObjectManager.TryGetObject<Hero>(initiatorClanLeaderId, out var initiatorClanLeader));
+            Assert.True(Server.ObjectManager.TryGetObject<Hero>(responderClanLeaderId, out var responderClanLeader));
+            initiatorClanLeader.Clan = initiator.Clan;
+            responderClanLeader.Clan = responder.Clan;
+            initiator.Clan.SetLeader(initiatorClanLeader);
+            responder.Clan.SetLeader(responderClanLeader);
+            initiator.SetBirthDay(CampaignTime.YearsFromNow(-30f));
+            responder.SetBirthDay(CampaignTime.YearsFromNow(-25f));
+            initiator.Occupation = Occupation.Lord;
+            responder.Occupation = Occupation.Lord;
+            responder.IsFemale = !initiator.IsFemale;
+            Assert.True(
+                Campaign.Current.Models.MarriageModel.IsCoupleSuitableForMarriage(initiator, responder),
+                $"InitiatorCanMarry={initiator.CanMarry()}, ResponderCanMarry={responder.CanMarry()}, " +
+                $"InitiatorAge={initiator.Age}, ResponderAge={responder.Age}, " +
+                $"InitiatorClan={initiator.Clan?.StringId}, ResponderClan={responder.Clan?.StringId}, " +
+                $"SameGender={initiator.IsFemale == responder.IsFemale}");
+            Assert.True(Server.ObjectManager.TryGetId(initiator.Clan, out initiatorClanId));
+            Assert.True(Server.ObjectManager.TryGetId(responder.Clan, out responderClanId));
+        });
+
+        RequestInteraction(client1, initiatorPartyId, responderPartyId);
+        var sessionId = Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionStarted>().Single().SessionId;
+        SubmitOption(client1, sessionId, initiatorPartyId, PlayerPartyInteractionOption.MarriageProposal);
+        SubmitOption(client2, sessionId, responderPartyId, PlayerPartyInteractionOption.AcceptProposal);
+
+        Assert.Equal(
+            PlayerPartyInteractionOutcomeType.MarriageAccepted,
+            Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionEnded>().Single().OutcomeType);
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<Hero>(initiatorHeroId, out var initiator));
+            Assert.True(Server.ObjectManager.TryGetObject<Hero>(responderHeroId, out var responder));
+            Assert.Same(responder, initiator.Spouse);
+            Assert.Same(initiator, responder.Spouse);
+            Assert.True(Server.ObjectManager.TryGetId(initiator.Clan, out var currentInitiatorClanId));
+            Assert.True(Server.ObjectManager.TryGetId(responder.Clan, out var currentResponderClanId));
+            Assert.Equal(initiatorClanId, currentInitiatorClanId);
+            Assert.Equal(responderClanId, currentResponderClanId);
+        });
+    }
+
+    [Fact]
+    public void JoinedPlayer_CanSeparateThenLeaveWithoutRecoveringTransferredGold()
+    {
+        var (client1, client2, initiatorHeroId, _, initiatorPartyId, responderPartyId) =
+            CreateTwoMembershipPlayerParties();
+        string? personalClanId = null;
         Server.Call(() =>
         {
             Assert.True(Server.ObjectManager.TryGetObject<PartyBase>(initiatorPartyId, out var initiatorParty));
             Assert.True(Server.ObjectManager.TryGetObject<PartyBase>(responderPartyId, out var responderParty));
+            responderParty.LeaderHero.Clan.Tier = 6;
+            responderParty.LeaderHero.Clan.SetLeader(responderParty.LeaderHero);
+            responderParty.MobileParty.Position = new CampaignVec2(Vec2.Zero, true);
+            initiatorParty.LeaderHero.Gold = 200;
+            responderParty.LeaderHero.Gold = 1000;
+            Assert.True(Server.ObjectManager.TryGetId(initiatorParty.LeaderHero.Clan, out personalClanId));
+        });
 
-            Assert.NotEqual(responderParty.LeaderHero.Clan, initiatorParty.LeaderHero.Clan);
-            Assert.NotEqual(responderParty.LeaderHero.Clan, initiatorParty.MobileParty.ActualClan);
+        RequestInteraction(client1, initiatorPartyId, responderPartyId);
+        var sessionId = Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionStarted>().Single().SessionId;
+        SubmitOption(client1, sessionId, initiatorPartyId, PlayerPartyInteractionOption.JoinClan);
+        SubmitOption(client1, sessionId, initiatorPartyId, PlayerPartyInteractionOption.ConfirmJoinClan);
+        SubmitOption(client2, sessionId, responderPartyId, PlayerPartyInteractionOption.AcceptProposal);
+
+        Server.Call(() =>
+        {
+            var players = Server.Resolve<IPlayerManager>();
+            var membership = Server.Resolve<IPlayerClanMembershipService>();
+            Assert.True(Server.ObjectManager.TryGetObject<Hero>(initiatorHeroId, out var initiatorHero));
+            Assert.True(Server.ObjectManager.TryGetObject<PartyBase>(responderPartyId, out var responderParty));
+            Assert.True(players.TryGetPlayer("PlayerOne", out var embedded));
+            Assert.Equal(1200, initiatorHero.Gold);
+            Assert.Equal(1200, responderParty.LeaderHero.Gold);
+
+            Assert.True(membership.TrySeparate(embedded, emergency: false, out var independent));
+            Assert.Equal(PlayerClanMembershipMode.IndependentParty, independent.ClanMembershipMode);
+            Assert.NotEqual(embedded.MobilePartyId, independent.MobilePartyId);
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(independent.MobilePartyId, out var independentParty));
+            Assert.Same(initiatorHero, independentParty.LeaderHero);
+
+            Assert.True(membership.TryLeave(independent, out var returned));
+            Assert.Equal(PlayerClanMembershipMode.PersonalClan, returned.ClanMembershipMode);
+            Assert.Equal(personalClanId, returned.ClanId);
+            Assert.Equal(0, initiatorHero.Gold);
+            Assert.Equal(1200, responderParty.LeaderHero.Gold);
         });
     }
 
@@ -620,7 +739,7 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
 
     [Theory]
     [InlineData(PlayerPartyInteractionProposal.Trade, "I have a proposal that may benefit us both.")]
-    [InlineData(PlayerPartyInteractionProposal.JoinClan, "(COMING SOON) I wish to offer my services in your clan.")]
+    [InlineData(PlayerPartyInteractionProposal.JoinClan, "I wish to join your clan and travel in your party.")]
     [InlineData(PlayerPartyInteractionProposal.Vassal, "I wish to swear my allegiance to your majesty.")]
     public void ProposalPending_DialogText_ShowsInitiatorSelectedLine(
         PlayerPartyInteractionProposal proposal,
@@ -3441,6 +3560,54 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
     {
         var (client1, client2, _, _, initiatorPartyId, responderPartyId) = CreateTwoPlayerPartiesWithHeroes();
         return (client1, client2, initiatorPartyId, responderPartyId);
+    }
+
+    private (EnvironmentInstance client1, EnvironmentInstance client2, string initiatorHeroId, string responderHeroId, string initiatorPartyId, string responderPartyId) CreateTwoMembershipPlayerParties()
+    {
+        var clients = Clients.ToArray();
+        var client1 = clients[0];
+        var client2 = clients[1];
+        client1.Resolve<IControllerIdProvider>().SetControllerId("PlayerOne");
+        client2.Resolve<IControllerIdProvider>().SetControllerId("PlayerTwo");
+
+        var first = CreateMembershipPlayerParty("PlayerOne");
+        var second = CreateMembershipPlayerParty("PlayerTwo");
+        Server.Call(() =>
+        {
+            Server.Resolve<IPlayerManager>().SetPeer("PlayerOne", client1.NetPeer);
+            Server.Resolve<IPlayerManager>().SetPeer("PlayerTwo", client2.NetPeer);
+        });
+
+        return (
+            client1,
+            client2,
+            first.HeroId,
+            second.HeroId,
+            GetPartyBaseId(Server, first.MobilePartyId),
+            GetPartyBaseId(Server, second.MobilePartyId));
+    }
+
+    private (string HeroId, string MobilePartyId) CreateMembershipPlayerParty(string controllerId)
+    {
+        var mobilePartyId = TestEnvironment.CreateRegisteredObject<MobileParty>();
+        string? heroId = null;
+        string? clanId = null;
+        string? characterId = null;
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(mobilePartyId, out var party));
+            Assert.True(Server.ObjectManager.TryGetId(party.LeaderHero, out heroId));
+            Assert.True(Server.ObjectManager.TryGetId(party.LeaderHero.Clan, out clanId));
+            Assert.True(Server.ObjectManager.TryGetId(party.LeaderHero.CharacterObject, out characterId));
+        });
+
+        void Register(EnvironmentInstance instance) => instance.Call(() =>
+            Assert.True(instance.Resolve<IPlayerManager>().AddPlayer(new Player(
+                controllerId, heroId!, mobilePartyId, clanId!, characterId!))));
+
+        Register(Server);
+        foreach (var client in Clients) Register(client);
+        return (heroId!, mobilePartyId);
     }
 
     private (EnvironmentInstance client1, EnvironmentInstance client2, string initiatorHeroId, string responderHeroId, string initiatorPartyId, string responderPartyId) CreateTwoPlayerPartiesWithHeroes()

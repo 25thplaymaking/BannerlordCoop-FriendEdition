@@ -88,6 +88,7 @@ internal class LordPartyComponentHandler : IHandler
         var instance = payload.What.Instance;
         var initArgs = payload.What.InitArgs;
 
+        if (instance == null || initArgs == null) return;
         if (!objectManager.TryGetIdWithLogging(instance, out var lordPartyComponentId)) return;
 
         // SpawnSettlement is optional; only resolve an id when one is present.

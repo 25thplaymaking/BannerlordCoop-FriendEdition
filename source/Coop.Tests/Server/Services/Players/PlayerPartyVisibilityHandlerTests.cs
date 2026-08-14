@@ -1,16 +1,22 @@
 ﻿using Common;
 using Common.Network;
+using Common.Network.Messages;
 using Common.Tests.Utils;
+using Coop.Tests.Mocks;
 using Coop.Core.Server.Services.Players.Handlers;
+using Coop.Core.Server.Connections.Messages;
 using Coop.Core.Server.Services.Save.Messages;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
 using GameInterface.Services.Players.Data;
+using GameInterface.Services.Players.Messages;
 using GameInterface.Services.SiegeEvents.Interfaces;
 using HarmonyLib;
 using Moq;
 using System;
+using System.Linq;
 using System.Runtime.Serialization;
+using System.Threading;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Siege;
@@ -80,7 +86,8 @@ public class PlayerPartyVisibilityHandlerTests : IDisposable
             playerManager.Object,
             objectManager.Object,
             Mock.Of<INetwork>(),
-            Mock.Of<ISiegeEventInterface>());
+            Mock.Of<ISiegeEventInterface>(),
+            Mock.Of<IPlayerClanMembershipService>());
 
         broker.Publish(this, new SavedPlayerRegistrationsRestored());
 
@@ -104,7 +111,8 @@ public class PlayerPartyVisibilityHandlerTests : IDisposable
             playerManager.Object,
             objectManager.Object,
             Mock.Of<INetwork>(),
-            Mock.Of<ISiegeEventInterface>());
+            Mock.Of<ISiegeEventInterface>(),
+            Mock.Of<IPlayerClanMembershipService>());
 
         broker.Publish(this, new SavedPlayerRegistrationsRestored());
 
@@ -135,12 +143,122 @@ public class PlayerPartyVisibilityHandlerTests : IDisposable
             playerManager.Object,
             objectManager.Object,
             Mock.Of<INetwork>(),
-            siegeEventInterface.Object);
+            siegeEventInterface.Object,
+            Mock.Of<IPlayerClanMembershipService>());
 
         broker.Publish(this, new SavedPlayerRegistrationsRestored());
 
         siegeEventInterface.Verify(value => value.BreakSiegeForPartyOnly(party), Times.Once);
         Assert.False(party.IsActive);
+    }
+
+    [Fact]
+    public void PlayerDisconnected_EmbeddedMember_DoesNotParkLeaderParty()
+    {
+        var peer = new TestNetwork().CreatePeer();
+        var player = new Player(
+            "Member", "Hero_Member", "Party_Leader", "Clan_Joined", "Character_Member",
+            "Clan_Personal", PlayerClanMembershipMode.Embedded);
+        var party = CreateParty();
+        var playerManager = new Mock<IPlayerManager>();
+        playerManager.Setup(manager => manager.TryGetPlayer(peer, out player)).Returns(true);
+        var objectManager = new Mock<IObjectManager>();
+        objectManager.Setup(manager => manager.TryGetObjectWithLogging(player.MobilePartyId, out party)).Returns(true);
+        var membership = new Mock<IPlayerClanMembershipService>();
+        var broker = new TestMessageBroker();
+        using var handler = new PlayerPartyVisibilityHandler(
+            broker,
+            playerManager.Object,
+            objectManager.Object,
+            Mock.Of<INetwork>(),
+            Mock.Of<ISiegeEventInterface>(),
+            membership.Object);
+
+        broker.Publish(this, new PlayerDisconnected(peer, default));
+
+        Assert.True(party.IsActive);
+        Assert.True(party.IsVisible);
+        playerManager.Verify(manager => manager.ClearPeer(peer), Times.Once);
+        membership.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public void PlayerDisconnected_ClanLeader_SeparatesEmbeddedMembersBeforeParking()
+    {
+        var peer = new TestNetwork().CreatePeer();
+        var leader = new Player("Leader", "Hero_Leader", "Party_Leader", "Clan_Joined", "Character_Leader");
+        var member = new Player(
+            "Member", "Hero_Member", "Party_Leader", "Clan_Joined", "Character_Member",
+            "Clan_Personal", PlayerClanMembershipMode.Embedded);
+        var separated = new Player(
+            "Member", "Hero_Member", "Party_Member", "Clan_Joined", "Character_Member",
+            "Clan_Personal", PlayerClanMembershipMode.IndependentParty, true);
+        var party = CreateParty();
+        var playerManager = new Mock<IPlayerManager>();
+        playerManager.SetupGet(manager => manager.Players).Returns(new[] { leader, member });
+        playerManager.Setup(manager => manager.TryGetPlayer(peer, out leader)).Returns(true);
+        var objectManager = new Mock<IObjectManager>();
+        objectManager.Setup(manager => manager.TryGetObjectWithLogging(leader.MobilePartyId, out party)).Returns(true);
+        var membership = new Mock<IPlayerClanMembershipService>();
+        membership.Setup(service => service.TrySeparate(member, true, out separated)).Returns(true);
+        var broker = new TestMessageBroker();
+        using var handler = new PlayerPartyVisibilityHandler(
+            broker,
+            playerManager.Object,
+            objectManager.Object,
+            Mock.Of<INetwork>(),
+            Mock.Of<ISiegeEventInterface>(),
+            membership.Object);
+
+        broker.Publish(this, new PlayerDisconnected(peer, default));
+
+        Assert.True(SpinWait.SpinUntil(
+            () => membership.Invocations.Any(invocation =>
+                invocation.Method.Name == nameof(IPlayerClanMembershipService.TrySeparate)),
+            TimeSpan.FromSeconds(5)));
+        Assert.Single(membership.Invocations, invocation =>
+            invocation.Method.Name == nameof(IPlayerClanMembershipService.TrySeparate));
+        Assert.False(party.IsActive);
+        Assert.False(party.IsVisible);
+    }
+
+    [Fact]
+    public void PlayerCampaignEntered_EmergencyMember_NotifiesAndClearsFlag()
+    {
+        var peer = new TestNetwork().CreatePeer();
+        var member = new Player(
+            "Member", "Hero_Member", "Party_Member", "Clan_Joined", "Character_Member",
+            "Clan_Personal", PlayerClanMembershipMode.IndependentParty, true);
+        var leader = new Player("Leader", "Hero_Leader", "Party_Leader", "Clan_Joined", "Character_Leader");
+        var party = CreateParty();
+        var playerManager = new Mock<IPlayerManager>();
+        playerManager.Setup(manager => manager.TryGetPlayer(peer, out member)).Returns(true);
+        playerManager.Setup(manager => manager.IsConnected(leader)).Returns(true);
+        playerManager.Setup(manager => manager.TryGetPeer(member.ControllerId, out peer)).Returns(true);
+        playerManager.Setup(manager => manager.ReplacePlayer(member, It.IsAny<Player>())).Returns(true);
+        var objectManager = new Mock<IObjectManager>();
+        objectManager.Setup(manager => manager.TryGetObjectWithLogging(member.MobilePartyId, out party)).Returns(true);
+        var membership = new Mock<IPlayerClanMembershipService>();
+        membership.Setup(service => service.TryGetClanLeader(member, out leader)).Returns(true);
+        var network = new Mock<INetwork>();
+        var broker = new TestMessageBroker();
+        using var handler = new PlayerPartyVisibilityHandler(
+            broker,
+            playerManager.Object,
+            objectManager.Object,
+            network.Object,
+            Mock.Of<ISiegeEventInterface>(),
+            membership.Object);
+
+        broker.Publish(this, new PlayerCampaignEntered(peer));
+
+        Assert.True(SpinWait.SpinUntil(
+            () => network.Invocations.Any(invocation => invocation.Method.Name == nameof(INetwork.Send)),
+            TimeSpan.FromSeconds(5)));
+        network.Verify(value => value.Send(peer, It.IsAny<ClanLeaderReturnedNotification>()), Times.Once);
+        playerManager.Verify(manager => manager.ReplacePlayer(
+            member,
+            It.Is<Player>(replacement => !replacement.EmergencyDetached)), Times.Once);
     }
 
     private static Player CreatePlayer() =>

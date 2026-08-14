@@ -11,6 +11,7 @@ using GameInterface.Services.MapEvents.Messages.Conversation;
 using GameInterface.Services.MobileParties.Extensions;
 using GameInterface.Services.MobileParties.Messages.Behavior;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.Players;
 using LiteNetLib;
 using SandBox.View.Map;
 using Serilog;
@@ -54,6 +55,7 @@ internal class PlayerPartyInteractionHandler : IHandler
     private readonly INetworkConfig configuration;
     private readonly IPlayerPartyHostileEncounterService hostileEncounterService;
     private readonly PlayerPartyInteractionOutcomeHandler outcomeHandler;
+    private readonly IPlayerClanMembershipService clanMembershipService;
 
     private readonly ConcurrentDictionary<string, PlayerPartyInteractionSession> sessionsById = new ConcurrentDictionary<string, PlayerPartyInteractionSession>();
     private readonly ConcurrentDictionary<string, string> sessionsByPartyId = new ConcurrentDictionary<string, string>();
@@ -71,7 +73,8 @@ internal class PlayerPartyInteractionHandler : IHandler
         ConversationPartyTracker conversationPartyTracker,
         INetworkConfig configuration,
         IPlayerPartyHostileEncounterService hostileEncounterService,
-        IKingdomMembershipState kingdomMembershipState)
+        IKingdomMembershipState kingdomMembershipState,
+        IPlayerClanMembershipService clanMembershipService)
     {
         this.messageBroker = messageBroker;
         this.network = network;
@@ -79,7 +82,8 @@ internal class PlayerPartyInteractionHandler : IHandler
         this.conversationPartyTracker = conversationPartyTracker;
         this.configuration = configuration;
         this.hostileEncounterService = hostileEncounterService;
-        outcomeHandler = new PlayerPartyInteractionOutcomeHandler(objectManager, kingdomMembershipState);
+        this.clanMembershipService = clanMembershipService;
+        outcomeHandler = new PlayerPartyInteractionOutcomeHandler(objectManager, kingdomMembershipState, clanMembershipService);
 
         messageBroker.Subscribe<NetworkPlayerPartyInteractionStarted>(Handle_NetworkPlayerPartyInteractionStarted);
         messageBroker.Subscribe<NetworkPlayerPartyInteractionState>(Handle_NetworkPlayerPartyInteractionState);
@@ -481,9 +485,44 @@ internal class PlayerPartyInteractionHandler : IHandler
     {
         if (TryHandleInitiatorLeaveOption(session, option)) return;
         if (option == PlayerPartyInteractionOption.OfferServices) return;
+        if (TryHandleInitiatorClanJoinOption(session, option)) return;
         if (TryHandleInitiatorHostileDemandOption(session, option)) return;
 
         HandleInitiatorProposalOption(session, option);
+    }
+
+    private bool TryHandleInitiatorClanJoinOption(
+        PlayerPartyInteractionSession session,
+        PlayerPartyInteractionOption option)
+    {
+        if (option == PlayerPartyInteractionOption.JoinClan)
+        {
+            if (!session.InitiatorEnabledOptions.Contains(option)) return true;
+            SendInitiatorState(
+                session,
+                PlayerPartyInteractionPhase.ClanJoinConfirm,
+                PlayerPartyInteractionProposal.JoinClan,
+                new[]
+                {
+                    PlayerPartyInteractionOption.ConfirmJoinClan,
+                    PlayerPartyInteractionOption.CancelJoinClan
+                });
+            return true;
+        }
+
+        if (option == PlayerPartyInteractionOption.ConfirmJoinClan)
+        {
+            HandleInitiatorProposalOption(session, PlayerPartyInteractionOption.JoinClan);
+            return true;
+        }
+
+        if (option == PlayerPartyInteractionOption.CancelJoinClan)
+        {
+            EndSession(session, PlayerPartyInteractionOutcomeType.Left);
+            return true;
+        }
+
+        return false;
     }
 
     private bool TryHandleInitiatorLeaveOption(PlayerPartyInteractionSession session, PlayerPartyInteractionOption option)
@@ -777,11 +816,18 @@ internal class PlayerPartyInteractionHandler : IHandler
         AddInitiatorOption(session, PlayerPartyInteractionOption.TradeProposal, enabled: true);
         AddInitiatorOption(
             session,
+            PlayerPartyInteractionOption.MarriageProposal,
+            clanMembershipService.CanMarry(initiatorParty, responderParty));
+        AddInitiatorOption(
+            session,
             PlayerPartyInteractionOption.TravelTogether,
             PlayerPartyTravelGroup.CanCreate(initiatorParty, responderParty));
         AddInitiatorOption(session, PlayerPartyInteractionOption.OfferServices, enabled: !session.IsHostile);
         AddInitiatorOption(session, PlayerPartyInteractionOption.HostileDemand, hostileEncounterService.CanStartHostileEncounter(initiatorParty, responderParty));
-        AddInitiatorOption(session, PlayerPartyInteractionOption.JoinClan, enabled: false);
+        AddInitiatorOption(
+            session,
+            PlayerPartyInteractionOption.JoinClan,
+            clanMembershipService.CanJoin(initiatorParty, responderParty));
         var vassalAvailable = IsVassalServiceAvailable(initiatorParty, responderParty, out var vassalUnavailableReason);
         session.VassalUnavailableReason = vassalUnavailableReason;
         AddInitiatorOption(
@@ -849,6 +895,8 @@ internal class PlayerPartyInteractionHandler : IHandler
                 return PlayerPartyInteractionProposal.HostileDemand;
             case PlayerPartyInteractionOption.TravelTogether:
                 return PlayerPartyInteractionProposal.TravelTogether;
+            case PlayerPartyInteractionOption.MarriageProposal:
+                return PlayerPartyInteractionProposal.Marriage;
             default:
                 return PlayerPartyInteractionProposal.None;
         }
@@ -864,6 +912,8 @@ internal class PlayerPartyInteractionHandler : IHandler
                 return PlayerPartyInteractionOutcomeType.VassalAccepted;
             case PlayerPartyInteractionProposal.TravelTogether:
                 return PlayerPartyInteractionOutcomeType.TravelTogetherAccepted;
+            case PlayerPartyInteractionProposal.Marriage:
+                return PlayerPartyInteractionOutcomeType.MarriageAccepted;
             default:
                 return PlayerPartyInteractionOutcomeType.None;
         }
@@ -881,6 +931,8 @@ internal class PlayerPartyInteractionHandler : IHandler
                 return PlayerPartyInteractionOutcomeType.VassalDeclined;
             case PlayerPartyInteractionProposal.TravelTogether:
                 return PlayerPartyInteractionOutcomeType.TravelTogetherDeclined;
+            case PlayerPartyInteractionProposal.Marriage:
+                return PlayerPartyInteractionOutcomeType.MarriageDeclined;
             default:
                 return PlayerPartyInteractionOutcomeType.None;
         }

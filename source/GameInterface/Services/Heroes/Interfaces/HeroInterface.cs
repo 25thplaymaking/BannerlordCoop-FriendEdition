@@ -23,6 +23,7 @@ using TaleWorlds.CampaignSystem.CharacterDevelopment;
 using TaleWorlds.CampaignSystem.Naval;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.Core;
+using TaleWorlds.Library;
 using TaleWorlds.ObjectSystem;
 
 namespace GameInterface.Services.Heroes.Interfaces;
@@ -31,6 +32,7 @@ public interface IHeroInterface : IGameAbstraction
 {
     byte[] PackageMainHero();
     void SwitchToPlayer(Player player);
+    void SwitchToHeir(Player heirPlayer, string deadHeroName);
     Hero ServerUnpackHero(byte[] bytes);
     Hero ClientUnpackHero(byte[] bytes, Player player);
 }
@@ -108,6 +110,30 @@ internal class HeroInterface : IHeroInterface
         blocking: true);
 
         return hero;
+    }
+
+    /// <summary>
+    /// Player-death succession: switch this client into the heir the server selected and tell
+    /// the player what happened. The registration rebind arrives separately through
+    /// <c>NetworkPlayerRegistrationUpdated</c> on every client; this runs only on the owner.
+    /// </summary>
+    public void SwitchToHeir(Player heirPlayer, string deadHeroName)
+    {
+        SwitchToPlayer(heirPlayer);
+
+        if (!objectManager.TryGetObjectWithLogging(heirPlayer.HeroId, out Hero heir)) return;
+
+        var message = new TaleWorlds.Localization.TextObject(
+            "{=CoopHeirSuccession}{DEAD_HERO} has died. You continue the bloodline as {HEIR}.");
+        message.SetTextVariable("DEAD_HERO", deadHeroName);
+        message.SetTextVariable("HEIR", heir.Name);
+        InformationManager.ShowInquiry(new InquiryData(
+            new TaleWorlds.Localization.TextObject("{=CoopHeirSuccessionTitle}Succession").ToString(),
+            message.ToString(),
+            isAffirmativeOptionShown: true,
+            isNegativeOptionShown: false,
+            new TaleWorlds.Localization.TextObject("{=yQtzabbe}Close").ToString(),
+            null, null, null));
     }
 
     public void SwitchToPlayer(Player player)

@@ -8,6 +8,7 @@ using HarmonyLib;
 using SandBox.CampaignBehaviors;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.Party;
@@ -366,7 +367,13 @@ internal class DefaultNotificationsCampaignBehaviorPatches
     [HarmonyPostfix]
     public static void OnHeroKilledPostfix(ref DefaultNotificationsCampaignBehavior __instance, Hero victimHero, Hero killer, KillCharacterAction.KillCharacterActionDetail detail, bool showNotification)
     {
-        if (ModInformation.IsClient || !IsValidPlayerClan(victimHero.Clan)) return;
+        // Broadcast every non-bandit clan hero death, not only player-clan victims: clients
+        // mirror the native killed log entry (encyclopedia) for all of them, and the death map
+        // notice gate is per-client FAMILY relation - a player's parent/spouse/sibling usually
+        // belongs to another clan, so a player-clan-only gate would drop exactly those notices.
+        // Each client filters locally; lord deaths are far too infrequent to matter on the wire.
+        if (ModInformation.IsClient
+            || victimHero.Clan == null || Clan.BanditFactions.Contains(victimHero.Clan)) return;
 
         var message = new NotifyHeroKilled(victimHero, killer, detail, showNotification);
         MessageBroker.Instance.Publish(__instance, message);

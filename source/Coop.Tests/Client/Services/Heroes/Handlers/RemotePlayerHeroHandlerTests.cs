@@ -1,6 +1,7 @@
 ﻿using Common.Tests.Utils;
 using Coop.Core.Client.Services.Heroes.Handlers;
 using Coop.Core.Client.Services.Heroes.Messages;
+using GameInterface.Services.Entity;
 using GameInterface.Services.Heroes.Interfaces;
 using GameInterface.Services.Players;
 using GameInterface.Services.Players.Data;
@@ -14,11 +15,14 @@ public class RemotePlayerHeroHandlerTests
     private readonly TestMessageBroker messageBroker = new();
     private readonly Mock<IHeroInterface> heroInterface = new();
     private readonly Mock<IPlayerManager> playerManager = new();
+    private readonly Mock<IControllerIdProvider> controllerIdProvider = new();
     private readonly RemotePlayerHeroHandler handler;
 
     public RemotePlayerHeroHandlerTests()
     {
-        handler = new RemotePlayerHeroHandler(messageBroker, heroInterface.Object, playerManager.Object);
+        controllerIdProvider.Setup(provider => provider.ControllerId).Returns("ctrl");
+        handler = new RemotePlayerHeroHandler(
+            messageBroker, heroInterface.Object, playerManager.Object, controllerIdProvider.Object);
     }
 
     private static NetworkNewPlayerHeroCreated NewHeroMessage(out Player player, out byte[] heroData)
@@ -86,5 +90,28 @@ public class RemotePlayerHeroHandlerTests
         messageBroker.Publish(this, new NetworkPlayerRegistrationUpdated(replacement));
 
         playerManager.Verify(manager => manager.ReplacePlayer(registered, replacement), Times.Once);
+    }
+
+    [Fact]
+    public void HeirSucceeded_OwnController_SwitchesIntoHeir()
+    {
+        var heirPlayer = new Player("ctrl", "heir1", "party1", "clan1", "char1");
+
+        messageBroker.Publish(this, new NetworkPlayerHeirSucceeded(heirPlayer, "Dead Hero"));
+
+        heroInterface.Verify(x => x.SwitchToHeir(heirPlayer, "Dead Hero"), Times.Once);
+    }
+
+    [Fact]
+    public void HeirSucceeded_OtherController_IsIgnored()
+    {
+        // Targeted at the owning peer, but a mis-delivered succession must never hijack this
+        // client's character.
+        var heirPlayer = new Player("other", "heir1", "party1", "clan1", "char1");
+
+        messageBroker.Publish(this, new NetworkPlayerHeirSucceeded(heirPlayer, "Dead Hero"));
+
+        heroInterface.Verify(
+            x => x.SwitchToHeir(It.IsAny<Player>(), It.IsAny<string>()), Times.Never);
     }
 }

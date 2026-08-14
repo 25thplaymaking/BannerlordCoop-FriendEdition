@@ -2,6 +2,7 @@
 using Common.Logging;
 using Common.Messaging;
 using Coop.Core.Client.Services.Heroes.Messages;
+using GameInterface.Services.Entity;
 using GameInterface.Services.Heroes.Interfaces;
 using GameInterface.Services.Players;
 using Serilog;
@@ -28,24 +29,53 @@ internal class RemotePlayerHeroHandler : IHandler
     private readonly IMessageBroker messageBroker;
     private readonly IHeroInterface heroInterface;
     private readonly IPlayerManager playerRegistry;
+    private readonly IControllerIdProvider controllerIdProvider;
 
     public RemotePlayerHeroHandler(
         IMessageBroker messageBroker,
         IHeroInterface heroInterface,
-        IPlayerManager playerRegistry)
+        IPlayerManager playerRegistry,
+        IControllerIdProvider controllerIdProvider)
     {
         this.messageBroker = messageBroker;
         this.heroInterface = heroInterface;
         this.playerRegistry = playerRegistry;
+        this.controllerIdProvider = controllerIdProvider;
 
         messageBroker.Subscribe<NetworkNewPlayerHeroCreated>(Handle_NetworkNewPlayerHeroCreated);
         messageBroker.Subscribe<NetworkPlayerRegistrationUpdated>(Handle_NetworkPlayerRegistrationUpdated);
+        messageBroker.Subscribe<NetworkPlayerHeirSucceeded>(Handle_NetworkPlayerHeirSucceeded);
     }
 
     public void Dispose()
     {
         messageBroker.Unsubscribe<NetworkNewPlayerHeroCreated>(Handle_NetworkNewPlayerHeroCreated);
         messageBroker.Unsubscribe<NetworkPlayerRegistrationUpdated>(Handle_NetworkPlayerRegistrationUpdated);
+        messageBroker.Unsubscribe<NetworkPlayerHeirSucceeded>(Handle_NetworkPlayerHeirSucceeded);
+    }
+
+    private void Handle_NetworkPlayerHeirSucceeded(MessagePayload<NetworkPlayerHeirSucceeded> payload)
+    {
+        var message = payload.What;
+
+        // Targeted at the owning peer, but stay defensive: switching characters on the wrong
+        // client would hijack its camera and party.
+        if (message.Player == null ||
+            message.Player.ControllerId != controllerIdProvider.ControllerId)
+        {
+            Logger.Error(
+                "Ignoring heir succession for controller {ControllerId}: not this client",
+                message.Player?.ControllerId);
+            return;
+        }
+
+        // The registration rebind (NetworkPlayerRegistrationUpdated) was broadcast before this
+        // message and both defer to the same game-thread queue, so control data is already
+        // consistent by the time the switch runs.
+        GameThread.RunSafe(() =>
+        {
+            heroInterface.SwitchToHeir(message.Player, message.DeadHeroName);
+        }, blocking: true, context: nameof(Handle_NetworkPlayerHeirSucceeded));
     }
 
     private void Handle_NetworkNewPlayerHeroCreated(MessagePayload<NetworkNewPlayerHeroCreated> payload)

@@ -1,4 +1,5 @@
 ﻿using Common;
+using Common.Network.Messages;
 using Common.Util;
 using Coop.Core.Client.Services.Kingdoms.Handlers;
 using Coop.Core.Client.Services.MobileParties.Messages;
@@ -394,6 +395,8 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         ConfigureClanInKingdom(targetPlayer.ClanId, targetKingdomId);
         EnsureKingdomRegisteredEverywhere(kingdomId);
         EnsureKingdomRegisteredEverywhere(targetKingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(client1, ControllerId);
+        TestEnvironment.ConnectRegisteredPlayer(client2, SecondControllerId);
 
         Server.Call(() =>
         {
@@ -477,6 +480,157 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         }
     }
 
+    [Fact]
+    public void KingdomDecisionVotes_OfflineRegisteredClanDoesNotBlockConnectedClan()
+    {
+        var client = Clients.First();
+        client.Resolve<IControllerIdProvider>().SetControllerId(ControllerId);
+
+        var connectedPlayer = CreateSyncedPlayerContext(ControllerId, client);
+        var offlinePlayer = CreateSyncedPlayerContext("OfflinePlayer", _ => false);
+        var kingdomId = TestEnvironment.CreateRegisteredObject<Kingdom>();
+        var targetKingdomId = TestEnvironment.CreateRegisteredObject<Kingdom>();
+        var targetClanId = CreateSyncedNpcClan();
+
+        ConfigureClanInKingdom(connectedPlayer.ClanId, kingdomId);
+        ConfigureClanInKingdom(offlinePlayer.ClanId, kingdomId);
+        ConfigureClanInKingdom(targetClanId, targetKingdomId);
+        EnsureKingdomRegisteredEverywhere(kingdomId);
+        EnsureKingdomRegisteredEverywhere(targetKingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(client, ControllerId);
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<Kingdom>(kingdomId, out var kingdom));
+            Assert.True(Server.ObjectManager.TryGetObject<Kingdom>(targetKingdomId, out var targetKingdom));
+            Assert.True(Server.ObjectManager.TryGetObject<Clan>(connectedPlayer.ClanId, out var proposerClan));
+
+            kingdom.AddDecision(new DeclareWarDecision(proposerClan, targetKingdom));
+
+            Assert.Single(kingdom.UnresolvedDecisions);
+        });
+
+        client.SimulateMessage(
+            this,
+            new KingdomDecisionVoteRequested(CreateDeclareWarVote(kingdomId, isFinal: true)));
+
+        Assert.Single(
+            Server.NetworkSentMessages.GetMessages<NetworkKingdomDecisionResolved>(),
+            message => message.KingdomId == kingdomId
+                       && message.DecisionIndex == 0
+                       && message.IsPlayerDecision);
+        Assert.Single(
+            Server.NetworkSentMessages.GetMessages<NetworkDeclareWar>(),
+            message => message.Faction1Id == kingdomId
+                       && message.Faction2Id == targetKingdomId);
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<Kingdom>(kingdomId, out var kingdom));
+            Assert.Empty(kingdom.UnresolvedDecisions);
+        });
+    }
+
+    [Fact]
+    public void KingdomDecisionVotes_DisconnectingPendingVoterResolvesForRemainingFinalVoter()
+    {
+        var client1 = Clients.First();
+        var client2 = Clients.Skip(1).First();
+        client1.Resolve<IControllerIdProvider>().SetControllerId(ControllerId);
+        client2.Resolve<IControllerIdProvider>().SetControllerId(SecondControllerId);
+        var player1 = CreateSyncedPlayerContext(ControllerId, client1);
+        var player2 = CreateSyncedPlayerContext(SecondControllerId, client2);
+        var kingdomId = TestEnvironment.CreateRegisteredObject<Kingdom>();
+        var targetKingdomId = TestEnvironment.CreateRegisteredObject<Kingdom>();
+        var targetClanId = CreateSyncedNpcClan();
+
+        ConfigureClanInKingdom(player1.ClanId, kingdomId);
+        ConfigureClanInKingdom(player2.ClanId, kingdomId);
+        ConfigureClanInKingdom(targetClanId, targetKingdomId);
+        EnsureKingdomRegisteredEverywhere(kingdomId);
+        EnsureKingdomRegisteredEverywhere(targetKingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(client1, ControllerId);
+        TestEnvironment.ConnectRegisteredPlayer(client2, SecondControllerId);
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<Kingdom>(kingdomId, out var kingdom));
+            Assert.True(Server.ObjectManager.TryGetObject<Kingdom>(targetKingdomId, out var targetKingdom));
+            Assert.True(Server.ObjectManager.TryGetObject<Clan>(player1.ClanId, out var proposerClan));
+            kingdom.AddDecision(new DeclareWarDecision(proposerClan, targetKingdom));
+        });
+
+        client1.SimulateMessage(
+            this,
+            new KingdomDecisionVoteRequested(CreateDeclareWarVote(kingdomId, isFinal: true)));
+
+        Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkKingdomDecisionResolved>());
+
+        Server.SimulateMessage(this, new PlayerDisconnected(client2.NetPeer, default));
+
+        Assert.Single(
+            Server.NetworkSentMessages.GetMessages<NetworkKingdomDecisionResolved>(),
+            message => message.KingdomId == kingdomId
+                       && message.DecisionIndex == 0
+                       && message.OutcomeIndex == 0);
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<Kingdom>(kingdomId, out var kingdom));
+            Assert.Empty(kingdom.UnresolvedDecisions);
+        });
+    }
+
+    [Fact]
+    public void KingdomDecisionVotes_DisconnectingPreviewVoterRemovesTheirVoteBeforeResolution()
+    {
+        var client1 = Clients.First();
+        var client2 = Clients.Skip(1).First();
+        client1.Resolve<IControllerIdProvider>().SetControllerId(ControllerId);
+        client2.Resolve<IControllerIdProvider>().SetControllerId(SecondControllerId);
+        var player1 = CreateSyncedPlayerContext(ControllerId, client1);
+        var player2 = CreateSyncedPlayerContext(SecondControllerId, client2);
+        var kingdomId = TestEnvironment.CreateRegisteredObject<Kingdom>();
+        var targetKingdomId = TestEnvironment.CreateRegisteredObject<Kingdom>();
+        var targetClanId = CreateSyncedNpcClan();
+
+        // Player 2 is the ruler/chooser so their preview would override the result if it survived disconnect.
+        ConfigureClanInKingdom(player2.ClanId, kingdomId);
+        ConfigureClanInKingdom(player1.ClanId, kingdomId);
+        ConfigureClanInKingdom(targetClanId, targetKingdomId);
+        EnsureKingdomRegisteredEverywhere(kingdomId);
+        EnsureKingdomRegisteredEverywhere(targetKingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(client1, ControllerId);
+        TestEnvironment.ConnectRegisteredPlayer(client2, SecondControllerId);
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<Kingdom>(kingdomId, out var kingdom));
+            Assert.True(Server.ObjectManager.TryGetObject<Kingdom>(targetKingdomId, out var targetKingdom));
+            Assert.True(Server.ObjectManager.TryGetObject<Clan>(player1.ClanId, out var proposerClan));
+            kingdom.AddDecision(new DeclareWarDecision(proposerClan, targetKingdom));
+        });
+
+        client2.SimulateMessage(
+            this,
+            new KingdomDecisionVoteRequested(CreateDeclareWarNoVote(kingdomId, isFinal: false)));
+        client1.SimulateMessage(
+            this,
+            new KingdomDecisionVoteRequested(CreateDeclareWarVote(kingdomId, isFinal: true)));
+
+        Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkKingdomDecisionResolved>());
+
+        Server.SimulateMessage(this, new PlayerDisconnected(client2.NetPeer, default));
+
+        Assert.Single(
+            Server.NetworkSentMessages.GetMessages<NetworkKingdomDecisionResolved>(),
+            message => message.KingdomId == kingdomId
+                       && message.DecisionIndex == 0
+                       && message.OutcomeIndex == 0);
+        Assert.Single(
+            Server.NetworkSentMessages.GetMessages<NetworkDeclareWar>(),
+            message => message.Faction1Id == kingdomId
+                       && message.Faction2Id == targetKingdomId);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -495,6 +649,7 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         EnsureKingdomRegisteredEverywhere(playerKingdomId);
         EnsureKingdomRegisteredEverywhere(enemyKingdomId);
         ConfigureWarEverywhere(playerKingdomId, enemyKingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(client, ControllerId);
 
         Server.Call(() =>
         {
@@ -582,6 +737,7 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         EnsureKingdomRegisteredEverywhere(playerKingdomId);
         EnsureKingdomRegisteredEverywhere(enemyKingdomId);
         ConfigureWarEverywhere(playerKingdomId, enemyKingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(Clients.First(), ControllerId);
 
         Server.Call(() =>
         {
@@ -622,6 +778,7 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         EnsureKingdomRegisteredEverywhere(kingdomId);
         EnsureKingdomRegisteredEverywhere(targetKingdomId);
         EnsureKingdomRegisteredEverywhere(unrelatedKingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(Clients.First(), ControllerId);
 
         Server.Call(() =>
         {
@@ -657,6 +814,7 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         ConfigureClanInKingdom(targetPlayer.ClanId, targetKingdomId);
         EnsureKingdomRegisteredEverywhere(kingdomId);
         EnsureKingdomRegisteredEverywhere(targetKingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(Clients.First(), ControllerId);
 
         DeclareWarDecision decision = null;
         Server.Call(() =>
@@ -714,6 +872,8 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         ConfigureClanInKingdom(targetPlayer.ClanId, targetKingdomId);
         EnsureKingdomRegisteredEverywhere(kingdomId);
         EnsureKingdomRegisteredEverywhere(targetKingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(client1, ControllerId);
+        TestEnvironment.ConnectRegisteredPlayer(client2, SecondControllerId);
 
         var player1NoVote = new KingdomDecisionVoteData(
             kingdomId,
@@ -868,6 +1028,7 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         EnsureKingdomRegisteredEverywhere(kingdomId);
         EnsureKingdomRegisteredEverywhere(firstTargetKingdomId);
         EnsureKingdomRegisteredEverywhere(secondTargetKingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(Clients.First(), ControllerId);
 
         Server.Call(() =>
         {
@@ -933,6 +1094,8 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         ConfigureClanInKingdom(targetPlayer.ClanId, targetKingdomId);
         EnsureKingdomRegisteredEverywhere(kingdomId);
         EnsureKingdomRegisteredEverywhere(targetKingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(client1, ControllerId);
+        TestEnvironment.ConnectRegisteredPlayer(client2, SecondControllerId);
 
         Server.Call(() =>
         {
@@ -1002,6 +1165,8 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         ConfigureClanInKingdom(targetPlayer.ClanId, targetKingdomId);
         EnsureKingdomRegisteredEverywhere(kingdomId);
         EnsureKingdomRegisteredEverywhere(targetKingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(client1, ControllerId);
+        TestEnvironment.ConnectRegisteredPlayer(client2, SecondControllerId);
 
         Server.Call(() =>
         {
@@ -1151,6 +1316,8 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         ConfigureClanInKingdom(targetPlayer.ClanId, targetKingdomId);
         EnsureKingdomRegisteredEverywhere(kingdomId);
         EnsureKingdomRegisteredEverywhere(targetKingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(client1, ControllerId);
+        TestEnvironment.ConnectRegisteredPlayer(client2, SecondControllerId);
 
         Server.Call(() =>
         {
@@ -1231,6 +1398,8 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         ConfigureClanInKingdom(targetPlayer.ClanId, targetKingdomId);
         EnsureKingdomRegisteredEverywhere(kingdomId);
         EnsureKingdomRegisteredEverywhere(targetKingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(client1, ControllerId);
+        TestEnvironment.ConnectRegisteredPlayer(client2, SecondControllerId);
 
         Server.Call(() =>
         {
@@ -1287,6 +1456,8 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         ConfigureClanInKingdom(player2.ClanId, kingdomId);
         EnsureKingdomRegisteredEverywhere(kingdomId);
         EnsureKingdomRegisteredEverywhere(targetKingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(client1, ControllerId);
+        TestEnvironment.ConnectRegisteredPlayer(client2, SecondControllerId);
 
         client1.Call(() =>
         {
@@ -1341,6 +1512,7 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         ConfigureClanInKingdom(player1.ClanId, kingdomId);
         EnsureKingdomRegisteredEverywhere(kingdomId);
         EnsureKingdomRegisteredEverywhere(targetKingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(client1, ControllerId);
 
         foreach (var instance in Clients.Prepend(Server))
         {
@@ -1407,6 +1579,7 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         ConfigureClanInKingdom(player2.ClanId, kingdomId);
         EnsureKingdomRegisteredEverywhere(kingdomId);
         EnsureKingdomRegisteredEverywhere(targetKingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(client1, ControllerId);
 
         Server.Call(() =>
         {
@@ -1423,6 +1596,8 @@ public class PlayerKingdomCreationFlowTests : IDisposable
                 player2.PartyId,
                 player2.ClanId,
                 player2.CharacterId);
+            playerManager.SetPeer(SecondControllerId, client2.NetPeer);
+            Assert.True(playerManager.IsConnected(players[SecondControllerId]));
 
             kingdom.AddDecision(new DeclareWarDecision(proposerClan, targetKingdom));
         });
@@ -1466,6 +1641,7 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         EnsureKingdomRegisteredEverywhere(kingdomId);
         EnsureKingdomRegisteredEverywhere(targetKingdomId);
         SetKingdomStringIdEverywhere(kingdomId, "native_created_kingdom");
+        TestEnvironment.ConnectRegisteredPlayer(client, ControllerId);
 
         Server.Call(() =>
         {
@@ -1532,6 +1708,8 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         ConfigureClanInKingdom(player1.ClanId, kingdomId);
         ConfigureClanInKingdom(player2.ClanId, kingdomId);
         EnsureKingdomRegisteredEverywhere(kingdomId);
+        TestEnvironment.ConnectRegisteredPlayer(client1, ControllerId);
+        TestEnvironment.ConnectRegisteredPlayer(client2, SecondControllerId);
 
         string policyId = null;
         Server.Call(() =>

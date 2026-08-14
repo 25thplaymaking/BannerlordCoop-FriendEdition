@@ -342,6 +342,22 @@ internal static class DiplomacyCapabilityPolicy
     public static bool IsEnabled(bool optionEnabled, bool routeReady) => optionEnabled && routeReady;
 }
 
+internal static class DiplomacyActorAuthority
+{
+    public static bool CanExecute(
+        DiplomacyOperation operation,
+        bool actorBelongsToRegisteredParty,
+        bool actorLeadsRegisteredParty,
+        bool actorHasClan)
+    {
+        if (!actorBelongsToRegisteredParty || !actorHasClan) return false;
+
+        // A joined player embedded in the clan leader's party can still perform this personal action.
+        // Clan, kingdom, fief, and gold actions remain controlled by the party leader.
+        return actorLeadsRegisteredParty || operation == DiplomacyOperation.SendMessenger;
+    }
+}
+
 internal sealed class DiplomacyCapabilitySource : IWorkshopCapabilitySource
 {
     internal const string ModuleId = "Bannerlord.Diplomacy";

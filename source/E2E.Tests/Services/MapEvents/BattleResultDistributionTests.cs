@@ -9,16 +9,20 @@ using E2E.Tests.Environment.Instance;
 using GameInterface.Services.MapEvents;
 using GameInterface.Services.MapEvents.Data;
 using GameInterface.Services.MapEvents.Interfaces;
+using GameInterface.Services.MapEvents.Messages;
 using GameInterface.Services.MapEvents.Messages.Leave;
+using GameInterface.Services.MapEvents.Patches;
 using GameInterface.Services.Players;
 using GameInterface.Services.TroopRosters.Data;
 using HarmonyLib;
+using Helpers;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.GameComponents;
 using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Party;
+using TaleWorlds.CampaignSystem.Party.PartyComponents;
 using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.Core;
 using Xunit;
@@ -209,6 +213,108 @@ public class BattleResultDistributionTests : MapEventTestBase
         // Player 1's encounter received only player 1's prisoner; player 2's received only player 2's.
         AssertEncounterPrisoners(Clients.First(), ownTroopId: troopForP1, foreignTroopId: troopForP2);
         AssertEncounterPrisoners(Clients.Last(), ownTroopId: troopForP2, foreignTroopId: troopForP1);
+    }
+
+    [Fact]
+    public void BanditSurrenderResult_OpensStandardPrisonerThenLootFlow()
+    {
+        var ctx = CreateServerMapEvent();
+        var client = Clients.First();
+        RegisterAsPlayerParty("1", TestEnvironment.CreateRegisteredObject<Hero>(), ctx.AttackerPartyId);
+        SetMainPartyInBattle(client, ctx.AttackerPartyId);
+        SetMockPlayerEncounter(client, mapEventId: ctx.MapEventId);
+
+        var surrenderedTroopId = TestEnvironment.CreateRegisteredObject<CharacterObject>();
+        string playerMapEventPartyId = null;
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MapEvent>(ctx.MapEventId, out var mapEvent));
+            playerMapEventPartyId = ResolveMapEventPartyId(mapEvent.AttackerSide, ctx.AttackerPartyId);
+        }, MapEventDisabledMethods);
+
+        var result = Server.EnsureSerializable(new NetworkCommitMapEventResults(
+            ctx.MapEventId,
+            BattleSideEnum.Attacker,
+            BattleSideEnum.Attacker,
+            playerMapEventPartyId,
+            new NetworkPlayerLootData(
+                new Dictionary<string, ItemRosterElement[]>(),
+                new Dictionary<string, TroopRosterData>(),
+                new Dictionary<string, TroopRosterData>
+                {
+                    {
+                        playerMapEventPartyId,
+                        new TroopRosterData(new[]
+                        {
+                            new TroopRosterElementData(surrenderedTroopId, 3, 0, 0),
+                        })
+                    },
+                })));
+
+        client.Call(() =>
+        {
+            Assert.True(client.ObjectManager.TryGetObject<MapEvent>(ctx.MapEventId, out var mapEvent));
+            BanditSurrenderPatch.MarkPendingPostBattleResults(mapEvent);
+            BanditSurrenderPatch.MarkSurrenderRequestPublished(mapEvent);
+            BanditSurrenderPatch.ClearPendingPostBattleResultsAfterFailure(mapEvent);
+            client.SimulateMessage(Server.NetPeer, result);
+
+            Assert.True(client.ObjectManager.TryGetObject<CharacterObject>(surrenderedTroopId, out var troop));
+            Assert.Equal(3, PlayerEncounter.Current.RosterToReceiveLootPrisoners.GetElementNumber(troop));
+            Assert.Equal(PlayerEncounterState.LootInventory, PlayerEncounter.Current.EncounterState);
+            Assert.False(BanditSurrenderPatch.TryConsumePendingPostBattleResults(mapEvent));
+        }, MapEventDisabledMethods.Append(
+            AccessTools.Method(typeof(PartyScreenHelper), nameof(PartyScreenHelper.OpenScreenAsLoot))).ToList());
+    }
+
+    [Fact]
+    public void BanditSurrenderRequest_AcceptsOnlyThePlayersOpposingSide()
+    {
+        var ownedBattle = CreateServerMapEvent();
+        var unrelatedBattle = CreateServerMapEvent();
+        var client = Clients.First();
+        RegisterAsPlayerParty("1", TestEnvironment.CreateRegisteredObject<Hero>(), ownedBattle.AttackerPartyId);
+        Server.Resolve<IPlayerManager>().SetPeer("1", client.NetPeer);
+
+        client.Call(() => client.Resolve<INetwork>().SendAll(
+            new NetworkMapEventSurrender(unrelatedBattle.MapEventId, BattleSideEnum.Defender)),
+            ConcludeVictoryDisabledMethods());
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MapEvent>(unrelatedBattle.MapEventId, out var mapEvent));
+            Assert.Equal(BattleState.None, mapEvent.BattleState);
+            Assert.False(mapEvent.DefenderSide.IsSurrendered);
+        }, MapEventDisabledMethods);
+
+        Server.NetworkSentMessages.Clear();
+        client.Call(() => client.Resolve<INetwork>().SendAll(
+            new NetworkMapEventSurrender(ownedBattle.MapEventId, BattleSideEnum.Defender)),
+            ConcludeVictoryDisabledMethods());
+        Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkCommitMapEventResults>());
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MapEvent>(ownedBattle.MapEventId, out var mapEvent));
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(ownedBattle.AttackerPartyId, out var playerParty));
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(ownedBattle.DefenderPartyId, out var banditParty));
+            Assert.Contains(mapEvent.AttackerSide.Parties, value => value.Party == playerParty.Party);
+            Assert.True(mapEvent.IsFieldBattle);
+            Assert.Null(mapEvent.MapEventSettlement);
+            Assert.False(mapEvent.IsFinalized);
+            Assert.Equal(BattleState.None, mapEvent.BattleState);
+
+            banditParty._partyComponent = ObjectHelper.SkipConstructor<BanditPartyComponent>();
+            banditParty.UpdatePartyComponentFlags();
+            Assert.True(banditParty.IsBandit);
+        }, MapEventDisabledMethods);
+        client.Call(() => client.Resolve<INetwork>().SendAll(
+            new NetworkMapEventSurrender(ownedBattle.MapEventId, BattleSideEnum.Defender)),
+            ConcludeVictoryDisabledMethods());
+
+        var result = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkCommitMapEventResults>());
+        Assert.Equal(BattleSideEnum.Attacker, result.WinningSide);
+        Assert.Equal(BattleSideEnum.Attacker, result.PlayerSide);
     }
 
     [Fact]

@@ -1,7 +1,10 @@
 ﻿using Common;
 using HarmonyLib;
 using System;
+using System.Runtime.CompilerServices;
 using TaleWorlds.CampaignSystem.CampaignBehaviors;
+using TaleWorlds.CampaignSystem.Encounters;
+using TaleWorlds.CampaignSystem.MapEvents;
 
 namespace GameInterface.Services.MapEvents.Patches;
 
@@ -17,6 +20,13 @@ namespace GameInterface.Services.MapEvents.Patches;
 [HarmonyPatch(typeof(BanditInteractionsCampaignBehavior))]
 internal static class BanditSurrenderPatch
 {
+    private sealed class PendingState
+    {
+        public bool RequestPublished { get; set; }
+    }
+
+    private static readonly ConditionalWeakTable<MapEvent, PendingState> PendingPostBattleResults = new();
+
     /// <summary>
     /// True while the conversing client is applying a bandit-surrender dialogue consequence. Static
     /// because the Harmony patch methods that read and write it are static, and <c>[ThreadStatic]</c>
@@ -27,16 +37,65 @@ internal static class BanditSurrenderPatch
 
     [HarmonyPatch("conversation_bandits_surrender_on_consequence")]
     [HarmonyPrefix]
-    private static void Prefix()
+    private static void Prefix(out MapEvent __state)
     {
+        __state = null;
         if (ModInformation.IsClient)
+        {
             InSurrenderConsequence = true;
+
+            try
+            {
+                __state = PlayerEncounter.Battle;
+            }
+            catch (NullReferenceException)
+            {
+                return;
+            }
+
+            MarkPendingPostBattleResults(__state);
+        }
     }
 
     [HarmonyPatch("conversation_bandits_surrender_on_consequence")]
     [HarmonyFinalizer]
-    private static void Finalizer()
+    private static Exception Finalizer(Exception __exception, MapEvent __state)
     {
         InSurrenderConsequence = false;
+
+        if (__exception != null && __state != null)
+            ClearPendingPostBattleResultsAfterFailure(__state);
+
+        return __exception;
+    }
+
+    internal static void MarkPendingPostBattleResults(MapEvent mapEvent)
+    {
+        if (mapEvent == null) return;
+
+        PendingPostBattleResults.Remove(mapEvent);
+        PendingPostBattleResults.Add(mapEvent, new PendingState());
+    }
+
+    internal static void MarkSurrenderRequestPublished(MapEvent mapEvent)
+    {
+        if (mapEvent != null && PendingPostBattleResults.TryGetValue(mapEvent, out var state))
+            state.RequestPublished = true;
+    }
+
+    internal static void ClearPendingPostBattleResultsAfterFailure(MapEvent mapEvent)
+    {
+        if (mapEvent != null && PendingPostBattleResults.TryGetValue(mapEvent, out var state) &&
+            !state.RequestPublished)
+        {
+            PendingPostBattleResults.Remove(mapEvent);
+        }
+    }
+
+    internal static bool TryConsumePendingPostBattleResults(MapEvent mapEvent)
+    {
+        if (mapEvent == null) return false;
+
+        return PendingPostBattleResults.Remove(mapEvent);
     }
 }

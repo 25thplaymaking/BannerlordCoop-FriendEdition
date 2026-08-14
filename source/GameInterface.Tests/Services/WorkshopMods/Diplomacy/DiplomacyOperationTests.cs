@@ -210,6 +210,28 @@ public sealed class DiplomacyOperationTests
     }
 
     [Fact]
+    public void ActorAuthority_AllowsEmbeddedClanMemberToSendMessengerOnly()
+    {
+        Assert.True(DiplomacyActorAuthority.CanExecute(
+            DiplomacyOperation.SendMessenger,
+            actorBelongsToRegisteredParty: true,
+            actorLeadsRegisteredParty: false,
+            actorHasClan: true));
+
+        Assert.False(DiplomacyActorAuthority.CanExecute(
+            DiplomacyOperation.GrantFief,
+            actorBelongsToRegisteredParty: true,
+            actorLeadsRegisteredParty: false,
+            actorHasClan: true));
+
+        Assert.False(DiplomacyActorAuthority.CanExecute(
+            DiplomacyOperation.SendMessenger,
+            actorBelongsToRegisteredParty: false,
+            actorLeadsRegisteredParty: false,
+            actorHasClan: true));
+    }
+
+    [Fact]
     public void MessengerAuthorityStore_PreservesTravelAcrossRestartAndRejectsWrongController()
     {
         var store = new DiplomacyMessengerAuthorityStore();

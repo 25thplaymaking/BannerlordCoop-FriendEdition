@@ -2,6 +2,7 @@
 using Common.Extensions;
 using Common.Logging;
 using Common.Messaging;
+using Common.Network.Messages;
 using Common.Util;
 using GameInterface.Registry.Auto;
 using GameInterface.Services.Kingdoms;
@@ -63,6 +64,23 @@ public class KingdomHandler : IHandler
         messageBroker.Subscribe<NetworkDestroyKingdom>(HandleNetworkDestroyKingdom);
         messageBroker.Subscribe<NetworkRulingClanChanged>(HandleNetworkRulingClanChanged);
         messageBroker.Subscribe<ChangeKingdomName>(HandleChangeKingdomName);
+        messageBroker.Subscribe<PlayerDisconnected>(HandlePlayerDisconnected);
+    }
+
+    private void HandlePlayerDisconnected(MessagePayload<PlayerDisconnected> payload)
+    {
+        if (!ModInformation.IsServer) return;
+
+        string disconnectedControllerId = null;
+        var peer = payload.What.PlayerId;
+        if (playerManager.TryGetPlayer(peer, out var player)
+            && playerManager.TryGetPeer(player.ControllerId, out var currentPeer)
+            && ReferenceEquals(currentPeer, peer))
+        {
+            disconnectedControllerId = player.ControllerId;
+        }
+
+        RunKingdomMutation(() => decisionVoteManager.HandlePlayerDisconnected(disconnectedControllerId));
     }
 
     private void HandleCreateKingdom(MessagePayload<CreateKingdom> obj)
@@ -574,5 +592,6 @@ public class KingdomHandler : IHandler
         messageBroker.Unsubscribe<NetworkDestroyKingdom>(HandleNetworkDestroyKingdom);
         messageBroker.Unsubscribe<NetworkRulingClanChanged>(HandleNetworkRulingClanChanged);
         messageBroker.Unsubscribe<ChangeKingdomName>(HandleChangeKingdomName);
+        messageBroker.Unsubscribe<PlayerDisconnected>(HandlePlayerDisconnected);
     }
 }

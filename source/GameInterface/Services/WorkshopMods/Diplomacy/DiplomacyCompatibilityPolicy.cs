@@ -203,6 +203,20 @@ internal static class DiplomacyCompatibilityPolicy
                 "OnGameLoadFinished",
                 "SyncData",
             },
+            // Diplomacy's "diplomacy.*" console cheats mutate the ensured singletons and
+            // unreplicated campaign state directly (alliances, pacts, war exhaustion, banner
+            // colors, rebel-kingdom legitimization). Routing them through the same server-only
+            // funnel keeps a client console from silently desyncing the campaign; the two
+            // UI-debug cheats (ToggleUIDebugMode, ReloadUI) stay role-local presentation.
+            ["Diplomacy.CampaignCheatsExtension"] = new[]
+            {
+                "FormAlliance",
+                "FormNonAggressionPact",
+                "BreakNonAggressionPact",
+                "SetWarExhaustion",
+                "ChangeKingdomBannerColor",
+                "LegitimizeRebelKingdom",
+            },
         };
 
     private static readonly IReadOnlyDictionary<string, string[]> CivilWarEntryPoints =

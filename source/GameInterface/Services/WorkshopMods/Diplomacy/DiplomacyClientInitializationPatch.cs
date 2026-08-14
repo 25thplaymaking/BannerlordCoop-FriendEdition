@@ -46,6 +46,36 @@ internal static class DiplomacyClientInitializationPatch
     private static void EnsureDiplomacyClientSingletonsInitialized()
     {
         EnsureDiplomacyEvents();
+        EnsureClientManagers();
+    }
+
+    /// <summary>
+    /// Pre-create every Diplomacy manager singleton at map build, closing the map-build →
+    /// snapshot-apply window. The join-handshake snapshot apply ensures the same managers, but
+    /// Diplomacy's <c>UIBehavior.AddUIElements</c> runs on the first campaign tick — Coop allows it
+    /// on clients — and installs the campaign-map war-exhaustion widget, whose item VMs call
+    /// <c>WarExhaustionManager.Instance.GetWarExhaustion(...)</c> during construction. On a late
+    /// join that tick precedes the snapshot, so without this the widget NREs on a null Instance
+    /// (the same failure class as the 2026-08-13 Kingdom-tab incidents, found by audit before it
+    /// fired live). Each manager is created empty and idempotently through the same
+    /// <c>DiplomacyRuntime.EnsureManager</c> path the snapshot apply uses; the snapshot then
+    /// repopulates those same instances. Client-only — server-side ensuring happens at the
+    /// authoritative capture barrier.
+    /// </summary>
+    private static void EnsureClientManagers()
+    {
+        if (!ModInformation.IsClient) return;
+        foreach (string typeName in DiplomacyManagerCaptureBarrier.RequiredManagerTypeNames)
+        {
+            try
+            {
+                DiplomacyRuntime.EnsureManager(typeName);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Failed to pre-initialize Diplomacy manager {Manager} on client", typeName);
+            }
+        }
     }
 
     private static void EnsureDiplomacyEvents()

@@ -1032,9 +1032,11 @@ internal sealed class DiplomacyRuntime : IDiplomacyRuntime
 
     /// <summary>
     /// Idempotently create a Diplomacy manager singleton by type name (no-op if already present or if
-    /// Diplomacy is absent). Used both when applying a server snapshot and, on the client, to pre-create
-    /// the agreement manager at map build so encyclopedia/UI reads never hit a null Instance
-    /// (see <see cref="DiplomacyClientInitializationPatch"/>).
+    /// Diplomacy is absent). Called from three places that must stay in lockstep: the snapshot apply
+    /// (client, authoritative repopulation), <see cref="DiplomacyManagerCaptureBarrier"/> (host, before
+    /// capture), and <see cref="DiplomacyClientInitializationPatch"/> (client, at map build — closing
+    /// the map-build → snapshot window for every ungated reader, e.g. the campaign-map war-exhaustion
+    /// widget that Diplomacy's UIBehavior installs on the first campaign tick).
     /// </summary>
     internal static void EnsureManager(string managerTypeName)
     {

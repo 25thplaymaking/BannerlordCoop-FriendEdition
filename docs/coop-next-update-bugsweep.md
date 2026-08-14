@@ -167,6 +167,83 @@ Kingdom-tab completion claims. Phase D fixed the raid path; Phase E owns the rem
   `friendallmods1` save and sidecar at their original hashes. Rollback snapshot:
   `/home/bishop/bannerlord-coop/server/_mod_backups/pre-4b731ead5-20260813T224028Z`.
 
+## Phase G — client join freeze: unpatchable generic Harmony targets (2026-08-13; source `6ce74c217`)
+
+- **Symptom:** after the `4b731ead5` client shipped, every joining client soft-froze on the
+  "Applying patches..." loading screen; the server parked all three peers in `state:"handshake"`
+  indefinitely. Client log: `HarmonyException` patching
+  `AbstractDiplomaticAction<FormNonAggressionPactAction>::TryApply` →
+  `ArgumentException: The given generic instantiation was invalid`, thrown from
+  `GameInterface.PatchAll()` inside `MainMenuState.Handle_NetworkConnected`, swallowed by the
+  message broker (`Failed to run <null>`).
+- **Root cause:** the .NET Framework client CLR refuses Harmony rewrites of methods **declared on a
+  constructed generic type**; the server's .NET Core runtime accepts them, which is why the server
+  kept booting clean. `Harmony.PatchCategory` aborts the whole category on its first failed job, so
+  the join handshake died with it. Two live targets:
+  1. `DiplomacyPlayerKingdomActionGuardPatch` → `TryApply` (declared on the generic action base;
+     latent since `9899ac47e` on 2026-08-09, armed when `c9644be9c`'s wiring fixes made Diplomacy
+     category registration actually succeed on clients).
+  2. `DiplomacyClientSettingsBridge.GlobalSettingsInstancePatch` → `get_Instance` (lands on MCM's
+     `GlobalSettings<Diplomacy.Settings>`; added 2026-08-13 in `c9644be9c`). Would have been the
+     next abort once #1 was fixed.
+- **Fix (`a0d1567f0` + `6ce74c217`):** new `HarmonyGenericTargetPolicy` — every Workshop
+  `TargetMethods()` routes candidates through `CanPatch`; generic-declared targets are yielded only
+  on runtimes that accept them (server keeps both), open generics never. Framework clients stay
+  guarded via the concrete overrides (`ApplyInternal` + newly added `AssessCosts`); the MCM getter
+  patch is skipped on clients, whose full MCM registers the real settings object (snapshot-apply
+  boundaries remain the loud failure surface). `MainMenuState.Handle_NetworkConnected` now catches
+  PatchAll failures: logs the real exception and tears down via `ICoopFinalizer` with a visible
+  message instead of freezing.
+- **Adversarial audit:** every Harmony target-resolution across all seven Workshop mods
+  cross-checked against the pinned decompiles — no further generic-declared targets. Hardening
+  note: `FourberieMethodSpec.Resolve`, `ImprovedGarrisonsMethodSpec.Resolve`, and
+  `DiplomacyUnsupportedImplementationGate.TargetMethods` resolve without `DeclaredOnly`; a future
+  mod build that stops overriding a member would silently retarget to a base. Not currently
+  hazardous; tighten when next touched.
+- Unit tests: `HarmonyGenericTargetPolicyTests` mirrors both real shapes (CRTP action base, MCM
+  settings getter via declared-only base walk).
+
+## Phase H — black Kingdom tab + full Diplomacy static-read audit (2026-08-13/14)
+
+- **Black Kingdom tab, third and final null (`e91a46c90`):** with joins fixed, the tab still blacked
+  out. `KingdomWarItemVMMixin` ctor → `DiplomacyCostCalculator.DetermineReparationsForMakingPeace` →
+  `KingdomExtensions.IsRebelKingdomOf` → `RebelFactionManager.AllRebelFactions` (`=> Instance.
+  RebelFactions`) with a null `Instance`. Friend Edition retires Diplomacy's civil war (Separatism
+  owns rebellions), so nothing ever constructs the singleton on either role; the pinned cost
+  calculator still consults its ledger for every war row. Fix: `RebelFactionManager` is the fifth
+  ensured manager — existence only, canonically empty, never synced — in the snapshot-apply ensure
+  block, ctor preflight, capture barrier, `RequiredManagerDictionaries`, and the assembly-audit
+  `RequiredTypes`.
+- **Why this class of bug recurs (mechanism):** Gauntlet rebuilds the whole Kingdom VM tree on every
+  open; Diplomacy's UIExtenderEx mixins eagerly compute costs in VM constructors; co-op retires
+  Diplomacy's CampaignBehaviors (they would desync peers), so every manager singleton those
+  behaviors would construct exists only if Coop's ensure-lists create it. Any read the lists missed
+  = construction-time NRE = black panel.
+- **Full static-read audit (decompile × adapter cross-reference)** enumerated every `*.Instance`/
+  static-singleton read in Diplomacy 1.4.7 and classified reachability. Result: all mixin-reachable
+  reads of the five managers, MCM settings, and `DiplomacyEvents` are provided. Gaps found and fixed
+  in this phase:
+  - **GAP-1/2 — campaign-map war-exhaustion widget (found before it fired live):** Diplomacy's
+    `UIBehavior.AddUIElements` runs on the first campaign tick (Coop allows it on clients; it is a
+    MapView, so no UiLifecycle/readiness gate can reach it) and installs
+    `WarExhaustionMapIndicatorVM`, whose item VMs call `WarExhaustionManager.Instance.
+    GetWarExhaustion(...)` during construction — on a late join that precedes the snapshot apply.
+    Fix: `DiplomacyClientInitializationPatch` now pre-creates **all five** managers at
+    `MapScreen.OnInitialize` (sourced from `DiplomacyManagerCaptureBarrier.
+    RequiredManagerTypeNames`), closing the map-build → snapshot window for every current and
+    future ungated reader. (This also makes the `EnsureManager` doc contract true again — GAP-6.)
+  - **GAP-5 — `diplomacy.*` console cheats bypassed authority:** `CampaignCheatsExtension` mutates
+    ensured singletons and unreplicated state directly. Its six mutating cheats now route through
+    the server-only `SharedMutationMethods` funnel; the two UI-debug cheats stay role-local.
+  - **GAP-4 — verified closed by construction:** the only `DiplomacyAutomatedOperationScope.Enter()`
+    site is `DiplomacyAutomatedKingdomActionContext`'s ctor, which creates the `BarterPlayerContext`
+    in the same breath; the explicit-scope path enters one in `DiplomacyOperationHandler`.
+- **GAP-3 — documented, not coded:** `WarExhaustionBehavior` server callbacks reach
+  `PlayerHelper.GetOpposingKingdomIfPlayerKingdomProvided` → `Hero.MainHero.MapFaction`, which NREs
+  on a dedicated host **only when `StoryModeManager.Current != null`** (`WarExhaustionManager.cs:613`
+  returns early for sandbox). `friendallmods1` is a sandbox campaign, so this is unreachable today.
+  If a story-mode campaign is ever hosted, wrap those callbacks in a `BarterPlayerContext` first.
+
 ## Deferred — reverted upstream fixes that break Separatism (need dedicated compat work, NOT bundled)
 
 - **#2632** (companion fiefs; closes clan-menu-black softlock #2860 + Give-Settlement #2790) — **CONFIRMED** to re-break `SeparatismCampaignFlowTests.ChaosStart…SynchronizesTheCreatedKingdom` (rebel kingdom named "Former Rebel Kingdom" vs expected "Kingdom of Rebel Clan"). Its `ClanName` sync (`ClanNameHandler`/`ClanNameChangePatch`) collides with Separatism rebel-kingdom naming. Earlier session mis-attributed this to #2867. Fixes no *user-reported* bug → dropped from this update; needs Separatism-compat rework.

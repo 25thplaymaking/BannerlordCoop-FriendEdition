@@ -101,7 +101,9 @@ namespace GameInterface.Services.Kingdoms
             if (!TryGetDecisionIndex(decisionOption.Decision, out int decisionIndex)) return false;
             if (!TryGetKingdomId(decisionOption.Decision.Kingdom, out string kingdomId)) return false;
 
-            int outcomeIndex = decisionOption.IsOptionForAbstain ? -1 : GetOutcomeIndex(decisionOption.Option, decisionOption._kingdomDecisionMaker);
+            int outcomeIndex = decisionOption.IsOptionForAbstain
+                ? -1
+                : GetOutcomeIndex(decisionOption.Option, decisionOption._kingdomDecisionMaker);
             if (!decisionOption.IsOptionForAbstain && outcomeIndex < 0) return false;
 
             string outcomeKey = null;

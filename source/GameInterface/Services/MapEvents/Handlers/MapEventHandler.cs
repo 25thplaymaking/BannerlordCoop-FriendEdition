@@ -6,6 +6,7 @@ using GameInterface.Services.MapEvents;
 using GameInterface.Services.MapEvents.Extensions;
 using GameInterface.Services.MapEvents.Logging;
 using GameInterface.Services.MapEvents.Messages;
+using GameInterface.Services.MapEvents.Patches;
 using GameInterface.Services.MobileParties.Extensions;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
@@ -310,6 +311,7 @@ internal class MapEventHandler : IHandler
             return;
 
         network.SendAll(new NetworkMapEventSurrender(mapEventId, payload.What.Side));
+        BanditSurrenderPatch.MarkSurrenderRequestPublished(payload.What.MapEvent);
     }
 
     private void Handle_NetworkMapEventSurrender(MessagePayload<NetworkMapEventSurrender> payload)
@@ -317,6 +319,7 @@ internal class MapEventHandler : IHandler
         if (ModInformation.IsClient)
             return;
 
+        NetPeer sender = payload.Who as NetPeer;
         var mapEventId = payload.What.MapEventId;
         var side = payload.What.Side;
 
@@ -329,7 +332,8 @@ internal class MapEventHandler : IHandler
         {
             try
             {
-                if (!objectManager.TryGetObjectWithLogging<MapEvent>(mapEventId, out var mapEvent))
+                if (!objectManager.TryGetObjectWithLogging<MapEvent>(mapEventId, out var mapEvent) ||
+                    !CanApplyBanditSurrender(sender, mapEvent, mapEventId, side))
                     return;
 
                 // Skip if this side already surrendered — another pipeline (e.g. a PvP loser's
@@ -344,5 +348,36 @@ internal class MapEventHandler : IHandler
                 Logger.Error(e, "Failed to apply {Message}", nameof(NetworkMapEventSurrender));
             }
         });
+    }
+
+    private bool CanApplyBanditSurrender(
+        NetPeer sender,
+        MapEvent mapEvent,
+        string mapEventId,
+        BattleSideEnum surrenderedSide)
+    {
+        if (sender == null ||
+            !playerManager.TryGetPlayer(sender, out var player) ||
+            !objectManager.TryGetObject(player.MobilePartyId, out MobileParty playerParty))
+            return false;
+
+        bool playerIsAttacker = SideContains(mapEvent.AttackerSide, playerParty.Party);
+        bool playerIsDefender = SideContains(mapEvent.DefenderSide, playerParty.Party);
+        BattleSideEnum expectedSide = playerIsAttacker
+            ? BattleSideEnum.Defender
+            : playerIsDefender ? BattleSideEnum.Attacker : BattleSideEnum.None;
+
+        if (surrenderedSide != expectedSide || expectedSide == BattleSideEnum.None ||
+            !mapEvent.IsFieldBattle || mapEvent.MapEventSettlement != null || mapEvent.IsFinalized ||
+            mapEvent.BattleState != BattleState.None || ServerBattleModeArbiter.IsClaimed(mapEventId))
+            return false;
+
+        // This message originates only from the bandit surrender conversation. Never allow a
+        // forged request to surrender a lord, caravan, villager, or another connected player.
+        var surrenderedParties = mapEvent.GetMapEventSide(surrenderedSide).Parties
+            .Select(value => value?.Party?.MobileParty)
+            .ToArray();
+        return surrenderedParties.Length > 0 && surrenderedParties.All(party =>
+            party?.IsBandit == true && !playerManager.Contains(party));
     }
 }

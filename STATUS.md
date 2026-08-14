@@ -4,6 +4,19 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
+> **2026-08-14 messenger + bandit surrender + kingdom vote correction — STAGED, NOT DEPLOYED.** On branch
+> `25vid/messenger-bandit-capture`, embedded joined-clan players may use Diplomacy's personal
+> **Send Messenger** action while clan/kingdom/fief/gold operations remain party-leader controlled.
+> Bandit dialogue surrender now waits for the authoritative result, stages every surrendered troop
+> in the player's prisoner loot roster, and immediately enters Bannerlord's standard prisoner screen
+> followed by inventory looting. The surrender request is also restricted to the authenticated
+> player's opposing bandit side. Kingdom decisions now require votes only from connected registered
+> player clans, so dormant personal clans retained in the save cannot leave the decision popup waiting
+> forever. If a voter disconnects mid-decision, their preview/final support is removed and the vote
+> resolves immediately when every remaining connected clan has finalized. The full 45-test kingdom
+> E2E namespace and 49 GameInterface kingdom tests pass. This
+> candidate has not been merged or deployed; no launcher or live-server files were changed.
+
 > **2026-08-14 player clan membership — SHIPPED from source `da18f9b95`.** Merged PR #15
 > implements persisted native player membership. A registered player may voluntarily join another
 > player's clan only when its leader accepts and the receiving clan is **Tier 2+**. First join

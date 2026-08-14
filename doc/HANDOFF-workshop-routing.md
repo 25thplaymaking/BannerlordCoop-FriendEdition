@@ -159,12 +159,13 @@ Coverage is **per action, not per mod**. "Diplomacy is routed" must mean a named
 | Action | Entry point | State |
 |---|---|---|
 | Donate gold to a clan | `DonateGoldVM.ExecutePropose` | **ROUTED** (2026-08-09) |
-| Grant fief to a vassal | `GrantFiefVM.OnGrantFief` | blocked; next candidate — discrete, ids (settlement + hero), server recomputes relation |
-| Declare war (kingdom screen) | `KingdomWarItemVMMixin.ExecuteDirectAction` | blocked; overlaps Coop's native stance/decision authority — assess against it before routing |
-| Propose peace (kingdom screen) | `KingdomTruceItemVMMixin.ExecuteDirectAction` | blocked; same overlap |
-| Propose non-aggression pact | `KingdomTruceItemVMMixin.ProposeNonAggressionPact` + `FormNonAggressionPactAction` | blocked; also feature-gated in `DiplomacyPlayerKingdomActionGuardPatch` — needs agreement-manager snapshot on apply |
-| Send messenger | `EncyclopediaHeroPageVMMixin.SendMessenger` | whole `MessengerBehavior` feature-blocked; routing needs a PlayerEncounter shape — decide, don't drift |
-| Keep fief after siege | `KeepFiefAfterSiegeBehavior.OnPlayerSettlementTaken` | blocked; deferred-inquiry capture of MainHero — needs its own routed prompt |
+| Grant fief to a vassal | `GrantFiefVM.OnGrantFief` | **ROUTED** — authenticated server operation with stable settlement/clan ids |
+| Declare war (kingdom screen) | `KingdomWarItemVMMixin.ExecuteDirectAction` | **ROUTED** — authenticated, revision-checked server operation |
+| Propose peace (kingdom screen) | `KingdomTruceItemVMMixin.ExecuteDirectAction` | **ROUTED** — authenticated, revision-checked server operation |
+| End alliance | `KingdomDiplomacyVMMixin` / Diplomacy action | **ROUTED** — authenticated, revision-checked server operation |
+| Propose non-aggression pact | `KingdomTruceItemVMMixin.ProposeNonAggressionPact` + `FormNonAggressionPactAction` | **ROUTED** — server validates and applies the agreement |
+| Send messenger | `EncyclopediaHeroPageVMMixin.SendMessenger` | **ROUTED** — persisted controller-scoped server queue; embedded joined-clan members retain this personal action |
+| Keep fief after siege | `KeepFiefAfterSiegeBehavior.OnPlayerSettlementTaken` | **ROUTED** — server-owned prompt and decision |
 | Civil war actions (create/join/leave faction, start rebellion) | `RebelFactionsVM` / `RebelFactionItemVM` / `CivilWar.Actions.*` | permanently blocked while Friend Separatism owns rebellions (recorded decision, not debt) |
 
 ---

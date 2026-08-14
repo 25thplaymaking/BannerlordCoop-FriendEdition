@@ -10,6 +10,23 @@ Fork is pinned to game **1.4.7** — do NOT adopt upstream's 1.4.8 bump.
 PR: https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/pull/14
 Branch: `25vid/fix-kingdom-tab-diplomacy-managers` (base: `development`)
 
+## Phase N — messenger + bandit surrender + kingdom vote correction — STAGED, NOT DEPLOYED (2026-08-14)
+
+- **Send Messenger:** the authenticated executor now treats messenger dispatch as a personal action, so a
+  joined player embedded in the clan leader's party can send one. Party leadership is still required for the
+  clan, kingdom, fief, and gold operations.
+- **Bandit surrender:** the accepting client records the pending surrender before forwarding it. When the
+  authoritative result arrives, all surrendered participants are staged in the player's prisoner loot roster
+  and the encounter advances through the native prisoner screen and inventory-loot phase. The server accepts
+  the surrender only from a registered participant and only for that player's opposing bandit side.
+- **Kingdom decisions:** the authoritative vote manager counts only connected registered player clans. Dormant
+  personal clans retained in an existing save no longer become invisible required voters that deadlock the
+  decision popup. Disconnects also remove that clan's pending/final support and immediately resolve when all
+  remaining connected clans have finalized. The regressions cover an offline saved clan, disconnect-after-final,
+  and preview-then-disconnect; all 45 kingdom E2Es and 49 GameInterface kingdom tests pass through direct xUnit.
+- **Release boundary:** branch `25vid/messenger-bandit-capture`; held for PR review. No merge, launcher update,
+  server deployment, or live-server restart is authorized.
+
 ## Phase A — fixes shipping on PR #14 (all CI-green: build + unit + 8 E2E incl. Separatism)
 
 > **2026-08-13 correction:** the live reports showed that A1/A2 did not fix their user-visible defects.

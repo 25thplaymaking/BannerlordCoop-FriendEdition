@@ -6,6 +6,7 @@ using Common.Util;
 using GameInterface.Services.MapEvents.Data;
 using GameInterface.Services.MapEvents.Interfaces;
 using GameInterface.Services.MapEvents.Messages.Leave;
+using GameInterface.Services.MapEvents.Patches;
 using GameInterface.Services.MapEventParties;
 using GameInterface.Services.MapEventParties.Messages;
 using GameInterface.Services.ObjectManager;
@@ -139,6 +140,14 @@ internal class MapEventResultsHandler : IHandler
                 playerEncounter.RosterToReceiveLootItems.Add(lootedItems);
                 playerEncounter.RosterToReceiveLootMembers.Add(lootedMembers);
                 playerEncounter.RosterToReceiveLootPrisoners.Add(lootedPrisoners);
+            }
+
+            // Bandit dialogue has no mission-end callback to resume the encounter. Once its authoritative
+            // result is staged, enter Bannerlord's normal prisoner screen followed by inventory looting.
+            if (BanditSurrenderPatch.TryConsumePendingPostBattleResults(mapEvent) &&
+                data.WinningSide == data.PlayerSide)
+            {
+                PlayerEncounter.Update();
             }
         });
     }

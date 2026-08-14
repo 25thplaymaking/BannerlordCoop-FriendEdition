@@ -960,8 +960,11 @@ internal sealed class DiplomacyOperationExecutor
         out string failure)
     {
         failure = null;
-        if (actor == null || actorParty == null || actor.PartyBelongedTo != actorParty ||
-            actorParty.LeaderHero != actor || actor.Clan == null)
+        if (actor == null || actorParty == null || !DiplomacyActorAuthority.CanExecute(
+                request.Operation,
+                actor.PartyBelongedTo == actorParty,
+                actorParty.LeaderHero == actor,
+                actor.Clan != null))
         {
             failure = "authenticated controller has no matching active hero, clan, and party";
             return false;

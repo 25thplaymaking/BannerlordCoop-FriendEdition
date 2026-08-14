@@ -1,3 +1,4 @@
+using Common;
 using Common.Logging;
 using Common.Messaging;
 using GameInterface.Services.GameDebug.Messages;
@@ -39,6 +40,7 @@ namespace GameInterface.Services.Kingdoms
         void RegisterDecisionItem(DecisionItemBaseVM decisionItem);
         void UnregisterDecisionItem(DecisionItemBaseVM decisionItem);
         bool HandleVoteRequest(string controllerId, KingdomDecisionVoteData voteData);
+        void HandlePlayerDisconnected(string controllerId);
         void ApplyRemoteVote(string clanId, KingdomDecisionVoteData voteData);
         bool TryResolveDecision(KingdomDecision decision, bool force);
         bool HasEligiblePlayerClan(KingdomDecision decision);
@@ -227,7 +229,7 @@ namespace GameInterface.Services.Kingdoms
             if (!TryGetClanId(Clan.PlayerClan, out string canonicalClanId)) return false;
 
             KingdomDecisionVoteState state = GetOrCreateState(decision);
-            state.RefreshEligibleClanIds(GetEligibleClanIds(decision));
+            ReconcileEligibility(state);
             ApplyPendingRemoteVotes(state);
 
             return state.FinalVotes.ContainsKey(canonicalClanId);
@@ -250,7 +252,7 @@ namespace GameInterface.Services.Kingdoms
             if (decision != null)
             {
                 KingdomDecisionVoteState state = GetOrCreateState(decision);
-                state.RefreshEligibleClanIds(GetEligibleClanIds(decision));
+                ReconcileEligibility(state);
                 ApplyPendingRemoteVotes(state);
             }
 
@@ -273,7 +275,7 @@ namespace GameInterface.Services.Kingdoms
             if (!TryGetClanId(voterClan, out string voterClanId)) return false;
 
             KingdomDecisionVoteState state = GetOrCreateState(decision);
-            state.RefreshEligibleClanIds(GetEligibleClanIds(decision));
+            ReconcileEligibility(state);
             if (state.IsResolved || !state.EligibleClanIds.Contains(voterClanId)) return false;
             if (!ApplyVote(state, voterClanId, voterClan, voteData)) return false;
 
@@ -284,6 +286,22 @@ namespace GameInterface.Services.Kingdoms
                 ResolveDecision(state);
             }
             return true;
+        }
+
+        public void HandlePlayerDisconnected(string controllerId)
+        {
+            if (!ModInformation.IsServer) return;
+
+            foreach (KingdomDecisionVoteState state in DecisionStates.Values.ToList())
+            {
+                if (state.IsResolved) continue;
+
+                ReconcileEligibility(state, controllerId);
+                if (state.HasAllVotes)
+                {
+                    ResolveDecision(state);
+                }
+            }
         }
 
         public void ApplyRemoteVote(string clanId, KingdomDecisionVoteData voteData)
@@ -298,7 +316,7 @@ namespace GameInterface.Services.Kingdoms
             }
 
             KingdomDecisionVoteState state = GetOrCreateState(decision);
-            state.RefreshEligibleClanIds(GetEligibleClanIds(decision));
+            ReconcileEligibility(state);
             ApplyVote(state, clanId, clan, voteData);
         }
 
@@ -307,7 +325,7 @@ namespace GameInterface.Services.Kingdoms
             if (decision == null) return false;
 
             KingdomDecisionVoteState state = GetOrCreateState(decision);
-            state.RefreshEligibleClanIds(GetEligibleClanIds(decision));
+            ReconcileEligibility(state);
             if (state.EligibleClanIds.Count == 0) return false;
             if (!force && !state.HasAllVotes) return false;
 
@@ -363,7 +381,7 @@ namespace GameInterface.Services.Kingdoms
             {
                 if (decision == null) continue;
                 KingdomDecisionVoteState state = GetOrCreateState(decision);
-                state.RefreshEligibleClanIds(GetEligibleClanIds(decision));
+                ReconcileEligibility(state);
                 ApplyPendingRemoteVotes(state);
 
                 decisionInfos.Add(CreateDecisionDebugInfo(state));
@@ -454,7 +472,7 @@ namespace GameInterface.Services.Kingdoms
             if (decision == null || Clan.PlayerClan == null) return false;
             if (!TryGetClanId(Clan.PlayerClan, out string clanId)) return false;
             KingdomDecisionVoteState state = GetOrCreateState(decision);
-            state.RefreshEligibleClanIds(GetEligibleClanIds(decision));
+            ReconcileEligibility(state);
             if (!state.EligibleClanIds.Contains(clanId)) return false;
 
             return ApplyVote(state, clanId, Clan.PlayerClan, voteData);
@@ -1027,7 +1045,36 @@ namespace GameInterface.Services.Kingdoms
             return new KingdomDecisionVoteState(kingdomId, decisionIndex, decision, GetEligibleClanIds(decision));
         }
 
-        private HashSet<string> GetEligibleClanIds(KingdomDecision decision)
+        private void ReconcileEligibility(KingdomDecisionVoteState state, string disconnectedControllerId = null)
+        {
+            HashSet<string> eligibleClanIds = GetEligibleClanIds(state.Decision, disconnectedControllerId);
+            foreach (string removedClanId in state.Votes.Keys
+                         .Concat(state.FinalVotes.Keys)
+                         .Where(clanId => !eligibleClanIds.Contains(clanId))
+                         .Distinct()
+                         .ToList())
+            {
+                if (TryGetClan(removedClanId, state.Decision.Kingdom, out Clan removedClan))
+                {
+                    ResetClanSupport(state.Election, removedClan);
+                    if (state.Election._chooser == removedClan)
+                    {
+                        state.Election._chosenOutcome = null;
+                    }
+                }
+
+                state.Votes.Remove(removedClanId);
+                state.FinalVotes.Remove(removedClanId);
+            }
+
+            state.RefreshEligibleClanIds(eligibleClanIds);
+            state.Election.DetermineOfficialSupport();
+            ApplyVotesToActiveDecisionItems(state);
+        }
+
+        private HashSet<string> GetEligibleClanIds(
+            KingdomDecision decision,
+            string disconnectedControllerId = null)
         {
             HashSet<string> eligibleClanIds = new HashSet<string>();
             if (playerManager == null || objectManager == null) return eligibleClanIds;
@@ -1035,6 +1082,8 @@ namespace GameInterface.Services.Kingdoms
             foreach (var player in playerManager.Players)
             {
                 if (string.IsNullOrEmpty(player.ClanId)) continue;
+                if (player.ControllerId == disconnectedControllerId) continue;
+                if (ModInformation.IsServer && !playerManager.IsConnected(player)) continue;
                 if (!TryGetClan(player.ClanId, decision.Kingdom, out Clan clan)) continue;
                 if (clan.Kingdom != decision.Kingdom) continue;
 

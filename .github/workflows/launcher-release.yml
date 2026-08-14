@@ -21,7 +21,7 @@ on:
       channels:
         description: Which channel(s) to publish this build to
         type: choice
-        default: nightly
+        default: both
         options: [nightly, stable, both]
 
 permissions:
@@ -194,8 +194,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # No checkout in this job, so gh can't infer the repo from a git remote — name it.
           GH_REPO: ${{ github.repository }}
-          # Automatic development builds are nightly-only. Stable promotion is always manual.
-          CHANNELS: ${{ github.event_name == 'workflow_dispatch' && inputs.channels || 'nightly' }}
+          # Automatic development builds and dispatches publish to both channels.
+          CHANNELS: ${{ github.event_name == 'workflow_dispatch' && inputs.channels || 'both' }}
         run: |
           set -eu
           version=$(date -u +%Y.%m.%d.%H%M)

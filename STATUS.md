@@ -14,10 +14,11 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > the joined clan on departure. If the leader is offline, embedded members receive emergency parties
 > even above the party cap, are never auto-rejoined, and receive a one-time carrier-pigeon notice
 > when the leader returns. Consent-based player marriage is separate and preserves both clans.
-> Full-diff review corrected cross-clan re-embedding, stale-leader approval, roster XP removal, and
-> replicated destruction of the applicant's retired party. Release build is clean with zero errors;
-> 221 focused tests pass (5 crash reporter, 155 Diplomacy, 6 patch registration, 39 membership/save/
-> visibility unit tests, and 16 interaction E2E cases). No launcher package or server files have
+> Full-diff/CI review corrected cross-clan re-embedding, stale-leader approval, roster XP removal,
+> replicated destruction of the applicant's retired party, player-position-independent personal
+> marriage validation, and an unauthenticated siege-leave fixture. Release build is clean with zero
+> errors; 223 focused tests pass (5 crash reporter, 155 Diplomacy, 6 patch registration, 39 membership/
+> save/visibility unit tests, and 18 interaction/marriage/siege E2E cases). No launcher package or server files have
 > been changed yet.
 
 > **2026-08-14 Phase M crash correction — VERIFIED CANDIDATE, NOT DEPLOYED.** The 09:57 EDT

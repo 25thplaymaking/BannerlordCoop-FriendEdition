@@ -486,10 +486,11 @@ The local and deployment gates are green; rendered verification must use launche
   members before parking the leader party. Emergency creation may exceed the cap, further voluntary
   creation remains blocked by the cap, rejoin is voluntary, and a one-time carrier-pigeon notice is
   sent after leader return.
-- **Review and verification:** full PR review corrected stale-leader approval, roster XP removal,
-  cross-clan re-embedding, and old-party lifecycle replication. Release solution build completes
-  with zero errors. Focused direct-xUnit coverage is 221 passing cases: CrashReporter 5, Diplomacy
-  155, patch registration 6, membership/restore/save/visibility units 39, and interaction E2Es 16.
+- **Review and verification:** full PR/CI review corrected stale-leader approval, roster XP removal,
+  cross-clan re-embedding, old-party lifecycle replication, personal-marriage tuple orientation,
+  and an unauthenticated siege-leave fixture. Release solution build completes with zero errors.
+  Focused direct-xUnit coverage is 223 passing cases: CrashReporter 5, Diplomacy 155, patch
+  registration 6, membership/restore/save/visibility units 39, and interaction/marriage/siege E2Es 18.
   PR #15 remains the release boundary; no launcher or server deployment has occurred at this point.
 
 ### Still open after this phase

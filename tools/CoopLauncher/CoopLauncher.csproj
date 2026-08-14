@@ -25,6 +25,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- DPAPI for the opt-in remembered join password (Options tab). -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Ships beside the .exe; edited without a rebuild so the group can retune the server target. -->
     <None Update="launcher-config.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- Frontir shield crest; embedded so the borderless window's taskbar/Alt-Tab icon resolves at runtime. -->

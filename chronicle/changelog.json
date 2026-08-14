@@ -1,0 +1,32 @@
+[
+  {
+    "version": "2026.08.14.0001",
+    "date": "2026-08-14",
+    "title": "The join freeze is dead",
+    "highlights": [
+      "Joining the server no longer freezes on the \"Applying patches...\" screen.",
+      "If patch-up ever fails again, you get a real error message and a clean return to the menu instead of a frozen loading screen.",
+      "Under the hood: two mod-compatibility patches couldn't apply on the game's runtime; they now apply only where they work, with the same protections kept."
+    ]
+  },
+  {
+    "version": "2026.08.13.2231",
+    "date": "2026-08-13",
+    "title": "Army battles and runtime wiring",
+    "highlights": [
+      "Large allied-army battles now field the full army reserve instead of only your entry-time troops.",
+      "Retreating from an unresolved battle cleans up properly - no more stale attack loops.",
+      "All six gameplay mods verified wired on the dedicated server with exact per-file checks."
+    ]
+  },
+  {
+    "version": "2026.08.13.0740",
+    "date": "2026-08-13",
+    "title": "Raid softlock and kingdom-screen fixes",
+    "highlights": [
+      "Raiding a village no longer soft-locks the raider and flood the server.",
+      "Loot totals add up again after raids.",
+      "Stuck lords trapped in abandoned map events are freed automatically."
+    ]
+  }
+]

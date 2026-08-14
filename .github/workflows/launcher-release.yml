@@ -225,4 +225,9 @@ jobs:
                 $latest_flag
             fi
             gh release upload "$tag" Coop-client.zip launcher.json --clobber
+            # The Chronicle tab's curated changelog rides the same tag so the launcher can derive
+            # its URL from the client feed. Optional: an older checkout without the file still ships.
+            if [ -f chronicle/changelog.json ]; then
+              gh release upload "$tag" chronicle/changelog.json --clobber
+            fi
           done

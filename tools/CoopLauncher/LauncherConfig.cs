@@ -62,6 +62,17 @@ public sealed class LauncherConfig
     public string SuiteManifestUrl { get; set; } =
         "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/suite-stable/suite.json";
 
+    /// <summary>
+    /// Curated chronicle (player-facing changelog) feed. Empty = derive from
+    /// <see cref="UpdateManifestUrl"/> by swapping the file name to <c>changelog.json</c>, so the
+    /// chronicle rides the same release tag as the client feed with zero extra configuration.
+    /// </summary>
+    public string ChronicleUrl { get; set; } = "";
+
+    /// <summary>Shown as a link in Options; the project this launcher belongs to.</summary>
+    public string ProjectUrl { get; set; } =
+        "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition";
+
     private static readonly JsonSerializerOptions Options = new()
     {
         PropertyNameCaseInsensitive = true,

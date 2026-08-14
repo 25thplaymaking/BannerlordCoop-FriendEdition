@@ -389,6 +389,33 @@ public class PlayerPartyRestorerTests
         Assert.True(createCalled);
     }
 
+    [Fact]
+    public void TryRestore_EmbeddedMember_PreservesLeaderAndSharedParty()
+    {
+        var (hero, party, _, _) = CreatePlayerGraph();
+        var leader = (Hero)FormatterServices.GetUninitializedObject(typeof(Hero));
+        var leaderComponent = new LordPartyComponent(leader, null, null);
+        leaderComponent.MobileParty = party;
+        party._partyComponent = leaderComponent;
+        party.MemberRoster.AddToCounts(hero.CharacterObject, 1);
+        var player = new Player(
+            "Controller", "Hero_Saved", "MobileParty_Saved", "Clan_Saved", "Character_Saved",
+            "PersonalClan", PlayerClanMembershipMode.Embedded);
+        var objectManager = CreateObjectManager(player, hero, party);
+
+        var restorer = new PlayerPartyRestorer(
+            objectManager.Object,
+            Mock.Of<IAutoRegistryFactory>(),
+            () => new[] { party },
+            _ => throw new InvalidOperationException("The shared party should be reused"),
+            _ => throw new InvalidOperationException("The shared party should not be removed"));
+
+        Assert.True(restorer.TryRestore(player, out var restored));
+        Assert.Same(player, restored);
+        Assert.Same(leader, party.LordPartyComponent.Owner);
+        Assert.Equal(PlayerClanMembershipMode.Embedded, restored.ClanMembershipMode);
+    }
+
     private static (Hero Hero, MobileParty Party, Clan Clan, CharacterObject Character) CreatePlayerGraph()
     {
         var clan = (Clan)FormatterServices.GetUninitializedObject(typeof(Clan));

@@ -15,6 +15,7 @@ using GameInterface.Services.PartyVisuals.Extensions;
 using GameInterface.Services.PartyVisuals.Messages;
 using GameInterface.Services.Players;
 using GameInterface.Services.Players.Data;
+using GameInterface.Services.Players.Messages;
 using GameInterface.Services.SiegeEvents.Interfaces;
 using HarmonyLib;
 using LiteNetLib;
@@ -47,6 +48,7 @@ internal class PlayerPartyVisibilityHandler : IHandler
     private readonly IObjectManager objectManager;
     private readonly INetwork network;
     private readonly ISiegeEventInterface siegeEventInterface;
+    private readonly IPlayerClanMembershipService clanMembershipService;
     private readonly Dictionary<MobileParty, (MapEvent MapEvent, string ControllerId)> deferredMapEventParking = new();
 
     public PlayerPartyVisibilityHandler(
@@ -54,13 +56,15 @@ internal class PlayerPartyVisibilityHandler : IHandler
         IPlayerManager playerManager,
         IObjectManager objectManager,
         INetwork network,
-        ISiegeEventInterface siegeEventInterface)
+        ISiegeEventInterface siegeEventInterface,
+        IPlayerClanMembershipService clanMembershipService)
     {
         this.messageBroker = messageBroker;
         this.playerManager = playerManager;
         this.objectManager = objectManager;
         this.network = network;
         this.siegeEventInterface = siegeEventInterface;
+        this.clanMembershipService = clanMembershipService;
 
         messageBroker.Subscribe<PlayerDisconnected>(Handle_PlayerDisconnected);
         messageBroker.Subscribe<PlayerCampaignEntered>(Handle_PlayerCampaignEntered);
@@ -85,6 +89,17 @@ internal class PlayerPartyVisibilityHandler : IHandler
         foreach (var player in playerManager.Players)
         {
             if (playerManager.IsConnected(player)) continue;
+            if (player.ClanMembershipMode == PlayerClanMembershipMode.Embedded)
+            {
+                if (!clanMembershipService.TryGetClanLeader(player, out var leader) ||
+                    !playerManager.IsConnected(leader))
+                {
+                    if (clanMembershipService.TrySeparate(player, emergency: true, out var separated) &&
+                        objectManager.TryGetObjectWithLogging<MobileParty>(separated.MobilePartyId, out var separatedParty))
+                        ParkParty(separated, separatedParty, "its saved player and clan leader are offline");
+                }
+                continue;
+            }
             if (!objectManager.TryGetObjectWithLogging<MobileParty>(player.MobilePartyId, out var party))
                 continue;
 
@@ -109,8 +124,12 @@ internal class PlayerPartyVisibilityHandler : IHandler
         // of what happens below, so a stale peer never resolves to the wrong party
         playerManager.ClearPeer(peer);
 
+        if (player.ClanMembershipMode == PlayerClanMembershipMode.Embedded)
+            return;
+
         GameThread.RunSafe(() =>
         {
+            SeparateEmbeddedMembers(player);
             ParkParty(player, party, $"peer {peer.Id} disconnected");
         });
     }
@@ -169,8 +188,24 @@ internal class PlayerPartyVisibilityHandler : IHandler
 
         var peer = payload.What.playerId;
 
-        if (!playerManager.TryGetPlayer(peer, out var player) ||
-            !objectManager.TryGetObjectWithLogging<MobileParty>(player.MobilePartyId, out var party))
+        if (!playerManager.TryGetPlayer(peer, out var player))
+        {
+            Logger.Error("Could not resolve party for peer {Peer} on campaign entry", peer.Id);
+            return;
+        }
+
+        if (player.ClanMembershipMode == PlayerClanMembershipMode.Embedded &&
+            (!clanMembershipService.TryGetClanLeader(player, out var leader) ||
+             !playerManager.IsConnected(leader)))
+        {
+            if (!clanMembershipService.TrySeparate(player, emergency: true, out player))
+            {
+                Logger.Error("Could not create an emergency party for embedded peer {Peer}", peer.Id);
+                return;
+            }
+        }
+
+        if (!objectManager.TryGetObjectWithLogging<MobileParty>(player.MobilePartyId, out var party))
         {
             Logger.Error("Could not resolve party for peer {Peer} on campaign entry", peer.Id);
             return;
@@ -184,6 +219,8 @@ internal class PlayerPartyVisibilityHandler : IHandler
 
             if (party.IsActive)
             {
+                NotifyLeaderReturn(player);
+                NotifyMembersOfLeaderReturn(player);
                 return; // fresh join, never parked, nothing to restore
             }
 
@@ -203,7 +240,66 @@ internal class PlayerPartyVisibilityHandler : IHandler
             CreateVisual(party, player.MobilePartyId);
             party.Party.UpdateVisibilityAndInspected(party.Position);
             Logger.Information("Restored party {PartyId} for reconnected peer {Peer}", party.StringId, peer.Id);
+            NotifyLeaderReturn(player);
+            NotifyMembersOfLeaderReturn(player);
         });
+    }
+
+    private void SeparateEmbeddedMembers(Player leader)
+    {
+        foreach (var member in playerManager.Players
+            .Where(candidate => candidate.ControllerId != leader.ControllerId &&
+                                candidate.ClanMembershipMode == PlayerClanMembershipMode.Embedded &&
+                                candidate.MobilePartyId == leader.MobilePartyId)
+            .ToArray())
+        {
+            if (clanMembershipService.TrySeparate(member, emergency: true, out var separated) &&
+                !playerManager.IsConnected(separated) &&
+                objectManager.TryGetObjectWithLogging<MobileParty>(separated.MobilePartyId, out var separatedParty))
+            {
+                ParkParty(separated, separatedParty, "its player and clan leader are offline");
+            }
+        }
+    }
+
+    private void NotifyLeaderReturn(Player player)
+    {
+        if (!player.EmergencyDetached ||
+            !clanMembershipService.TryGetClanLeader(player, out var leader) ||
+            !playerManager.IsConnected(leader))
+            return;
+
+        NotifyAndClearEmergency(player);
+    }
+
+    private void NotifyMembersOfLeaderReturn(Player leader)
+    {
+        foreach (var member in playerManager.Players
+            .Where(candidate => candidate.ControllerId != leader.ControllerId &&
+                                candidate.ClanId == leader.ClanId &&
+                                candidate.EmergencyDetached)
+            .ToArray())
+        {
+            if (playerManager.IsConnected(member))
+                NotifyAndClearEmergency(member);
+        }
+    }
+
+    private void NotifyAndClearEmergency(Player member)
+    {
+        if (!playerManager.TryGetPeer(member.ControllerId, out var peer)) return;
+        network.Send(peer, new ClanLeaderReturnedNotification(true));
+        var replacement = new Player(
+            member.ControllerId,
+            member.HeroId,
+            member.MobilePartyId,
+            member.ClanId,
+            member.CharacterObjectId,
+            member.PersonalClanId,
+            member.ClanMembershipMode,
+            emergencyDetached: false);
+        if (playerManager.ReplacePlayer(member, replacement))
+            messageBroker.Publish(this, new PlayerRegistrationChanged(replacement));
     }
 
     private void Handle_MapEventFinalized(MessagePayload<MapEventFinalized> payload)

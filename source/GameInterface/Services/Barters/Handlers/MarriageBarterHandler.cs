@@ -460,9 +460,12 @@ internal sealed class MarriageBarterHandler : IHandler
         }
 
         var romanticLevel = Romance.GetRomanticLevel(heroBeingProposedTo, proposingHero);
-        if (proposingHero == playerHero)
+        if (proposingHero == playerHero ||
+            (heroBeingProposedTo == playerHero &&
+             romanticLevel != Romance.RomanceLevelEnum.MatchMadeByFamily))
         {
-            if (!romanceAuthority.TryValidateMarriage(playerHero, heroBeingProposedTo, out reason))
+            var prospectiveSpouse = proposingHero == playerHero ? heroBeingProposedTo : proposingHero;
+            if (!romanceAuthority.TryValidateMarriage(playerHero, prospectiveSpouse, out reason))
                 return false;
         }
         else

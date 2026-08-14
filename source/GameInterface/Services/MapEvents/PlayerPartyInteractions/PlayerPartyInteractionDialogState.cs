@@ -117,6 +117,8 @@ public static class PlayerPartyInteractionDialogState
                 return "Eh? What do you want?";
             case PlayerPartyInteractionPhase.HostileDemandPending:
                 return "I offer you one chance to surrender or die";
+            case PlayerPartyInteractionPhase.ClanJoinConfirm:
+                return "Joining permanently gives the clan leader your fiefs, workshops, caravans, alleys, gold, troops, prisoners, and party inventory. These assets will not return if you leave.";
             case PlayerPartyInteractionPhase.TradeActive:
                 return "Let us review the trade.";
             case PlayerPartyInteractionPhase.OfferServices:
@@ -192,13 +194,15 @@ public static class PlayerPartyInteractionDialogState
             case PlayerPartyInteractionProposal.Trade:
                 return "I have a proposal that may benefit us both.";
             case PlayerPartyInteractionProposal.JoinClan:
-                return "(COMING SOON) I wish to offer my services in your clan.";
+                return "I wish to join your clan and travel in your party.";
             case PlayerPartyInteractionProposal.Vassal:
                 return "I wish to swear my allegiance to your majesty.";
             case PlayerPartyInteractionProposal.HostileDemand:
                 return "I offer you one chance to surrender or die";
             case PlayerPartyInteractionProposal.TravelTogether:
                 return "Let us combine our parties and travel together.";
+            case PlayerPartyInteractionProposal.Marriage:
+                return "Will you marry me? Our clans will remain separate.";
             default:
                 return $"{OtherPlayerName} has made a proposal.";
         }

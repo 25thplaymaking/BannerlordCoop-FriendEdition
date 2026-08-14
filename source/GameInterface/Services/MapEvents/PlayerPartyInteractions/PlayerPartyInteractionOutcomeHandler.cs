@@ -3,6 +3,7 @@ using Common.Logging;
 using GameInterface.Services.Inventory.Data;
 using GameInterface.Services.Kingdoms;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.Players;
 using GameInterface.Services.TroopRosters.Data;
 using Serilog;
 using System;
@@ -62,13 +63,16 @@ internal class PlayerPartyInteractionOutcomeHandler
 
     private readonly IObjectManager objectManager;
     private readonly IKingdomMembershipState kingdomMembershipState;
+    private readonly IPlayerClanMembershipService clanMembershipService;
 
     public PlayerPartyInteractionOutcomeHandler(
         IObjectManager objectManager,
-        IKingdomMembershipState kingdomMembershipState)
+        IKingdomMembershipState kingdomMembershipState,
+        IPlayerClanMembershipService clanMembershipService)
     {
         this.objectManager = objectManager;
         this.kingdomMembershipState = kingdomMembershipState;
+        this.clanMembershipService = clanMembershipService;
     }
 
     public void Handle(PlayerPartyInteractionOutcome outcome)
@@ -87,6 +91,9 @@ internal class PlayerPartyInteractionOutcomeHandler
             case PlayerPartyInteractionOutcomeType.TravelTogetherAccepted:
                 HandleTravelTogetherAccepted(outcome);
                 break;
+            case PlayerPartyInteractionOutcomeType.MarriageAccepted:
+                HandleMarriageAccepted(outcome);
+                break;
             case PlayerPartyInteractionOutcomeType.ClanJoinDeclined:
             case PlayerPartyInteractionOutcomeType.TradeDeclined:
             case PlayerPartyInteractionOutcomeType.VassalDeclined:
@@ -96,9 +103,39 @@ internal class PlayerPartyInteractionOutcomeHandler
             case PlayerPartyInteractionOutcomeType.HostileDemandAccepted:
             case PlayerPartyInteractionOutcomeType.HostileDemandYielded:
             case PlayerPartyInteractionOutcomeType.TravelTogetherDeclined:
+            case PlayerPartyInteractionOutcomeType.MarriageDeclined:
                 // All the above lead to ending the interaction, however we may intend to have them lead to different
                 // logic in the future.
                 break;
+        }
+    }
+
+    private void HandleMarriageAccepted(PlayerPartyInteractionOutcome outcome)
+    {
+        try
+        {
+            RunOnGameThread(() => ApplyMarriage(outcome), "Apply player marriage");
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e,
+                "Failed to apply player marriage. SessionId={SessionId}, InitiatorPartyId={InitiatorPartyId}, ResponderPartyId={ResponderPartyId}",
+                outcome.SessionId,
+                outcome.InitiatorPartyId,
+                outcome.ResponderPartyId);
+        }
+    }
+
+    private void ApplyMarriage(PlayerPartyInteractionOutcome outcome)
+    {
+        if (!objectManager.TryGetObject(outcome.InitiatorPartyId, out PartyBase initiatorParty) ||
+            !objectManager.TryGetObject(outcome.ResponderPartyId, out PartyBase responderParty) ||
+            !clanMembershipService.TryMarry(initiatorParty, responderParty))
+        {
+            Logger.Warning(
+                "Unable to apply player marriage: eligibility changed before acceptance. InitiatorPartyId={InitiatorPartyId}, ResponderPartyId={ResponderPartyId}",
+                outcome.InitiatorPartyId,
+                outcome.ResponderPartyId);
         }
     }
 
@@ -248,20 +285,13 @@ internal class PlayerPartyInteractionOutcomeHandler
             return;
         }
 
-        var initiatorHero = initiatorParty.LeaderHero;
-        var responderClan = responderParty.LeaderHero?.Clan;
-        if (initiatorHero == null || responderClan == null)
+        if (!clanMembershipService.TryJoin(initiatorParty, responderParty))
         {
             Logger.Warning(
-                "Unable to apply player-party clan join: missing initiator hero or responder clan. InitiatorPartyId={InitiatorPartyId}, ResponderPartyId={ResponderPartyId}",
+                "Unable to apply player-party clan join: eligibility changed before acceptance. InitiatorPartyId={InitiatorPartyId}, ResponderPartyId={ResponderPartyId}",
                 outcome.InitiatorPartyId,
                 outcome.ResponderPartyId);
-            return;
         }
-
-        initiatorHero.Clan = responderClan;
-        if (initiatorParty.MobileParty != null)
-            initiatorParty.MobileParty.ActualClan = responderClan;
     }
 
     private void ApplyAcceptedTrade(PlayerPartyInteractionOutcome outcome)

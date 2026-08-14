@@ -439,11 +439,66 @@ The local and deployment gates are green; rendered verification must use launche
   marriage; army leave from the wait menu (incl. after a concluded battle); player death with an
   adult heir (succession handoff); loot a battle and verify totals.
 
+### Phase M — 0xC0000005 dump diagnosis and staged correction (2026-08-14)
+- **Exact artifact recovered:** Windows wrote
+  `%LOCALAPPDATA%\CrashDumps\Bannerlord.exe.37960.dmp` (91,209,245 bytes) for the 09:57 EDT
+  client crash on source `fa685f7f6`. It appeared after the Coop report's collection path had
+  looked only under Bannerlord's `crashes` tree, which is why the report incorrectly said no dump.
+- **Root cause proven in WinDbg:** the native tick boundary surfaced `0xC0000005`, but the fault is
+  a managed `System.NullReferenceException` in
+  `Diplomacy.ViewModelMixin.KingdomDiplomacyVMMixin.<.ctor>b__21_0`, dispatched by
+  `CampaignEvents.OnMakePeace` from Coop's queued `FactionStanceHandler.HandleMakePeace` task.
+  `Hero.MainHero.MapFaction` was a valid Kingdom; the null value was UIExtenderEx's weak
+  `BaseViewModelMixin.ViewModel` target. The Kingdom screen had closed about ten seconds earlier,
+  while its non-serialized listener remained subscribed. The Clan screen happened to be open when
+  the incoming peace update ran and did not cause the crash.
+- **Candidate fix:** a Diplomacy-category Harmony prefix covers the pinned 1.4.7 mixin's three exact
+  constructor callbacks (peace, war, and alliance-ended). It permits refresh while the weak view
+  model is live and skips only that stale presentation callback after collection. The authoritative
+  stance action and campaign-event dispatch are not suppressed. The implementation gate now audits
+  all three compiler-generated signatures against the exact pinned DLL.
+- **Reporter fix:** dump discovery searches both Bannerlord's crash tree and Windows LocalDumps at
+  `%LOCALAPPDATA%\CrashDumps`, then retains the existing PID/time validation and completion-copy
+  retry. A regression creates a matching Windows-style late dump and proves discovery.
+- **Verification / deployment boundary:** all five crash-reporter tests and all 155 Diplomacy
+  namespace tests pass through the direct xUnit runner (the machine's known IPv4 vstest transport
+  remains unusable). Release build and final gates are recorded with the candidate commit. Nothing
+  was copied into the live client or server, and the server was not restarted. Promotion remains a
+  lockstep client/server action after explicit green light; rendered proof should open then close
+  Kingdom and receive peace/war/alliance updates while another screen is active.
+
+### Phase N — native player clan membership (2026-08-14)
+- **Consent and eligibility:** player-to-player clan joining uses the existing party interaction
+  flow, requires an affirmative leader response, and is available only when the receiving player's
+  clan is Tier 2 or higher. The server revalidates the current clan leader on acceptance. Optional
+  player marriage uses native suitability and reciprocal spouse/romance state without moving either
+  player between clans.
+- **Ownership and party control:** first join permanently gives the receiving clan/leader the
+  applicant's fiefs, workshops, caravans, alleys, gold, troops, prisoners, and inventory. The member
+  is embedded in the leader's real party, so that party's leader owns map control and shared results;
+  hero XP is not pooled. Registration updates precede replicated destruction of the retired party,
+  preventing client-side zombie parties. Re-embedding is limited to the same joined clan.
+- **Separation and exit:** a joined player may request a leader-approved hero-only party subject to
+  the native party cap, or leave the clan without approval and return to the persisted personal clan.
+  Transferred assets and shared gold remain with the joined clan. Dormant personal clans are retained
+  while their player is away.
+- **Offline safeguard:** leader disconnect creates emergency independent parties for embedded
+  members before parking the leader party. Emergency creation may exceed the cap, further voluntary
+  creation remains blocked by the cap, rejoin is voluntary, and a one-time carrier-pigeon notice is
+  sent after leader return.
+- **Review and verification:** full PR/CI review corrected stale-leader approval, roster XP removal,
+  cross-clan re-embedding, old-party lifecycle replication, personal-marriage tuple orientation,
+  and an unauthenticated siege-leave fixture. Release solution build completes with zero errors.
+  Focused direct-xUnit coverage is 223 passing cases: CrashReporter 5, Diplomacy 155, patch
+  registration 6, membership/restore/save/visibility units 39, and interaction/marriage/siege E2Es 18.
+  PR #15 remains the release boundary; no launcher or server deployment has occurred at this point.
+
 ### Still open after this phase
-- **0xC0000005 root cause unproven** — need one accepted dump from the next occurrence.
 - **Equipment/IsReady client ERR floods** (~5k/min in battles) — worker-thread churn is
   by-design-unsynced but logged at ERR through Serilog on hot paths; wants a throttle/dedup plus a
-  decision on worker-thread allowances. Defer until a dump proves/disproves the log path's role.
+  decision on worker-thread allowances. The recovered dump proves this crash came from the stale
+  Diplomacy listener rather than those log paths, so they remain a separate observability/performance
+  issue rather than the current crash mechanism.
 - **Clan-registered-under-Kingdom-id** (`Could not cast (Clan) ... to Kingdom` while resolving a
   server-sent kingdom id): now silenced at the decision path, but the underlying cross-peer
   `Created_*` id divergence hint deserves a look if rebel-kingdom desyncs appear.

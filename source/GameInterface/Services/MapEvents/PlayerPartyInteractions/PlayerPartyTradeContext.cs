@@ -597,6 +597,10 @@ internal static class PlayerPartyTradeContext
                 return "Vassalage offer accepted.";
             case PlayerPartyInteractionOutcomeType.VassalDeclined:
                 return "Vassalage offer declined.";
+            case PlayerPartyInteractionOutcomeType.MarriageAccepted:
+                return "Marriage proposal accepted.";
+            case PlayerPartyInteractionOutcomeType.MarriageDeclined:
+                return "Marriage proposal declined.";
             default:
                 return null;
         }

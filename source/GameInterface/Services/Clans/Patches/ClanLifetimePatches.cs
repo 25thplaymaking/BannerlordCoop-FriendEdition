@@ -3,6 +3,9 @@ using Common.Logging;
 using Common.Messaging;
 using GameInterface.Policies;
 using GameInterface.Services.Clans.Messages.Lifetime;
+using GameInterface.Services.ObjectManager;
+using GameInterface.Services.Players;
+using GameInterface.Services.Players.Data;
 using HarmonyLib;
 using Serilog;
 using TaleWorlds.CampaignSystem;
@@ -24,6 +27,12 @@ internal class ClanLifetimePatches
     {
         if (CallOriginalPolicy.IsOriginalAllowed()) return true;
 
+        if (ModInformation.IsServer && IsProtectedPersonalClan(destroyedClan))
+        {
+            Logger.Information("Keeping dormant personal clan {ClanId} while its player is in another clan", destroyedClan.StringId);
+            return false;
+        }
+
         if (ModInformation.IsClient)
         {
             Logger.Error("Client created managed {name}", typeof(Clan));
@@ -33,5 +42,23 @@ internal class ClanLifetimePatches
         MessageBroker.Instance.Publish(destroyedClan, new ClanDestroyed(destroyedClan, details));
 
         return true;
+    }
+
+    private static bool IsProtectedPersonalClan(Clan clan)
+    {
+        if (clan == null ||
+            !ContainerProvider.TryResolve<IPlayerManager>(out var playerManager) ||
+            !ContainerProvider.TryResolve<IObjectManager>(out var objectManager) ||
+            !objectManager.TryGetId(clan, out var clanId))
+            return false;
+
+        foreach (var player in playerManager.Players)
+        {
+            if (player.ClanMembershipMode != PlayerClanMembershipMode.PersonalClan &&
+                player.PersonalClanId == clanId)
+                return true;
+        }
+
+        return false;
     }
 }

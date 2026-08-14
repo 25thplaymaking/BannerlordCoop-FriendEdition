@@ -10,6 +10,7 @@ public class PlayerPartyInteractionCampaignBehavior : CampaignBehaviorBase
     private const string ServiceToken = "coop_player_party_interaction_services";
     private const string ResponderToken = "coop_player_party_interaction_responder";
     private const string HostileConfirmToken = "coop_player_party_interaction_hostile_confirm";
+    private const string ClanJoinConfirmToken = "coop_player_party_interaction_clan_join_confirm";
     private const string InitiatorWaitToken = "coop_player_party_interaction_initiator_wait";
     private const string CloseToken = "close_window";
     private const int PlayerPartyDialogPriority = 10000;
@@ -85,6 +86,16 @@ public class PlayerPartyInteractionCampaignBehavior : CampaignBehaviorBase
             PlayerPartyDialogPriority,
             null);
 
+        starter.AddDialogLine(
+            "coop_player_party_interaction_clan_join_confirm_line",
+            ClanJoinConfirmToken,
+            ClanJoinConfirmToken,
+            "{=coop_player_party_clan_join_warning}{COOP_PLAYER_PARTY_INTERACTION_TEXT}",
+            () => IsPhase(PlayerPartyInteractionPhase.ClanJoinConfirm),
+            null,
+            PlayerPartyDialogPriority,
+            null);
+
         starter.AddPlayerLine(
             "coop_player_party_interaction_trade",
             InitialToken,
@@ -132,12 +143,46 @@ public class PlayerPartyInteractionCampaignBehavior : CampaignBehaviorBase
         starter.AddPlayerLine(
             "coop_player_party_interaction_join_clan",
             ServiceToken,
-            InitiatorWaitToken,
-            "(COMING SOON) I wish to offer my services in your clan.",
+            ClanJoinConfirmToken,
+            "I wish to offer my services in your clan.",
             () => PlayerPartyInteractionDialogState.HasOption(PlayerPartyInteractionOption.JoinClan),
             () => PlayerPartyInteractionDialogState.Submit(PlayerPartyInteractionOption.JoinClan),
             PlayerPartyDialogPriority,
             IsJoinClanEnabled,
+            null);
+
+
+        starter.AddPlayerLine(
+            "coop_player_party_interaction_join_clan_confirm",
+            ClanJoinConfirmToken,
+            InitiatorWaitToken,
+            "I understand. Send the request.",
+            () => PlayerPartyInteractionDialogState.HasOption(PlayerPartyInteractionOption.ConfirmJoinClan),
+            () => PlayerPartyInteractionDialogState.Submit(PlayerPartyInteractionOption.ConfirmJoinClan),
+            PlayerPartyDialogPriority,
+            null,
+            null);
+
+        starter.AddPlayerLine(
+            "coop_player_party_interaction_marriage",
+            InitialToken,
+            InitiatorWaitToken,
+            "Will you marry me? Our clans will remain separate.",
+            () => PlayerPartyInteractionDialogState.HasOption(PlayerPartyInteractionOption.MarriageProposal),
+            () => PlayerPartyInteractionDialogState.Submit(PlayerPartyInteractionOption.MarriageProposal),
+            PlayerPartyDialogPriority,
+            null,
+            null);
+
+        starter.AddPlayerLine(
+            "coop_player_party_interaction_join_clan_cancel",
+            ClanJoinConfirmToken,
+            CloseToken,
+            "I have reconsidered.",
+            () => PlayerPartyInteractionDialogState.HasOption(PlayerPartyInteractionOption.CancelJoinClan),
+            () => PlayerPartyInteractionDialogState.Submit(PlayerPartyInteractionOption.CancelJoinClan),
+            PlayerPartyDialogPriority,
+            null,
             null);
 
         starter.AddPlayerLine(

@@ -196,6 +196,15 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
     }
 
     [Fact]
+    public void KingdomStanceRefreshCallback_SkipsAStaleMixinViewModel()
+    {
+        Assert.False(DiplomacyKingdomStanceRefreshSafety.HasLiveViewModel(
+            new TestKingdomDiplomacyMixin(null)));
+        Assert.True(DiplomacyKingdomStanceRefreshSafety.HasLiveViewModel(
+            new TestKingdomDiplomacyMixin(new object())));
+    }
+
+    [Fact]
     public void DiplomacyUiLifecycle_FailsClosedUntilEveryGatedExtensionEnables()
     {
         ModInformation.IsServer = false;
@@ -397,6 +406,9 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
     [InlineData("Diplomacy.SubModule", "OnGameStart", 2)]
     [InlineData("Diplomacy.CampaignBehaviors.WarExhaustionBehavior", "OnMapEventEnded", 1)]
     [InlineData("Diplomacy.CampaignBehaviors.CivilWarBehavior", "RegisterEvents", 0)]
+    [InlineData("Diplomacy.ViewModelMixin.KingdomDiplomacyVMMixin", "<.ctor>b__21_0", 3)]
+    [InlineData("Diplomacy.ViewModelMixin.KingdomDiplomacyVMMixin", "<.ctor>b__21_1", 3)]
+    [InlineData("Diplomacy.ViewModelMixin.KingdomDiplomacyVMMixin", "<.ctor>b__21_2", 2)]
     [InlineData("Diplomacy.ViewModelMixin.KingdomTruceItemVMMixin", "ProposeNonAggressionPact", 0)]
     [InlineData("Diplomacy.DiplomaticAction.NonAggressionPact.FormNonAggressionPactAction", "ApplyInternal", 3)]
     [InlineData("Diplomacy.DiplomaticAction.WarPeace.KingdomPeaceAction", "ApplyPeace", 6)]
@@ -1404,5 +1416,21 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
     private sealed class FakeMutableSetting
     {
         public int Value { get; set; }
+    }
+
+    private abstract class TestViewModelMixinBase
+    {
+        private readonly object viewModel;
+
+        protected TestViewModelMixinBase(object viewModel) => this.viewModel = viewModel;
+
+        protected object ViewModel => viewModel;
+    }
+
+    private sealed class TestKingdomDiplomacyMixin : TestViewModelMixinBase
+    {
+        internal TestKingdomDiplomacyMixin(object viewModel) : base(viewModel)
+        {
+        }
     }
 }

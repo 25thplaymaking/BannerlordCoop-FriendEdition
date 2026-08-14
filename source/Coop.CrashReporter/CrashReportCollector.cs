@@ -165,10 +165,10 @@ namespace Coop.CrashReporter
             return path;
         }
 
-        private List<string> CopyLogs(string destinationRoot)
+        private List<string> CopyLogs(string destinationRoot, bool refreshOnlyIfAppended = false)
         {
             var copied = new List<string>();
-            CopyLog(options.CoopLogPath, destinationRoot, copied);
+            CopyLog(options.CoopLogPath, destinationRoot, copied, refreshOnlyIfAppended);
 
             string sourceRoot = Path.Combine(options.BannerlordDataRoot, "logs");
             string processId = options.ProcessId.ToString(CultureInfo.InvariantCulture);
@@ -189,21 +189,95 @@ namespace Coop.CrashReporter
 
         private void RefreshLogs(string destinationRoot, ICollection<string> copiedLogs)
         {
-            foreach (string refreshedLog in CopyLogs(destinationRoot))
+            // The refresh runs after the dump-discovery wait (up to ~30s). The co-op log lives at
+            // a fixed shared path, so a RELAUNCHED game truncates and rewrites it during that
+            // window; blindly re-copying replaced the crash-time capture with the new session's
+            // startup lines and destroyed the only evidence (observed on four of the 2026-08-13
+            // crash reports, whose captured Coop_client.log began AFTER the crash). A refresh may
+            // therefore only replace a copy when the source is an append-extension of it; the
+            // per-PID rgl/watchdog logs can never belong to another process and always refresh.
+            foreach (string refreshedLog in CopyLogs(destinationRoot, refreshOnlyIfAppended: true))
             {
                 if (!copiedLogs.Contains(refreshedLog, StringComparer.OrdinalIgnoreCase))
                     copiedLogs.Add(refreshedLog);
             }
         }
 
+        internal static bool IsAppendExtensionOf(string candidatePath, string previousCopyPath)
+        {
+            try
+            {
+                var previousInfo = new FileInfo(previousCopyPath);
+                var candidateInfo = new FileInfo(candidatePath);
+                if (!previousInfo.Exists) return true;
+                if (!candidateInfo.Exists) return false;
+                if (candidateInfo.Length < previousInfo.Length) return false;
+
+                const int probeLength = 64 * 1024;
+                int compareLength = (int)Math.Min(previousInfo.Length, probeLength);
+                if (compareLength == 0) return true;
+
+                byte[] previousBytes = new byte[compareLength];
+                byte[] candidateBytes = new byte[compareLength];
+                using (var previousStream = new FileStream(
+                    previousCopyPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                {
+                    if (ReadExactly(previousStream, previousBytes) != compareLength) return false;
+                }
+                using (var candidateStream = new FileStream(
+                    candidatePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                {
+                    if (ReadExactly(candidateStream, candidateBytes) != compareLength) return false;
+                }
+
+                for (int i = 0; i < compareLength; i++)
+                {
+                    if (previousBytes[i] != candidateBytes[i]) return false;
+                }
+
+                return true;
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
+
+        private static int ReadExactly(Stream stream, byte[] buffer)
+        {
+            int total = 0;
+            while (total < buffer.Length)
+            {
+                int read = stream.Read(buffer, total, buffer.Length - total);
+                if (read <= 0) break;
+                total += read;
+            }
+
+            return total;
+        }
+
         private static void CopyLog(
             string sourcePath,
             string destinationRoot,
-            ICollection<string> copied)
+            ICollection<string> copied,
+            bool refreshOnlyIfAppended = false)
         {
             string destinationPath = Path.Combine(
                 destinationRoot,
                 Path.GetFileName(sourcePath));
+            if (refreshOnlyIfAppended && !IsAppendExtensionOf(sourcePath, destinationPath))
+            {
+                // The source no longer starts with what was captured at crash time - a relaunched
+                // process owns it now. Keep the crash-time copy.
+                if (File.Exists(destinationPath))
+                    copied.Add(destinationPath);
+                return;
+            }
+
             if (TryCopyFile(sourcePath, destinationPath))
                 copied.Add(destinationPath);
         }

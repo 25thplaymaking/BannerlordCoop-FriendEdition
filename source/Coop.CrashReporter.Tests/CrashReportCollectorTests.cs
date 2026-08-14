@@ -72,6 +72,41 @@ namespace Coop.CrashReporter.Tests
             Assert.Equal(processId, copiedProcessId);
         }
 
+        [Fact]
+        public void IsAppendExtensionOf_AcceptsAppendedLog_RejectsRelaunchedLog()
+        {
+            Directory.CreateDirectory(tempRoot);
+            string crashTimeCopy = Path.Combine(tempRoot, "Coop_client.log");
+            File.WriteAllText(crashTimeCopy, "[21:44] session A start\n[21:44] crash imminent\n");
+
+            // The live log grew by appended lines: refresh is allowed.
+            string appendedSource = Path.Combine(tempRoot, "appended.log");
+            File.WriteAllText(
+                appendedSource,
+                "[21:44] session A start\n[21:44] crash imminent\n[21:44] final flush\n");
+            Assert.True(CrashReportCollector.IsAppendExtensionOf(appendedSource, crashTimeCopy));
+
+            // A relaunched game truncated and rewrote the shared-path log during the dump wait:
+            // the crash-time copy must be preserved. Longer AND shorter rewrites both fail.
+            string relaunchedLonger = Path.Combine(tempRoot, "relaunched-long.log");
+            File.WriteAllText(
+                relaunchedLonger,
+                "[21:45] session B start - completely different content that is longer than A\n");
+            Assert.False(CrashReportCollector.IsAppendExtensionOf(relaunchedLonger, crashTimeCopy));
+
+            string relaunchedShorter = Path.Combine(tempRoot, "relaunched-short.log");
+            File.WriteAllText(relaunchedShorter, "[21:45] B\n");
+            Assert.False(CrashReportCollector.IsAppendExtensionOf(relaunchedShorter, crashTimeCopy));
+
+            // No prior copy means the initial capture: always allowed.
+            Assert.True(CrashReportCollector.IsAppendExtensionOf(
+                appendedSource, Path.Combine(tempRoot, "does-not-exist.log")));
+
+            // A vanished source cannot refresh anything.
+            Assert.False(CrashReportCollector.IsAppendExtensionOf(
+                Path.Combine(tempRoot, "gone.log"), crashTimeCopy));
+        }
+
         public void Dispose()
         {
             try

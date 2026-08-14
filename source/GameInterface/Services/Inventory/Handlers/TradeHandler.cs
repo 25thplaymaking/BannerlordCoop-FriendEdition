@@ -20,6 +20,7 @@ using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
+using TaleWorlds.ObjectSystem;
 
 namespace GameInterface.Services.Inventory.Handlers;
 
@@ -305,14 +306,14 @@ internal class TradeHandler : IHandler
     {
         result = default;
 
-        if (!objectManager.TryGetId(itemRosterElement.EquipmentElement.Item, out var itemObjectId))
+        if (!TryResolveCatalogObjectId(itemRosterElement.EquipmentElement.Item, out var itemObjectId))
         {
             logger.Error("Failed to get id for {type}", nameof(itemRosterElement.EquipmentElement.Item));
             return false;
         }
 
         string itemModifierId = null;
-        if (itemRosterElement.EquipmentElement.ItemModifier is not null && !objectManager.TryGetId(itemRosterElement.EquipmentElement.ItemModifier, out itemModifierId))
+        if (itemRosterElement.EquipmentElement.ItemModifier is not null && !TryResolveCatalogObjectId(itemRosterElement.EquipmentElement.ItemModifier, out itemModifierId))
         {
             logger.Error("Failed to get id for {type}", nameof(itemRosterElement.EquipmentElement.ItemModifier));
             return false;
@@ -326,6 +327,31 @@ internal class TradeHandler : IHandler
         );
 
         return true;
+    }
+
+    /// <summary>
+    /// Items and item modifiers are registered under their catalog <c>StringId</c>. Native loot
+    /// distribution can hand the trade roster a fresh instance of a catalog item (same StringId,
+    /// different reference), which fails the reference-keyed <c>TryGetId</c> and used to silently
+    /// drop the element from the trade message - the player kept the loot locally while the server
+    /// never saw it. When the instance is unknown but the catalog holds an object under its
+    /// StringId, that StringId IS the wire id, so resolve through it.
+    /// </summary>
+    private bool TryResolveCatalogObjectId<T>(T catalogObject, out string id) where T : MBObjectBase
+    {
+        if (objectManager.TryGetId(catalogObject, out id)) return true;
+
+        var stringId = catalogObject?.StringId;
+        if (!string.IsNullOrEmpty(stringId) && objectManager.TryGetObject<T>(stringId, out _))
+        {
+            id = stringId;
+            logger.Debug(
+                "Resolved unregistered {type} instance through catalog StringId {id}",
+                typeof(T).Name, stringId);
+            return true;
+        }
+
+        return false;
     }
 
     private Dictionary<string, EquipmentData[]> ResolveCharacterIdEquipmentsData(MobileParty party, CharacterObject initialCharacter)

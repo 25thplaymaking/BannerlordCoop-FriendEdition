@@ -372,6 +372,14 @@ public class ClientKingdomHandler : IHandler
     private void HandleNetworkRemoveDecision(MessagePayload<NetworkRemoveDecision> obj)
     {
         var payload = obj.What;
+
+        // Same gate as HandleNetworkAddDecision: decisions are only materialized for the
+        // player's own kingdom, so a remove for any other kingdom targets a list that was
+        // never populated here - previously that fell through to a guaranteed
+        // "Index is out of bounds" warning (and, when the id no longer resolves to a
+        // Kingdom on this client, an ObjectManager cast error) on every broadcast.
+        if (!ShouldApplyNetworkDecision(payload.KingdomId)) return;
+
         var message = new RemoveDecision(payload.KingdomId, payload.Index);
         messageBroker.Publish(this, message);
     }

@@ -439,11 +439,40 @@ The local and deployment gates are green; rendered verification must use launche
   marriage; army leave from the wait menu (incl. after a concluded battle); player death with an
   adult heir (succession handoff); loot a battle and verify totals.
 
+### Phase M — 0xC0000005 dump diagnosis and staged correction (2026-08-14)
+- **Exact artifact recovered:** Windows wrote
+  `%LOCALAPPDATA%\CrashDumps\Bannerlord.exe.37960.dmp` (91,209,245 bytes) for the 09:57 EDT
+  client crash on source `fa685f7f6`. It appeared after the Coop report's collection path had
+  looked only under Bannerlord's `crashes` tree, which is why the report incorrectly said no dump.
+- **Root cause proven in WinDbg:** the native tick boundary surfaced `0xC0000005`, but the fault is
+  a managed `System.NullReferenceException` in
+  `Diplomacy.ViewModelMixin.KingdomDiplomacyVMMixin.<.ctor>b__21_0`, dispatched by
+  `CampaignEvents.OnMakePeace` from Coop's queued `FactionStanceHandler.HandleMakePeace` task.
+  `Hero.MainHero.MapFaction` was a valid Kingdom; the null value was UIExtenderEx's weak
+  `BaseViewModelMixin.ViewModel` target. The Kingdom screen had closed about ten seconds earlier,
+  while its non-serialized listener remained subscribed. The Clan screen happened to be open when
+  the incoming peace update ran and did not cause the crash.
+- **Candidate fix:** a Diplomacy-category Harmony prefix covers the pinned 1.4.7 mixin's three exact
+  constructor callbacks (peace, war, and alliance-ended). It permits refresh while the weak view
+  model is live and skips only that stale presentation callback after collection. The authoritative
+  stance action and campaign-event dispatch are not suppressed. The implementation gate now audits
+  all three compiler-generated signatures against the exact pinned DLL.
+- **Reporter fix:** dump discovery searches both Bannerlord's crash tree and Windows LocalDumps at
+  `%LOCALAPPDATA%\CrashDumps`, then retains the existing PID/time validation and completion-copy
+  retry. A regression creates a matching Windows-style late dump and proves discovery.
+- **Verification / deployment boundary:** all five crash-reporter tests and all 155 Diplomacy
+  namespace tests pass through the direct xUnit runner (the machine's known IPv4 vstest transport
+  remains unusable). Release build and final gates are recorded with the candidate commit. Nothing
+  was copied into the live client or server, and the server was not restarted. Promotion remains a
+  lockstep client/server action after explicit green light; rendered proof should open then close
+  Kingdom and receive peace/war/alliance updates while another screen is active.
+
 ### Still open after this phase
-- **0xC0000005 root cause unproven** — need one accepted dump from the next occurrence.
 - **Equipment/IsReady client ERR floods** (~5k/min in battles) — worker-thread churn is
   by-design-unsynced but logged at ERR through Serilog on hot paths; wants a throttle/dedup plus a
-  decision on worker-thread allowances. Defer until a dump proves/disproves the log path's role.
+  decision on worker-thread allowances. The recovered dump proves this crash came from the stale
+  Diplomacy listener rather than those log paths, so they remain a separate observability/performance
+  issue rather than the current crash mechanism.
 - **Clan-registered-under-Kingdom-id** (`Could not cast (Clan) ... to Kingdom` while resolving a
   server-sent kingdom id): now silenced at the decision path, but the underlying cross-peer
   `Created_*` id divergence hint deserves a look if rebel-kingdom desyncs appear.

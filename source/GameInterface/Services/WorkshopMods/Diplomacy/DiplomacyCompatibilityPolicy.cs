@@ -111,6 +111,12 @@ internal static class DiplomacyCompatibilityPolicy
             ["Diplomacy.Character.PlayerCharacterTraitHelper"] = new[] { ("UpdateTrait", 4) },
             ["Diplomacy.Character.PlayerCharacterTraitEventExperience"] = new[] { ("Apply", 0) },
             ["Diplomacy.ViewModelMixin.EncyclopediaHeroPageVMMixin"] = new[] { ("SendMessenger", 0) },
+            ["Diplomacy.ViewModelMixin.KingdomDiplomacyVMMixin"] = new[]
+            {
+                ("<.ctor>b__21_0", 3),
+                ("<.ctor>b__21_1", 3),
+                ("<.ctor>b__21_2", 2),
+            },
             ["Diplomacy.ViewModelMixin.KingdomWarItemVMMixin"] = new[] { ("ExecuteDirectAction", 0) },
             ["Diplomacy.ViewModelMixin.KingdomTruceItemVMMixin"] = new[]
             {

@@ -34,6 +34,26 @@ namespace Coop.CrashReporter.Tests
         }
 
         [Fact]
+        public async Task WaitForMatchingDump_FindsWindowsLocalCrashDump()
+        {
+            int processId = Process.GetCurrentProcess().Id;
+            CrashReporterOptions options = CreateOptions(processId);
+            var collector = new CrashReportCollector(
+                options,
+                TimeSpan.FromSeconds(2),
+                TimeSpan.FromMilliseconds(10));
+
+            Task<string> waitTask = Task.Run(
+                () => collector.WaitForMatchingDump(TimeSpan.FromSeconds(2)));
+
+            await Task.Delay(100);
+            string dumpPath = Path.Combine(options.WindowsCrashDumpRoot, "Bannerlord.exe." + processId + ".dmp");
+            WriteMinidump(dumpPath, processId);
+
+            Assert.Equal(dumpPath, await waitTask);
+        }
+
+        [Fact]
         public void TryCopyDump_RetriesPastTwentyIntervals()
         {
             int processId = Process.GetCurrentProcess().Id;
@@ -131,7 +151,8 @@ namespace Coop.CrashReporter.Tests
                 "client",
                 "test",
                 tempRoot,
-                Path.Combine(tempRoot, "reports"));
+                Path.Combine(tempRoot, "reports"),
+                Path.Combine(tempRoot, "LocalAppData"));
         }
 
         private static void WriteMinidump(string path, int processId)

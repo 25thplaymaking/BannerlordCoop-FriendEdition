@@ -4,6 +4,19 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
+> **2026-08-14 Phase M crash correction — VERIFIED CANDIDATE, NOT DEPLOYED.** The 09:57 EDT
+> client failure on live pair `fa685f7f6` produced a Windows LocalDumps artifact after the Coop
+> report had already missed it. WinDbg resolves the apparent `0xC0000005` to a managed
+> `NullReferenceException` in
+> `Diplomacy.ViewModelMixin.KingdomDiplomacyVMMixin.<.ctor>b__21_0`: a make-peace event reached
+> the mixin after the Kingdom screen closed and UIExtenderEx's weak `ViewModel` target had died.
+> The open Clan screen was incidental. The candidate prefixes the pinned mixin's exact peace, war,
+> and alliance-ended callbacks and skips only their presentation refresh when that target is gone;
+> authoritative stance mutation and campaign-event dispatch remain unchanged. The crash reporter
+> now also searches `%LOCALAPPDATA%\CrashDumps`, matching where Windows wrote the recovered dump.
+> Regression suites are green. No client package was published, no live files were changed, and the
+> running server was not restarted; lockstep promotion awaits Bryce's green light.
+
 > **AUTHORITY ROUTING IN PROGRESS (2026-08-11): prior RC superseded; corrective stable live.** The exact function
 > ledger covers 41,050 methods across the ten active Workshop modules, retired RBM, and integrated
 > Separatism. Deterministic IL evidence now includes static shared-state writes and collection mutations,

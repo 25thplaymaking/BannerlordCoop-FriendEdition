@@ -15,7 +15,8 @@ namespace Coop.CrashReporter
             string role,
             string build,
             string programDataRoot,
-            string outputRoot)
+            string outputRoot,
+            string localAppDataRoot = null)
         {
             ProcessId = processId;
             ProcessStartUtcTicks = processStartUtcTicks;
@@ -26,6 +27,11 @@ namespace Coop.CrashReporter
                 Path.GetFullPath(programDataRoot),
                 BannerlordDirectoryName);
             OutputRoot = Path.GetFullPath(outputRoot);
+            WindowsCrashDumpRoot = Path.Combine(
+                Path.GetFullPath(
+                    localAppDataRoot ??
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)),
+                "CrashDumps");
         }
 
         public int ProcessId { get; }
@@ -35,6 +41,7 @@ namespace Coop.CrashReporter
         public string Build { get; }
         public string BannerlordDataRoot { get; }
         public string OutputRoot { get; }
+        public string WindowsCrashDumpRoot { get; }
 
         public static bool TryParse(string[] args, out CrashReporterOptions options)
         {

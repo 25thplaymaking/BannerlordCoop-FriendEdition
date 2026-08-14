@@ -99,22 +99,29 @@ namespace Coop.CrashReporter
         private HashSet<string> FindDumps()
         {
             string crashesRoot = Path.Combine(options.BannerlordDataRoot, "crashes");
-            if (!Directory.Exists(crashesRoot))
-                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var dumps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            AddDumps(crashesRoot, SearchOption.AllDirectories, dumps);
+            AddDumps(options.WindowsCrashDumpRoot, SearchOption.TopDirectoryOnly, dumps);
+            return dumps;
+        }
+
+        private static void AddDumps(
+            string root,
+            SearchOption searchOption,
+            ISet<string> dumps)
+        {
+            if (!Directory.Exists(root)) return;
 
             try
             {
-                return Directory
-                    .EnumerateFiles(crashesRoot, "*.dmp", SearchOption.AllDirectories)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                foreach (string path in Directory.EnumerateFiles(root, "*.dmp", searchOption))
+                    dumps.Add(path);
             }
             catch (IOException)
             {
-                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             }
             catch (UnauthorizedAccessException)
             {
-                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             }
         }
 

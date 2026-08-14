@@ -76,6 +76,73 @@ internal static class DiplomacySharedMutationAuthorityPatch
 }
 
 /// <summary>
+/// Diplomacy 1.4.7 keeps kingdom stance listeners alive after UIExtenderEx's weak reference to
+/// the KingdomDiplomacyVM has expired. Its peace, war and alliance callbacks then dereference the
+/// missing view model. Skip only those presentation refresh callbacks; the campaign event and its
+/// authoritative stance mutation still run normally.
+/// </summary>
+[HarmonyPatch]
+[HarmonyPatchCategory(WorkshopPatchCategories.Diplomacy)]
+internal static class DiplomacyKingdomStanceRefreshPatch
+{
+    private static IEnumerable<MethodBase> TargetMethods()
+    {
+        var type = DiplomacyCompatibilityPolicy.ResolveType(
+            "Diplomacy.ViewModelMixin.KingdomDiplomacyVMMixin");
+        if (type == null) yield break;
+
+        foreach (var method in AccessTools.GetDeclaredMethods(type))
+        {
+            if (method.Name.StartsWith("<.ctor>b__", StringComparison.Ordinal) &&
+                method.ReturnType == typeof(void) &&
+                DiplomacyCompatibilityPolicy.IsRequiredMethodShape(
+                    type.FullName,
+                    method.Name,
+                    method.GetParameters().Length))
+            {
+                yield return method;
+            }
+        }
+    }
+
+    [HarmonyPrepare]
+    private static bool Prepare() => TargetMethods().Any();
+
+    [HarmonyPrefix]
+    private static bool Prefix(object __instance) =>
+        DiplomacyKingdomStanceRefreshSafety.HasLiveViewModel(__instance);
+}
+
+internal static class DiplomacyKingdomStanceRefreshSafety
+{
+    internal static bool HasLiveViewModel(object mixin)
+    {
+        if (mixin == null) return false;
+
+        for (Type type = mixin.GetType(); type != null; type = type.BaseType)
+        {
+            var property = type.GetProperty(
+                "ViewModel",
+                BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (property == null) continue;
+
+            try
+            {
+                return property.GetValue(mixin) != null;
+            }
+            catch (Exception)
+            {
+                // This is a UI-only refresh. If the pinned mixin layout cannot be read, failing
+                // closed is safer than allowing the known null-dereference path to execute.
+                return false;
+            }
+        }
+
+        return false;
+    }
+}
+
+/// <summary>
 /// Structural validation for Diplomacy's null-unsafe war-exhaustion callback. Reflection keeps
 /// this helper independent of the optional Diplomacy assembly and makes it possible to reject a
 /// partially dismantled MapEvent graph before the original code touches it.

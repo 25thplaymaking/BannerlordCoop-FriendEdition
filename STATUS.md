@@ -4,7 +4,9 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
-> **2026-08-14 battle upkeep + siege result/village defense correction — VERIFIED CANDIDATE, NOT DEPLOYED.**
+> **2026-08-14 battle upkeep + siege result/village defense correction — SHIPPED from source
+> `1974e2994`.** Merged PR #17. Required workflow `31833738722` passed build, unit tests, and
+> all eight E2E shards after full-diff review found no remaining Critical or Important issues.
 > When battle economy is `Disabled`, only parties currently in a map event skip food consumption and
 > party wages; other parties and the rest of the clan ledger continue normally. `Disabled` is now the
 > packaged default. A live siege at 18:24 UTC also proved the campaign simulation could finish an event
@@ -14,8 +16,15 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > the server validates faction eligibility and village encounter range, then attaches their party to the village
 > side and starts the resistance battle instead of rejecting the join. Safe passage remains enforced and coastal
 > approaches validate against the village port. The focused GameInterface tests pass 26/26, map-event authority
-> E2Es pass 4/4, and the five village defense regressions pass. No launcher asset, live
-> configuration, server file, save, process, or service was changed.
+> E2Es pass 4/4, and the five village defense regressions pass. Release workflow `31834158937`
+> published stable client `2026.08.14.1942` with ZIP SHA-256
+> `aa1a144c08db8be8fbfea48d72871aca682a200eec610b29916ca88d043e1dff`; the exact artifact
+> was installed locally. The server pair uses core SHA-256
+> `b63120bb035bf9305fca7c5195e86632fbfd86a49717ca20008a6e3798e1af95` and receipt SHA-256
+> `64fa384166dde423c4382f4d443381655ddc2c72bdaa4de0b358f0b9ef51325d`. It restarted on
+> preserved save `friendallmods1`, reached `SERVING` on UDP 4200, emitted repeated pulses, and
+> remained at `NRestarts=0`. Byte-verified rollback snapshot:
+> `/home/bishop/bannerlord-coop/server/_mod_backups/pre-1974e2994-20260814T194210Z`.
 
 > **2026-08-14 messenger + bandit surrender + kingdom vote correction — SHIPPED from source
 > `bff4266fe`.** Merged PR #16. Embedded joined-clan players may use Diplomacy's personal

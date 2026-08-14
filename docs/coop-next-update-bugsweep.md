@@ -10,7 +10,7 @@ Fork is pinned to game **1.4.7** — do NOT adopt upstream's 1.4.8 bump.
 PR: https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/pull/14
 Branch: `25vid/fix-kingdom-tab-diplomacy-managers` (base: `development`)
 
-## Phase O — battle upkeep + siege result/village defense correction — STAGED (2026-08-14)
+## Phase O — battle upkeep + siege result/village defense correction — SHIPPED (2026-08-14)
 
 - `Disabled` battle economy is party-scoped: a party currently in a battle pays no party wages and
   consumes no food. Other clan parties, income, and unrelated expenses continue normally. The packaged
@@ -24,8 +24,14 @@ Branch: `25vid/fix-kingdom-tab-diplomacy-managers` (base: `development`)
   compatibility, safe-passage eligibility, and the village encounter radius (gate or coastal port) before accepting
   the defender join.
 - Focused verification: GameInterface battle-upkeep/config tests 26/26; map-event authority E2Es 4/4;
-  village-defense regressions 5/5. Both test projects build with zero errors. No client release or live server
-  change was made.
+  village-defense regressions 5/5. Both test projects build with zero errors. PR #17 merged as `1974e2994`;
+  required workflow `31833738722` passed build, unit tests, and all eight E2E shards. Workflow
+  `31834158937` published stable client `2026.08.14.1942` (ZIP SHA-256
+  `aa1a144c08db8be8fbfea48d72871aca682a200eec610b29916ca88d043e1dff`). The server pair uses
+  core SHA-256 `b63120bb035bf9305fca7c5195e86632fbfd86a49717ca20008a6e3798e1af95` and receipt SHA-256
+  `64fa384166dde423c4382f4d443381655ddc2c72bdaa4de0b358f0b9ef51325d`; it loaded preserved save
+  `friendallmods1`, reached `SERVING` on UDP 4200, and remained at `NRestarts=0`. Rollback snapshot:
+  `/home/bishop/bannerlord-coop/server/_mod_backups/pre-1974e2994-20260814T194210Z`.
 
 ## Phase N — messenger + bandit surrender + kingdom vote correction — SHIPPED (2026-08-14)
 

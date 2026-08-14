@@ -1,5 +1,7 @@
 ﻿using Common.Util;
 using E2E.Tests.Util;
+using Coop.Core.Server.Services.Instances;
+using GameInterface.Services.MapEvents;
 using HarmonyLib;
 using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Party;
@@ -61,6 +63,26 @@ public class MapEventUpdateAuthorityTests : MapEventTestBase
 
             mapEvent.DefenderSide._battleParties.Add(ObjectHelper.SkipConstructor<MapEventParty>());
 
+            Assert.False(InvokeMapEventUpdatePrefix(mapEvent));
+        }, MapEventDisabledMethods);
+    }
+
+    [Fact]
+    public void OccupiedMissionMapEvent_WithoutPlayerMobileParty_ServerUpdateIsBlocked()
+    {
+        var context = CreateServerMapEvent();
+        var missionMember = Clients.First();
+
+        Server.Call(() =>
+        {
+            Assert.True(ServerBattleModeArbiter.TryClaimMission(context.MapEventId));
+            Assert.True(Server.Resolve<IMissionManager>().TryEnterMission(
+                missionMember.NetPeer,
+                "siege-host",
+                context.MapEventId,
+                out _));
+
+            Assert.True(Server.ObjectManager.TryGetObject<MapEvent>(context.MapEventId, out var mapEvent));
             Assert.False(InvokeMapEventUpdatePrefix(mapEvent));
         }, MapEventDisabledMethods);
     }

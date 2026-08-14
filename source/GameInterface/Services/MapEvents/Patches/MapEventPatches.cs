@@ -355,6 +355,11 @@ internal class MapEventPatches
                 return !HasOccupiedBattleMission(__instance);
         }
 
+        // A live mission owns the result while one of its members is still inside it. Do not let
+        // the campaign simulation finish the map event before that authoritative result arrives.
+        if (HasOccupiedBattleMission(__instance))
+            return false;
+
         // A settlement PartyBase is a complete participant even though it has no MobileParty.
         if (__instance.InvolvedParties.Any(x => x is null || (!x.IsMobile && !x.IsSettlement)))
             return false;

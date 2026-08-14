@@ -4,6 +4,19 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
+> **2026-08-14 battle upkeep + siege result/village defense correction — VERIFIED CANDIDATE, NOT DEPLOYED.**
+> When battle economy is `Disabled`, only parties currently in a map event skip food consumption and
+> party wages; other parties and the rest of the clan ledger continue normally. `Disabled` is now the
+> packaged default. A live siege at 18:24 UTC also proved the campaign simulation could finish an event
+> before its occupied mission returned `AttackerVictory`, causing the valid result to be rejected and the
+> winner to be captured. Occupied mission-owned map events are now held until the mission result arrives.
+> Players may also use Bannerlord's normal **Help defenders** path to interrupt an active village raid;
+> the server validates faction eligibility and village encounter range, then attaches their party to the village
+> side and starts the resistance battle instead of rejecting the join. Safe passage remains enforced and coastal
+> approaches validate against the village port. The focused GameInterface tests pass 26/26, map-event authority
+> E2Es pass 4/4, and the five village defense regressions pass. No launcher asset, live
+> configuration, server file, save, process, or service was changed.
+
 > **2026-08-14 messenger + bandit surrender + kingdom vote correction — SHIPPED from source
 > `bff4266fe`.** Merged PR #16. Embedded joined-clan players may use Diplomacy's personal
 > **Send Messenger** action while clan/kingdom/fief/gold operations remain party-leader controlled.

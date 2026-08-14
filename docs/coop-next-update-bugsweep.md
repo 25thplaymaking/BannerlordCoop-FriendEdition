@@ -413,6 +413,32 @@ The local and deployment gates are green; rendered verification must use launche
   close inventory near an encounter (the 0xC0000005 window) — and if an AV still occurs, ACCEPT
   the TW dump prompt this time; the preserved crash-time logs + one dump decide the diagnosis.
 
+### Phase L — reviewed, hardened, and SHIPPED as the testable pair (2026-08-14 12:57 UTC)
+- **Session review applied** (`8b6ef23b2`, high-effort /code-review over the whole session range):
+  scoped the equipment teardown allowance (was opening every sync gate on every screen close),
+  zombie death-mark clearing, deferred succession off the kill call stack with fresh-successor
+  retry, arranged double-promise block, kingdom-decision gate fail-closed on unresolvable ids
+  (with pre-registration grace), native comment-behavior reuse, `TryGetCatalogId` hoisted to
+  ObjectManager and applied at six sibling silent-drop sites.
+- **Army leave fixed** (`7837e4510`) — "join but never leave": stale MapEvent/siege residue no
+  longer hides the Leave button; the leave consequence mirrors locally; the kicked-out path is
+  routed; server-side removal authority (own party or army leader only). Upstream `33bf1031b`
+  verified already present (ArmyDisbander).
+- **Upstream easy wins merged**: 13 `-x`-stamped cherry-picks (kingdom vote freeze/recovery
+  chain, character-creation transition guard, party-command checks). Skipped-as-present:
+  inventory/party duplication, settlement party-forming, escort refresh. Deliberately deferred:
+  troop-XP sync (~1,400-line feature), map-event load repairs (Phase D-F collision), live-test
+  infra, wanderer content.
+- **TESTABLE PAIR LIVE (lockstep)**: stable client **`2026.08.14.1251`** (ZIP SHA
+  `546851cef222c3bab9dbaccd9f4b4dd20c1918f7e4ed84135b1fca1e2140797d`, independently verified) +
+  server pair from the same code (paired core `2079129d1bd32b75035181134fc522319d57a566420557d2682560f3fe2e73df`),
+  deployed with pin verification, `CAMPAIGN LOADED` → `SERVING` on `friendallmods1`, UDP 4200,
+  `NRestarts=0`, pulses healthy 90s+ post-start. Rollback snapshot:
+  `/home/bishop/bannerlord-coop/server/_mod_backups/pre-fa685f7f6-20260814T125655Z`.
+- **Live smokes owed on this pair**: personal marriage via settlement-menu talk; one arranged
+  marriage; army leave from the wait menu (incl. after a concluded battle); player death with an
+  adult heir (succession handoff); loot a battle and verify totals.
+
 ### Still open after this phase
 - **0xC0000005 root cause unproven** — need one accepted dump from the next occurrence.
 - **Equipment/IsReady client ERR floods** (~5k/min in battles) — worker-thread churn is

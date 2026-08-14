@@ -26,6 +26,7 @@ using TaleWorlds.CampaignSystem.BarterSystem.Barterables;
 using TaleWorlds.CampaignSystem.CharacterDevelopment;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
+using TaleWorlds.CampaignSystem.Settlements.Locations;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
 using Romance = TaleWorlds.CampaignSystem.Romance;
@@ -314,6 +315,9 @@ internal sealed class MarriageBarterHandler : IHandler
                 request.RequestId,
                 peer.Id,
                 reason);
+            // Tell the player immediately; a silent refusal here left the propose button dead
+            // with no explanation until the actual request bounced.
+            network.Send(peer, new NetworkRomanceRequestRejected(reason));
             return;
         }
 
@@ -500,10 +504,27 @@ internal sealed class MarriageBarterHandler : IHandler
 
         if (context == MarriageConversationContext.Location)
         {
-            return counterpartyHero.CharacterObject != null &&
-                   objectManager.TryGetId(counterpartyHero.CharacterObject, out var characterId) &&
-                   locationConversationTracker.TryGetEngagement(peer, out var npcKey) &&
-                   npcKey == LocationConversationTracker.ComposeKey(contextId, characterId);
+            if (counterpartyHero.CharacterObject == null ||
+                !objectManager.TryGetId(counterpartyHero.CharacterObject, out var characterId))
+                return false;
+
+            if (locationConversationTracker.TryGetEngagement(peer, out var npcKey))
+                return npcKey == LocationConversationTracker.ComposeKey(contextId, characterId);
+
+            // Menu-initiated talks (settlement menu "Talk", keep shortcuts) start the conversation
+            // WITHOUT the agent-interaction acquire step, so no engagement is ever tracked - this
+            // gate rejected every such marriage proposal ("The marriage conversation is no longer
+            // active", 2026-08-13 live loops). With no engagement to compare, verify presence
+            // directly: the player's party and the counterparty must be in the same settlement,
+            // and the claimed location must belong to that settlement's location complex.
+            return !string.IsNullOrEmpty(player.MobilePartyId) &&
+                   objectManager.TryGetObject(contextId, out Location claimedLocation) &&
+                   objectManager.TryGetObject(player.MobilePartyId, out MobileParty locationPlayerParty) &&
+                   locationPlayerParty.IsActive &&
+                   locationPlayerParty.CurrentSettlement != null &&
+                   counterpartyHero.CurrentSettlement == locationPlayerParty.CurrentSettlement &&
+                   locationPlayerParty.CurrentSettlement.LocationComplex?.GetListOfLocations()
+                       ?.Contains(claimedLocation) == true;
         }
 
         if (context == MarriageConversationContext.Settlement)

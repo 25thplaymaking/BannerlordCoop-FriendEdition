@@ -13,6 +13,13 @@ internal interface IRomanceAuthority : IGameAbstraction
         Romance.RomanceLevelEnum requestedLevel,
         out string reason);
 
+    bool TryValidateArrangedStateChange(
+        Hero playerHero,
+        Hero clanMember,
+        Hero targetHero,
+        Romance.RomanceLevelEnum requestedLevel,
+        out string reason);
+
     bool TryValidateMarriage(Hero playerHero, Hero targetHero, out string reason);
 }
 
@@ -41,6 +48,78 @@ internal class RomanceAuthority : IRomanceAuthority
         }
 
         if (IsActiveCourtship(requestedLevel) && HasOtherActiveCourtship(targetHero, playerHero))
+        {
+            reason = "That hero is already being courted.";
+            return false;
+        }
+
+        reason = null;
+        return true;
+    }
+
+    /// <summary>
+    /// Validates the promise of an ARRANGED match: the requesting player's (non-player) clan
+    /// member being matched to a hero of another clan. Only <c>MatchMadeByFamily</c> may be
+    /// recorded this way - it is exactly what the marriage barter later requires - so the
+    /// arranged route cannot be abused to walk a full courtship on behalf of NPCs.
+    /// </summary>
+    public bool TryValidateArrangedStateChange(
+        Hero playerHero,
+        Hero clanMember,
+        Hero targetHero,
+        Romance.RomanceLevelEnum requestedLevel,
+        out string reason)
+    {
+        if (requestedLevel != Romance.RomanceLevelEnum.MatchMadeByFamily)
+        {
+            reason = "Only a family match may be arranged for a clan member.";
+            return false;
+        }
+
+        if (playerHero?.Clan == null || clanMember == null || targetHero == null)
+        {
+            reason = "All heroes must exist.";
+            return false;
+        }
+
+        if (clanMember.Clan != playerHero.Clan || clanMember.IsPlayerHero())
+        {
+            reason = "Only your own (non-player) clan members can be promised.";
+            return false;
+        }
+
+        if (targetHero.Clan == playerHero.Clan || targetHero.IsPlayerHero())
+        {
+            reason = "The match must be with another clan's hero.";
+            return false;
+        }
+
+        if (!clanMember.IsAlive || !targetHero.IsAlive)
+        {
+            reason = "Both heroes must be alive.";
+            return false;
+        }
+
+        if (clanMember.Spouse != null || targetHero.Spouse != null)
+        {
+            reason = "Both heroes must be unmarried.";
+            return false;
+        }
+
+        var currentLevel = Romance.GetRomanticLevel(clanMember, targetHero);
+        if (!RomanceTransitionRules.IsAllowed(currentLevel, requestedLevel))
+        {
+            reason = $"Cannot change romance from {currentLevel} to {requestedLevel}.";
+            return false;
+        }
+
+        if (!Campaign.Current.Models.MarriageModel.IsCoupleSuitableForMarriage(clanMember, targetHero))
+        {
+            reason = "That pair is not currently eligible for marriage.";
+            return false;
+        }
+
+        if (HasOtherActiveCourtship(targetHero, clanMember))
         {
             reason = "That hero is already being courted.";
             return false;

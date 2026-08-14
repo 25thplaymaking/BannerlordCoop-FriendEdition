@@ -78,15 +78,36 @@ internal class RomanceHandler : IHandler
         if (ModInformation.IsServer) return;
 
         var request = payload.What;
-        if (!TryGetControlledPair(request.Person1, request.Person2, out _, out var targetHero)) return;
-        if (!objectManager.TryGetId(targetHero, out var targetHeroId)) return;
+        if (TryGetControlledPair(request.Person1, request.Person2, out _, out var targetHero))
+        {
+            if (!objectManager.TryGetId(targetHero, out var targetHeroId)) return;
+
+            network.SendAll(new NetworkRequestRomanceStateChange(
+                targetHeroId,
+                request.RequestedLevel,
+                request.ProgressToNextLevel,
+                request.LastVisit,
+                request.ScoreFromPersuasion));
+            return;
+        }
+
+        // Arranged match: (own clan member, outside hero). Send both ids so the server can
+        // validate the promise between the two non-player heroes.
+        if (!Patches.RomanceActionPatches.IsLocalArrangedPair(request.Person1, request.Person2)) return;
+
+        var localClan = Hero.MainHero?.Clan;
+        var clanMember = request.Person1?.Clan == localClan ? request.Person1 : request.Person2;
+        var outsider = clanMember == request.Person1 ? request.Person2 : request.Person1;
+        if (!objectManager.TryGetId(outsider, out var outsiderId)) return;
+        if (!objectManager.TryGetId(clanMember, out var clanMemberId)) return;
 
         network.SendAll(new NetworkRequestRomanceStateChange(
-            targetHeroId,
+            outsiderId,
             request.RequestedLevel,
             request.ProgressToNextLevel,
             request.LastVisit,
-            request.ScoreFromPersuasion));
+            request.ScoreFromPersuasion,
+            clanMemberId));
     }
 
     private void Handle_RomanceStatesChanged(MessagePayload<RomanceStatesChanged> payload)
@@ -119,6 +140,28 @@ internal class RomanceHandler : IHandler
             }
 
             var requestedLevel = (Romance.RomanceLevelEnum)request.RequestedLevel;
+
+            if (!string.IsNullOrEmpty(request.ClanMemberHeroId))
+            {
+                // Arranged match: the promise is between the requester's clan member and the
+                // target, not the requester themselves.
+                if (!TryResolveHero(request.ClanMemberHeroId, out var clanMember))
+                {
+                    Reject(peer, "The selected clan member no longer exists.");
+                    return;
+                }
+
+                if (!romanceAuthority.TryValidateArrangedStateChange(
+                        playerHero, clanMember, targetHero, requestedLevel, out var arrangedReason))
+                {
+                    Reject(peer, arrangedReason);
+                    return;
+                }
+
+                ChangeRomanticStateAction.Apply(clanMember, targetHero, requestedLevel);
+                return;
+            }
+
             if (!romanceAuthority.TryValidateStateChange(playerHero, targetHero, requestedLevel, out var reason))
             {
                 Reject(peer, reason);

@@ -780,6 +780,157 @@ public class RomanceMarriageBarterSyncTests : MapEventTestBase
         });
     }
 
+    [Fact]
+    public void MarriageBarterAuthorization_MenuTalkLocationContext_VerifiesPresenceWithoutEngagement()
+    {
+        // Settlement-menu "Talk" starts the conversation without the agent-interaction acquire
+        // step, so the server holds NO location engagement. The authorization must fall back to
+        // verifying real presence (same settlement, location belongs to it) instead of rejecting
+        // with "the marriage conversation is no longer active" - the 2026-08-13 live loop.
+        const int initialPlayerGold = 1_000_000;
+        const int offeredGold = 500_000;
+
+        var client = Clients.First();
+        var player = CreatePartyWithRegisteredLeader();
+        var counterparty = CreatePartyWithRegisteredLeader();
+        var spouseId = TestEnvironment.CreateRegisteredObject<Hero>();
+        var settlementId = TestEnvironment.CreateRegisteredObject<Settlement>();
+        var locationId = TestEnvironment.CreateRegisteredObject<TaleWorlds.CampaignSystem.Settlements.Locations.Location>();
+
+        RegisterPlayer(client, player.HeroId, player.MobilePartyId);
+        SetMainHero(player.HeroId);
+
+        Server.Call(() =>
+        {
+            new GoldBarterBehavior().RegisterEvents();
+
+            Assert.True(Server.ObjectManager.TryGetObject<Hero>(player.HeroId, out var playerHero));
+            Assert.True(Server.ObjectManager.TryGetObject<Hero>(counterparty.HeroId, out var counterpartyHero));
+            Assert.True(Server.ObjectManager.TryGetObject<Hero>(spouseId, out var spouse));
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(player.MobilePartyId, out var playerParty));
+            Assert.True(Server.ObjectManager.TryGetObject<Settlement>(settlementId, out var settlement));
+            Assert.True(Server.ObjectManager.TryGetObject<TaleWorlds.CampaignSystem.Settlements.Locations.Location>(
+                locationId, out var location));
+
+            playerHero.SetBirthDay(CampaignTime.YearsFromNow(-30f));
+            spouse.SetBirthDay(CampaignTime.YearsFromNow(-25f));
+            playerHero.Occupation = Occupation.Lord;
+            spouse.Occupation = Occupation.Lord;
+            spouse.IsFemale = !playerHero.IsFemale;
+            spouse.Clan = counterpartyHero.Clan;
+            playerHero.Gold = initialPlayerGold;
+            counterpartyHero.Gold = 50;
+            Assert.True(Campaign.Current.Models.MarriageModel.IsCoupleSuitableForMarriage(playerHero, spouse));
+
+            // The player's party sits in the settlement; the counterparty lord stays there too.
+            playerParty.CurrentSettlement = settlement;
+            counterpartyHero.PartyBelongedTo = null;
+            counterpartyHero.StayingInSettlement = settlement;
+
+            // The claimed conversation location belongs to that settlement's complex.
+            var complex = new TaleWorlds.CampaignSystem.Settlements.Locations.LocationComplex();
+            complex._locations.Add(locationId, location);
+            settlement.LocationComplex = complex;
+
+            Romance.SetRomanticState(playerHero, spouse, Romance.RomanceLevelEnum.CoupleAgreedOnMarriage);
+        });
+        Server.NetworkSentMessages.Clear();
+
+        var requestId = System.Guid.NewGuid().ToString("N");
+        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkAuthorizeMarriageBarter(
+            requestId,
+            counterparty.HeroId,
+            MarriageConversationContext.Location,
+            locationId,
+            player.HeroId,
+            spouseId)));
+
+        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkRequestMarriageBarter(
+            counterparty.HeroId,
+            MarriageConversationContext.Location,
+            locationId,
+            player.HeroId,
+            spouseId,
+            new[]
+            {
+                new MarriageBarterTerm(
+                    MarriageBarterTermType.Gold,
+                    player.HeroId,
+                    objectId: null,
+                    itemModifierId: null,
+                    itemModifierNull: true,
+                    amount: offeredGold),
+            },
+            requestId)));
+        TestEnvironment.FlushCoalescer();
+
+        var result = Server.NetworkSentMessages.GetMessages<NetworkMarriageBarterResult>().Single();
+        Assert.True(result.Accepted, result.Reason);
+
+        AssertMarriageAndGold(
+            Server,
+            player.HeroId,
+            spouseId,
+            counterparty.HeroId,
+            initialPlayerGold - offeredGold,
+            50 + offeredGold,
+            assertMainHero: true);
+    }
+
+    [Fact]
+    public void ArrangedRomanceStateChange_OwnClanMember_RoutesToServer()
+    {
+        // The arranged-match promise (MatchMadeByFamily) is set between two NON-player heroes.
+        // The client-side ChangeRomanticStateAction patch used to drop that case silently, so the
+        // server never learned the clans agreed and every arranged marriage barter bounced with
+        // "has not been agreed by both clans" (2026-08-14 live loop).
+        var client = Clients.First();
+        var player = CreatePartyWithRegisteredLeader();
+        var clanMemberId = TestEnvironment.CreateRegisteredObject<Hero>();
+        var outsiderId = TestEnvironment.CreateRegisteredObject<Hero>();
+        var outsiderClanId = TestEnvironment.CreateRegisteredObject<Clan>();
+
+        RegisterPlayer(client, player.HeroId, player.MobilePartyId);
+        SetMainHero(player.HeroId);
+
+        foreach (var instance in new[] { (EnvironmentInstance)Server }.Concat(Clients))
+        {
+            instance.Call(() =>
+            {
+                Assert.True(instance.ObjectManager.TryGetObject<Hero>(player.HeroId, out var playerHero));
+                Assert.True(instance.ObjectManager.TryGetObject<Hero>(clanMemberId, out var clanMember));
+                Assert.True(instance.ObjectManager.TryGetObject<Hero>(outsiderId, out var outsider));
+                Assert.True(instance.ObjectManager.TryGetObject<Clan>(outsiderClanId, out var outsiderClan));
+
+                clanMember.SetBirthDay(CampaignTime.YearsFromNow(-25f));
+                outsider.SetBirthDay(CampaignTime.YearsFromNow(-24f));
+                clanMember.Occupation = Occupation.Lord;
+                outsider.Occupation = Occupation.Lord;
+                outsider.IsFemale = !clanMember.IsFemale;
+                clanMember.Clan = playerHero.Clan;
+                outsider.Clan = outsiderClan;
+            });
+        }
+
+        client.Call(() =>
+        {
+            Assert.True(client.ObjectManager.TryGetObject<Hero>(clanMemberId, out var clanMember));
+            Assert.True(client.ObjectManager.TryGetObject<Hero>(outsiderId, out var outsider));
+
+            TaleWorlds.CampaignSystem.Actions.ChangeRomanticStateAction.Apply(
+                clanMember, outsider, Romance.RomanceLevelEnum.MatchMadeByFamily);
+        });
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<Hero>(clanMemberId, out var clanMember));
+            Assert.True(Server.ObjectManager.TryGetObject<Hero>(outsiderId, out var outsider));
+            Assert.Equal(
+                Romance.RomanceLevelEnum.MatchMadeByFamily,
+                Romance.GetRomanticLevel(clanMember, outsider));
+        });
+    }
+
     private static void AssertArrangedMarriageAndGold(
         EnvironmentInstance instance,
         string playerHeroId,

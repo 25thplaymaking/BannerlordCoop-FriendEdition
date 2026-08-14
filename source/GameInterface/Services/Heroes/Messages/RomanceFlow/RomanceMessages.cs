@@ -49,18 +49,27 @@ internal readonly struct NetworkRequestRomanceStateChange : ICommand
     [ProtoMember(5)]
     public readonly float ScoreFromPersuasion;
 
+    /// <summary>
+    /// Set only for an ARRANGED change: the requesting player's clan member being promised to
+    /// <see cref="TargetHeroId"/>. Empty/null means the player hero itself is the courting party.
+    /// </summary>
+    [ProtoMember(6)]
+    public readonly string ClanMemberHeroId;
+
     public NetworkRequestRomanceStateChange(
         string targetHeroId,
         Romance.RomanceLevelEnum requestedLevel,
         int progressToNextLevel,
         float lastVisit,
-        float scoreFromPersuasion)
+        float scoreFromPersuasion,
+        string clanMemberHeroId = null)
     {
         TargetHeroId = targetHeroId;
         RequestedLevel = (int)requestedLevel;
         ProgressToNextLevel = progressToNextLevel;
         LastVisit = lastVisit;
         ScoreFromPersuasion = scoreFromPersuasion;
+        ClanMemberHeroId = clanMemberHeroId;
     }
 }
 

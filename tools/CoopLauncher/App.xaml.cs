@@ -58,7 +58,7 @@ public partial class App : Application
         if (shootIdx >= 0 && shootIdx + 1 < e.Args.Length)
         {
             var window = new MainWindow(shootMode: true);
-            window.RenderToFile(e.Args[shootIdx + 1]);
+            window.RenderAllPanels(e.Args[shootIdx + 1]);
             Shutdown();
             return;
         }

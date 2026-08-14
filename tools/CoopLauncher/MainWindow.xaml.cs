@@ -12,8 +12,10 @@ namespace CoopLauncher;
 
 public partial class MainWindow : Window
 {
-    private readonly LauncherConfig _config;
-    private readonly ArmoryUpdateCoordinator _updates;
+    private readonly LauncherConfig _shipped;
+    private readonly LauncherSettings _settings;
+    private LauncherConfig _config;
+    private ArmoryUpdateCoordinator _updates;
     private readonly bool _continuePreparation;
     private readonly DispatcherTimer _statusTimer = new() { Interval = TimeSpan.FromSeconds(12) };
 
@@ -22,6 +24,8 @@ public partial class MainWindow : Window
     private ArmorySnapshot? _snapshot;
     private bool _operationActive;
     private bool _preparationFailed;
+    private bool _optionsWiring;
+    private readonly bool _shootMode;
 
     private SolidColorBrush Gold => (SolidColorBrush)FindResource("Gold");
     private SolidColorBrush Steel => (SolidColorBrush)FindResource("Steel");
@@ -36,14 +40,21 @@ public partial class MainWindow : Window
         _continuePreparation = continuePreparation;
 
         string configPath = Path.Combine(AppContext.BaseDirectory, "launcher-config.json");
-        _config = LauncherConfig.Load(configPath);
+        _shipped = LauncherConfig.Load(configPath);
+        _settings = LauncherSettings.Load(LauncherSettings.DefaultPath);
+        _config = _settings.ApplyTo(_shipped);
         _updates = new ArmoryUpdateCoordinator(_config);
         TitleText.Text = _config.GroupName;
         Title = _config.GroupName;
-        ServerPasswordBox.Password = _config.ServerPassword;
+
+        // The remembered watchword (opt-in, DPAPI) wins over the shipped config's token; both
+        // fall back to empty and the member types it.
+        string remembered = _settings.RememberPassword ? _settings.UnprotectPassword() : "";
+        ServerPasswordBox.Password = remembered.Length > 0 ? remembered : _config.ServerPassword;
 
         if (shootMode)
         {
+            _shootMode = true;
             SetStatus(online: true, $"ONLINE — {_config.ServerHost}:{_config.ServerPort}");
             LauncherUpdateValue.Text = "Current — 2026.8.12.8";
             SuiteUpdateValue.Text = "Current — 2026.08.12.0218";
@@ -53,6 +64,25 @@ public partial class MainWindow : Window
             JoinButton.Content = "MARCH TO WAR";
             JoinButton.IsEnabled = true;
             UpdateText.Text = "All update scrolls verified.";
+            ChronicleEmptyText.Visibility = Visibility.Collapsed;
+            ChronicleList.ItemsSource = new List<ChronicleEntry>
+            {
+                new()
+                {
+                    Version = "2026.08.14.0001", Date = "2026-08-14", Title = "The join freeze is dead",
+                    Highlights =
+                    {
+                        "Joining the server no longer freezes on the \"Applying patches...\" screen.",
+                        "Patch failures now show a real error instead of a frozen loading screen.",
+                    },
+                },
+                new()
+                {
+                    Version = "2026.08.13.2356", Date = "2026-08-13", Title = "Co-op client 2026.08.13.2356",
+                    Source = "build",
+                    Highlights = { "Skip the second unpatchable generic target: MCM settings getter" },
+                },
+            };
             return;
         }
 
@@ -66,7 +96,52 @@ public partial class MainWindow : Window
         GatherLogsButton.Click += OnGatherLogsClicked;
         _statusTimer.Tick += async (_, _) => await OnStatusTickAsync();
 
+        MusterTab.Checked += (_, _) => ShowPanel(MusterPanel);
+        ChronicleTab.Checked += async (_, _) =>
+        {
+            ShowPanel(ChroniclePanel);
+            if (!_shootMode) await LoadChronicleAsync();
+        };
+        OptionsTab.Checked += (_, _) => ShowPanel(OptionsPanel);
+        WireOptions();
+
         Loaded += OnLoaded;
+    }
+
+    private void ShowPanel(FrameworkElement active)
+    {
+        if (MusterPanel is null) return; // Checked can fire during InitializeComponent.
+        MusterPanel.Visibility = ReferenceEquals(active, MusterPanel) ? Visibility.Visible : Visibility.Collapsed;
+        ChroniclePanel.Visibility = ReferenceEquals(active, ChroniclePanel) ? Visibility.Visible : Visibility.Collapsed;
+        OptionsPanel.Visibility = ReferenceEquals(active, OptionsPanel) ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// Renders every panel to PNGs without showing the window (design review only):
+    /// <c>path</c> gets the Muster, plus <c>-chronicle</c> / <c>-options</c> siblings.
+    /// </summary>
+    public void RenderAllPanels(string path)
+    {
+        string Sibling(string suffix)
+        {
+            string dir = Path.GetDirectoryName(path) ?? "";
+            return Path.Combine(dir,
+                Path.GetFileNameWithoutExtension(path) + suffix + Path.GetExtension(path));
+        }
+
+        // Tab handlers are not wired in shoot mode, so drive both the check state (for the gold
+        // underline) and the panel visibility directly.
+        MusterTab.IsChecked = true;
+        ShowPanel(MusterPanel);
+        RenderToFile(path);
+        ChronicleTab.IsChecked = true;
+        ShowPanel(ChroniclePanel);
+        RenderToFile(Sibling("-chronicle"));
+        OptionsTab.IsChecked = true;
+        ShowPanel(OptionsPanel);
+        RenderToFile(Sibling("-options"));
+        MusterTab.IsChecked = true;
+        ShowPanel(MusterPanel);
     }
 
     /// <summary>Renders the window's visual tree to a PNG without showing it (design review only).</summary>
@@ -92,6 +167,7 @@ public partial class MainWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         UnfurlBanner();
+        SpawnEmbers();
         Log.Begin();
 
         _bannerlordExe = GameLocator.FindBannerlordExe(_config.GamePath);
@@ -100,7 +176,7 @@ public partial class MainWindow : Window
             : $"Found Bannerlord.exe: {_bannerlordExe}");
         if (_bannerlordExe is null)
         {
-            SetStatus(online: false, "Bannerlord not found — set gamePath in launcher-config.json");
+            SetStatus(online: false, "Bannerlord not found — set the game path in OPTIONS");
             SetGameMissingState();
             return;
         }
@@ -129,7 +205,7 @@ public partial class MainWindow : Window
         ClientUpdateValue.Text = "Could not inspect";
         ArmoryHeadline.Text = "THE MUSTER GROUND IS MISSING";
         ArmoryDetail.Text = "Bannerlord must be located before the army can be verified.";
-        UpdateText.Text = "Set gamePath in launcher-config.json or repair the Steam installation.";
+        UpdateText.Text = "Set the game path in the OPTIONS tab or repair the Steam installation.";
         JoinButton.Content = "GAME NOT FOUND";
         JoinButton.IsEnabled = false;
     }
@@ -157,7 +233,12 @@ public partial class MainWindow : Window
         finally
         {
             _operationActive = false;
-            if (_snapshot is not null) RenderSnapshot(_snapshot);
+            if (_snapshot is not null)
+            {
+                RenderSnapshot(_snapshot);
+                // Feed the Chronicle's build-note history so uncurated builds still appear there.
+                Chronicle.RecordBuildNotes(_snapshot);
+            }
         }
     }
 
@@ -431,22 +512,22 @@ public partial class MainWindow : Window
         try
         {
             LogPackageResult result = await Task.Run(() => LogPackager.Package(_bannerlordExe));
-            UpdateText.Foreground = result.Success ? Gold : Steel;
+            OptionsStatusText.Foreground = result.Success ? Gold : Steel;
             if (result.Success && result.ZipPath is not null)
             {
                 LogPackager.RevealInExplorer(result.ZipPath);
-                UpdateText.Text = $"Packaged {result.FileCount} log(s) → {result.ZipPath}  —  send this zip to Bishop.";
+                OptionsStatusText.Text = $"Packaged {result.FileCount} log(s) → {result.ZipPath}  —  send this zip to Bishop.";
             }
             else
             {
-                UpdateText.Text = result.Message;
+                OptionsStatusText.Text = result.Message;
             }
         }
         catch (Exception ex)
         {
             Log.Write($"Gather logs threw: {ex}");
-            UpdateText.Foreground = Steel;
-            UpdateText.Text = $"Couldn't gather logs — {ex.Message}";
+            OptionsStatusText.Foreground = Steel;
+            OptionsStatusText.Text = $"Couldn't gather logs — {ex.Message}";
         }
         finally
         {
@@ -494,6 +575,254 @@ public partial class MainWindow : Window
         Sigil.Foreground = accent;
     }
 
+    // ─────────────────────────── Options ───────────────────────────
+
+    /// <summary>Reflect settings into the Options controls and subscribe changes back to disk.</summary>
+    private void WireOptions()
+    {
+        _optionsWiring = true;
+        try
+        {
+            GamePathText.Text = string.IsNullOrWhiteSpace(_settings.GamePathOverride)
+                ? (string.IsNullOrWhiteSpace(_shipped.GamePath) ? "Auto-detected from Steam" : _shipped.GamePath)
+                : _settings.GamePathOverride;
+            LauncherChannelToggle.IsChecked = IsNightly(_settings.LauncherChannel);
+            SuiteChannelToggle.IsChecked = IsNightly(_settings.SuiteChannel);
+            ClientChannelToggle.IsChecked = IsNightly(_settings.ClientChannel);
+            RememberPasswordCheck.IsChecked = _settings.RememberPassword;
+            CloseAfterLaunchCheck.IsChecked = _settings.CloseAfterLaunch;
+            VerboseLoggingCheck.IsChecked = _settings.VerboseLogging;
+            UpdateNightlyWarning();
+        }
+        finally
+        {
+            _optionsWiring = false;
+        }
+
+        BrowseGameButton.Click += OnBrowseGameClicked;
+        RedetectGameButton.Click += OnRedetectGameClicked;
+        LauncherChannelToggle.Click += (_, _) => OnChannelChanged();
+        SuiteChannelToggle.Click += (_, _) => OnChannelChanged();
+        ClientChannelToggle.Click += (_, _) => OnChannelChanged();
+        RememberPasswordCheck.Click += (_, _) => OnRememberPasswordChanged();
+        CloseAfterLaunchCheck.Click += (_, _) => SaveSimpleToggles();
+        VerboseLoggingCheck.Click += (_, _) => SaveSimpleToggles();
+        OpenLogsFolderButton.Click += (_, _) => OpenPathInExplorer(Path.GetDirectoryName(Log.Path)!);
+        GithubButton.Click += (_, _) => OpenUrl(_config.ProjectUrl);
+    }
+
+    private static bool IsNightly(string channel) =>
+        string.Equals(channel, LauncherSettings.NightlyChannel, StringComparison.OrdinalIgnoreCase);
+
+    private void UpdateNightlyWarning() =>
+        NightlyWarning.Visibility =
+            LauncherChannelToggle.IsChecked == true ||
+            SuiteChannelToggle.IsChecked == true ||
+            ClientChannelToggle.IsChecked == true
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+
+    private void OnBrowseGameClicked(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "Pick the Bannerlord install folder (contains bin\\Win64_Shipping_Client)",
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        _settings.GamePathOverride = dialog.FolderName;
+        _settings.Save(LauncherSettings.DefaultPath);
+        GamePathText.Text = dialog.FolderName;
+        OptionsStatusText.Text = "Game path saved. Re-checking the muster ground…";
+        _ = ReapplySettingsAsync();
+    }
+
+    private void OnRedetectGameClicked(object sender, RoutedEventArgs e)
+    {
+        _settings.GamePathOverride = "";
+        _settings.Save(LauncherSettings.DefaultPath);
+        GamePathText.Text = string.IsNullOrWhiteSpace(_shipped.GamePath)
+            ? "Auto-detected from Steam"
+            : _shipped.GamePath;
+        OptionsStatusText.Text = "Auto-detecting from the Steam library…";
+        _ = ReapplySettingsAsync();
+    }
+
+    private void OnChannelChanged()
+    {
+        if (_optionsWiring) return;
+        _settings.LauncherChannel = LauncherChannelToggle.IsChecked == true
+            ? LauncherSettings.NightlyChannel : LauncherSettings.StableChannel;
+        _settings.SuiteChannel = SuiteChannelToggle.IsChecked == true
+            ? LauncherSettings.NightlyChannel : LauncherSettings.StableChannel;
+        _settings.ClientChannel = ClientChannelToggle.IsChecked == true
+            ? LauncherSettings.NightlyChannel : LauncherSettings.StableChannel;
+        _settings.Save(LauncherSettings.DefaultPath);
+        UpdateNightlyWarning();
+        OptionsStatusText.Text = "Channels saved. Re-reading the royal scrolls…";
+        _ = ReapplySettingsAsync();
+    }
+
+    private void OnRememberPasswordChanged()
+    {
+        if (_optionsWiring) return;
+        _settings.RememberPassword = RememberPasswordCheck.IsChecked == true;
+        if (_settings.RememberPassword)
+            _settings.ProtectPassword(ServerPasswordBox.Password);
+        else
+            _settings.ProtectedPassword = "";
+        _settings.Save(LauncherSettings.DefaultPath);
+        OptionsStatusText.Text = _settings.RememberPassword
+            ? "The watchword is remembered for your Windows account."
+            : "The watchword is forgotten.";
+    }
+
+    private void SaveSimpleToggles()
+    {
+        if (_optionsWiring) return;
+        _settings.CloseAfterLaunch = CloseAfterLaunchCheck.IsChecked == true;
+        _settings.VerboseLogging = VerboseLoggingCheck.IsChecked == true;
+        _settings.Save(LauncherSettings.DefaultPath);
+    }
+
+    /// <summary>
+    /// Recompute the effective config after a settings change and re-run locate + armory check,
+    /// unless an install/launch is mid-flight (the change still applies on the next check).
+    /// </summary>
+    private async Task ReapplySettingsAsync()
+    {
+        _config = _settings.ApplyTo(_shipped);
+        if (_operationActive)
+        {
+            OptionsStatusText.Text += "  (applies after the current operation)";
+            return;
+        }
+
+        _updates = new ArmoryUpdateCoordinator(_config);
+        _bannerlordExe = GameLocator.FindBannerlordExe(_config.GamePath);
+        _modulesDir = _bannerlordExe is null ? null : GameLocator.FindModulesDir(_bannerlordExe);
+        if (_bannerlordExe is null || _modulesDir is null)
+        {
+            SetStatus(online: false, "Bannerlord not found — set the game path in OPTIONS");
+            SetGameMissingState();
+            return;
+        }
+        await CheckArmoryAsync();
+    }
+
+    private void OpenPathInExplorer(string path)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = path,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            OptionsStatusText.Text = $"Couldn't open {path} — {ex.Message}";
+        }
+    }
+
+    private void OpenUrl(string url)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = url,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            OptionsStatusText.Text = $"Couldn't open the project page — {ex.Message}";
+        }
+    }
+
+    // ─────────────────────────── Chronicle ───────────────────────────
+
+    private async Task LoadChronicleAsync()
+    {
+        try
+        {
+            List<ChronicleEntry> entries = await Chronicle.LoadAsync(_config);
+            ChronicleList.ItemsSource = entries;
+            ChronicleEmptyText.Visibility = entries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            ChronicleEmptyText.Text = "No dispatches yet — the chronicle could not be fetched and nothing is cached.";
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"Chronicle load failed: {ex}");
+            ChronicleEmptyText.Visibility = Visibility.Visible;
+        }
+    }
+
+    // ─────────────────────────── Embers ───────────────────────────
+
+    /// <summary>
+    /// A handful of gold embers drifting up from the camp. Pure ambience: capped count, each a
+    /// looping storyboard, and skipped entirely when the OS says not to animate.
+    /// </summary>
+    private void SpawnEmbers()
+    {
+        if (!SystemParameters.ClientAreaAnimation) return;
+
+        var random = new Random(20260813);
+        const int emberCount = 16;
+        for (int i = 0; i < emberCount; i++)
+        {
+            double size = 2 + random.NextDouble() * 3;
+            var ember = new System.Windows.Shapes.Ellipse
+            {
+                Width = size,
+                Height = size,
+                Fill = new SolidColorBrush(
+                    Color.FromArgb((byte)(120 + random.Next(100)), 0xE7, 0xC5, 0x6A)),
+                Opacity = 0,
+            };
+            double left = 60 + random.NextDouble() * 1100;
+            System.Windows.Controls.Canvas.SetLeft(ember, left);
+            System.Windows.Controls.Canvas.SetTop(ember, 0);
+            EmberCanvas.Children.Add(ember);
+
+            var rise = new TranslateTransform();
+            ember.RenderTransform = rise;
+            double duration = 9 + random.NextDouble() * 9;
+            double delay = random.NextDouble() * 8;
+            double startY = 640 + random.NextDouble() * 90;
+
+            var yAnimation = new DoubleAnimation(startY, startY - 260 - random.NextDouble() * 160,
+                TimeSpan.FromSeconds(duration))
+            {
+                BeginTime = TimeSpan.FromSeconds(delay),
+                RepeatBehavior = RepeatBehavior.Forever,
+            };
+            var drift = new DoubleAnimation(0, random.NextDouble() * 44 - 22, TimeSpan.FromSeconds(duration))
+            {
+                BeginTime = TimeSpan.FromSeconds(delay),
+                RepeatBehavior = RepeatBehavior.Forever,
+                EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
+            };
+            var fade = new DoubleAnimationUsingKeyFrames
+            {
+                BeginTime = TimeSpan.FromSeconds(delay),
+                Duration = TimeSpan.FromSeconds(duration),
+                RepeatBehavior = RepeatBehavior.Forever,
+            };
+            fade.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromPercent(0)));
+            fade.KeyFrames.Add(new LinearDoubleKeyFrame(0.9, KeyTime.FromPercent(0.15)));
+            fade.KeyFrames.Add(new LinearDoubleKeyFrame(0.55, KeyTime.FromPercent(0.7)));
+            fade.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromPercent(1)));
+
+            rise.BeginAnimation(TranslateTransform.YProperty, yAnimation);
+            rise.BeginAnimation(TranslateTransform.XProperty, drift);
+            ember.BeginAnimation(OpacityProperty, fade);
+        }
+    }
+
     private async Task LaunchGameAsync()
     {
         if (_bannerlordExe is null || _snapshot?.PrimaryAction != ArmoryPrimaryAction.Launch)
@@ -504,6 +833,13 @@ public partial class MainWindow : Window
         {
             JoinButton.IsEnabled = false;
             JoinButton.Content = "RIDING OUT…";
+
+            // Opt-in only: refresh the remembered watchword with whatever is being used to ride out.
+            if (_settings.RememberPassword)
+            {
+                _settings.ProtectPassword(ServerPasswordBox.Password);
+                _settings.Save(LauncherSettings.DefaultPath);
+            }
 
             bool steamUp = GameLauncher.IsSteamRunning();
             if (!steamUp) Log.Write("WARNING: Steam client does not appear to be running");
@@ -526,9 +862,21 @@ public partial class MainWindow : Window
                 return;
             }
 
-            Log.Write("Bannerlord still running after 9s — handing off, closing launcher");
-            _statusTimer.Stop();
-            Close();
+            if (_settings.CloseAfterLaunch)
+            {
+                Log.Write("Bannerlord still running after 9s — handing off, closing launcher");
+                _statusTimer.Stop();
+                Close();
+                return;
+            }
+
+            // The member asked the launcher to stay: hand off but keep the camp lit.
+            Log.Write("Bannerlord still running after 9s — handing off, launcher stays open");
+            _operationActive = false;
+            JoinButton.IsEnabled = true;
+            JoinButton.Content = "MARCH TO WAR";
+            UpdateText.Foreground = Steel;
+            UpdateText.Text = "Bannerlord has taken the field. The launcher stays open (Options → The Camp).";
         }
         catch (Exception ex)
         {

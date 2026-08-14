@@ -393,6 +393,20 @@ The local and deployment gates are green; rendered verification must use launche
 - **Inventory teardown window:** `ScreenManager.PopScreen` joined the equipment allowance wrap.
 - **Crash-reporter log preservation** (above), with regression test.
 
+### Secondary update (2026-08-14, client-only)
+- **Scope:** everything unpushed from Phase J (ScoreboardTick reinstatement) + Phase K fixes
+  (loot trade desync, kingdom-decision gate, PopScreen teardown window, crash-reporter log
+  preservation). **No server redeploy required:** the trade fix changes the client sending path
+  (the server already resolves StringId wire ids), the kingdom gate is client-side, the equipment
+  wrap is inside the client-only branch, and the crash reporter is client tooling. grain.silo
+  stays on its current pair, `NRestarts=0`.
+- **Channel history note:** Gemini's 2026-08-14 02:31 UTC dispatch published to BOTH channels —
+  the stable feed friends run has been on Phase J source `1737916f6` since 02:35 UTC (that is the
+  build on five of last night's crash reports). This update supersedes it.
+- **Ship path:** push → automatic nightly (source `d8a999910`); on CI green, dispatch
+  `launcher-release.yml` with `channels: stable` on the same source; verify manifest version +
+  ZIP SHA-256 against the workflow output.
+
 ### Still open after this phase
 - **0xC0000005 root cause unproven** — need one accepted dump from the next occurrence.
 - **Equipment/IsReady client ERR floods** (~5k/min in battles) — worker-thread churn is

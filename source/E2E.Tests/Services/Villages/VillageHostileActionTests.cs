@@ -1049,6 +1049,134 @@ public class VillageHostileActionTests : MapEventTestBase
     }
 
     [Fact]
+    public void RaidLootingCompletion_ServerClosesRaidingPlayersEncounter()
+    {
+        // The slow-raid loot phase concludes NATIVELY on the server: RaidEventComponent.Update sets
+        // AttackerVictory and MapEvent.Update calls FinishBattle directly — no mission result, no
+        // NetworkChangeBattleState — so nothing published MapEventConcluded and the raiding client's
+        // encounter was never closed. The client sat softlocked on the looting menu with a dead
+        // "End raid" button (live incident 2026-08-14, village_EW6_4).
+        var (heroId, mobilePartyId) = CreatePlayerHeroParty("PlayerOne");
+        var attackerPartyId = GetPartyBaseId(mobilePartyId);
+        var target = CreateVillageTarget();
+        var villageTypeId = TestEnvironment.CreateRegisteredObject<VillageType>();
+        string? mapEventId = null;
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<Hero>(heroId, out var hero));
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(mobilePartyId, out var mobileParty));
+            Assert.True(Server.ObjectManager.TryGetObject<Settlement>(target.SettlementId, out var settlement));
+            Assert.True(Server.ObjectManager.TryGetObject<Village>(target.VillageId, out var village));
+            Assert.True(Server.ObjectManager.TryGetObject<VillageType>(villageTypeId, out var villageType));
+
+            using (new AllowedThread())
+            {
+                mobileParty.MemberRoster.AddToCounts(hero.CharacterObject, 10);
+                hero.PartyBelongedTo = mobileParty;
+                hero.Gold = 0;
+                villageType._productions = new MBList<(ItemObject, float)>();
+                village.VillageType = villageType;
+                // Nearly looted already: the next loot tick zeroes the hit points and concludes the raid.
+                settlement.SettlementHitPoints = 0.02f;
+                settlement.Village.Hearth = 100f;
+                Campaign.Current.MapTimeTracker._deltaTimeInTicks = CampaignTime.Hours(10f).NumTicks;
+            }
+
+            var mapEvent = CreateHostileActionMapEvent(mobileParty.Party, settlement.Party, VillageHostileAction.Raid);
+            Assert.True(mapEvent.IsActiveSlowVillageRaid());
+            Assert.True(Server.ObjectManager.TryGetId(mapEvent, out mapEventId));
+        }, MapEventDisabledMethods);
+
+        Assert.NotNull(mapEventId);
+        Server.NetworkSentMessages.Clear();
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MapEvent>(mapEventId!, out var mapEvent));
+            var component = (RaidEventComponent)mapEvent.Component;
+
+            // Drive loot ticks the way the campaign-map update does until the raid concludes natively.
+            var finished = false;
+            for (int i = 0; i < 50 && mapEvent.BattleState != BattleState.AttackerVictory; i++)
+                component.Update(ref finished);
+
+            Assert.Equal(BattleState.AttackerVictory, mapEvent.BattleState);
+            Assert.True(finished);
+
+            // MapEvent.Update reacts to the component's finish by calling the native FinishBattle.
+            AccessTools.Method(typeof(MapEvent), "FinishBattle").Invoke(mapEvent, null);
+            Assert.True(mapEvent.IsFinalized);
+        }, MapEventDisabledMethods);
+
+        // The raiding player's encounter must be closed by the server — this is what was missing live.
+        var close = Server.NetworkSentMessages.GetMessages<NetworkClosePvpEncounter>().Single();
+        Assert.Contains(attackerPartyId, close.PartyIds);
+
+        Server.Call(() =>
+        {
+            Assert.False(Server.ObjectManager.TryGetObject<MapEvent>(mapEventId!, out _));
+            Assert.True(Server.ObjectManager.TryGetObject<Village>(target.VillageId, out var village));
+            Assert.Equal(Village.VillageStates.Looted, village.VillageState);
+        }, MapEventDisabledMethods);
+
+        foreach (var syncedClient in Clients)
+        {
+            syncedClient.Call(() =>
+            {
+                Assert.False(syncedClient.ObjectManager.TryGetObject<MapEvent>(mapEventId!, out _));
+                Assert.True(syncedClient.ObjectManager.TryGetObject<Village>(target.VillageId, out var village));
+                Assert.Equal(Village.VillageStates.Looted, village.VillageState);
+            });
+        }
+    }
+
+    [Fact]
+    public void RaidEndRequest_UnresolvableLocalMapEvent_ClosesLocalRaidMenu()
+    {
+        // Client half of the same softlock: if the server's destroy already unregistered the raid
+        // MapEvent locally, the End-raid consequence used to publish a finalize request that could
+        // never resolve an id — silently eating every click. It must fall back to closing the local
+        // menu instead.
+        var client = Clients.First();
+        var (_, mobilePartyId) = CreatePlayerHeroParty("PlayerOne");
+
+        EnableHeadlessEncounterFinish(client);
+        client.Call(() =>
+        {
+            Assert.True(client.ObjectManager.TryGetObject<MobileParty>(mobilePartyId, out var mobileParty));
+
+            using (new AllowedThread())
+            {
+                Campaign.Current.MainParty = mobileParty;
+            }
+
+            // A stale local raid event the object manager no longer knows about (server destroy applied).
+            var staleMapEvent = ObjectHelper.SkipConstructor<MapEvent>();
+            var encounter = ObjectHelper.SkipConstructor<PlayerEncounter>();
+            encounter._mapEvent = staleMapEvent;
+            encounter.ForceRaid = true;
+            Campaign.Current.PlayerEncounter = encounter;
+            Assert.False(client.ObjectManager.TryGetId(staleMapEvent, out _));
+        }, MapEventDisabledMethods);
+
+        client.InternalMessages.Clear();
+        var disabledMethods = MapEventDisabledMethods
+            .Append(AccessTools.Method(typeof(GameMenu), nameof(GameMenu.ExitToLast)))
+            .ToList();
+
+        client.Call(() =>
+        {
+            AccessTools.Method(typeof(VillageHostileActionCampaignBehavior), "wait_menu_end_raiding_on_consequence")
+                .Invoke(null, new object?[] { null });
+        }, disabledMethods);
+
+        // No finalize request went out for the unresolvable event, and the local menu state was closed.
+        Assert.Empty(client.InternalMessages.GetMessages<MapEventFinalizeAttempted>());
+        client.Call(() => Assert.Null(PlayerEncounter.Current), MapEventDisabledMethods);
+    }
+
+    [Fact]
     public void RaidFinalizeRequest_EndingSlowRaidMovesRaiderToVillageGate()
     {
         var client = Clients.First();

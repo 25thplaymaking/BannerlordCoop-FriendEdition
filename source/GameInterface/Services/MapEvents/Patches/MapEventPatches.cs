@@ -172,6 +172,39 @@ internal class MapEventPatches
         return true;
     }
 
+    /// <summary>
+    /// [Server] A slow village raid's loot phase concludes NATIVELY: <c>RaidEventComponent.Update</c> sets the
+    /// victory state and <c>MapEvent.Update</c> calls <c>FinishBattle</c> directly — no mission result and no
+    /// <see cref="NetworkChangeBattleState"/> — so nothing publishes <see cref="MapEventConcluded"/> and
+    /// <c>BattleFinalizeHandler</c> never closes the raiding players' encounters. The raiding client is left
+    /// softlocked on the looting menu with a dead "End raid" button (its local event is torn down by the
+    /// replicated destroy, so the click's finalize request can no longer resolve an id). Route exactly this
+    /// finish through the normal conclusion pipeline before the native finalize runs; the pipeline's finalize
+    /// dedup makes the native <c>FinalizeEventAux</c> that follows a no-op.
+    /// </summary>
+    [HarmonyPatch("FinishBattle")]
+    [HarmonyPrefix]
+    private static void Prefix_FinishBattle(MapEvent __instance)
+    {
+        if (CallOriginalPolicy.IsOriginalAllowed()) return;
+        if (ModInformation.IsClient) return;
+        if (__instance.IsFinalized) return;
+        if (!__instance.IsRaidHostileAction()) return;
+        if (!__instance.ContainsPlayerParty()) return;
+
+        if (!ContainerProvider.TryResolve<IObjectManager>(out var objectManager) ||
+            !objectManager.TryGetId(__instance, out var mapEventId))
+            return;
+
+        var playerPartyIds = MapEventPlayerPartyCollector.CollectPartyIds(__instance, objectManager);
+        Logger.Information(
+            "Routing native raid finish of {MapEventId} (BattleState={BattleState}) through the conclusion pipeline for player parties [{PlayerPartyIds}]",
+            mapEventId,
+            __instance.BattleState,
+            string.Join(",", playerPartyIds));
+        MessageBroker.Instance.Publish(__instance, new MapEventConcluded(mapEventId, playerPartyIds));
+    }
+
     [HarmonyPatch(nameof(MapEvent.DoSurrender))]
     [HarmonyPrefix]
     private static bool Prefix_DoSurrender(MapEvent __instance, BattleSideEnum side)

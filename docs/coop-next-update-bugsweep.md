@@ -244,6 +244,39 @@ Kingdom-tab completion claims. Phase D fixed the raid path; Phase E owns the rem
   returns early for sandbox). `friendallmods1` is a sandbox campaign, so this is unreachable today.
   If a story-mode campaign is ever hosted, wrap those callbacks in a `BarterPlayerContext` first.
 
+## Phase I — village-raid loot-completion softlock ("End raid" dead button) (2026-08-14)
+
+Live incident (2026-08-14 ~00:37 UTC, village_EW6_4, client Chipmunk on `6ce74c217`): after the
+resistance battle, the client entered the looting wait-menu; the raid completed, and every
+"End raid"/leave click was silently eaten — softlocked until game restart. Server journal shows the
+resistance battle (`MapEvent_Created_73950`) conclude → continued-raid loot ticks (`ItemRoster`
+scratch noise at 00:37:22) → the raiding party pulsing `mapEvent=none` with **no conclusion or
+encounter close ever emitted** for the continued raid.
+
+- **Root cause (server):** a slow village raid's loot phase concludes NATIVELY — `RaidEventComponent.
+  Update` sets `BattleState = AttackerVictory` and `MapEvent.Update` calls `FinishBattle` →
+  `FinalizeEventAux` directly. No mission result and no `NetworkChangeBattleState` means nothing
+  publishes `MapEventConcluded`, so `BattleFinalizeHandler` (the only component that closes involved
+  players' encounters) is bypassed entirely: the event is destroyed, the destroy replicates, and the
+  raiding client is never told to leave its menu.
+- **Root cause (client half):** with the local event unregistered by the replicated destroy, the
+  End-raid consequence (`VillageRaidEndPatch`) published a `MapEventFinalizeAttempted` whose
+  `TryGetIdWithLogging` could never resolve — silent early return, every click eaten, and the
+  wait-menu's other leave options are patched identically.
+- **Fix (server):** `MapEventPatches.Prefix_FinishBattle` — when the server natively finishes a
+  raid-hostile-action event that contains player parties and is not yet finalized, publish
+  `MapEventConcluded` first. The pipeline finalizes (marking dedup), moves raid attackers to the
+  village gate, and sends `NetworkClosePvpEncounter`; the native `FinalizeEventAux` that follows
+  no-ops on the already-finalized event. Also covers the no-winner variant (attacker side emptied).
+- **Fix (client hardening):** `VillageRaidEndPatch` only routes a finalize request for an event the
+  object manager can still resolve; otherwise it closes the local menu (detaching the stale event
+  from the encounter and the main party so `Finish` does not re-publish an unresolvable finalize).
+- **Tests:** `RaidLootingCompletion_ServerClosesRaidingPlayersEncounter` (drives real loot ticks to
+  native completion; asserts the close + Looted state + destroy on server and clients) and
+  `RaidEndRequest_UnresolvableLocalMapEvent_ClosesLocalRaidMenu` (stale local event → no finalize
+  publish, encounter closed). Both fail without the fixes; full VillageHostileActionTests +
+  CoopBattleFinalizeTests + MapEventLoadCleanerTests green locally (87 tests).
+
 ## Deferred — reverted upstream fixes that break Separatism (need dedicated compat work, NOT bundled)
 
 - **#2632** (companion fiefs; closes clan-menu-black softlock #2860 + Give-Settlement #2790) — **CONFIRMED** to re-break `SeparatismCampaignFlowTests.ChaosStart…SynchronizesTheCreatedKingdom` (rebel kingdom named "Former Rebel Kingdom" vs expected "Kingdom of Rebel Clan"). Its `ClanName` sync (`ClanNameHandler`/`ClanNameChangePatch`) collides with Separatism rebel-kingdom naming. Earlier session mis-attributed this to #2867. Fixes no *user-reported* bug → dropped from this update; needs Separatism-compat rework.

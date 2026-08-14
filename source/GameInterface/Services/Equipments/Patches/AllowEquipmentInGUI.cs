@@ -25,6 +25,11 @@ internal class AllowEquipmentInGUI
 {
     private static IEnumerable<MethodBase> TargetMethods()
     {
+        if (Common.ModInformation.IsServer)
+        {
+            return Enumerable.Empty<MethodBase>();
+        }
+
         var explicitMethods = new MethodBase[]
         {
             AccessTools.Method(typeof(CampaignUIHelper), nameof(CampaignUIHelper.GetCharacterCode)),
@@ -44,10 +49,7 @@ internal class AllowEquipmentInGUI
             typeof(SPInventoryVM),
             typeof(ClanManagementVM),
             typeof(PartyVM),
-            typeof(InventoryLogic),
-            typeof(CharacterTableau),
-            typeof(BasicCharacterTableau),
-            typeof(ItemTableau)
+            typeof(InventoryLogic)
         };
 
         var discoveredMethods = new List<MethodBase>();
@@ -55,17 +57,23 @@ internal class AllowEquipmentInGUI
         {
             if (type == null) continue;
 
-            foreach (var ctor in AccessTools.GetDeclaredConstructors(type))
+            try
             {
-                if (ctor != null) discoveredMethods.Add(ctor);
-            }
-
-            foreach (var method in AccessTools.GetDeclaredMethods(type))
-            {
-                if (method != null && !method.IsAbstract && !method.IsGenericMethod)
+                foreach (var ctor in AccessTools.GetDeclaredConstructors(type))
                 {
-                    discoveredMethods.Add(method);
+                    if (ctor != null) discoveredMethods.Add(ctor);
                 }
+
+                foreach (var method in AccessTools.GetDeclaredMethods(type))
+                {
+                    if (method != null && !method.IsAbstract && !method.IsGenericMethod)
+                    {
+                        discoveredMethods.Add(method);
+                    }
+                }
+            }
+            catch
+            {
             }
         }
 

@@ -25,11 +25,6 @@ internal class AllowEquipmentInGUI
 {
     private static IEnumerable<MethodBase> TargetMethods()
     {
-        if (Common.ModInformation.IsServer)
-        {
-            return Enumerable.Empty<MethodBase>();
-        }
-
         var explicitMethods = new MethodBase[]
         {
             AccessTools.Method(typeof(CampaignUIHelper), nameof(CampaignUIHelper.GetCharacterCode)),
@@ -38,6 +33,11 @@ internal class AllowEquipmentInGUI
             AccessTools.Method(typeof(CharacterSpawner), nameof(CharacterSpawner.InitWithCharacter)),
             AccessTools.Method(typeof(CharacterThumbnailCache), "GetPoseParamsFromCharacterCode")
         };
+
+        if (Common.ModInformation.IsServer)
+        {
+            return explicitMethods.Where(m => m != null);
+        }
 
         var typesToWrap = new Type[]
         {

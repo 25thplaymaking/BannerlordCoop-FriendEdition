@@ -4,9 +4,9 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
-> **2026-08-14 player clan membership — REVIEWED CANDIDATE, NOT DEPLOYED.** Draft PR #15 now
+> **2026-08-14 player clan membership — SHIPPED from source `da18f9b95`.** Merged PR #15
 > implements persisted native player membership. A registered player may voluntarily join another
-> player's clan only when its leader accepts and the receiving clan is Tier 2 or higher. First join
+> player's clan only when its leader accepts and the receiving clan is **Tier 2+**. First join
 > permanently transfers the applicant's holdings, workshops, caravans, alleys, gold, troops,
 > prisoners, and party inventory to the receiving clan/leader, then embeds the hero in the leader's
 > party; XP remains hero-local. Joined members may request a leader-approved independent party or
@@ -18,8 +18,13 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > replicated destruction of the applicant's retired party, player-position-independent personal
 > marriage validation, and an unauthenticated siege-leave fixture. Release build is clean with zero
 > errors; 223 focused tests pass (5 crash reporter, 155 Diplomacy, 6 patch registration, 39 membership/
-> save/visibility unit tests, and 18 interaction/marriage/siege E2E cases). No launcher package or server files have
-> been changed yet.
+> save/visibility unit tests, and 18 interaction/marriage/siege E2E cases). Required PR workflow
+> `31818854020` passed the build, test, and all eight E2E shards. Release workflow `31819338262`
+> published stable and nightly client `2026.08.14.1630` from the exact merge. The matching server
+> pair uses core SHA-256 `d3975ba0920186448cdce04eea29af4f1c0764efa03953bc7e784357586eff70`;
+> it loaded the preserved `friendallmods1` world, reached `SERVING` on UDP 4200, and remained at
+> `NRestarts=0`. Byte-verified rollback snapshot:
+> `/home/bishop/bannerlord-coop/server/_mod_backups/pre-da18f9b95-20260814T163244Z`.
 
 > **2026-08-14 Phase M crash correction — VERIFIED CANDIDATE, NOT DEPLOYED.** The 09:57 EDT
 > client failure on live pair `fa685f7f6` produced a Windows LocalDumps artifact after the Coop

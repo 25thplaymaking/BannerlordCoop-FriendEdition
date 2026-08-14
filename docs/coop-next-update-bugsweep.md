@@ -467,10 +467,10 @@ The local and deployment gates are green; rendered verification must use launche
   lockstep client/server action after explicit green light; rendered proof should open then close
   Kingdom and receive peace/war/alliance updates while another screen is active.
 
-### Phase N — native player clan membership (2026-08-14)
+### Phase N — native player clan membership — SHIPPED (2026-08-14; source `da18f9b95`)
 - **Consent and eligibility:** player-to-player clan joining uses the existing party interaction
   flow, requires an affirmative leader response, and is available only when the receiving player's
-  clan is Tier 2 or higher. The server revalidates the current clan leader on acceptance. Optional
+  clan is Tier 2+. The server revalidates the current clan leader on acceptance. Optional
   player marriage uses native suitability and reciprocal spouse/romance state without moving either
   player between clans.
 - **Ownership and party control:** first join permanently gives the receiving clan/leader the
@@ -491,7 +491,14 @@ The local and deployment gates are green; rendered verification must use launche
   and an unauthenticated siege-leave fixture. Release solution build completes with zero errors.
   Focused direct-xUnit coverage is 223 passing cases: CrashReporter 5, Diplomacy 155, patch
   registration 6, membership/restore/save/visibility units 39, and interaction/marriage/siege E2Es 18.
-  PR #15 remains the release boundary; no launcher or server deployment has occurred at this point.
+  PR #15 merged only after workflow `31818854020` passed build, test, and all eight E2E shards.
+- **Release:** workflow `31819338262` published stable and nightly client `2026.08.14.1630` from the
+  exact merge. The matching server pair uses core SHA-256
+  `d3975ba0920186448cdce04eea29af4f1c0764efa03953bc7e784357586eff70`; it preserved and loaded
+  `friendallmods1`, reached `SERVING` on UDP 4200, and remained at `NRestarts=0`. Byte-verified
+  rollback snapshot: `/home/bishop/bannerlord-coop/server/_mod_backups/pre-da18f9b95-20260814T163244Z`.
+  Rendered clan-join, independent-party, departure, player-marriage, and succession proof still
+  requires player actions and is not inferred from headless server health.
 
 ### Still open after this phase
 - **Equipment/IsReady client ERR floods** (~5k/min in battles) — worker-thread churn is

@@ -305,19 +305,25 @@ Review `origin/development...HEAD` for authority bypass, object-registration con
 compatibility, roster duplication/loss, clan-leader validation, disconnect ordering, and player
 marriage clan movement. Fix every confirmed defect and rerun the affected test.
 
-- [ ] **Step 3: Update owned docs and PR metadata**
+- [x] **Step 3: Update owned docs and PR metadata**
 
 Record exact behavior and test counts in `STATUS.md` and `docs/coop-next-update-bugsweep.md`. Update
 PR #15 with the final scope and validation; mark it ready only after the review is clean.
 
-- [ ] **Step 4: Merge only the reviewed PR**
+- [x] **Step 4: Merge only the reviewed PR**
 
 Confirm PR checks and head commit, merge PR #15 into `development`, and verify the merged branch
 builds before release operations.
 
-- [ ] **Step 5: Update launcher delivery and deploy the server**
+- [x] **Step 5: Update launcher delivery and deploy the server**
 
 Use the repository's existing launcher/client release workflow and documented server deployment
 path. Do not change launcher source unless its existing feed cannot deliver this build. Preserve the
 configured campaign save, restart headlessly, and verify the server reaches serving state with the
 new build and no startup script errors.
+
+**Execution result:** PR #15 merged as `da18f9b95` after workflow `31818854020` passed every
+required job. Workflow `31819338262` published stable/nightly client `2026.08.14.1630`. The paired
+server deployment preserved `friendallmods1`, reached `SERVING` on UDP 4200, and held
+`NRestarts=0`; rollback snapshot is
+`/home/bishop/bannerlord-coop/server/_mod_backups/pre-da18f9b95-20260814T163244Z`.

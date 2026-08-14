@@ -31,8 +31,10 @@ and the root-cause diagnosis of the live complaints (2026-08-14): "marriage is s
   presence gate, 15-min lifetime) → request → validate participants/clans/eligibility → apply
   barterables → no-rollback-after-mutation discipline. `MarriageAction` client-side is blocked;
   E2E-covered (`RomanceMarriageBarterSyncTests`, `LordBarterSyncTests`).
-- **Protections**: NPC marriage cannot poach player-clan heroes (`RomanceNpcMarriagePatches`);
-  player↔player romance rejected; `MarriageOfferCampaignBehavior` (random offers) disabled.
+- **Protections**: NPC marriage cannot poach player-clan heroes (`RomanceNpcMarriagePatches`), and
+  `MarriageOfferCampaignBehavior` (random offers) is disabled. The normal courtship route still
+  rejects player↔player romance transitions; the explicit player-party proposal route now supports
+  consent-based player marriage, applies native suitability checks, and preserves both clans.
 
 ## Why marriage was "so buggy" — two root causes, proven from the server journal
 
@@ -71,7 +73,8 @@ with a reason). The server now sends the rejection reason immediately.
 
 Four stacked causes, in order of impact:
 
-1. **Until now, nobody was actually married through co-op** (zero successes above). Spouses
+1. **At diagnosis time, nobody had actually married through the NPC co-op route** (zero successes
+   above). Spouses
    people do have came from the save's history or NPC↔NPC server marriages — heroes the players
    never gained routed control surfaces for.
 2. **Post-marriage placement is native server AI.** `MarriageAction` makes the clan-switching
@@ -102,8 +105,9 @@ companion flows. That is the remaining piece of "controllable spouses."
 - Build green; new E2E tests: `MarriageBarterAuthorization_MenuTalkLocationContext_…`
   (menu-talk presence fallback accepts a valid proposal) and
   `ArrangedRomanceStateChange_OwnClanMember_RoutesToServer` (arranged promise reaches the
-  server). CI is the test gate.
-- **Owed live smoke before stable:** one real in-game marriage — personal (via settlement-menu
-  talk, the previously-broken path) and one arranged for a clan member — plus the wire is
-  version-locked (the romance request message gained a field), so client and server must deploy
-  in lockstep as usual.
+  server). The player-party E2E also proves two players can accept marriage without either player
+  changing clans. CI is the test gate.
+- Stable/nightly client `2026.08.14.1630` and its matching server were deployed in lockstep from
+  `da18f9b95`. Live rendered smokes remain owed for one player↔player proposal, one personal NPC
+  marriage through settlement-menu talk, and one arranged clan-member marriage; deployment health
+  is not treated as proof of those player-driven paths.

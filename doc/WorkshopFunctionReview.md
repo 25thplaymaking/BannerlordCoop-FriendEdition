@@ -17,10 +17,18 @@ closures/state machines, private helpers, and methods with no body. Each record 
 assembly SHA-256, identity, declaring type, return/parameter shape, generic arity, method flags,
 metadata token, and RVA.
 
-The authority ledger reconciles one-for-one with all 41,050 method records. Its development baseline
-contains 10,082 authority candidates: 4,599 exact records are classified and 5,483 active
-gameplay candidates remain unclassified. Release mode rejects every one of those open records; this
-is deliberately not a completion claim.
+The authority ledger reconciles one-for-one with all 41,050 method records. As of 2026-08-14,
+13,310 of the 13,729 required routes are classified. Six of the seven gameplay modules
+(UnblockableThrust, DismembermentPlus, Separatism, ImprovedGarrisons, Bannerlord.Diplomacy,
+PlayerSettlement) are fully classified and gated by `Validate-GameplayModuleAuthority.ps1` inside
+`WorkshopIntegration.Run-Tests`. Fourberie retains **419 reviewed open routes**, held by a
+shrink-only ratchet (`tools/WorkshopIntegration/fourberie-open-routes.json`): the un-adapted
+stealth/fight-club/banditry mission stack (`FStealthMissionLogic`, mission controllers, spawners,
+`FourbCom`, `InsideMissionsHelper` — end-of-mission consequences mutate campaign state on the
+entering client with no Coop route), unrouted behavior/menu consequences
+(`FourberieBehavior.PlayerActionsConsequences`, `PickAction`, fight-club/bandit/escape residues),
+and a handful of VM canonical-state writes. Classifying an open route requires giving it a real
+Coop owner first; adding a new open route fails the ratchet.
 
 Historical version-specific implementation DLLs that the 1.4.7 loaders cannot select and bundled
 third-party libraries are not treated as mod gameplay functions. Their bytes and dependency

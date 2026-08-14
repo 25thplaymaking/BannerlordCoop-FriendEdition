@@ -450,6 +450,31 @@ if ($LASTEXITCODE -ne 0) { throw 'Authority audit generator regression tests fai
 & (Join-Path $PSScriptRoot 'Validate-AuthorityAudit.ps1') -SelfTest
 if ($LASTEXITCODE -ne 0) { throw 'Authority audit validator self-tests failed.' }
 
+# Real-audit gameplay authority gate (2026-08-14): six modules are fully classified and must
+# stay that way. Fourberie carries a reviewed open-route set (un-adapted stealth/fight-club/
+# banditry mission stack + unrouted behavior consequences) held by a shrink-only ratchet:
+# classifying an open route removes it from the snapshot; adding a new open route fails here.
+& (Join-Path $PSScriptRoot 'Validate-GameplayModuleAuthority.ps1') -ModuleId @(
+    'UnblockableThrust', 'DismembermentPlus', 'Separatism', 'ImprovedGarrisons',
+    'Bannerlord.Diplomacy', 'PlayerSettlement')
+if ($LASTEXITCODE -ne 0) { throw 'Gameplay module authority validation failed.' }
+
+$fourberieRatchetPath = Join-Path $PSScriptRoot '..\fourberie-open-routes.json'
+$fourberieRatchet = Get-Content -LiteralPath $fourberieRatchetPath -Raw | ConvertFrom-Json
+$realAuditPath = Join-Path $PSScriptRoot '..\..\..\doc\generated\workshop-authority-audit.json'
+$realAudit = Get-Content -LiteralPath $realAuditPath -Raw | ConvertFrom-Json
+$fourberieOpen = @($realAudit.records | Where-Object {
+    [string]$_.moduleId -ceq 'Fourberie' -and [bool]$_.active -and
+    [bool]$_.requiresDisposition -and [string]$_.disposition -ceq 'Unclassified'
+})
+$allowedOpen = [Collections.Generic.HashSet[string]]::new([string[]]@($fourberieRatchet.openTokens), [StringComparer]::Ordinal)
+$newOpen = @($fourberieOpen | Where-Object { -not $allowedOpen.Contains([string]$_.metadataToken) })
+if ($newOpen.Count -gt 0) {
+    $labels = @($newOpen | ForEach-Object { '{0}/{1}.{2}' -f [string]$_.metadataToken, [string]$_.declaringType, [string]$_.method })
+    throw "GAMEPLAY AUTHORITY: Fourberie gained $($newOpen.Count) NEW open route(s) beyond the reviewed ratchet: $($labels -join ', ')"
+}
+Write-Host ("PASS: Fourberie open routes within reviewed ratchet ({0} of {1} allowed)" -f $fourberieOpen.Count, $allowedOpen.Count)
+
 # Every failure path above throws. Without this, the exit code of the last native child process
 # leaks as the script's own — including the rejection tests' verifier, which is SUPPOSED to exit 1.
 exit 0

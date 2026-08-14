@@ -10,7 +10,7 @@ Fork is pinned to game **1.4.7** — do NOT adopt upstream's 1.4.8 bump.
 PR: https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/pull/14
 Branch: `25vid/fix-kingdom-tab-diplomacy-managers` (base: `development`)
 
-## Phase N — messenger + bandit surrender + kingdom vote correction — STAGED, NOT DEPLOYED (2026-08-14)
+## Phase N — messenger + bandit surrender + kingdom vote correction — SHIPPED (2026-08-14)
 
 - **Send Messenger:** the authenticated executor now treats messenger dispatch as a personal action, so a
   joined player embedded in the clan leader's party can send one. Party leadership is still required for the
@@ -24,8 +24,13 @@ Branch: `25vid/fix-kingdom-tab-diplomacy-managers` (base: `development`)
   decision popup. Disconnects also remove that clan's pending/final support and immediately resolve when all
   remaining connected clans have finalized. The regressions cover an offline saved clan, disconnect-after-final,
   and preview-then-disconnect; all 45 kingdom E2Es and 49 GameInterface kingdom tests pass through direct xUnit.
-- **Release boundary:** branch `25vid/messenger-bandit-capture`; held for PR review. No merge, launcher update,
-  server deployment, or live-server restart is authorized.
+- **Release:** PR #16 merged as `bff4266fe`. Required workflow `31825410274` passed build, unit tests,
+  and all eight E2E shards. Workflow `31825845733` published stable and nightly client
+  `2026.08.14.1754` (ZIP SHA-256 `ac01a27109dade8fc1619c4a8c3b39205d10ba1f4100ad2c963ae99200404a8e`).
+  The paired server core SHA-256 is `d204ccedc76ff5ae2d5879d7c83dd7e8d176601c16ba25c8ba2dd2c8f2ee3d53`;
+  it restarted on preserved save `friendallmods1`, reached `SERVING` on UDP 4200, and remained at
+  `NRestarts=0`. Rollback snapshot:
+  `/home/bishop/bannerlord-coop/server/_mod_backups/pre-bff4266fe-20260814T175833Z`.
 
 ## Phase A — fixes shipping on PR #14 (all CI-green: build + unit + 8 E2E incl. Separatism)
 

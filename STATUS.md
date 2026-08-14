@@ -4,8 +4,8 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
-> **2026-08-14 messenger + bandit surrender + kingdom vote correction — STAGED, NOT DEPLOYED.** On branch
-> `25vid/messenger-bandit-capture`, embedded joined-clan players may use Diplomacy's personal
+> **2026-08-14 messenger + bandit surrender + kingdom vote correction — SHIPPED from source
+> `bff4266fe`.** Merged PR #16. Embedded joined-clan players may use Diplomacy's personal
 > **Send Messenger** action while clan/kingdom/fief/gold operations remain party-leader controlled.
 > Bandit dialogue surrender now waits for the authoritative result, stages every surrendered troop
 > in the player's prisoner loot roster, and immediately enters Bannerlord's standard prisoner screen
@@ -14,8 +14,15 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > player clans, so dormant personal clans retained in the save cannot leave the decision popup waiting
 > forever. If a voter disconnects mid-decision, their preview/final support is removed and the vote
 > resolves immediately when every remaining connected clan has finalized. The full 45-test kingdom
-> E2E namespace and 49 GameInterface kingdom tests pass. This
-> candidate has not been merged or deployed; no launcher or live-server files were changed.
+> E2E namespace and 49 GameInterface kingdom tests pass. Required workflow `31825410274` passed
+> build, unit tests, and all eight E2E shards for the exact source. Release workflow `31825845733`
+> published stable and nightly client `2026.08.14.1754`; both feeds resolve to ZIP SHA-256
+> `ac01a27109dade8fc1619c4a8c3b39205d10ba1f4100ad2c963ae99200404a8e`. The matching server
+> pair uses core SHA-256 `d204ccedc76ff5ae2d5879d7c83dd7e8d176601c16ba25c8ba2dd2c8f2ee3d53`
+> and receipt SHA-256 `7fed132b54a3d14141eeb5bc0ed47e23d2c20bf1c57aa473efb5f42e7118e923`.
+> It restarted on the preserved `friendallmods1` world, reached `SERVING` on UDP 4200, and remained
+> at `NRestarts=0`. Byte-verified rollback snapshot:
+> `/home/bishop/bannerlord-coop/server/_mod_backups/pre-bff4266fe-20260814T175833Z`.
 
 > **2026-08-14 player clan membership — SHIPPED from source `da18f9b95`.** Merged PR #15
 > implements persisted native player membership. A registered player may voluntarily join another

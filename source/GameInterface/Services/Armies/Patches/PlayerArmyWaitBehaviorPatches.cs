@@ -3,6 +3,7 @@ using Common.Messaging;
 using Common.Util;
 using GameInterface.Services.Armies.Messages;
 using GameInterface.Services.MobileParties.Messages.Behavior;
+using GameInterface.Services.ObjectManager;
 using HarmonyLib;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.CampaignBehaviors;
@@ -177,10 +178,66 @@ internal class PlayerArmyWaitBehaviorPatches
             (mainParty.AttachedTo == leaderParty && leaderParty.Army == army);
     }
 
+    /// <summary>
+    /// Client "Leave Army" availability. Native hides the option whenever the main party holds ANY
+    /// <c>MapEvent</c> or <c>BesiegedSettlement</c> reference - but on a co-op client those
+    /// references can be STALE (a battle concluded and destroyed server-side whose local reference
+    /// was never cleared, or siege-camp residue; the Phase I raid softlock was this same class).
+    /// A stale reference made the option vanish forever: the player could join an army but never
+    /// leave it. Only a LIVE blocking state (resolvable, unfinalized event; camp matching the
+    /// settlement's live siege) hides the option here.
+    /// </summary>
+    [HarmonyPatch(typeof(PlayerArmyWaitBehavior), nameof(PlayerArmyWaitBehavior.wait_menu_army_leave_on_condition))]
+    [HarmonyPrefix]
+    private static bool WaitMenuLeaveConditionPrefix(MenuCallbackArgs args, ref bool __result)
+    {
+        if (ModInformation.IsServer) return true;
+
+        args.optionLeaveType = GameMenuOption.LeaveType.Leave;
+        var mainParty = MobileParty.MainParty;
+        __result = mainParty?.Army != null &&
+                   !HasLiveBlockingMapEvent(mainParty) &&
+                   !HasLiveBesiegedSettlement(mainParty);
+        return false;
+    }
+
+    internal static bool HasLiveBlockingMapEvent(MobileParty mainParty)
+    {
+        var mapEvent = mainParty.MapEvent;
+        if (mapEvent == null) return false;
+        if (mapEvent.IsFinalized) return false;
+
+        // An event the object manager cannot resolve was destroyed authoritatively and this local
+        // reference is residue - it must not block the player (Phase I precedent).
+        if (ContainerProvider.TryResolve<IObjectManager>(out var objectManager) &&
+            !objectManager.TryGetId(mapEvent, out _))
+            return false;
+
+        return true;
+    }
+
+    internal static bool HasLiveBesiegedSettlement(MobileParty mainParty)
+    {
+        var settlement = mainParty.BesiegedSettlement;
+        if (settlement == null) return false;
+
+        // Only a camp that IS the settlement's live siege blocks leaving; anything else is a stale
+        // siege graph (the same residue GetAttachedArmySiegeState classifies as Incomplete).
+        var camp = mainParty.BesiegerCamp;
+        var siegeEvent = settlement.SiegeEvent;
+        return siegeEvent != null && camp != null &&
+               camp.SiegeEvent == siegeEvent &&
+               siegeEvent.BesiegerCamp == camp;
+    }
+
     [HarmonyPatch(typeof(PlayerArmyWaitBehavior), nameof(PlayerArmyWaitBehavior.wait_menu_army_leave_on_consequence))]
     [HarmonyPrefix]
     private static bool WaitMenuLeavePrefix(PlayerArmyWaitBehavior __instance, MenuCallbackArgs args)
     {
+        // Capture BEFORE the menu/encounter teardown below can disturb it.
+        var mainParty = MobileParty.MainParty;
+        var army = mainParty.Army;
+
         if (PlayerEncounter.Current != null)
         {
             PlayerEncounter.Finish(true);
@@ -191,17 +248,31 @@ internal class PlayerArmyWaitBehaviorPatches
         }
         if (Settlement.CurrentSettlement != null)
         {
-            MessageBroker.Instance.Publish(MobileParty.MainParty, new EndSettlementEncounterAttempted(MobileParty.MainParty));
+            MessageBroker.Instance.Publish(mainParty, new EndSettlementEncounterAttempted(mainParty));
             PartyBase.MainParty.SetVisualAsDirty();
         }
-        var message = new MobilePartyInArmyRemoved(MobileParty.MainParty.Army, MobileParty.MainParty, MobileParty.MainParty);
+
+        if (army == null) return false; // already out - nothing to route
+
+        // Route the authoritative removal, then mirror it locally (like the abandon and siege leave
+        // paths). Without the local mirror the party stayed in the army until the server echo, and
+        // the state-menu tick shoved the player straight back into army_wait.
+        var message = new MobilePartyInArmyRemoved(army, mainParty, mainParty);
         MessageBroker.Instance.Publish(__instance, message);
+        using (new AllowedThread())
+        {
+            ArmyPatches.RemoveMobilePartyInArmy(mainParty, army, mainParty);
+        }
         return false;
     }
+
     [HarmonyPatch(typeof(PlayerArmyWaitBehavior), nameof(PlayerArmyWaitBehavior.wait_menu_army_abandon_on_consequence))]
     [HarmonyPrefix]
     private static bool Prefixwait_menu_army_abandon_on_consequence(PlayerArmyWaitBehavior __instance, MenuCallbackArgs args)
     {
+        var mainParty = MobileParty.MainParty;
+        var army = mainParty.Army;
+
         MessageBroker.Instance.Publish(__instance, new ChangeClanInfluence(Clan.PlayerClan, (int)(float)Campaign.Current.Models.DiplomacyModel.GetInfluenceCostOfAbandoningArmy()));
         if (PlayerEncounter.Current != null)
         {
@@ -211,9 +282,41 @@ internal class PlayerArmyWaitBehaviorPatches
         {
             GameMenu.ExitToLast();
         }
-        var message = new MobilePartyInArmyRemoved(MobileParty.MainParty.Army, MobileParty.MainParty, MobileParty.MainParty);
-        ArmyPatches.RemoveMobilePartyInArmy(MobileParty.MainParty, MobileParty.MainParty.Army, MobileParty.MainParty);
+
+        if (army == null) return false;
+
+        var message = new MobilePartyInArmyRemoved(army, mainParty, mainParty);
         MessageBroker.Instance.Publish(__instance, message);
+        using (new AllowedThread())
+        {
+            ArmyPatches.RemoveMobilePartyInArmy(mainParty, army, mainParty);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// The navigation-incapability kick menu cleared the army with a raw client-local
+    /// <c>Army = null</c>, which sync drops - the server kept the party in the army and pulled it
+    /// back. Route it like every other leave path.
+    /// </summary>
+    [HarmonyPatch(typeof(PlayerArmyWaitBehavior), nameof(PlayerArmyWaitBehavior.player_kicked_out_from_army_consequence))]
+    [HarmonyPrefix]
+    private static bool PlayerKickedOutPrefix(MenuCallbackArgs args)
+    {
+        if (ModInformation.IsServer) return true;
+
+        var mainParty = MobileParty.MainParty;
+        var army = mainParty.Army;
+        if (army != null)
+        {
+            MessageBroker.Instance.Publish(mainParty, new MobilePartyInArmyRemoved(army, mainParty, mainParty));
+            using (new AllowedThread())
+            {
+                ArmyPatches.RemoveMobilePartyInArmy(mainParty, army, mainParty);
+            }
+        }
+
+        PlayerArmyWaitBehavior.army_dispersed_continue_on_consequence(args);
         return false;
     }
 }

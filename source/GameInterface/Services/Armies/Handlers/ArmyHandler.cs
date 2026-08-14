@@ -6,6 +6,8 @@ using Common.Util;
 using GameInterface.Services.Armies.Messages;
 using GameInterface.Services.Armies.Patches;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.Players;
+using LiteNetLib;
 using Serilog;
 using System;
 using System.Collections.Generic;
@@ -27,12 +29,14 @@ public class ArmyHandler : IHandler
     private readonly IMessageBroker messageBroker;
     private readonly INetwork network;
     private readonly IObjectManager objectManager;
+    private readonly IPlayerManager playerManager;
 
-    public ArmyHandler(IMessageBroker messageBroker, INetwork network, IObjectManager objectManager)
+    public ArmyHandler(IMessageBroker messageBroker, INetwork network, IObjectManager objectManager, IPlayerManager playerManager)
     {
         this.messageBroker = messageBroker;
         this.network = network;
         this.objectManager = objectManager;
+        this.playerManager = playerManager;
 
         messageBroker.Subscribe<MobilePartyInArmyAdded>(HandleAddMobilePartyInArmy);
         messageBroker.Subscribe<NetworkAddMobilePartyInArmy>(HandleChangeAddMobilePartyInArmy);
@@ -123,8 +127,39 @@ public class ArmyHandler : IHandler
     private void HandleChangeRemoveMobilePartyInArmy(MessagePayload<NetworkRemovePartyInArmy> payload)
     {
         var data = payload.What;
+        var senderPeer = ModInformation.IsServer ? payload.Who as NetPeer : null;
+
         GameThread.RunSafe(() =>
         {
+        // A client may remove its OWN party (leave/abandon/kicked flows) or, as the army's
+        // leader, another member (army-management UI). Anything else from a peer is rejected.
+        // Server-originated broadcasts carry no client peer.
+        if (senderPeer != null)
+        {
+            if (!playerManager.TryGetPlayer(senderPeer, out var senderPlayer) ||
+                string.IsNullOrEmpty(senderPlayer.MobilePartyId))
+            {
+                Logger.Warning(
+                    "Rejected army removal of party {PartyId} from unregistered peer {Peer}",
+                    data.MobilePartyId, senderPeer.Id);
+                return;
+            }
+
+            var senderIsLeaver = senderPlayer.MobilePartyId == data.MobilePartyId;
+            var senderIsArmyLeader =
+                objectManager.TryGetObject<Army>(data.ArmyId, out var senderArmy) &&
+                senderArmy?.LeaderParty != null &&
+                objectManager.TryGetId(senderArmy.LeaderParty, out var leaderPartyId) &&
+                leaderPartyId == senderPlayer.MobilePartyId;
+            if (!senderIsLeaver && !senderIsArmyLeader)
+            {
+                Logger.Warning(
+                    "Rejected army removal of party {PartyId} from peer {Peer}: neither their party nor their army",
+                    data.MobilePartyId, senderPeer.Id);
+                return;
+            }
+        }
+
         if (objectManager.TryGetObjectWithLogging(data.MobilePartyId, out MobileParty mobileParty) == false) return;
         if (objectManager.TryGetObjectWithLogging<Army>(data.ArmyId, out var army) == false) return;
         MobileParty clientMobileParty = null;

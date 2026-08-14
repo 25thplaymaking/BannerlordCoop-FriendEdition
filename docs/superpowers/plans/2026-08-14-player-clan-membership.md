@@ -45,7 +45,7 @@ actions and existing BannerlordCoop E2E harness.
   `Player.ClanMembershipMode`, `Player.EmergencyDetached`, and conditional party/clan claims.
 - Preserves: the existing five-argument `Player` constructor behavior for old saves and callers.
 
-- [ ] **Step 1: Write failing ownership and round-trip tests**
+- [x] **Step 1: Write failing ownership and round-trip tests**
 
 Add focused assertions equivalent to:
 
@@ -61,7 +61,7 @@ Assert.False(manager.Contains(joinedClan));
 Round-trip the three new protobuf members and prove an old five-field registration normalizes to
 `PersonalClan`, `PersonalClanId == ClanId`, and `EmergencyDetached == false`.
 
-- [ ] **Step 2: Run the focused tests and verify the expected failures**
+- [x] **Step 2: Run the focused tests and verify the expected failures**
 
 ```powershell
 & .\source\GameInterface.Tests\bin\Release\net6.0\xunit.console.exe .\source\GameInterface.Tests\bin\Release\net6.0\GameInterface.Tests.dll -noshadow -parallel none -class GameInterface.Tests.Services.Players.PlayerManagerTests
@@ -70,7 +70,7 @@ Round-trip the three new protobuf members and prove an old five-field registrati
 
 Expected: failures because the membership fields and conditional ownership do not exist.
 
-- [ ] **Step 3: Implement the minimum persisted state and ownership rules**
+- [x] **Step 3: Implement the minimum persisted state and ownership rules**
 
 Use protobuf member numbers 6-8 and optional constructor parameters:
 
@@ -87,7 +87,7 @@ changes. `PlayerPartyRestorer` accepts a valid embedded party containing the her
 that hero to party leader; if the party is gone it returns an `IndependentParty` recovery
 registration preserving `PersonalClanId`.
 
-- [ ] **Step 4: Build and rerun the focused tests**
+- [x] **Step 4: Build and rerun the focused tests**
 
 ```powershell
 & 'C:\Program Files\dotnet\dotnet.exe' build source\GameInterface.Tests\GameInterface.Tests.csproj -c Release --no-restore
@@ -96,7 +96,7 @@ registration preserving `PersonalClanId`.
 
 Run the two direct xUnit commands from Step 2 plus `PlayerPartyRestorerTests`; require zero failures.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add source/GameInterface/Services/Players source/GameInterface.Tests/Services/Players source/Coop.Tests/Server/Services/Save
@@ -123,7 +123,7 @@ git commit -m "feat: persist player clan membership"
 - Consumes: existing player-party proposal, native campaign actions, object registration, and party
   lifetime replication.
 
-- [ ] **Step 1: Write failing E2E tests for join and marriage**
+- [x] **Step 1: Write failing E2E tests for join and marriage**
 
 Drive the real player-party dialog messages. Assert that a tier-1 target cannot receive a join
 proposal, the applicant must confirm the permanent transfer warning, and acceptance produces:
@@ -140,7 +140,7 @@ Assert.Equal(targetLeader, settlement.OwnerClan.Leader);
 For marriage, accept the proposal and assert reciprocal spouse links while both original clan
 references remain unchanged.
 
-- [ ] **Step 2: Run the new E2E class and verify the expected failures**
+- [x] **Step 2: Run the new E2E class and verify the expected failures**
 
 ```powershell
 & .\source\E2E.Tests\bin\Release\net6.0\xunit.console.exe .\source\E2E.Tests\bin\Release\net6.0\E2E.Tests.dll -noshadow -parallel none -class E2E.Tests.Services.Players.PlayerClanMembershipFlowTests
@@ -148,7 +148,7 @@ references remain unchanged.
 
 Expected: failure because join is disabled and player marriage is absent.
 
-- [ ] **Step 3: Implement join eligibility, confirmation, transfer, and registration replacement**
+- [x] **Step 3: Implement join eligibility, confirmation, transfer, and registration replacement**
 
 The service validates server state again at acceptance, transfers fiefs/workshops/caravans/alleys,
 then moves party rosters and the applicant hero before removing the empty party. It replaces the
@@ -163,18 +163,18 @@ new Player(current.ControllerId, current.HeroId, leaderPartyId, targetClanId,
 For a member already in the target clan, the same accepted proposal only re-embeds the member and
 does not repeat asset transfer.
 
-- [ ] **Step 4: Implement consent-based player marriage without clan movement**
+- [x] **Step 4: Implement consent-based player marriage without clan movement**
 
 Validate both registered heroes through the native marriage suitability model, set reciprocal
 `Spouse` references, publish `OnBeforeHeroesMarried`, end both courtships, and apply native
 `RomanceLevelEnum.Marriage`. Do not call native `MarriageAction`, because it moves one spouse's clan.
 
-- [ ] **Step 5: Build and rerun the E2E class**
+- [x] **Step 5: Build and rerun the E2E class**
 
 Build `source/E2E.Tests/E2E.Tests.csproj` Release, then run the direct xUnit command from Step 2;
 require zero failures.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add source/GameInterface/Services/MapEvents/PlayerPartyInteractions source/GameInterface/Services/Players source/E2E.Tests/Services/Players
@@ -200,17 +200,17 @@ git commit -m "feat: let players join clans and marry"
 - Leader decision: request id plus approve/decline; server revalidates requester and leader.
 - Registration changes continue through `PlayerRegistrationChanged`.
 
-- [ ] **Step 1: Write failing rule and E2E tests**
+- [x] **Step 1: Write failing rule and E2E tests**
 
 Cover only these breaks: voluntary separation over cap is rejected; approved separation creates a
 hero-only party; leave needs no leader response and restores `PersonalClanId`; transferred holdings
 stay with the joined clan; joined gold resolves to the clan leader.
 
-- [ ] **Step 2: Run the focused tests and verify the expected failures**
+- [x] **Step 2: Run the focused tests and verify the expected failures**
 
 Run direct xUnit for `PlayerClanMembershipRulesTests` and `PlayerClanMembershipFlowTests`.
 
-- [ ] **Step 3: Implement native Clan → Parties entry points and approval messages**
+- [x] **Step 3: Implement native Clan → Parties entry points and approval messages**
 
 Allow only the local embedded player hero through `GetNewPartyLeaderCandidates`. Intercept its
 creation action with a TaleWorlds inquiry that sends either `RequestIndependentParty` or
@@ -218,7 +218,7 @@ creation action with a TaleWorlds inquiry that sends either `RequestIndependentP
 action with a leave confirmation. The server resolves controller identity from `NetPeer`; client
 payloads never choose another controller.
 
-- [ ] **Step 4: Implement separate/leave and gold ownership**
+- [x] **Step 4: Implement separate/leave and gold ownership**
 
 `TrySeparate` uses `IPlayerPartyRestorer` with a null party id to create and register a hero-only
 party, then replaces the player registration. `TryLeave` separates first when embedded, changes the
@@ -226,12 +226,12 @@ hero and party back to `PersonalClanId`, clears shared gold from the leaving her
 transferred assets. Gold changes for joined heroes are redirected to the current clan leader and
 mirrored to joined player heroes after the authoritative change.
 
-- [ ] **Step 5: Protect dormant personal clans**
+- [x] **Step 5: Protect dormant personal clans**
 
 Prefix native clan destruction and return `false` only when the target id is the `PersonalClanId`
 of a registered player currently away from that clan. Normal clan destruction is unchanged.
 
-- [ ] **Step 6: Build, run the focused tests, and commit**
+- [x] **Step 6: Build, run the focused tests, and commit**
 
 ```powershell
 git add source/GameInterface/Services/Players source/GameInterface/Services/Clans source/Coop.Core/Common/Players source/Coop.Core/Client/Services/Players source/Coop.Core/Server/Services/Players source/GameInterface.Tests/Services/Players source/E2E.Tests/Services/Players
@@ -252,17 +252,17 @@ git commit -m "feat: manage joined player parties"
 - Produces: `IndependentParty` with `EmergencyDetached == true` and a one-time carrier-pigeon
   notification after leader return.
 
-- [ ] **Step 1: Write failing disconnect/reconnect tests**
+- [x] **Step 1: Write failing disconnect/reconnect tests**
 
 Assert that an embedded member disconnect does not park the leader party; a leader disconnect
 separates embedded members before parking; emergency creation succeeds above the native cap; a
 leader reconnect does not re-embed anyone; and the notification is delivered once.
 
-- [ ] **Step 2: Run the focused tests and verify the expected failures**
+- [x] **Step 2: Run the focused tests and verify the expected failures**
 
 Run direct xUnit for `PlayerPartyVisibilityHandlerTests` and `PlayerClanMembershipFlowTests`.
 
-- [ ] **Step 3: Implement disconnect ordering and notification**
+- [x] **Step 3: Implement disconnect ordering and notification**
 
 On member disconnect, clear only the peer. On leader disconnect, call `TrySeparate(member, true)`
 for each embedded registration sharing the leader party, then park the leader party. On campaign
@@ -275,7 +275,7 @@ A carrier pigeon arrives: your clan leader has returned. Rejoin their party when
 
 Clear `EmergencyDetached` only after delivery; never auto-embed.
 
-- [ ] **Step 4: Build, rerun the focused tests, and commit**
+- [x] **Step 4: Build, rerun the focused tests, and commit**
 
 ```powershell
 git add source/Coop.Core/Server/Services/Players source/Coop.Core/Client/Services/Players source/Coop.Tests/Server/Services/Players source/E2E.Tests/Services/Players
@@ -293,13 +293,13 @@ git commit -m "fix: prevent joined players from being stranded"
 - Consumes: all commits from `origin/development..HEAD`.
 - Produces: reviewed draft PR, required green verification, then merge/deployment/launcher update.
 
-- [ ] **Step 1: Run required verification**
+- [x] **Step 1: Run required verification**
 
 Build `source/Coop.sln` Release. Run the focused CrashReporter, Diplomacy, PatchTest, membership
 unit, visibility, save, and membership E2E classes through direct xUnit. Do not add unrelated test
 suites.
 
-- [ ] **Step 2: Review the full PR diff**
+- [x] **Step 2: Review the full PR diff**
 
 Review `origin/development...HEAD` for authority bypass, object-registration conflicts, save
 compatibility, roster duplication/loss, clan-leader validation, disconnect ordering, and player
@@ -321,4 +321,3 @@ Use the repository's existing launcher/client release workflow and documented se
 path. Do not change launcher source unless its existing feed cannot deliver this build. Preserve the
 configured campaign save, restart headlessly, and verify the server reaches serving state with the
 new build and no startup script errors.
-

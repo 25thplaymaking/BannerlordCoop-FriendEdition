@@ -467,6 +467,31 @@ The local and deployment gates are green; rendered verification must use launche
   lockstep client/server action after explicit green light; rendered proof should open then close
   Kingdom and receive peace/war/alliance updates while another screen is active.
 
+### Phase N — native player clan membership (2026-08-14)
+- **Consent and eligibility:** player-to-player clan joining uses the existing party interaction
+  flow, requires an affirmative leader response, and is available only when the receiving player's
+  clan is Tier 2 or higher. The server revalidates the current clan leader on acceptance. Optional
+  player marriage uses native suitability and reciprocal spouse/romance state without moving either
+  player between clans.
+- **Ownership and party control:** first join permanently gives the receiving clan/leader the
+  applicant's fiefs, workshops, caravans, alleys, gold, troops, prisoners, and inventory. The member
+  is embedded in the leader's real party, so that party's leader owns map control and shared results;
+  hero XP is not pooled. Registration updates precede replicated destruction of the retired party,
+  preventing client-side zombie parties. Re-embedding is limited to the same joined clan.
+- **Separation and exit:** a joined player may request a leader-approved hero-only party subject to
+  the native party cap, or leave the clan without approval and return to the persisted personal clan.
+  Transferred assets and shared gold remain with the joined clan. Dormant personal clans are retained
+  while their player is away.
+- **Offline safeguard:** leader disconnect creates emergency independent parties for embedded
+  members before parking the leader party. Emergency creation may exceed the cap, further voluntary
+  creation remains blocked by the cap, rejoin is voluntary, and a one-time carrier-pigeon notice is
+  sent after leader return.
+- **Review and verification:** full PR review corrected stale-leader approval, roster XP removal,
+  cross-clan re-embedding, and old-party lifecycle replication. Release solution build completes
+  with zero errors. Focused direct-xUnit coverage is 221 passing cases: CrashReporter 5, Diplomacy
+  155, patch registration 6, membership/restore/save/visibility units 39, and interaction E2Es 16.
+  PR #15 remains the release boundary; no launcher or server deployment has occurred at this point.
+
 ### Still open after this phase
 - **Equipment/IsReady client ERR floods** (~5k/min in battles) — worker-thread churn is
   by-design-unsynced but logged at ERR through Serilog on hot paths; wants a throttle/dedup plus a

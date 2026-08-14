@@ -329,30 +329,8 @@ internal class TradeHandler : IHandler
         return true;
     }
 
-    /// <summary>
-    /// Items and item modifiers are registered under their catalog <c>StringId</c>. Native loot
-    /// distribution can hand the trade roster a fresh instance of a catalog item (same StringId,
-    /// different reference), which fails the reference-keyed <c>TryGetId</c> and used to silently
-    /// drop the element from the trade message - the player kept the loot locally while the server
-    /// never saw it. When the instance is unknown but the catalog holds an object under its
-    /// StringId, that StringId IS the wire id, so resolve through it.
-    /// </summary>
     private bool TryResolveCatalogObjectId<T>(T catalogObject, out string id) where T : MBObjectBase
-    {
-        if (objectManager.TryGetId(catalogObject, out id)) return true;
-
-        var stringId = catalogObject?.StringId;
-        if (!string.IsNullOrEmpty(stringId) && objectManager.TryGetObject<T>(stringId, out _))
-        {
-            id = stringId;
-            logger.Debug(
-                "Resolved unregistered {type} instance through catalog StringId {id}",
-                typeof(T).Name, stringId);
-            return true;
-        }
-
-        return false;
-    }
+        => objectManager.TryGetCatalogId(catalogObject, out id);
 
     private Dictionary<string, EquipmentData[]> ResolveCharacterIdEquipmentsData(MobileParty party, CharacterObject initialCharacter)
     {

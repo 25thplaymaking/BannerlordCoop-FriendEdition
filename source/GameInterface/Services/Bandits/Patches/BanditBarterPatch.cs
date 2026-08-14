@@ -1,4 +1,4 @@
-using Common;
+﻿using Common;
 using Common.Network;
 using GameInterface.Policies;
 using GameInterface.Services.Barters;
@@ -249,7 +249,7 @@ internal static class BanditBarterPatch
         IObjectManager objectManager)
     {
         var equipmentElement = barterable.ItemRosterElement.EquipmentElement;
-        if (equipmentElement.Item == null || !objectManager.TryGetId(equipmentElement.Item, out var itemId))
+        if (equipmentElement.Item == null || !objectManager.TryGetCatalogId(equipmentElement.Item, out var itemId))
             return false;
 
         string modifierId = null;

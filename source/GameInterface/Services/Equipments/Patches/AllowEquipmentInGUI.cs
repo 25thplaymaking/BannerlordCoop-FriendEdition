@@ -54,14 +54,6 @@ internal class AllowEquipmentInGUI
 
         var discoveredMethods = new List<MethodBase>();
 
-        // The inventory/character teardown path (HandleFinalize -> Gauntlet widget dispose ->
-        // character preview/tableau release) runs inside ScreenManager.PopScreen AFTER the
-        // screen's own methods have returned, so the per-method windows above cannot cover it.
-        // Wrapping PopScreen itself keeps the whole teardown inside one allowance window
-        // (crash family: 0xC0000005 after closing inventory, 2026-08-13/14 reports).
-        var popScreen = AccessTools.Method(typeof(TaleWorlds.ScreenSystem.ScreenManager), "PopScreen");
-        if (popScreen != null) discoveredMethods.Add(popScreen);
-
         foreach (var type in typesToWrap)
         {
             if (type == null) continue;
@@ -102,6 +94,43 @@ internal class AllowEquipmentInGUI
     private static void Finalizer()
     {
         AllowedThread.RevokeThisThread();
+    }
+}
+
+/// <summary>
+/// The inventory/character teardown path (HandleFinalize -> Gauntlet widget dispose -> character
+/// preview/tableau release) runs inside <c>ScreenManager.PopScreen</c> AFTER the screen's own
+/// methods return, so the per-method windows above cannot cover it (crash family: 0xC0000005
+/// after closing inventory, 2026-08-13/14 reports). The allowance is granted ONLY when the screen
+/// being popped is one of the wrapped equipment screens: an unconditional wrap would open every
+/// sync-interception gate in the mod (AllowedThread short-circuits CallOriginalPolicy) during the
+/// teardown of EVERY screen - kingdom, party, mission end - silently desyncing any patched
+/// campaign mutation that fires there.
+/// </summary>
+[HarmonyPatch(typeof(TaleWorlds.ScreenSystem.ScreenManager), "PopScreen")]
+internal class EquipmentScreenTeardownAllowancePatch
+{
+    [HarmonyPrefix]
+    private static void Prefix(ref bool __state)
+    {
+        __state = false;
+        if (Common.ModInformation.IsServer) return;
+
+        var topScreen = TaleWorlds.ScreenSystem.ScreenManager.TopScreen;
+        if (topScreen is GauntletInventoryScreen ||
+            topScreen is GauntletCharacterDeveloperScreen ||
+            topScreen is GauntletClanScreen ||
+            topScreen is GauntletPartyScreen)
+        {
+            AllowedThread.AllowThisThread();
+            __state = true;
+        }
+    }
+
+    [HarmonyFinalizer]
+    private static void Finalizer(bool __state)
+    {
+        if (__state) AllowedThread.RevokeThisThread();
     }
 }
 

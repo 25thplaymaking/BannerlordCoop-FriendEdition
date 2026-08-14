@@ -378,7 +378,10 @@ public class ClientKingdomHandler : IHandler
         // never populated here - previously that fell through to a guaranteed
         // "Index is out of bounds" warning (and, when the id no longer resolves to a
         // Kingdom on this client, an ObjectManager cast error) on every broadcast.
-        if (!ShouldApplyNetworkDecision(payload.KingdomId)) return;
+        // A kingdom that still holds locally-materialized decisions (the clan was a member
+        // when they were added) keeps receiving removes so its list is cleaned up.
+        if (!ShouldApplyNetworkDecision(payload.KingdomId) &&
+            !HasLocallyMaterializedDecisions(payload.KingdomId)) return;
 
         var message = new RemoveDecision(payload.KingdomId, payload.Index);
         messageBroker.Publish(this, message);
@@ -396,12 +399,29 @@ public class ClientKingdomHandler : IHandler
     private bool ShouldApplyNetworkDecision(string kingdomId)
     {
         if (string.IsNullOrWhiteSpace(kingdomId)) return false;
-        if (!objectManager.TryGetObject(kingdomId, out Kingdom kingdom)) return true;
-        if (!playerManager.TryGetPlayer(controllerIdProvider.ControllerId, out var player)) return true;
+        // Fail CLOSED on every unresolvable lookup: an id that does not resolve to a Kingdom on
+        // this client (destroyed locally, or registered as another type - the live
+        // Clan-under-a-kingdom-id cast errors) cannot be the player's kingdom, and applying
+        // anyway just reproduces the downstream lookup error this gate exists to prevent.
+        if (!objectManager.TryGetObject(kingdomId, out Kingdom kingdom)) return false;
+        if (!playerManager.TryGetPlayer(controllerIdProvider.ControllerId, out var player)) return false;
         if (string.IsNullOrWhiteSpace(player.ClanId)) return false;
         if (!objectManager.TryGetObject(player.ClanId, out Clan clan)) return false;
 
         return clan.Kingdom == kingdom;
+    }
+
+    /// <summary>
+    /// Removes must also pass for a kingdom whose decisions THIS client materialized while the
+    /// clan was still a member - after leaving, the membership gate alone would drop the cleanup
+    /// broadcasts and stale unresolved decisions would linger until reload.
+    /// </summary>
+    private bool HasLocallyMaterializedDecisions(string kingdomId)
+    {
+        return !string.IsNullOrWhiteSpace(kingdomId) &&
+               objectManager.TryGetObject(kingdomId, out Kingdom kingdom) &&
+               kingdom.UnresolvedDecisions != null &&
+               kingdom.UnresolvedDecisions.Count > 0;
     }
 
     private void HandleDestroyKingdom(MessagePayload<DestroyKingdom> obj)

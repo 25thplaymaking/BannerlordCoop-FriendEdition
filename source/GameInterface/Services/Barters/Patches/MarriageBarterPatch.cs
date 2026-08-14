@@ -1,4 +1,4 @@
-using Common;
+﻿using Common;
 using Common.Network;
 using GameInterface.Policies;
 using GameInterface.Services.Barters.Messages;
@@ -315,12 +315,12 @@ internal static class MarriageBarterPatch
     {
         term = default;
         var equipmentElement = barterable.ItemRosterElement.EquipmentElement;
-        if (equipmentElement.Item == null || !objectManager.TryGetId(equipmentElement.Item, out var itemId))
+        if (equipmentElement.Item == null || !objectManager.TryGetCatalogId(equipmentElement.Item, out var itemId))
             return false;
 
         var modifier = equipmentElement.ItemModifier;
         string modifierId = null;
-        if (modifier != null && !objectManager.TryGetId(modifier, out modifierId))
+        if (modifier != null && !objectManager.TryGetCatalogId(modifier, out modifierId))
             return false;
 
         term = new MarriageBarterTerm(

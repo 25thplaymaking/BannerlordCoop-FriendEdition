@@ -54,6 +54,19 @@ internal class KillCharacterActionPatches
             Logger.Warning(
                 "Blocked {Detail} death of co-op player hero {Hero}: no living child or no eligible clan successor",
                 actionDetail, victim.Name);
+
+            // A blocked DEFERRED kill (death-marked in a map event, collected later when the
+            // successor has since died) must not strand a living hero with a permanent death
+            // mark: nothing else ever clears one, capture refuses marked heroes, and battle
+            // results treat them as dead. Clearing it restores the plain protected state.
+            if (victim.DeathMark != KillCharacterAction.KillCharacterActionDetail.None)
+            {
+                victim.DeathMark = KillCharacterAction.KillCharacterActionDetail.None;
+                victim.DeathMarkKillerHero = null;
+                Logger.Warning(
+                    "Cleared stale death mark on protected player hero {Hero}", victim.Name);
+            }
+
             return false;
         }
 

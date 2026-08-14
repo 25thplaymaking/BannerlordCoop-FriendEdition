@@ -15,6 +15,7 @@ using System.Linq;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.CampaignBehaviors;
+using TaleWorlds.CampaignSystem.CampaignBehaviors.CommentBehaviors;
 using TaleWorlds.CampaignSystem.Extensions;
 using TaleWorlds.CampaignSystem.LogEntries;
 using TaleWorlds.CampaignSystem.Map;
@@ -1156,10 +1157,12 @@ internal class DefaultNotificationsHandler : IHandler
 
             // Birth-and-death lifecycle events fire only on the authoritative server, so the
             // native comment behaviors (encyclopedia log entries, map notices) never run here.
-            // Mirror CommentPregnancyBehavior: one pregnancy log entry per conception.
+            // Invoke the registered native behavior itself rather than copying its internals -
+            // zero drift when TaleWorlds changes its gates.
             using (new AllowedThread())
             {
-                LogEntry.AddLogEntry(new PregnancyLogEntry(mother));
+                Campaign.Current.GetCampaignBehavior<CommentPregnancyBehavior>()
+                    ?.OnChildConceived(mother);
             }
         });
     }
@@ -1202,37 +1205,18 @@ internal class DefaultNotificationsHandler : IHandler
 
             notificationsBehavior.OnGivenBirth(mother, aliveOffsprings, obj.What.StillbornCount);
 
-            // Mirror the server-only comment behaviors so this client's encyclopedia and map
-            // notices match native single player. CommentCharacterBornBehavior: a born log entry
-            // for every naturally-born child. CommentChildbirthBehavior: childbirth log entries
-            // plus child-born map notices, but only when the mother is THIS client's main hero
-            // or a member of THIS client's clan (same local gate as native).
+            // Run the native comment behaviors (encyclopedia log entries, child-born map notices,
+            // per-client family gates) instead of duplicating their internals.
             using (new AllowedThread())
             {
+                var bornBehavior = Campaign.Current.GetCampaignBehavior<CommentCharacterBornBehavior>();
                 foreach (var child in aliveOffsprings)
                 {
-                    LogEntry.AddLogEntry(new CharacterBornLogEntry(child));
+                    bornBehavior?.HeroCreated(child, true);
                 }
 
-                bool isLocalFamily = mother == Hero.MainHero || mother.Clan == Hero.MainHero?.Clan;
-                if (isLocalFamily)
-                {
-                    for (int i = 0; i < obj.What.StillbornCount; i++)
-                    {
-                        var stillbornEntry = new ChildbirthLogEntry(mother, null);
-                        LogEntry.AddLogEntry(stillbornEntry);
-                        Campaign.Current.CampaignInformationManager.NewMapNoticeAdded(
-                            new ChildBornMapNotification(null, stillbornEntry.GetEncyclopediaText(), CampaignTime.Now));
-                    }
-
-                    foreach (var child in aliveOffsprings)
-                    {
-                        var childEntry = new ChildbirthLogEntry(mother, child);
-                        LogEntry.AddLogEntry(childEntry);
-                        Campaign.Current.CampaignInformationManager.NewMapNoticeAdded(
-                            new ChildBornMapNotification(child, childEntry.GetEncyclopediaText(), CampaignTime.Now));
-                    }
-                }
+                Campaign.Current.GetCampaignBehavior<CommentChildbirthBehavior>()
+                    ?.OnGivenBirthEvent(mother, aliveOffsprings, obj.What.StillbornCount);
             }
         });
     }
@@ -1266,47 +1250,14 @@ internal class DefaultNotificationsHandler : IHandler
 
             notificationsBehavior.OnHeroKilled(victimHero, killer, obj.What.Detail, obj.What.ShowNotification);
 
-            // Mirror CommentOnCharacterKilledBehavior (server-only event): a killed log entry for
-            // every non-bandit clan hero, plus a death map notice when the victim is family of
-            // THIS client's main hero (the native local-relation gate).
+            // Run the native comment behavior (killed log entry + family-gated death map notice)
+            // instead of duplicating its internals.
             using (new AllowedThread())
             {
-                if (victimHero.Clan != null && !Clan.BanditFactions.Contains(victimHero.Clan))
-                {
-                    var killedEntry = new CharacterKilledLogEntry(victimHero, killer, obj.What.Detail);
-                    LogEntry.AddLogEntry(killedEntry);
-                    if (IsFamilyOfLocalMainHero(victimHero) &&
-                        ((obj.What.Detail != KillCharacterAction.KillCharacterActionDetail.Executed &&
-                          obj.What.Detail != KillCharacterAction.KillCharacterActionDetail.ExecutionAfterMapEvent) ||
-                         killer != Hero.MainHero))
-                    {
-                        Campaign.Current.CampaignInformationManager.NewMapNoticeAdded(
-                            new DeathMapNotification(
-                                victimHero, killer, killedEntry.GetEncyclopediaText(), obj.What.Detail, CampaignTime.Now));
-                    }
-                }
+                Campaign.Current.GetCampaignBehavior<CommentOnCharacterKilledBehavior>()
+                    ?.OnBeforeHeroKilled(victimHero, killer, obj.What.Detail, obj.What.ShowNotification);
             }
         });
-    }
-
-    private static bool IsFamilyOfLocalMainHero(Hero victim)
-    {
-        var mainHero = Hero.MainHero;
-        if (mainHero == null) return false;
-        if (victim == mainHero || victim == mainHero.Mother || victim == mainHero.Father || victim == mainHero.Spouse)
-            return true;
-
-        foreach (var child in mainHero.Children)
-        {
-            if (victim == child) return true;
-        }
-
-        foreach (var sibling in mainHero.Siblings)
-        {
-            if (victim == sibling) return true;
-        }
-
-        return false;
     }
 
     private void Handle_HeroSharedFoodWithAnotherHero(MessagePayload<HeroSharedFoodWithAnotherHero> obj)

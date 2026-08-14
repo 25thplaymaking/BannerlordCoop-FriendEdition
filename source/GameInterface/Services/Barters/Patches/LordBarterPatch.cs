@@ -1,4 +1,4 @@
-using Common;
+﻿using Common;
 using Common.Network;
 using Common.Util;
 using GameInterface.Policies;
@@ -439,10 +439,10 @@ internal static class LordBarterPatch
         term = default;
 
         var equipment = item.ItemRosterElement.EquipmentElement;
-        if (equipment.Item == null || !manager.TryGetId(equipment.Item, out var itemId)) return false;
+        if (equipment.Item == null || !manager.TryGetCatalogId(equipment.Item, out var itemId)) return false;
 
         string modifierId = null;
-        if (equipment.ItemModifier != null && !manager.TryGetId(equipment.ItemModifier, out modifierId)) return false;
+        if (equipment.ItemModifier != null && !manager.TryGetCatalogId(equipment.ItemModifier, out modifierId)) return false;
 
         term = new PeaceBarterTerm(
             PeaceBarterTermType.Item, ownerId, itemId, modifierId, equipment.ItemModifier == null, item.CurrentAmount);

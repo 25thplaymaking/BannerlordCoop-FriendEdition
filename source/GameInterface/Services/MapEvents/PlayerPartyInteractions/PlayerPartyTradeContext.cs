@@ -1,4 +1,4 @@
-using Common.Messaging;
+﻿using Common.Messaging;
 using GameInterface.Services.Inventory.Data;
 using GameInterface.Services.MapEvents.Messages.Conversation;
 using GameInterface.Services.ObjectManager;
@@ -508,7 +508,7 @@ internal static class PlayerPartyTradeContext
         key = null;
 
         if (item.EquipmentElement.Item == null) return false;
-        if (!objectManager.TryGetId(item.EquipmentElement.Item, out var itemObjectId)) return false;
+        if (!objectManager.TryGetCatalogId(item.EquipmentElement.Item, out var itemObjectId)) return false;
 
         string itemModifierId = null;
         var itemModifierNull = item.EquipmentElement.ItemModifier == null;

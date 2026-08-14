@@ -1,4 +1,4 @@
-using Serilog;
+﻿using Serilog;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -31,6 +31,15 @@ public interface IObjectManager
     /// <returns>True if successful, false if failed</returns>
     bool TryGetId(object obj, out string id);
     bool TryGetIdWithLogging<T>(T obj, out string id);
+
+    /// <summary>
+    /// Resolves the wire id of a CATALOG object (items, item modifiers - registered under their
+    /// StringId), tolerating a fresh instance of the same catalog entry: native systems (loot
+    /// distribution, barters, tournaments) can hand rosters a new instance whose reference the
+    /// id map has never seen, even though the catalog holds an object under its StringId. In
+    /// that case the StringId IS the wire id.
+    /// </summary>
+    bool TryGetCatalogId<T>(T catalogObject, out string id) where T : MBObjectBase;
 
     /// <summary>
     /// Attempts to get an object using a StringId and object type
@@ -320,6 +329,23 @@ public class ObjectManager : IObjectManager
     }
 
     #region LogHelpers
+    public bool TryGetCatalogId<T>(T catalogObject, out string id) where T : MBObjectBase
+    {
+        if (TryGetId(catalogObject, out id)) return true;
+
+        var stringId = catalogObject?.StringId;
+        if (!string.IsNullOrEmpty(stringId) && TryGetObject<T>(stringId, out _))
+        {
+            id = stringId;
+            logger.Debug(
+                "[{ClassName}] Resolved unregistered {Type} instance through catalog StringId {Id}",
+                nameof(ObjectManager), typeof(T).Name, stringId);
+            return true;
+        }
+
+        return false;
+    }
+
     public bool TryGetIdWithLogging<T>(T obj, out string id)
     {
         id = null;

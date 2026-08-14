@@ -1,4 +1,4 @@
-using Common;
+﻿using Common;
 using Common.Logging;
 using Common.Messaging;
 using Common.Network;
@@ -1366,7 +1366,7 @@ internal sealed partial class TournamentSessionHandler : IHandler
         foreach (EquipmentElement element in equipment)
         {
             if (element.IsEmpty) continue;
-            if (!objectManager.TryGetId(element.Item, out string _) ||
+            if (!objectManager.TryGetCatalogId(element.Item, out string _) ||
                 (element.ItemModifier != null &&
                  !objectManager.TryGetId(element.ItemModifier, out string _)))
             {

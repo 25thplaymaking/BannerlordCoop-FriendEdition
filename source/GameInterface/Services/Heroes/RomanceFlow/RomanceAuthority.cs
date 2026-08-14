@@ -125,6 +125,15 @@ internal class RomanceAuthority : IRomanceAuthority
             return false;
         }
 
+        // The clan member's own promises count too - without this, the same clan member could be
+        // promised to several outside lords, and every match past the first would die at barter
+        // time with a misleading reason.
+        if (HasOtherActiveCourtship(clanMember, targetHero))
+        {
+            reason = "Your clan member is already promised to someone.";
+            return false;
+        }
+
         reason = null;
         return true;
     }

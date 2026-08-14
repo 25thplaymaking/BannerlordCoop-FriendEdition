@@ -1,4 +1,4 @@
-﻿using Serilog;
+using Serilog;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -373,18 +373,31 @@ public class ObjectManager : IObjectManager
 
         if (!TryGetObject(id, out obj))
         {
-            logger.Error(
-                "[{ClassName}] Failed to get {name} using {id}",
-                nameof(ObjectManager),
-                typeof(T),
-                id
-            );
+            if (id.StartsWith("Created_", StringComparison.Ordinal) || id.Contains("_Created_"))
+            {
+                logger.Debug(
+                    "[{ClassName}] Failed to get transient {name} using {id}",
+                    nameof(ObjectManager),
+                    typeof(T),
+                    id
+                );
+            }
+            else
+            {
+                logger.Error(
+                    "[{ClassName}] Failed to get {name} using {id}",
+                    nameof(ObjectManager),
+                    typeof(T),
+                    id
+                );
+            }
 
             return false;
         }
 
         return true;
     }
+
 
     public void Clear()
     {

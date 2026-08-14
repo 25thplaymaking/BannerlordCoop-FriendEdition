@@ -1,4 +1,4 @@
-﻿using Common.Logging;
+using Common.Logging;
 using HarmonyLib;
 using GameInterface.Services.MapEvents.Initialization;
 using SandBox.ViewModelCollection.Map;
@@ -7,6 +7,7 @@ using System;
 using System.Reflection;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.MapEvents;
+using TaleWorlds.CampaignSystem.Party;
 
 namespace GameInterface.Services.MapEvents.Patches;
 
@@ -15,6 +16,30 @@ internal class MapEventRobustnessPatches
 {
     private static readonly ILogger Logger = LogManager.GetLogger<MapEvent>();
     [ThreadStatic] private static bool restoringTroopUpgradeTracker;
+
+    [HarmonyPatch(typeof(MapEvent), nameof(MapEvent.PlayerMapEvent), MethodType.Getter)]
+    [HarmonyPrefix]
+    private static bool PrefixPlayerMapEvent(ref MapEvent __result)
+    {
+        if (MobileParty.MainParty == null)
+        {
+            __result = null;
+            return false;
+        }
+        return true;
+    }
+
+    [HarmonyPatch(typeof(MapEvent), nameof(MapEvent.IsPlayerMapEvent), MethodType.Getter)]
+    [HarmonyPrefix]
+    private static bool PrefixIsPlayerMapEvent(ref bool __result)
+    {
+        if (MobileParty.MainParty == null)
+        {
+            __result = false;
+            return false;
+        }
+        return true;
+    }
 
     [HarmonyPatch(typeof(MapEvent), nameof(MapEvent.TroopUpgradeTracker), MethodType.Getter)]
     [HarmonyPostfix]
@@ -60,3 +85,4 @@ internal class MapEventRobustnessPatches
         return null;
     }
 }
+

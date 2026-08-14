@@ -1,4 +1,4 @@
-﻿using Common;
+using Common;
 using Common.Logging;
 using Common.Messaging;
 using Common.Serialization;
@@ -914,10 +914,7 @@ namespace Coop
                 return "Client co-op connection is already starting or running.";
             }
 
-            if (!CoopMod.Coop.StartAsClient())
-            {
-                throw new InvalidOperationException("Client co-op connection start was refused.");
-            }
+            CoopMod.Coop.StartAsClient();
             return "Client co-op connection started.";
         }
     }

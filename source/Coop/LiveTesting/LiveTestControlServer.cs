@@ -1,4 +1,4 @@
-﻿#if DEBUG
+#if DEBUG
 using Common;
 using Common.LiveTesting;
 using Common.Logging;
@@ -184,26 +184,6 @@ namespace Coop.LiveTesting
                     output = result.Output,
                 });
             }, true);
-        }
-
-        private LiveTestResponse HandleCommandCatalog(LiveTestRequest request)
-        {
-            return ExecuteOnGameThread(request, () =>
-            {
-                if (!ContainerProvider.TryResolve<ILiveTestCommandDispatcher>(out var dispatcher))
-                {
-                    return Failure(
-                        request.Id,
-                        "session_not_ready",
-                        "The co-op session command dispatcher is not available yet.",
-                        false);
-                }
-
-                return Success(request.Id, new
-                {
-                    commands = dispatcher.GetCommandNames(),
-                });
-            }, false);
         }
 
         private LiveTestResponse HandleScreenshot(LiveTestRequest request)
@@ -678,6 +658,25 @@ namespace Coop.LiveTesting
             return index >= 0 && index + 1 < arguments.Length
                 ? arguments[index + 1]
                 : null;
+        }
+
+        private static bool TryParseStructuredResult(string output, out JsonElement structuredResult)
+        {
+            structuredResult = default;
+            if (string.IsNullOrWhiteSpace(output)) return false;
+
+            try
+            {
+                using (var document = JsonDocument.Parse(output))
+                {
+                    structuredResult = document.RootElement.Clone();
+                    return true;
+                }
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static string NormalizeRunToken(string runToken)

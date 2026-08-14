@@ -2237,14 +2237,48 @@ public class VillageHostileActionTests : MapEventTestBase
     }
 
     [Fact]
-    public void SlowRaidMapEvent_DefenderJoinRequest_IsRejected()
+    public void SlowRaidMapEvent_DefenderJoinRequest_StartsResistance()
+    {
+        var client = Clients.First();
+        var context = CreateSlowRaidDefenderJoinContext();
+
+        Server.NetworkSentMessages.Clear();
+        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkRequestJoinBattle(
+            Guid.NewGuid().ToString(),
+            context.MapEventId,
+            context.JoinerPartyId,
+            BattleSideEnum.Defender)), MapEventDisabledMethods);
+
+        Assert.True(Server.NetworkSentMessages.GetMessages<NetworkJoinBattleReply>().Single().Accepted);
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MapEvent>(context.MapEventId, out var mapEvent));
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(context.JoinerMobilePartyId, out var joinerParty));
+            Assert.False(mapEvent.IsActiveSlowVillageRaid());
+            Assert.Same(mapEvent, joinerParty.MapEvent);
+            Assert.Same(mapEvent.DefenderSide, joinerParty.Party.MapEventSide);
+        }, MapEventDisabledMethods);
+
+        foreach (var instance in Clients)
+        {
+            instance.Call(() =>
+            {
+                Assert.True(instance.ObjectManager.TryGetObject<MapEvent>(context.MapEventId, out var mapEvent));
+                Assert.True(instance.ObjectManager.TryGetObject<MobileParty>(context.JoinerMobilePartyId, out var joinerParty));
+                Assert.Same(mapEvent, joinerParty.MapEvent);
+                Assert.Same(mapEvent.DefenderSide, joinerParty.Party.MapEventSide);
+            });
+        }
+    }
+
+    [Fact]
+    public void ActiveSlowRaid_DefenderJoinOption_RequestsBattleJoin()
     {
         var client = Clients.First();
         var (_, raiderMobilePartyId) = CreatePlayerHeroParty("PlayerOne");
-        var (_, joinerMobilePartyId) = CreatePlayerHeroParty("PlayerTwo");
-        TestEnvironment.ConnectRegisteredPlayer(client, "PlayerTwo");
+        var (joinerHeroId, joinerMobilePartyId) = CreatePlayerHeroParty("PlayerTwo");
         var target = CreateVillageTarget();
-        var joinerPartyId = GetPartyBaseId(joinerMobilePartyId);
         string? raidMapEventId = null;
 
         Server.Call(() =>
@@ -2253,36 +2287,55 @@ public class VillageHostileActionTests : MapEventTestBase
             Assert.True(Server.ObjectManager.TryGetObject<Settlement>(target.SettlementId, out var settlement));
 
             var mapEvent = CreateHostileActionMapEvent(raiderParty.Party, settlement.Party, VillageHostileAction.Raid);
-
             Assert.True(mapEvent.IsActiveSlowVillageRaid());
             Assert.True(Server.ObjectManager.TryGetId(mapEvent, out raidMapEventId));
         }, MapEventDisabledMethods);
 
         Assert.NotNull(raidMapEventId);
+        client.NetworkSentMessages.Clear();
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkRequestJoinBattle(
-            System.Guid.NewGuid().ToString(),
-            raidMapEventId!,
-            joinerPartyId,
-            BattleSideEnum.Defender)), MapEventDisabledMethods);
+        var disabledMethods = MapEventDisabledMethods
+            .Append(AccessTools.Method(typeof(GameMenu), nameof(GameMenu.ActivateGameMenu), new[] { typeof(string) }))
+            .Append(AccessTools.Method(typeof(GameMenu), nameof(GameMenu.SwitchToMenu), new[] { typeof(string) }))
+            .Append(AccessTools.Method(
+                typeof(E2E.Tests.Environment.TestNetworkRouter),
+                nameof(E2E.Tests.Environment.TestNetworkRouter.SendAll),
+                new[] { typeof(LiteNetLib.NetPeer), typeof(IMessage) }))
+            .ToList();
 
-        Server.Call(() =>
+        client.Call(() =>
         {
-            Assert.True(Server.ObjectManager.TryGetObject<MapEvent>(raidMapEventId!, out var mapEvent));
-            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(joinerMobilePartyId, out var joinerParty));
-            Assert.True(mapEvent.IsActiveSlowVillageRaid());
-            Assert.Null(joinerParty.MapEvent);
-        }, MapEventDisabledMethods);
+            Assert.True(client.ObjectManager.TryGetObject<MapEvent>(raidMapEventId!, out var mapEvent));
+            Assert.True(client.ObjectManager.TryGetObject<Hero>(joinerHeroId, out var joinerHero));
+            Assert.True(client.ObjectManager.TryGetObject<MobileParty>(joinerMobilePartyId, out var joinerParty));
 
-        foreach (var instance in Clients)
-        {
-            instance.Call(() =>
+            using (new AllowedThread())
             {
-                Assert.True(instance.ObjectManager.TryGetObject<MapEvent>(raidMapEventId!, out var _));
-                Assert.True(instance.ObjectManager.TryGetObject<MobileParty>(joinerMobilePartyId, out var joinerParty));
-                Assert.Null(joinerParty.MapEvent);
-            });
-        }
+                Campaign.Current.MainParty = joinerParty;
+                joinerHero.PartyBelongedTo = joinerParty;
+                Game.Current.PlayerTroop = joinerHero.CharacterObject;
+            }
+
+            var encounter = ObjectHelper.SkipConstructor<PlayerEncounter>();
+            encounter._mapEvent = mapEvent;
+            encounter._encounteredParty = mapEvent.AttackerSide.LeaderParty;
+            Campaign.Current.PlayerEncounter = encounter;
+
+            var condition = InvokeRaidJoinEncounterConditionPostfix(
+                "game_menu_join_encounter_help_defenders_on_condition",
+                initialResult: true);
+            Assert.True(condition.Result);
+            Assert.True(condition.IsEnabled);
+
+            var runOriginal = InvokeRaidJoinEncounterConsequencePrefix(
+                "game_menu_join_encounter_help_defenders_on_consequence");
+            Assert.False(runOriginal);
+        }, disabledMethods);
+
+        var request = client.NetworkSentMessages.GetMessages<NetworkRequestJoinBattle>().Single();
+        Assert.Equal(raidMapEventId, request.MapEventId);
+        Assert.Equal(GetPartyBaseId(joinerMobilePartyId), request.PartyId);
+        Assert.Equal(BattleSideEnum.Defender, request.Side);
     }
 
     [Theory]
@@ -2479,6 +2532,52 @@ public class VillageHostileActionTests : MapEventTestBase
         {
             ServerBattleModeArbiter.Release(hostileAction.MapEventId);
         }
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void SlowRaidMapEvent_InvalidDefenderJoinRequest_IsRejected(bool remote, bool safePassage)
+    {
+        var client = Clients.First();
+        var context = CreateSlowRaidDefenderJoinContext(remote, safePassage);
+
+        Server.NetworkSentMessages.Clear();
+        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkRequestJoinBattle(
+            Guid.NewGuid().ToString(),
+            context.MapEventId,
+            context.JoinerPartyId,
+            BattleSideEnum.Defender)), MapEventDisabledMethods);
+
+        Assert.False(Server.NetworkSentMessages.GetMessages<NetworkJoinBattleReply>().Single().Accepted);
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MapEvent>(context.MapEventId, out var mapEvent));
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(context.JoinerMobilePartyId, out var joinerParty));
+            Assert.True(mapEvent.IsActiveSlowVillageRaid());
+            Assert.Null(joinerParty.MapEvent);
+        }, MapEventDisabledMethods);
+    }
+
+    [Fact]
+    public void SlowRaidMapEvent_CoastalDefenderAtPort_StartsResistance()
+    {
+        var client = Clients.First();
+        var context = CreateSlowRaidDefenderJoinContext(coastal: true);
+
+        Server.NetworkSentMessages.Clear();
+        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkRequestJoinBattle(
+            Guid.NewGuid().ToString(),
+            context.MapEventId,
+            context.JoinerPartyId,
+            BattleSideEnum.Defender)), MapEventDisabledMethods);
+
+        Assert.True(Server.NetworkSentMessages.GetMessages<NetworkJoinBattleReply>().Single().Accepted);
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MapEvent>(context.MapEventId, out var mapEvent));
+            Assert.False(mapEvent.IsActiveSlowVillageRaid());
+        }, MapEventDisabledMethods);
     }
 
     [Theory]
@@ -3114,6 +3213,26 @@ public class VillageHostileActionTests : MapEventTestBase
 
         return (bool)prefix.Invoke(null, new object[] { originalMethod })!;
     }
+
+    private static (bool Result, bool IsEnabled) InvokeRaidJoinEncounterConditionPostfix(
+        string methodName,
+        bool initialResult)
+    {
+        var originalMethod = AccessTools.Method(typeof(EncounterGameMenuBehavior), methodName);
+        Assert.NotNull(originalMethod);
+
+        var patchType = AccessTools.TypeByName("GameInterface.Services.MapEvents.Patches.RaidJoinEncounterConditionPatch");
+        var postfix = AccessTools.Method(patchType, "Postfix");
+        Assert.NotNull(postfix);
+
+        var args = new MenuCallbackArgs((MenuContext)null, null)
+        {
+            IsEnabled = true,
+        };
+        object[] invocation = { originalMethod, args, initialResult };
+        postfix.Invoke(null, invocation);
+        return ((bool)invocation[2], args.IsEnabled);
+    }
     private static bool InvokeVillageHealRegisterEventsPrefix()
     {
         var patchType = AccessTools.TypeByName("GameInterface.Services.Villages.Patches.DisableVillageHealCampaignBehavior");
@@ -3139,6 +3258,56 @@ public class VillageHostileActionTests : MapEventTestBase
 
         endPoint.Address = IPAddress.Loopback;
         endPoint.Port = 1 + (Interlocked.Increment(ref peerPortCounter) % 60000);
+    }
+
+    private RaidDefenderJoinContext CreateSlowRaidDefenderJoinContext(
+        bool remote = false,
+        bool safePassage = false,
+        bool coastal = false)
+    {
+        var client = Clients.First();
+        var (_, raiderMobilePartyId) = CreatePlayerHeroParty("PlayerOne");
+        var (_, joinerMobilePartyId) = CreatePlayerHeroParty("PlayerTwo");
+        TestEnvironment.ConnectRegisteredPlayer(client, "PlayerTwo");
+        var target = CreateVillageTarget();
+        var joinerPartyId = GetPartyBaseId(joinerMobilePartyId);
+        string? mapEventId = null;
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(raiderMobilePartyId, out var raiderParty));
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(joinerMobilePartyId, out var joinerParty));
+            Assert.True(Server.ObjectManager.TryGetObject<Settlement>(target.SettlementId, out var settlement));
+            Assert.True(Server.ObjectManager.TryGetObject<Clan>(target.OwnerClanId, out var ownerClan));
+
+            joinerParty.ActualClan = ownerClan;
+            if (coastal)
+            {
+                var portPosition = new CampaignVec2(new Vec2(100f, 100f), false);
+                settlement.SetPortPosition(portPosition);
+                joinerParty.SetTargetSettlement(settlement, isTargetingPort: true);
+                joinerParty.Position = portPosition;
+            }
+            else
+            {
+                joinerParty.Position = remote
+                    ? new CampaignVec2(new Vec2(1000f, 1000f), true)
+                    : settlement.GatePosition;
+            }
+
+            joinerParty.IsActive = true;
+            raiderParty.IsActive = true;
+            VillageHostileFactionStanceHelper.ApplyWarStance(raiderParty.MapFaction, settlement.MapFaction);
+            if (safePassage)
+                raiderParty.MapFaction.NotAttackableByPlayerUntilTime = CampaignTime.DaysFromNow(1f);
+
+            var mapEvent = CreateHostileActionMapEvent(raiderParty.Party, settlement.Party, VillageHostileAction.Raid);
+            Assert.True(mapEvent.IsActiveSlowVillageRaid());
+            Assert.True(Server.ObjectManager.TryGetId(mapEvent, out mapEventId));
+        }, MapEventDisabledMethods);
+
+        Assert.NotNull(mapEventId);
+        return new RaidDefenderJoinContext(mapEventId!, joinerMobilePartyId, joinerPartyId);
     }
 
     private VillageTarget CreateVillageTarget()
@@ -3225,7 +3394,7 @@ public class VillageHostileActionTests : MapEventTestBase
             });
         }
 
-        return new VillageTarget(settlementId, villageId, settlementPartyId!, ownerFactionId!);
+        return new VillageTarget(settlementId, villageId, settlementPartyId!, ownerFactionId!, boundOwnerClanId);
     }
 
     private void RequestConversation(EnvironmentInstance client, string attackerPartyId, string defenderPartyId)
@@ -3588,7 +3757,16 @@ public class VillageHostileActionTests : MapEventTestBase
         }
     }
 
-    private readonly record struct VillageTarget(string SettlementId, string VillageId, string SettlementPartyId, string OwnerFactionId);
+    private readonly record struct VillageTarget(
+        string SettlementId,
+        string VillageId,
+        string SettlementPartyId,
+        string OwnerFactionId,
+        string OwnerClanId);
+    private readonly record struct RaidDefenderJoinContext(
+        string MapEventId,
+        string JoinerMobilePartyId,
+        string JoinerPartyId);
     private readonly record struct RaidMapEventContext(
         string MapEventId,
         string AttackerMobilePartyId,

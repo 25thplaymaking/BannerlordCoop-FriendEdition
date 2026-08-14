@@ -10,6 +10,23 @@ Fork is pinned to game **1.4.7** — do NOT adopt upstream's 1.4.8 bump.
 PR: https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/pull/14
 Branch: `25vid/fix-kingdom-tab-diplomacy-managers` (base: `development`)
 
+## Phase O — battle upkeep + siege result/village defense correction — STAGED (2026-08-14)
+
+- `Disabled` battle economy is party-scoped: a party currently in a battle pays no party wages and
+  consumes no food. Other clan parties, income, and unrelated expenses continue normally. The packaged
+  default is now `Disabled`; the live shared configuration remains unchanged.
+- The 18:24 UTC live siege log showed `AttackerVictory` reconciled after its map event had already become
+  inactive. The server now blocks campaign `MapEvent.Update` while an accepted live mission is occupied,
+  so campaign simulation cannot defeat/capture the winner before the authoritative mission result arrives.
+- Active slow village raids once blanket-disabled the defend option and rejected defender joins on the server.
+  **Help defenders** now routes through the normal authoritative join, replicates the player's party onto the
+  village side, and transitions the raid into its resistance battle. The server requires vanilla faction-side
+  compatibility, safe-passage eligibility, and the village encounter radius (gate or coastal port) before accepting
+  the defender join.
+- Focused verification: GameInterface battle-upkeep/config tests 26/26; map-event authority E2Es 4/4;
+  village-defense regressions 5/5. Both test projects build with zero errors. No client release or live server
+  change was made.
+
 ## Phase N — messenger + bandit surrender + kingdom vote correction — SHIPPED (2026-08-14)
 
 - **Send Messenger:** the authenticated executor now treats messenger dispatch as a personal action, so a

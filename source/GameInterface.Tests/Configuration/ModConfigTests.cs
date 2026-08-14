@@ -272,7 +272,7 @@ public class ModConfigTests : IDisposable
         Assert.True(options.AutoPauseEnabled);
         Assert.False(options.ClientsCanUseCheats);
         Assert.True(options.GoldFoodInfluenceChangeInSettlements);
-        Assert.Equal(GoldFoodChangeMode.OneDayMax, options.GoldFoodInfluenceChangeInBattles);
+        Assert.Equal(GoldFoodChangeMode.Disabled, options.GoldFoodInfluenceChangeInBattles);
         Assert.False(options.GoldFoodInfluenceChangeForDisconnectedPlayers);
         Assert.Equal(24, options.PlayerBattleAiJoinWindowHours);
         Assert.True(options.SpeedLimitWhilePlayersInBattle);

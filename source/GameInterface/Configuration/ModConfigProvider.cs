@@ -41,7 +41,7 @@ public readonly struct ModOptions
     [ProtoMember(4)]
     public readonly bool GoldFoodInfluenceChangeInSettlements { get; } = true;
     [ProtoMember(5)]
-    public readonly GoldFoodChangeMode GoldFoodInfluenceChangeInBattles { get; } = GoldFoodChangeMode.OneDayMax;
+    public readonly GoldFoodChangeMode GoldFoodInfluenceChangeInBattles { get; } = GoldFoodChangeMode.Disabled;
     [ProtoMember(6)]
     public readonly bool GoldFoodInfluenceChangeForDisconnectedPlayers { get; } = false;
     [ProtoMember(7)]

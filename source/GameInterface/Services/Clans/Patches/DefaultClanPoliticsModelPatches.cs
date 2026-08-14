@@ -35,8 +35,8 @@ internal class DefaultClanPoliticsModelPatches
         // Clan leader not in a map event, calculate influence change normally
         if (clanLeaderMapEvent == null) return true;
 
-        // Influence change is disabled in battles, skip this calculation
-        if (ModConfigProvider.ModOptions.GoldFoodInfluenceChangeInBattles == GoldFoodChangeMode.Disabled) return false;
+        // Disabled pauses only the involved party's food and wages; clan influence continues normally.
+        if (ModConfigProvider.ModOptions.GoldFoodInfluenceChangeInBattles == GoldFoodChangeMode.Disabled) return true;
 
         // Use gold fold consumption window to determine if the influence change should be calculated based on config.
         // This way players only have an influence change at most once during a map event when set to OneDayMax.

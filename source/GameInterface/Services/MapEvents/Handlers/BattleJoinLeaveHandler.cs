@@ -12,6 +12,7 @@ using GameInterface.Services.MapEvents.Messages.Start;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
 using GameInterface.Services.SiegeEvents.Interfaces;
+using GameInterface.Services.Villages.Interfaces;
 using LiteNetLib;
 using Serilog;
 using System;
@@ -36,6 +37,7 @@ namespace GameInterface.Services.MapEvents.Handlers;
 internal class BattleJoinLeaveHandler : IHandler
 {
     private static readonly ILogger Logger = LogManager.GetLogger<BattleJoinLeaveHandler>();
+    private const float PositionSyncDriftSlack = 0.5f;
 
     private readonly IMessageBroker messageBroker;
     private readonly IObjectManager objectManager;
@@ -230,11 +232,18 @@ internal class BattleJoinLeaveHandler : IHandler
                         Logger.Warning("Ignoring join request: party {PartyId} is already in a map event", data.PartyId);
                         return;
                     }
-                    if (mapEvent.IsActiveSlowVillageRaid() && data.Side == BattleSideEnum.Defender)
+
+                    if (mapEvent.IsActiveSlowVillageRaid() &&
+                        data.Side == BattleSideEnum.Defender &&
+                        !CanJoinActiveSlowRaidAsDefender(mapEvent, party))
                     {
-                        Logger.Warning("Ignoring defender join request: map event {MapEventId} is an active slow village raid", data.MapEventId);
+                        Logger.Warning(
+                            "Ignoring defender join request: party {PartyId} is not eligible or close enough to defend active village raid {MapEventId}",
+                            data.PartyId,
+                            data.MapEventId);
                         return;
                     }
+
                     var side = mapEvent.GetMapEventSide(data.Side);
                     if (side == null)
                     {
@@ -408,6 +417,49 @@ internal class BattleJoinLeaveHandler : IHandler
         }
 
         controllerId = player.ControllerId;
+        return true;
+    }
+
+    private static bool CanJoinActiveSlowRaidAsDefender(MapEvent mapEvent, PartyBase party)
+    {
+        var mobileParty = party?.MobileParty;
+        var settlement = mapEvent?.MapEventSettlement;
+        var encounterModel = Campaign.Current?.Models?.EncounterModel;
+        var joiningFaction = party?.MapFaction;
+        var attackerFaction = mapEvent?.AttackerSide?.LeaderParty?.MapFaction;
+        if (mobileParty?.IsActive != true || settlement?.IsVillage != true || encounterModel == null ||
+            joiningFaction == null || attackerFaction == null || attackerFaction.NotAttackableByPlayerUntilTime.IsFuture)
+            return false;
+
+        if (!IsFactionCompatible(mapEvent.DefenderSide, joiningFaction, hostile: false) ||
+            !IsFactionCompatible(mapEvent.AttackerSide, joiningFaction, hostile: true))
+        {
+            return false;
+        }
+
+        var targetPosition = mobileParty.IsTargetingPort && settlement.HasPort
+            ? settlement.PortPosition
+            : settlement.GatePosition;
+        return mobileParty.CurrentSettlement == settlement ||
+            mobileParty.Position.Distance(targetPosition) <=
+            encounterModel.NeededMaximumDistanceForEncounteringVillage + PositionSyncDriftSlack;
+    }
+
+    private static bool IsFactionCompatible(MapEventSide side, IFaction joiningFaction, bool hostile)
+    {
+        if (side?.Parties == null || side.Parties.Count == 0)
+            return false;
+
+        foreach (var involved in side.Parties)
+        {
+            var involvedParty = involved?.Party;
+            if (involvedParty?.IsActive != true || involvedParty.MapFaction == null ||
+                VillageHostileFactionStanceHelper.HasWarStance(involvedParty.MapFaction, joiningFaction) != hostile)
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 

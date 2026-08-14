@@ -24,6 +24,12 @@ internal class DefaultClanFinanceModelPatches
     [HarmonyPrefix]
     private static bool AddExpenseFromLeaderPartyPrefix(DefaultClanFinanceModel __instance, Clan clan, ExplainedNumber goldChange, bool applyWithdrawals, ref int __result)
     {
+        if (ShouldSkipPartyExpense(clan?.Leader?.PartyBelongedTo))
+        {
+            __result = 0;
+            return false;
+        }
+
         ContainerProvider.TryResolve<IDefaultClanFinanceModelInterface>(out var financeModelInterface);
 
         __result = financeModelInterface.AddExpenseFromLeaderParty(__instance, clan, goldChange, applyWithdrawals);
@@ -80,12 +86,22 @@ internal class DefaultClanFinanceModelPatches
     [HarmonyPrefix]
     public static bool AddPartyExpensePrefix(DefaultClanFinanceModel __instance, ref int __result, MobileParty party, Clan clan, ExplainedNumber goldChange, bool applyWithdrawals)
     {
+        if (ShouldSkipPartyExpense(party))
+        {
+            __result = 0;
+            return false;
+        }
+
         ContainerProvider.TryResolve<IDefaultClanFinanceModelInterface>(out var financeModelInterface);
 
         __result = financeModelInterface.AddPartyExpense(__instance, party, clan, goldChange, applyWithdrawals);
 
         return false;
     }
+
+    internal static bool ShouldSkipPartyExpense(MobileParty party) =>
+        party?.MapEvent != null &&
+        ModConfigProvider.ModOptions.GoldFoodInfluenceChangeInBattles == GoldFoodChangeMode.Disabled;
 
     [HarmonyPatch(nameof(DefaultClanFinanceModel.CalculateClanGoldChange))]
     [HarmonyPrefix]
@@ -110,8 +126,8 @@ internal class DefaultClanFinanceModelPatches
         // Clan leader not in a map event, calculate gold change normally
         if (clanLeaderMapEvent == null) return true;
 
-        // Gold change is disabled in battles, skip this tick
-        if (ModConfigProvider.ModOptions.GoldFoodInfluenceChangeInBattles == GoldFoodChangeMode.Disabled) return false;
+        // Disabled is scoped to the involved party's upkeep. Income and unrelated clan expenses still tick.
+        if (ModConfigProvider.ModOptions.GoldFoodInfluenceChangeInBattles == GoldFoodChangeMode.Disabled) return true;
 
         // Use gold food consumption window to determine if the gold change should be calculated based on config.
         // This way players only have a gold change at most once during a map event when set to OneDayMax.

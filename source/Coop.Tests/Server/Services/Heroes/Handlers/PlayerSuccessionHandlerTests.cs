@@ -25,12 +25,15 @@ public class PlayerSuccessionHandlerTests
 
     public PlayerSuccessionHandlerTests()
     {
+        // Inline deferrer: production defers to the game thread (EnqueueSafe) because succession
+        // arrives from inside the kill call stack; unit tests have no pump to drain the queue.
         handler = new PlayerSuccessionHandler(
             messageBroker,
             network.Object,
             objectManager.Object,
             playerManager.Object,
-            playerPartyRestorer.Object);
+            playerPartyRestorer.Object,
+            action => action());
     }
 
     private (Hero victim, Hero heir, Player registered, Player restored) SetupSuccession()

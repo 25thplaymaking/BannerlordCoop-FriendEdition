@@ -399,12 +399,15 @@ public class ClientKingdomHandler : IHandler
     private bool ShouldApplyNetworkDecision(string kingdomId)
     {
         if (string.IsNullOrWhiteSpace(kingdomId)) return false;
-        // Fail CLOSED on every unresolvable lookup: an id that does not resolve to a Kingdom on
-        // this client (destroyed locally, or registered as another type - the live
-        // Clan-under-a-kingdom-id cast errors) cannot be the player's kingdom, and applying
-        // anyway just reproduces the downstream lookup error this gate exists to prevent.
+        // Fail CLOSED when the id does not resolve to a Kingdom on this client (destroyed
+        // locally, or registered as another type - the live Clan-under-a-kingdom-id cast
+        // errors): it cannot be the player's kingdom, and applying anyway just reproduces the
+        // downstream lookup error this gate exists to prevent.
         if (!objectManager.TryGetObject(kingdomId, out Kingdom kingdom)) return false;
-        if (!playerManager.TryGetPlayer(controllerIdProvider.ControllerId, out var player)) return false;
+        // Pre-registration grace: before this client's player registration lands, membership is
+        // unknowable - keep applying (the pre-gate behavior) so a joining player's own-kingdom
+        // decisions arriving in the same flush are not starved.
+        if (!playerManager.TryGetPlayer(controllerIdProvider.ControllerId, out var player)) return true;
         if (string.IsNullOrWhiteSpace(player.ClanId)) return false;
         if (!objectManager.TryGetObject(player.ClanId, out Clan clan)) return false;
 

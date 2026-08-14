@@ -9,6 +9,7 @@ using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
 using GameInterface.Services.Players.Data;
 using Serilog;
+using System;
 
 namespace Coop.Core.Server.Services.Heroes.Handlers;
 
@@ -30,6 +31,7 @@ internal class PlayerSuccessionHandler : IHandler
     private readonly IObjectManager objectManager;
     private readonly IPlayerManager playerManager;
     private readonly IPlayerPartyRestorer playerPartyRestorer;
+    private readonly Action<Action> deferToGameThread;
 
     public PlayerSuccessionHandler(
         IMessageBroker messageBroker,
@@ -37,12 +39,25 @@ internal class PlayerSuccessionHandler : IHandler
         IObjectManager objectManager,
         IPlayerManager playerManager,
         IPlayerPartyRestorer playerPartyRestorer)
+        : this(messageBroker, network, objectManager, playerManager, playerPartyRestorer,
+               action => GameThread.EnqueueSafe(action, context: nameof(PlayerSuccessionHandler)))
+    {
+    }
+
+    internal PlayerSuccessionHandler(
+        IMessageBroker messageBroker,
+        INetwork network,
+        IObjectManager objectManager,
+        IPlayerManager playerManager,
+        IPlayerPartyRestorer playerPartyRestorer,
+        Action<Action> deferToGameThread)
     {
         this.messageBroker = messageBroker;
         this.network = network;
         this.objectManager = objectManager;
         this.playerManager = playerManager;
         this.playerPartyRestorer = playerPartyRestorer;
+        this.deferToGameThread = deferToGameThread;
 
         messageBroker.Subscribe<PlayerHeroDied>(Handle_PlayerHeroDied);
     }
@@ -60,7 +75,7 @@ internal class PlayerSuccessionHandler : IHandler
         // KillCharacterAction.ApplyInternal, whose native callers (death-mark collection, daily
         // ticks) may still be enumerating hero/party collections. Recovery-party creation mutates
         // exactly those collections, so it must run on a later game-thread update.
-        GameThread.EnqueueSafe(() =>
+        deferToGameThread(() =>
         {
             if (!TryApplySuccession(payload, payload.Successor))
             {
@@ -80,7 +95,7 @@ internal class PlayerSuccessionHandler : IHandler
                     "on the dead hero until their next reconnect repairs the registration",
                     payload.ControllerId);
             }
-        }, context: nameof(PlayerSuccessionHandler));
+        });
     }
 
     private bool TryApplySuccession(PlayerHeroDied payload, TaleWorlds.CampaignSystem.Hero successor)

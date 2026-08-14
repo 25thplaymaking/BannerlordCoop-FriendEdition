@@ -167,6 +167,12 @@ internal sealed class DiplomacyRuntime : IDiplomacyRuntime
             EnsureManager("Diplomacy.CooldownManager");
             EnsureManager("Diplomacy.DiplomaticAction.DiplomaticAgreementManager");
             EnsureManager("Diplomacy.WarExhaustion.WarExhaustionManager");
+            // Never synced — Friend Edition Separatism owns rebellions, so Diplomacy's civil-war
+            // ledger is canonically EMPTY — but it must EXIST: the pinned cost calculator consults
+            // RebelFactionManager.AllRebelFactions (=> Instance.RebelFactions) for every war row the
+            // Kingdom tab builds, and a null Instance NREs KingdomWarItemVMMixin and blacks out the
+            // tab (2026-08-13).
+            EnsureManager("Diplomacy.CivilWar.RebelFactionManager");
 
             if (!TryValidateRequiredManagerShape(out var managerShapeFailure))
             {
@@ -478,6 +484,7 @@ internal sealed class DiplomacyRuntime : IDiplomacyRuntime
             "Diplomacy.CooldownManager",
             "Diplomacy.DiplomaticAction.DiplomaticAgreementManager",
             "Diplomacy.WarExhaustion.WarExhaustionManager",
+            "Diplomacy.CivilWar.RebelFactionManager",
         };
         if (managerTypes.Any(managerTypeName => !CanEnsureManager(managerTypeName)) ||
             agreementConstructor == null || registerAgreement == null ||
@@ -537,6 +544,11 @@ internal sealed class DiplomacyRuntime : IDiplomacyRuntime
             ("Diplomacy.WarExhaustion.WarExhaustionManager", "_warExhaustionScores", "System.String", "Diplomacy.WarExhaustion.WarExhaustionRecord", false),
             ("Diplomacy.WarExhaustion.WarExhaustionManager", "_warExhaustionRates", "System.String", "Diplomacy.WarExhaustion.WarExhaustionRecord", false),
             ("Diplomacy.WarExhaustion.WarExhaustionManager", "_warExhaustionEventRecords", "System.String", "Diplomacy.WarExhaustion.EventRecords.WarExhaustionEventRecord", true),
+            // Never synced (Separatism owns rebellions; content stays empty), but existence-checked
+            // here so Kingdom-UI readiness fails toward the snapshot repair path — which ensures the
+            // singleton — instead of letting the pinned cost calculator NRE on a null Instance.
+            ("Diplomacy.CivilWar.RebelFactionManager", "RebelFactions", "TaleWorlds.CampaignSystem.Kingdom", "Diplomacy.CivilWar.Factions.RebelFaction", true),
+            ("Diplomacy.CivilWar.RebelFactionManager", "LastCivilWar", "TaleWorlds.CampaignSystem.Kingdom", "TaleWorlds.CampaignSystem.CampaignTime", false),
         };
 
     private static bool TryValidateRequiredManagerShape(out string failure)
@@ -1181,6 +1193,11 @@ internal static class DiplomacyManagerCaptureBarrier
         "Diplomacy.CooldownManager",
         "Diplomacy.DiplomaticAction.DiplomaticAgreementManager",
         "Diplomacy.WarExhaustion.WarExhaustionManager",
+        // Existence-only: never captured into the snapshot (Separatism owns rebellions, so the
+        // civil-war ledger is canonically empty), but the pinned peace/reparations cost math reads
+        // RebelFactionManager.AllRebelFactions on both roles, and the retired Diplomacy behaviours
+        // mean nothing else ever constructs the singleton on the dedicated host.
+        "Diplomacy.CivilWar.RebelFactionManager",
     };
 
     internal static void RequireReady(

@@ -140,6 +140,7 @@ internal static class DiplomacyCompatibilityPolicy
         "Diplomacy.DiplomaticAction.NonAggressionPactAgreement",
         "Diplomacy.WarExhaustion.WarExhaustionManager",
         "Diplomacy.WarExhaustion.WarExhaustionRecord",
+        "Diplomacy.CivilWar.RebelFactionManager",
         "Diplomacy.ViewModelMixin.KingdomManagementPrefabExtension",
         "Diplomacy.ViewModelMixin.KingdomManagementScalingPatch",
         "Diplomacy.ViewModelMixin.KingdomManagementVMMixin",

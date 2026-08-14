@@ -878,6 +878,19 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
         Assert.Equal("Diplomacy.FactionPair", DiplomacyManagerCaptureBarrier.AgreementKeyTypeName);
     }
 
+    [Fact]
+    public void RebelFactionManager_IsEnsuredOnBothRoles_SoKingdomTabCostMathCannotNullRef()
+    {
+        // 2026-08-13 black Kingdom tab: KingdomWarItemVMMixin -> DiplomacyCostCalculator
+        // -> KingdomExtensions.IsRebelKingdomOf reads RebelFactionManager.AllRebelFactions
+        // (=> Instance.RebelFactions). Friend Edition retires Diplomacy's civil war, so nothing
+        // else ever constructs the singleton; it must be ensured (empty) wherever the other four
+        // managers are.
+        Assert.Contains(
+            "Diplomacy.CivilWar.RebelFactionManager",
+            DiplomacyManagerCaptureBarrier.RequiredManagerTypeNames);
+    }
+
     [Theory]
     [InlineData("42+731", true)]
     [InlineData("kingdom_vlandia+kingdom_battania", false)]

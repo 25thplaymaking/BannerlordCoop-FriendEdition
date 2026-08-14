@@ -313,3 +313,15 @@ The local and deployment gates are green; rendered verification must use launche
 - `dotnet` on PATH is SDK-less x86 → use `"C:\Program Files\dotnet\dotnet.exe"`.
 - 127.0.0.1 loopback broken here → `dotnet test` can't run locally; CI is the gate.
 - Client↔server join: no version reject at connection layer, but the in-game lobby browser gates on EXACT build version → client+server must deploy in lockstep.
+
+## Phase J — Equipment suppression, MapEvent robustness & ScoreboardTick restoration (2026-08-14)
+
+- **Equipment UI Synchronization Storm (0xC0000005 AV):**
+  - Diagnosis: Entering Character Developer, Inventory, Clan, or Party screens triggered unsuppressed equipment creation/modification on the UI thread, causing race conditions with the network thread and memory corruption.
+  - Fix: Extended AllowEquipmentInGUI to dynamically suppress all declared methods across Gauntlet screens and ViewModels.
+- **MapEvent Null Dereference:**
+  - Guarded MapEvent.PlayerMapEvent and MapEvent.IsPlayerMapEvent against null MobileParty.MainParty.
+- **Dedicated Server Harmony Safety:**
+  - Guaranteed AllowEquipmentInGUI.TargetMethods() returns explicit methods on server to satisfy Harmony constraints while avoiding client-only UI reflection.
+- **ScoreboardTickReadinessPatch Reinstatement (40b863f18):**
+  - Restored missing SPScoreboardVM.OnTick finalizer guard against NullReferenceException during co-op retreat/encounter teardown.

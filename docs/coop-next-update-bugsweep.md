@@ -325,3 +325,81 @@ The local and deployment gates are green; rendered verification must use launche
   - Guaranteed AllowEquipmentInGUI.TargetMethods() returns explicit methods on server to satisfy Harmony constraints while avoiding client-only UI reflection.
 - **ScoreboardTickReadinessPatch Reinstatement (40b863f18):**
   - Restored missing SPScoreboardVM.OnTick finalizer guard against NullReferenceException during co-op retreat/encounter teardown.
+
+## Phase K — Gemini review, crash triage, audit completion, secondary-update fixes (2026-08-14)
+
+### Phase J (Gemini/Antigravity) review verdicts
+- **Sound:** ScoreboardTick reinstatement (matches the held PR #10 fix), MapEvent
+  `PlayerMapEvent`/`IsPlayerMapEvent` null guards, ObjectManager transient-`Created_*` Debug
+  downgrade, LiveTestControlServer changes (repair of merge damage: duplicate `HandleCommandCatalog`
+  removed, missing `TryParseStructuredResult` restored), `CoopMod.StartAsClient` call change (the
+  method returns void since the launcher redesign — the old refusal check no longer compiled).
+- **Net-zero:** launcher-release channel default was flipped to `both` (767c71999) and immediately
+  reverted (1737916f6); nightly-only automatic publishing stands.
+- **Ineffective as shipped:** the `AllowEquipmentInGUI` mass-wrap of 9 screen/VM types did NOT stop
+  the equipment churn — the 00:03 crash session on the new build still logged 3,239
+  `Equipment_DynamicPatches` + 1,659 `LifetimePatches<Equipment>` client errors (burst of 3,636/min
+  during a battle at 23:44). Churn sources sit outside per-method windows (async agent-visual
+  worker threads; post-`HandleFinalize` teardown). The allowance revoke was already
+  exception-safe (finalizer, not postfix). Phase K adds the `ScreenManager.PopScreen` wrap for the
+  teardown half; the worker-thread half remains open (see below).
+
+### Crash triage — all 8 reports since 21:44 on 2026-08-13
+- **5× exit 0xC0000005 (AV):** one family. Context every time: battles/loot + inventory,
+  clan, or character screens; `IsReady`/Equipment client-churn floods precede each. Crashes
+  continued on build `1737916f6` (with the Phase J equipment fix), so the fix did not close it.
+  **No dump exists for any of them** — the TW dump prompt was cancelled each time, so the faulting
+  module is unproven. The AutoSync/Lifetime client "errors" are log-only (local sets are applied,
+  nothing is published or blocked), so the Phase J "sync storm memory corruption" mechanism is a
+  hypothesis, not established. If the AVs continue after this update, capture one dump (accept the
+  TW dialog) — that single artifact decides the diagnosis.
+- **3× exit -1:** shutdown-path false positives — normal "Deleting Managed Interface" teardown with
+  TW's known "Non-Zero Device Reference Count" exit error. Not gameplay crashes.
+- **Crash-reporter defect (fixed):** four reports' `Coop_client.log` was the RELAUNCHED session's
+  log — the post-dump-wait refresh re-copied the shared-path log after restart truncated it,
+  destroying the evidence. The refresh now only accepts append-extensions of the crash-time copy.
+
+### Workshop authority audit — COMPLETE (603f22e54)
+- 13,310 of 13,729 required routes classified (was 8,162). Six of seven gameplay modules
+  (UnblockableThrust, DismembermentPlus, Separatism, ImprovedGarrisons, **Bannerlord.Diplomacy
+  4,121/4,121**, **PlayerSettlement 625/625**) are fully classified and now gated inside
+  `WorkshopIntegration.Run-Tests` (real-audit validation, previously fixture-only).
+- **Fourberie: 419 reviewed OPEN routes** held by a shrink-only ratchet
+  (`tools/WorkshopIntegration/fourberie-open-routes.json`; new open routes fail the suite):
+  - **FOURB-OPEN-1 (largest):** the stealth/fight-club/banditry **mission stack is un-adapted** —
+    `FStealthMissionLogic` (128), mission controllers/spawners/`FourbCom`/`InsideMissionsHelper`
+    (~70). End-of-mission consequences (`OnEndMissionInternal`, militia routines, dialog
+    consequences) mutate campaign state on the entering client with no Coop route → silent desync
+    whenever a client runs an infiltration/larceny/fight-club mission. Needs either typed
+    consequence routing or a fail-closed mission-entry gate (product call: the gate removes crime
+    missions from co-op).
+  - **FOURB-OPEN-2:** unrouted behavior/menu consequences — `FourberieBehavior` (80: incl.
+    `PlayerActionsConsequences`, `PickAction`, `OnConfirmLeaveKingdomWithOption`), fight-club (35),
+    bandit (30), escape (3), safehouse behavior (7).
+  - **FOURB-OPEN-3:** VM canonical-state writes without a route — `CriminalVM` (11: `FOpenStash`,
+    pact/tribute list mutations), `FourbSafeHouseDataSourceVM` (5), detection view (2), misc.
+- Five Diplomacy records whose campaign-mutation evidence is heuristic false positive (read-only
+  `CanGrantFief`/`PreviewPositiveRelationChange`, UI event subscriptions) were hand-verified and
+  classified PurePolicy.
+
+### Fixes in this phase (904d0af8e)
+- **Loot trade desync (user-visible):** `TradeHandler` silently dropped battle-loot roster elements
+  whose `ItemObject` instance wasn't the registered catalog instance (fresh instance, same
+  StringId) — the player kept loot locally that the server never received (32–36 hits per loot
+  screen in last night's logs). Wire ids now resolve through the catalog StringId.
+- **Kingdom decision noise/asymmetry:** `NetworkRemoveDecision` now passes the same own-kingdom
+  gate as `NetworkAddDecision` (was: guaranteed "Index is out of bounds" + Clan→Kingdom cast
+  errors on every broadcast for foreign kingdoms).
+- **Inventory teardown window:** `ScreenManager.PopScreen` joined the equipment allowance wrap.
+- **Crash-reporter log preservation** (above), with regression test.
+
+### Still open after this phase
+- **0xC0000005 root cause unproven** — need one accepted dump from the next occurrence.
+- **Equipment/IsReady client ERR floods** (~5k/min in battles) — worker-thread churn is
+  by-design-unsynced but logged at ERR through Serilog on hot paths; wants a throttle/dedup plus a
+  decision on worker-thread allowances. Defer until a dump proves/disproves the log path's role.
+- **Clan-registered-under-Kingdom-id** (`Could not cast (Clan) ... to Kingdom` while resolving a
+  server-sent kingdom id): now silenced at the decision path, but the underlying cross-peer
+  `Created_*` id divergence hint deserves a look if rebel-kingdom desyncs appear.
+- Fourberie open routes (above), `NetworkUpdatePartyBehavior` storm (needs live profiling), #2632
+  Separatism-compat rework — unchanged.

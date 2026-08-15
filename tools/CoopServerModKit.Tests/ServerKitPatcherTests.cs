@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Xml.Linq;
 using CoopServerModKit.ButterLib;
 using CoopServerModKit.DedicatedServer;
 using CoopServerModKit.TaleWorlds;
@@ -174,6 +175,75 @@ public sealed class ServerKitPatcherTests : IDisposable
         Assert.False(File.Exists(receipt));
     }
 
+    [Fact]
+    public void CampaignSystemSetterPatch_MarksOnlyConcretePropertySettersNoInlining()
+    {
+        string input = Path.Combine(root, "TaleWorlds.CampaignSystem.dll");
+        string output = Path.Combine(root, "TaleWorlds.CampaignSystem.patched.dll");
+        CreateCampaignSystemFixture(input);
+
+        Assert.Equal(2, CampaignSystemSetterPatcher.Patch(input, output, Sha256(input), 3, 2));
+
+        using AssemblyDefinition patched = AssemblyDefinition.ReadAssembly(output);
+        TypeDefinition type = patched.MainModule.GetType("TaleWorlds.CampaignSystem.Fixture");
+        MethodDefinition[] setters = type.Methods.Where(method => method.IsSetter).ToArray();
+        Assert.Equal(3, setters.Length);
+        Assert.All(setters.Where(method => method.HasBody), setter =>
+            Assert.NotEqual(0, (int)(setter.ImplAttributes & MethodImplAttributes.NoInlining)));
+        Assert.DoesNotContain(setters.Where(method => !method.HasBody), setter =>
+            (setter.ImplAttributes & MethodImplAttributes.NoInlining) != 0);
+        Assert.Equal(MethodImplAttributes.IL, type.Methods.Single(method => method.Name == "Unrelated").ImplAttributes);
+    }
+
+    [Fact]
+    public void CampaignSystemSetterPatch_RejectsUnexpectedSetterShapeWithoutWriting()
+    {
+        string input = Path.Combine(root, "TaleWorlds.CampaignSystem.dll");
+        string output = Path.Combine(root, "TaleWorlds.CampaignSystem.patched.dll");
+        CreateCampaignSystemFixture(input);
+
+        InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
+            CampaignSystemSetterPatcher.Patch(input, output, Sha256(input), 4, 2));
+
+        Assert.Contains("setter shape", error.Message);
+        Assert.False(File.Exists(output));
+    }
+
+    [Fact]
+    public void SandBoxServerDescriptorPatch_EnablesOnlyGameplaySubModule()
+    {
+        string input = Path.Combine(root, "SandBox.SubModule.xml");
+        string output = Path.Combine(root, "SandBox.SubModule.server.xml");
+        File.WriteAllText(input, CreateSandBoxDescriptorFixture());
+
+        SandBoxServerDescriptorPatcher.Patch(input, output, Sha256(input), expectedOutputSha256: null);
+
+        XDocument patched = XDocument.Load(output);
+        XElement[] subModules = patched.Descendants("SubModule").ToArray();
+        XElement gameplay = subModules.Single(element =>
+            element.Element("SubModuleClassType")?.Attribute("value")?.Value ==
+            SandBoxServerDescriptorPatcher.GameplayClass);
+        Assert.Null(gameplay.Element("Tags"));
+        Assert.Equal(2, subModules.Count(element => element.Element("Tags") != null));
+    }
+
+    [Fact]
+    public void SandBoxServerDescriptorPatch_RejectsUnexpectedGameplayTagsWithoutWriting()
+    {
+        string input = Path.Combine(root, "SandBox.SubModule.xml");
+        string output = Path.Combine(root, "SandBox.SubModule.server.xml");
+        File.WriteAllText(input, CreateSandBoxDescriptorFixture().Replace(
+            "<Tag key=\"DedicatedServerType\" value=\"none\" />",
+            "<Tag key=\"DedicatedServerType\" value=\"custom\" />",
+            StringComparison.Ordinal));
+
+        InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
+            SandBoxServerDescriptorPatcher.Patch(input, output, Sha256(input), expectedOutputSha256: null));
+
+        Assert.Contains("gameplay tag shape", error.Message);
+        Assert.False(File.Exists(output));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
@@ -209,6 +279,64 @@ public sealed class ServerKitPatcherTests : IDisposable
         unrelatedValidate.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
         unrelated.Methods.Add(unrelatedValidate);
         assembly.Write(path);
+    }
+
+    private static void CreateCampaignSystemFixture(string path)
+    {
+        using AssemblyDefinition assembly = AssemblyDefinition.CreateAssembly(
+            new AssemblyNameDefinition("TaleWorlds.CampaignSystem", new Version(1, 0, 0, 0)),
+            "TaleWorlds.CampaignSystem", ModuleKind.Dll);
+        TypeDefinition type = AddType(assembly.MainModule, "TaleWorlds.CampaignSystem.Fixture");
+        AddProperty(type, "First", hasBody: true);
+        AddProperty(type, "Second", hasBody: true);
+        AddProperty(type, "Abstract", hasBody: false);
+        MethodDefinition unrelated = new("Unrelated", MethodAttributes.Public, assembly.MainModule.TypeSystem.Void);
+        unrelated.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+        type.Methods.Add(unrelated);
+        assembly.Write(path);
+    }
+
+    private static string CreateSandBoxDescriptorFixture() =>
+        string.Join("\r\n", new[]
+        {
+            "<?xml version='1.0' encoding='utf-8'?>",
+            "<Module>",
+            "\t<SubModules>",
+            "\t\t<SubModule>",
+            "\t\t\t<Name value=\"SandBox\" />",
+            "\t\t\t<DLLName value=\"SandBox.dll\" />",
+            "\t\t\t<SubModuleClassType value=\"SandBox.SandBoxSubModule\" />",
+            "\t\t\t<Tags>",
+            "\t\t\t\t<Tag key=\"DedicatedServerType\" value=\"none\" />",
+            "\t\t\t\t<Tag key=\"IsNoRenderModeElement\" value=\"false\" />",
+            "\t\t\t</Tags>",
+            "\t\t</SubModule>",
+            "\t\t<SubModule>",
+            "\t\t\t<SubModuleClassType value=\"SandBox.View.SandBoxViewSubModule\" />",
+            "\t\t\t<Tags><Tag key=\"DedicatedServerType\" value=\"none\" /></Tags>",
+            "\t\t</SubModule>",
+            "\t\t<SubModule>",
+            "\t\t\t<SubModuleClassType value=\"SandBox.GauntletUI.SandBoxGauntletUISubModule\" />",
+            "\t\t\t<Tags><Tag key=\"DedicatedServerType\" value=\"none\" /></Tags>",
+            "\t\t</SubModule>",
+            "\t</SubModules>",
+            "</Module>",
+        });
+
+    private static void AddProperty(TypeDefinition type, string name, bool hasBody)
+    {
+        ModuleDefinition module = type.Module;
+        PropertyDefinition property = new(name, PropertyAttributes.None, module.TypeSystem.Int32);
+        MethodAttributes attributes = MethodAttributes.Public | MethodAttributes.SpecialName | MethodAttributes.HideBySig;
+        MethodDefinition setter = new("set_" + name, attributes, module.TypeSystem.Void);
+        setter.Parameters.Add(new ParameterDefinition("value", ParameterAttributes.None, module.TypeSystem.Int32));
+        if (hasBody)
+            setter.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+        else
+            setter.Attributes |= MethodAttributes.Abstract | MethodAttributes.Virtual;
+        property.SetMethod = setter;
+        type.Methods.Add(setter);
+        type.Properties.Add(property);
     }
 
     private static void CreateDedicatedServerLoaderFixture(string path, bool duplicateTarget = false)

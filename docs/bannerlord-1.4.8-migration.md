@@ -47,10 +47,10 @@ reconciled as one release boundary. The result is zero unwired active modules:
   build with zero errors.
 
 No generic callback serializer or client-trusted consequence replay was used.
-Rendered multi-client and isolated-save boot remain deployment acceptance
-checks, not missing function wiring, and the live server/save were not changed.
+Rendered multi-client play remains a post-promotion acceptance check, not a
+missing function-wiring item. The same-save server gate is complete below.
 
-### Verified offline candidate — 2026-08-15
+### Verified build candidate — 2026-08-15
 
 The migration inputs and client payload have now been assembled and verified
 offline. The machine-readable source of truth is
@@ -89,10 +89,51 @@ offline. The machine-readable source of truth is
 - `Modules/NavalDLC` is absent and War Sails remains disabled in the staged
   configuration and payload.
 
-This is an offline, fully wired migration candidate. The paired Friend Edition
-server has not booted on an isolated save or passed rendered multi-client
-acceptance, and the live server/save were not touched. Those are promotion
-checks; the active-module function and authority ledgers have no open entries.
+These were the pre-promotion build results. They are retained as provenance and
+are superseded by the live promotion evidence below. The active-module function
+and authority ledgers have no open entries.
+
+### Live promotion — 2026-08-15
+
+Friend Edition is live on Bannerlord `v1.4.8` using the existing
+`friendallmods1` campaign. No new save was required.
+
+- The v1.4.8 `Sandbox` descriptor added `DedicatedServerType=none` to its
+  gameplay submodule. That prevented `SandBox.dll` from loading, skipped sandbox
+  XML initialization, and left settlement/NPC references null during old-save
+  cache restoration. The server-only descriptor patch removes exactly that one
+  gameplay tag block while retaining the dedicated-server exclusions on
+  `SandBox.View` and `SandBox.GauntletUI`.
+- The descriptor patch is pinned from SHA-256
+  `179168441d5696c64e9a7bb53ea93c0b61302e40fd20b504c0fc57141a9c02ec`
+  to `960e047adcc054ab9b6805862bfb1531d03212b814843782fc97034a60bc8b5b`.
+  Unknown input or output bytes fail closed.
+- The v1.4.8 `TaleWorlds.CampaignSystem.dll` setter-preparation patch is pinned
+  from `1f8e33e2ed73e6ec653d7629180afb70649ddc6e5bd1657a802a264efda1c3ae`
+  to `5ab3c3948c3d1cee68e43e7e1d167bd534064ebc94407ad3b150d9ce06ecee02`.
+  It marks all 1,264 concrete setters `NoInlining` so Coop's runtime detours
+  remain stable; no game behavior is replaced.
+- The existing campaign loaded 493 settlements, 2,058 heroes, and 1,545 mobile
+  parties, registered the settlement-distance cache, reached `SERVING`, bound
+  UDP 4200, and sustained repeated pulses with zero service restarts.
+- The existing save autosaved successfully on v1.4.8. Its observed live
+  SHA-256 at 19:25 UTC was
+  `2bbae2ac0e3e0b66a4e94bcc4c484192c51f9a49f5f8d56b45e16e965ee32875`
+  (5,959,371 bytes).
+- The production module chain is the exact approved ten-mod Friend Edition
+  order plus official base modules and `DedicatedServer.Windows`. It contains
+  neither `BirthAndDeath` nor `NavalDLC`.
+- Birth/death lifecycle is base-campaign behavior and remains controlled by the
+  authenticated host configuration. The optional TaleWorlds `BirthAndDeath`
+  module is presentation-only; its v1.4.7 and v1.4.8 descriptors are
+  functionally unchanged and it remains disabled on the headless server.
+- The final client suite contains 851 verified files and passed the full
+  assembly/provider audit. ZIP SHA-256:
+  `d6821bc28d0e3d24f36dd95a29f6ac62c60a0130e4178471a3955291fe6e683a`.
+
+Rendered multi-client play is still required for player-facing smoke
+acceptance. It is not an unresolved code, authority, binary, package, save, or
+server-startup defect and does not require another implementation pass.
 
 ## Evidence reviewed
 

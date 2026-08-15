@@ -831,7 +831,14 @@ internal static class FourberieCompatibilityManifest
             0x060001A2, 0x060002C2, 0x060002C3, 0x060002CB, 0x0600033C, 0x0600033E,
             0x060003EB, 0x0600046D, 0x06000474, 0x06000475, 0x0600047A, 0x0600047C,
             0x0600047E, 0x06000482, 0x06000485, 0x06000499, 0x060004C6, 0x06000512,
-            0x06000523, 0x06000526, 0x06000529, 0x0600052D);
+            0x06000523, 0x06000526, 0x06000529, 0x0600052D,
+            // Criminal menu conditions, score/income composition, and hint builders are reads or
+            // presentation caches. They must resolve against the replicated player view and never
+            // execute on the host's global MainHero/PlayerClan context.
+            0x0600031B, 0x0600031D, 0x0600031E, 0x06000322, 0x06000323, 0x06000329,
+            0x06000341, 0x0600034B, 0x0600034E, 0x0600037B, 0x0600037C, 0x0600037E,
+            0x0600037F, 0x06000384, 0x06000385, 0x06000386, 0x06000387, 0x060003B7,
+            0x060003B9, 0x060003BB, 0x060003C1, 0x060003C3, 0x060007CC, 0x0600080D);
         AddTokens(FourberiePatchKind.FightClubMissionLocal,
             0x0600042C, 0x0600042D, 0x0600042F, 0x06000431, 0x06000434, 0x0600043A,
             0x06000437, 0x060008AC, 0x060008B9);

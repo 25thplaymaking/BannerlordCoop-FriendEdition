@@ -66,6 +66,16 @@ internal enum FourberiePatchKind
     ContractTickReplacement,
     ContractProposalLegacyConsequence,
     InsideMissionOutcome,
+    FightClubOutcome,
+    FightClubMissionLocal,
+    FightClubFame,
+    FightClubAdmission,
+    FightClubEnrollment,
+    FightClubPatronRefusal,
+    FightClubStableOwnership,
+    FightClubStableRecruitment,
+    FightClubMenuRefresh,
+    FightClubPatronPayment,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -79,6 +89,16 @@ internal enum FourberiePatchKind
 
 internal sealed class FourberieMethodSpec
 {
+    public FourberieMethodSpec(int metadataToken, FourberiePatchKind kind)
+    {
+        MetadataToken = metadataToken;
+        Kind = kind;
+        TypeName = string.Empty;
+        MethodName = string.Empty;
+        ReturnTypeName = string.Empty;
+        ParameterTypeNames = Array.Empty<string>();
+    }
+
     public FourberieMethodSpec(
         string typeName,
         string methodName,
@@ -98,11 +118,16 @@ internal sealed class FourberieMethodSpec
     public string ReturnTypeName { get; }
     public FourberiePatchKind Kind { get; }
     public string[] ParameterTypeNames { get; }
+    public int? MetadataToken { get; }
 
-    public string Key => $"{TypeName}::{MethodName}({string.Join(",", ParameterTypeNames)}):{ReturnTypeName}";
+    public string Key => MetadataToken.HasValue
+        ? $"token 0x{MetadataToken.Value:X8}"
+        : $"{TypeName}::{MethodName}({string.Join(",", ParameterTypeNames)}):{ReturnTypeName}";
 
     public MethodInfo Resolve(Assembly assembly)
     {
+        if (MetadataToken.HasValue)
+            return assembly?.ManifestModule.ResolveMethod(MetadataToken.Value) as MethodInfo;
         var type = assembly?.GetType(TypeName, throwOnError: false, ignoreCase: false);
         if (type == null) return null;
 
@@ -327,6 +352,10 @@ internal static class FourberieCompatibilityManifest
         void AddReturning(string type, string method, string returnType, FourberiePatchKind kind,
             params string[] parameters) =>
             methods.Add(new FourberieMethodSpec(type, method, returnType, kind, parameters));
+        void AddTokens(FourberiePatchKind kind, params int[] tokens)
+        {
+            foreach (int token in tokens) methods.Add(new FourberieMethodSpec(token, kind));
+        }
 
         foreach (var behavior in BehaviorTypeNames)
         {
@@ -704,6 +733,38 @@ internal static class FourberieCompatibilityManifest
             FourberiePatchKind.InsideMissionOutcome, "System.Boolean");
         Add("Fourberie.InsideMissionsHelper", "AfterMathsEncounterAlley",
             FourberiePatchKind.InsideMissionOutcome, "System.Boolean");
+        AddReturning("Fourberie.FourbFightClubController", "OnEndMissionRequest",
+            "TaleWorlds.Library.InquiryData", FourberiePatchKind.FightClubOutcome, "System.Boolean&");
+        Add("Fourberie.FourbFightClubBehavior", "PitFightFameLoss",
+            FourberiePatchKind.FightClubFame,
+            "System.Int32", "System.Int32", "System.Int32", "System.String");
+        Add("Fourberie.FourbFightClubBehavior", "PitFightFameGain",
+            FourberiePatchKind.FightClubFame,
+            "System.Int32", "System.Int32", "System.Int32", "System.String", "System.Boolean");
+        AddReturning("Fourberie.FourbFightClubBehavior", "PatronPaycheck", "System.Int32",
+            FourberiePatchKind.FightClubPatronPayment,
+            "TaleWorlds.CampaignSystem.Hero", "System.Int32", "System.Boolean", "System.Boolean&");
+        Add("Fourberie.FourbFightClubBehavior+<>c__DisplayClass18_0", "<PitTrainingStart>b__0",
+            FourberiePatchKind.FightClubAdmission,
+            "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]");
+        Add("Fourberie.FourbFightClubBehavior+<>c__DisplayClass19_0", "<PitFightStart>b__0",
+            FourberiePatchKind.FightClubAdmission,
+            "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]");
+        Add("Fourberie.FourbFightClubBehavior+<>c", "<DialogsPitFight>b__8_1",
+            FourberiePatchKind.FightClubEnrollment);
+        Add("Fourberie.FourbFightClubBehavior+<>c__DisplayClass22_1", "<PatronStatus>b__0",
+            FourberiePatchKind.FightClubPatronRefusal,
+            "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]");
+        Add("Fourberie.FourbFightClubBehavior+<>c__DisplayClass12_0", "<YourStableStatus>b__4",
+            FourberiePatchKind.FightClubStableOwnership);
+        Add("Fourberie.FourbFightClubBehavior+<>c__DisplayClass12_2", "<YourStableStatus>b__2",
+            FourberiePatchKind.FightClubStableOwnership);
+        AddReturning("Fourberie.FourbFightClubBehavior", "RecruitLadsOnDoneClicked", "System.Boolean",
+            FourberiePatchKind.FightClubStableRecruitment,
+            TroopRoster, TroopRoster, TroopRoster, TroopRoster,
+            FlattenedTroopRoster, FlattenedTroopRoster, "System.Boolean", PartyBase, PartyBase);
+        Add("Fourberie.FourbFightClubBehavior", "fb_menu_main_on_init",
+            FourberiePatchKind.FightClubMenuRefresh, MenuCallbackArgs);
 
         // Screen registration is presentation-only. The adapter owns exact model compatibility, so
         // OnGameInitializationFinished keeps only the server-owned hero-dictionary rebuild.
@@ -726,6 +787,44 @@ internal static class FourberieCompatibilityManifest
             "TaleWorlds.CampaignSystem.ExplainedNumber&", "System.Boolean", "System.Boolean");
         Add("Fourberie.FModelHelperFinance", "CalculateClanExpenseFourberie", FourberiePatchKind.FinanceRead,
             "TaleWorlds.CampaignSystem.ExplainedNumber&", "System.Boolean");
+
+        // Exact-token mission surface. These callbacks manipulate only the local Mission, Agent,
+        // controller, navigation, audio, marker, and view-model graph. Persistent commit callbacks
+        // are deliberately absent and have dedicated typed transaction kinds above.
+        AddTokens(FourberiePatchKind.ClientPresentation,
+            0x06000011, 0x06000012, 0x06000034, 0x060001A5, 0x060003DF, 0x060003E7,
+            0x060003E9, 0x06000430, 0x06000433, 0x06000461, 0x06000463, 0x06000465,
+            0x06000466, 0x06000467, 0x06000468, 0x06000469, 0x0600046B, 0x06000470,
+            0x06000471, 0x06000472, 0x060004F9, 0x060004FA, 0x060004FB, 0x060004FC,
+            0x060004FE, 0x060004FF, 0x06000500, 0x06000501, 0x06000502, 0x06000505,
+            0x06000506, 0x06000507, 0x06000508, 0x06000509, 0x0600050A, 0x0600050B,
+            0x0600050D, 0x0600050E, 0x06000513, 0x06000514, 0x06000515, 0x06000516,
+            0x06000517, 0x06000518, 0x06000519, 0x0600051A, 0x0600051B, 0x0600051C,
+            0x0600051D, 0x0600051E, 0x0600051F, 0x06000520, 0x06000521, 0x06000522,
+            0x06000524, 0x06000525, 0x06000527, 0x0600052B, 0x0600052C, 0x0600052F,
+            0x06000530, 0x06000531, 0x06000532, 0x06000533, 0x06000534, 0x06000535,
+            0x06000536, 0x06000537, 0x06000538, 0x06000539, 0x0600053A, 0x0600053B,
+            0x0600053C, 0x0600053D, 0x0600053E, 0x0600053F, 0x06000540, 0x06000541,
+            0x06000542, 0x06000543, 0x06000544, 0x06000545, 0x06000546, 0x06000547,
+            0x06000548, 0x06000549, 0x0600054A, 0x0600054B, 0x0600054C, 0x0600054D,
+            0x0600054E, 0x0600054F, 0x06000550, 0x06000551, 0x06000552, 0x06000553,
+            0x06000554, 0x06000555, 0x06000556, 0x06000557, 0x060008A9, 0x060008AF,
+            0x060008B0, 0x060008C1, 0x060008C2, 0x060008C3, 0x060008C4, 0x06000914,
+            0x06000915, 0x06000916, 0x06000917, 0x06000918, 0x0600091A, 0x0600091B,
+            0x0600091E, 0x0600091F, 0x06000920, 0x06000921, 0x06000922, 0x06000923,
+            0x06000924, 0x06000925, 0x06000926, 0x06000927, 0x06000928, 0x06000929,
+            0x0600092B, 0x0600092C, 0x0600092E, 0x0600092F, 0x06000931, 0x06000933,
+            0x06000935, 0x06000936, 0x06000937, 0x0600093A, 0x0600093C, 0x0600093D);
+        AddTokens(FourberiePatchKind.FightClubMissionLocal,
+            0x0600042C, 0x0600042D, 0x0600042F, 0x06000431, 0x06000434, 0x0600043A,
+            0x06000437, 0x060008AC, 0x060008B9);
+        AddTokens(FourberiePatchKind.ClientPresentation,
+            0x060003F2, 0x060003F7, 0x060003F9, 0x06000400, 0x06000401, 0x06000403,
+            0x06000405, 0x06000408, 0x0600040A, 0x0600040D, 0x06000410, 0x06000413,
+            0x06000414, 0x06000415, 0x06000416, 0x06000419, 0x0600041A, 0x0600041C,
+            0x0600041D, 0x0600041F, 0x06000420, 0x06000426, 0x06000428, 0x0600042A,
+            0x0600042B, 0x060008A4);
+        AddTokens(FourberiePatchKind.SchemeOwnedReplacement, 0x060008B3, 0x060008B5);
 
         return methods;
     }

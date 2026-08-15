@@ -8,6 +8,7 @@ using Helpers;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using TaleWorlds.CampaignSystem;
@@ -167,6 +168,14 @@ internal sealed class FourberieOperationExecutor
                     actorItems = CaptureAllItems(actorParty.ItemRoster);
                     ApplyPrisonerEnslavement(actor, actorParty, request);
                     break;
+                case FourberieOperation.RecruitFightClubStable:
+                    actorCounts = CaptureCounts(actorParty.MemberRoster, request.Troops);
+                    actorPrisonCounts = CaptureCounts(actorParty.PrisonRoster, request.Troops);
+                    ApplyFightClubStableRecruitment(actorParty, request);
+                    break;
+                case FourberieOperation.RefreshFightClubMenu:
+                    ApplyFightClubMenuRefresh(actor, actorParty, request.SettlementId);
+                    break;
                 case FourberieOperation.TransferSafehouseItems:
                     actorItems = CaptureAllItems(actorParty.ItemRoster);
                     safehouseItems = CaptureAllItems(previousCrimeBase?.ItemRoster);
@@ -265,6 +274,15 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.CompleteLarcenyFight:
                 case FourberieOperation.CompleteAlleyFight:
                     ApplyInsideMissionOutcome(actor, actorParty, request);
+                    break;
+                case FourberieOperation.CompleteFightClubMatch:
+                    ApplyFightClubOutcome(actor, actorParty, request);
+                    break;
+                case FourberieOperation.StartFightClubMatch:
+                case FourberieOperation.EnrollFightClub:
+                case FourberieOperation.RefuteFightClubPatron:
+                case FourberieOperation.OwnFightClubStable:
+                    ApplyFightClubLifecycle(actor, actorParty, request);
                     break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
@@ -366,6 +384,230 @@ internal sealed class FourberieOperationExecutor
         if (string.IsNullOrEmpty(stableId)) return null;
         return objectManager.TryGetObject(stableId, out Hero hero) ? hero : Hero.Find(stableId);
     }
+
+    private void ApplyFightClubOutcome(
+        Hero actor,
+        MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        if (!TryResolveCurrentSettlement(actorParty, request.SettlementId, out Settlement settlement) ||
+            settlement.Town == null)
+            throw new InvalidOperationException("the fight-club town is no longer current");
+        FourberieFightClubResult result = FourberieFightClubResultCodec.Decode(request.IntValue);
+        Hero patron = string.IsNullOrEmpty(request.TargetId) ? null : ResolveHero(request.TargetId);
+        IDictionary crime = GetDictionary("_crimeValue");
+        IDictionary heroes = GetDictionary("_stringHeroIdDico");
+        if (ReadInt(crime, 900) != result.FightType ||
+            result.PatronTrial && ReadInt(crime, 951) != result.TrialFightType)
+            throw new InvalidOperationException("the fight selection changed before the result arrived");
+        using (new BarterPlayerContext(actor, actorParty))
+        using (new AllowedThread())
+            FourberieFightClubAuthority.Commit(
+                result,
+                actor,
+                settlement,
+                patron,
+                crime,
+                heroes,
+                assembly);
+    }
+
+    private void ApplyFightClubLifecycle(
+        Hero actor,
+        MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        if (!TryResolveCurrentSettlement(actorParty, request.SettlementId, out Settlement settlement) ||
+            settlement.Town == null)
+            throw new InvalidOperationException("the fight-club town is no longer current");
+        IDictionary crime = GetDictionary("_crimeValue");
+        IDictionary heroes = GetDictionary("_stringHeroIdDico");
+        IDictionary times = GetDictionary("_campaignTimeDictio");
+        using (new BarterPlayerContext(actor, actorParty))
+        using (new AllowedThread())
+        {
+            switch (request.Operation)
+            {
+                case FourberieOperation.EnrollFightClub:
+                    if (!crime.Contains(950))
+                        throw new InvalidOperationException("the player has not qualified for the fight club");
+                    Hero newProtector = ResolveHero(request.TargetId);
+                    if (newProtector == null || newProtector.IsHumanPlayerCharacter)
+                        throw new InvalidOperationException("the selected stable protector is invalid");
+                    if (heroes.Contains("pitProtector") &&
+                        ResolveHero(heroes["pitProtector"] as string) is Hero oldProtector &&
+                        oldProtector != newProtector && !oldProtector.IsHumanPlayerCharacter)
+                        ChangeRelationAction.ApplyPlayerRelation(oldProtector, -(5 + FightClubTier(ReadInt(crime, 950))), true, true);
+                    heroes["pitProtector"] = newProtector.StringId;
+                    break;
+                case FourberieOperation.OwnFightClubStable:
+                    if (!crime.Contains(950)) crime[950] = 500;
+                    if (heroes.Contains("pitProtector") &&
+                        ResolveHero(heroes["pitProtector"] as string) is Hero previousProtector &&
+                        !previousProtector.IsHumanPlayerCharacter)
+                    {
+                        if (!string.Equals(request.TargetId, previousProtector.StringId, StringComparison.Ordinal))
+                            throw new InvalidOperationException("the stable protector changed before ownership transfer");
+                        ChangeRelationAction.ApplyPlayerRelation(previousProtector, -(5 + FightClubTier(ReadInt(crime, 950))), true, true);
+                    }
+                    else if (!string.IsNullOrEmpty(request.TargetId))
+                        throw new InvalidOperationException("the stable ownership target is no longer canonical");
+                    heroes["pitProtector"] = actor.StringId;
+                    break;
+                case FourberieOperation.RefuteFightClubPatron:
+                    if (!heroes.Contains("pitPatron") ||
+                        !string.Equals(heroes["pitPatron"] as string, request.TargetId, StringComparison.Ordinal) ||
+                        ResolveHero(request.TargetId) is not Hero patron)
+                        throw new InvalidOperationException("the selected patron is no longer canonical");
+                    ChangeRelationAction.ApplyPlayerRelation(patron, -10, true, true);
+                    heroes.Remove("pitPatron");
+                    break;
+                case FourberieOperation.StartFightClubMatch:
+                    if (!crime.Contains(950))
+                        throw new InvalidOperationException("the player is not enrolled in the fight club");
+                    FourberieFightClubResult result = FourberieFightClubResultCodec.Decode(request.IntValue);
+                    crime[900] = result.FightType;
+                    if (!result.Training && !result.GangTrial && !result.PatronTrial && crime.Contains(901))
+                    {
+                        string remaining = Convert.ToString(crime[901], CultureInfo.InvariantCulture)
+                            .Replace(result.FightType.ToString(CultureInfo.InvariantCulture), string.Empty);
+                        crime[901] = string.IsNullOrEmpty(remaining)
+                            ? 0
+                            : int.Parse(remaining, CultureInfo.InvariantCulture);
+                    }
+                    if (result.GangTrial && result.FameDelta == 1)
+                    {
+                        MethodInfo traitXp = RequiredMethod(
+                            "Fourberie.VanillaHelperFourb",
+                            "AddPlayerTraitXPAndLogEntry",
+                            4);
+                        object note = Enum.ToObject(traitXp.GetParameters()[2].ParameterType, 0);
+                        traitXp.Invoke(null, new object[] { DefaultTraits.Valor, 10, note, actor });
+                    }
+                    if (result.PatronTrial)
+                    {
+                        if (settlement.Owner == null ||
+                            !string.Equals(request.TargetId, settlement.Owner.StringId, StringComparison.Ordinal))
+                            throw new InvalidOperationException("the patron trial owner changed before admission");
+                        crime[951] = result.TrialFightType;
+                        times[951] = CampaignTime.Now;
+                    }
+                    else crime.Remove(951);
+                    break;
+            }
+        }
+    }
+
+    private void ApplyFightClubStableRecruitment(
+        MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        if (!TryResolveCurrentSettlement(actorParty, request.SettlementId, out Settlement settlement) ||
+            settlement.Town == null)
+            throw new InvalidOperationException("the fight-club town is no longer current");
+        IDictionary crime = GetDictionary("_crimeValue");
+        IDictionary heroes = GetDictionary("_stringHeroIdDico");
+        if (!heroes.Contains("pitProtector") ||
+            ResolveHero(heroes["pitProtector"] as string) is not Hero protector ||
+            !protector.IsHumanPlayerCharacter)
+            throw new InvalidOperationException("the player does not own the fight-club stable");
+
+        var selected = ResolveTroops(request.Troops).ToArray();
+        int total = selected.Sum(value => value.Count);
+        int current = ReadInt(crime, 920);
+        if (total <= 0 || current + total > 50)
+            throw new InvalidOperationException("the stable fighter cap changed before recruitment");
+        foreach ((CharacterObject troop, int count) in selected)
+        {
+            if (troop.IsHero || troop.IsNotTransferableInHideouts)
+                throw new InvalidOperationException("a selected stable fighter is not transferable");
+            if (actorParty.MemberRoster.GetTroopCount(troop) + actorParty.PrisonRoster.GetTroopCount(troop) < count)
+                throw new InvalidOperationException("the selected fighter roster changed before recruitment");
+        }
+
+        FourberieReplicationGuard.EnsureEnabled();
+        foreach ((CharacterObject troop, int count) in selected)
+        {
+            int members = Math.Min(count, actorParty.MemberRoster.GetTroopCount(troop));
+            if (members > 0)
+                actorParty.MemberRoster.AddToCounts(troop, -members, false, 0, 0, true, -1);
+            int prisoners = count - members;
+            if (prisoners > 0)
+                actorParty.PrisonRoster.AddToCounts(troop, -prisoners, false, 0, 0, true, -1);
+        }
+        crime[920] = current + total;
+    }
+
+    private void ApplyFightClubMenuRefresh(Hero actor, MobileParty actorParty, string settlementId)
+    {
+        if (!TryResolveCurrentSettlement(actorParty, settlementId, out Settlement settlement) || settlement.Town == null)
+            throw new InvalidOperationException("the fight-club town is no longer current");
+        IDictionary crime = GetDictionary("_crimeValue");
+        IDictionary heroes = GetDictionary("_stringHeroIdDico");
+        IDictionary times = GetDictionary("_campaignTimeDictio");
+        MethodInfo fightDay = RequiredMethod("Fourberie.FourbFightClubBehavior", "GetPitFightDay", 1);
+        object[] dayArguments = { false };
+        fightDay.Invoke(null, dayArguments);
+        if (dayArguments[0] is not bool isFightNow || !isFightNow) return;
+
+        Hero protector = heroes.Contains("pitProtector") ? ResolveHero(heroes["pitProtector"] as string) : null;
+        Hero guest = heroes.Contains("pitGuest") ? ResolveHero(heroes["pitGuest"] as string) : null;
+        if (ReadInt(crime, 901) == 0 && crime.Contains(903))
+        {
+            int performance = ReadInt(crime, 903);
+            if (performance > 0)
+            {
+                GainRenownAction.Apply(actor, performance, false);
+                if (protector != null && !protector.IsHumanPlayerCharacter)
+                {
+                    ChangeRelationAction.ApplyPlayerRelation(protector, performance, true, true);
+                    protector.AddPower(performance);
+                }
+                if (performance > 1)
+                {
+                    Hero pitOwner = AccessTools.Method(assembly.GetType(BehaviorTypeName, true, false), "GangLeaderPowerInSettlement")?
+                        .Invoke(null, new object[] { settlement }) as Hero;
+                    if (pitOwner != null && pitOwner != protector && !IsFourberieEnemy(pitOwner))
+                        ChangeRelationAction.ApplyPlayerRelation(pitOwner, 2, true, true);
+                    if (guest != null && guest != protector && !IsFourberieEnemy(guest))
+                        ChangeRelationAction.ApplyPlayerRelation(guest, 2, true, true);
+                }
+                if (performance > 3)
+                    RequiredMethod(BehaviorTypeName, "XpFornoMercyNoHonorinParty", 3)
+                        .Invoke(null, new object[] { 0f, actorParty.MemberRoster, false });
+            }
+            crime.Remove(903);
+        }
+
+        float elapsedHours = times.Contains(902) && times[902] is CampaignTime lastFight
+            ? lastFight.ElapsedHoursUntilNow
+            : float.PositiveInfinity;
+        if (elapsedHours <= 8f) return;
+        if (protector == null || protector.HomeSettlement?.Culture == settlement.Culture)
+        {
+            Settlement[] candidates = Campaign.Current.Settlements
+                .Where(candidate => candidate.IsTown && candidate != settlement && candidate.Culture != settlement.Culture)
+                .ToArray();
+            if (candidates.Length == 0)
+                throw new InvalidOperationException("no eligible guest fight-club town exists");
+            Settlement candidate = candidates[MBRandom.RandomInt(candidates.Length)];
+            guest = AccessTools.Method(assembly.GetType(BehaviorTypeName, true, false), "GangLeaderPowerInSettlement")?
+                .Invoke(null, new object[] { candidate }) as Hero;
+        }
+        else guest = protector;
+        if (guest == null)
+            throw new InvalidOperationException("the nightly guest stable could not be resolved");
+        crime[901] = 1435;
+        crime[903] = 0;
+        heroes["pitGuest"] = guest.StringId;
+        times[902] = CampaignTime.Now;
+    }
+
+    private bool IsFourberieEnemy(Hero hero) =>
+        Convert.ToBoolean(RequiredMethod("Fourberie.FourbValueHelper", "FourbIsEnemy", 1)
+            .Invoke(null, new object[] { hero }));
+
+    private static int FightClubTier(int fame) => fame >= 4000 ? 4 : fame >= 2500 ? 3 : fame >= 1000 ? 2 : 1;
 
     private void ApplyPrisonerEnslavement(
         Hero actor,

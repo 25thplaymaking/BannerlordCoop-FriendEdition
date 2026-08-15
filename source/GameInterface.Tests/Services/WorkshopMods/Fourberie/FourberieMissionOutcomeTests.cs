@@ -72,6 +72,19 @@ public sealed class FourberieMissionOutcomeTests
             FourberieInsideMissionResultCodec.Decode(7).Outcome);
     }
 
+    [Fact]
+    public void ExactMissionSurface_IsClientLocalAndExcludesPersistentAftermaths()
+    {
+        FourberieMethodSpec[] local = FourberieCompatibilityManifest.Methods
+            .Where(spec => spec.MetadataToken.HasValue && spec.Kind == FourberiePatchKind.ClientPresentation)
+            .ToArray();
+        Assert.True(local.Length >= 120);
+        Assert.Equal(local.Length, local.Select(spec => spec.MetadataToken).Distinct().Count());
+        Assert.DoesNotContain(local, spec => spec.MetadataToken is
+            0x060005ED or 0x060005EF or 0x060005F1 or 0x060005F3 or
+            0x060005F5 or 0x060005F7 or 0x060005F9 or 0x060005FB);
+    }
+
     private static NetworkRequestFourberieOperation Request(
         FourberieOperation operation,
         string settlement,

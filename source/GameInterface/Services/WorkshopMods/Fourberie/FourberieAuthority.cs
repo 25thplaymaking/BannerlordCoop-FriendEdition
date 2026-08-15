@@ -8,9 +8,11 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.Inventory;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Roster;
@@ -314,6 +316,12 @@ internal static class FourberieAuthorityPatches
     private static Settlement pendingTerritoryAbandonment;
     private static Settlement banditRecruitmentSettlement;
     private static int banditRecruitmentMaximum;
+    private sealed class FightClubBaseline { public int Fame; }
+    private sealed class FightClubAdmission { public bool RandomWeapon; }
+    private static readonly ConditionalWeakTable<object, FightClubBaseline> FightClubBaselines =
+        new ConditionalWeakTable<object, FightClubBaseline>();
+    private static readonly ConditionalWeakTable<object, FightClubAdmission> FightClubAdmissions =
+        new ConditionalWeakTable<object, FightClubAdmission>();
 
     public static bool ServerOnlyPrefix() => ModInformation.IsServer;
 
@@ -919,6 +927,242 @@ internal static class FourberieAuthorityPatches
         _ => null,
     };
 
+    public static bool FightClubOutcomePrefix(
+        object __instance,
+        ref InquiryData __result,
+        ref bool canPlayerLeave)
+    {
+        if (!ModInformation.IsClient || __instance == null) return false;
+        Type type = __instance.GetType();
+        if (!(AccessTools.Field(type, "_fightWonCheck")?.GetValue(__instance) is bool won) || !won)
+            return true;
+
+        int fightType = ReadIntField(type, __instance, "_fightType");
+        int round = Math.Max(1, ReadIntField(type, __instance, "_round"));
+        int knockouts = Math.Max(0, ReadIntField(type, __instance, "_KoPoints"));
+        int trialFightType = ReadIntField(type, __instance, "_fightTypeTrialPatron");
+        bool training = ReadBoolField(type, "_isTraining");
+        bool gangTrial = ReadBoolField(type, "_isGangTrial");
+        bool patronTrial = ReadBoolField(type, "_isPatronTrial");
+        Type behavior = AccessTools.TypeByName("Fourberie.FourbFightClubBehavior");
+        bool handToHand = behavior != null &&
+                          AccessTools.Field(behavior, "_weaponType")?.GetValue(null) is int weapon && weapon == 1;
+        int fame = ReadCrimeValue(950);
+        int baseline = FightClubBaselines.TryGetValue(__instance, out FightClubBaseline captured)
+            ? captured.Fame
+            : fame;
+        int fameDelta = Math.Max(-1024, Math.Min(1023, fame - baseline));
+        var result = new FourberieFightClubResult(
+            fightType, round, knockouts, trialFightType,
+            training, gangTrial, patronTrial, handToHand, fameDelta);
+        int encoded = FourberieFightClubResultCodec.Encode(result);
+        Settlement settlement = Settlement.CurrentSettlement;
+        Hero patron = MappedHero("pitPatron");
+        bool submitted = FourberieFightClubResultCodec.IsValid(encoded) && settlement != null &&
+                         FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+                             FourberieOperation.CompleteFightClubMatch,
+                             settlement,
+                             patron,
+                             null,
+                             encoded,
+                             Array.Empty<FourberieLocalTroopSelection>())) == true;
+        if (!submitted) FourberieSafehouseTransferContext.ShowUnavailable();
+        AccessTools.Field(type, "_fightWonCheck")?.SetValue(__instance, false);
+        canPlayerLeave = true;
+        __result = null;
+        try { Mission.Current?.EndMission(); }
+        catch { }
+        return false;
+    }
+
+    public static bool FightClubMissionLocalPrefix(object __instance, MethodBase __originalMethod)
+    {
+        if (!ModInformation.IsClient) return false;
+        if (__instance != null && string.Equals(__originalMethod?.Name, "AfterStart", StringComparison.Ordinal))
+        {
+            FightClubBaselines.Remove(__instance);
+            FightClubBaselines.Add(__instance, new FightClubBaseline { Fame = ReadCrimeValue(950) });
+        }
+        return true;
+    }
+
+    public static bool FightClubFamePrefix() =>
+        ModInformation.IsClient || (ModInformation.IsServer && AllowedThread.IsThisThreadAllowed());
+
+    public static bool FightClubPatronPaymentPrefix(ref bool applyPayment)
+    {
+        if (ModInformation.IsClient)
+        {
+            applyPayment = false;
+            return true;
+        }
+        return ModInformation.IsServer && AllowedThread.IsThisThreadAllowed();
+    }
+
+    public static bool FightClubAdmissionPrefix(object __instance, object[] __args)
+    {
+        if (!ModInformation.IsClient) return false;
+        if (__instance != null)
+        {
+            FightClubAdmissions.Remove(__instance);
+            FightClubAdmissions.Add(__instance, new FightClubAdmission
+            {
+                RandomWeapon = string.Equals(SelectedInquiryIdentifier<string>(__args), "10", StringComparison.Ordinal),
+            });
+        }
+        return true;
+    }
+
+    public static void FightClubAdmissionPostfix(object __instance)
+    {
+        if (!ModInformation.IsClient) return;
+        Settlement settlement = Settlement.CurrentSettlement;
+        if (settlement == null) return;
+
+        int fightType = ReadCrimeValue(900);
+        int trialFightType = ReadCrimeValue(951);
+        bool training = ReadBoolField(AccessTools.TypeByName("Fourberie.FourbFightClubController"), "_isTraining");
+        bool gangTrial = ReadBoolField(AccessTools.TypeByName("Fourberie.FourbFightClubController"), "_isGangTrial");
+        bool patronTrial = ReadBoolField(AccessTools.TypeByName("Fourberie.FourbFightClubController"), "_isPatronTrial");
+        Type behavior = AccessTools.TypeByName("Fourberie.FourbFightClubBehavior");
+        bool handToHand = behavior != null &&
+                          AccessTools.Field(behavior, "_weaponType")?.GetValue(null) is int weapon && weapon == 1;
+        bool randomWeapon = __instance != null &&
+                            FightClubAdmissions.TryGetValue(__instance, out FightClubAdmission admission) &&
+                            admission.RandomWeapon;
+        var result = new FourberieFightClubResult(
+            fightType, 1, 0, trialFightType,
+            training, gangTrial, patronTrial, handToHand,
+            randomWeapon ? 1 : 0);
+        Hero target = patronTrial ? settlement.Owner : MappedHero("pitPatron");
+        bool submitted = FourberieFightClubResultCodec.IsValid(FourberieFightClubResultCodec.Encode(result)) &&
+                         FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+                             FourberieOperation.StartFightClubMatch,
+                             settlement,
+                             target,
+                             null,
+                             FourberieFightClubResultCodec.Encode(result),
+                             Array.Empty<FourberieLocalTroopSelection>())) == true;
+        if (!submitted) FourberieSafehouseTransferContext.ShowUnavailable();
+    }
+
+    public static bool FightClubEnrollmentPrefix()
+    {
+        if (ModInformation.IsClient)
+        {
+            Settlement settlement = Settlement.CurrentSettlement;
+            Hero protector = Hero.OneToOneConversationHero;
+            bool submitted = settlement != null && protector != null &&
+                             FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+                                 FourberieOperation.EnrollFightClub,
+                                 settlement,
+                                 protector,
+                                 null,
+                                 0,
+                                 Array.Empty<FourberieLocalTroopSelection>())) == true;
+            if (!submitted) FourberieSafehouseTransferContext.ShowUnavailable();
+        }
+        return false;
+    }
+
+    public static bool FightClubPatronRefusalPrefix(object[] __args)
+    {
+        if (ModInformation.IsClient)
+        {
+            InformationManager.HideInquiry();
+            if (string.Equals(SelectedInquiryIdentifier<string>(__args), "5", StringComparison.Ordinal))
+            {
+                Settlement settlement = Settlement.CurrentSettlement;
+                Hero patron = MappedHero("pitPatron");
+                bool submitted = settlement != null && patron != null &&
+                                 FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+                                     FourberieOperation.RefuteFightClubPatron,
+                                     settlement,
+                                     patron,
+                                     null,
+                                     0,
+                                     Array.Empty<FourberieLocalTroopSelection>())) == true;
+                if (!submitted) FourberieSafehouseTransferContext.ShowUnavailable();
+                else GameMenu.SwitchToMenu("town_fightclub");
+            }
+        }
+        return false;
+    }
+
+    public static bool FightClubStableOwnershipPrefix()
+    {
+        if (ModInformation.IsClient)
+        {
+            Settlement settlement = Settlement.CurrentSettlement;
+            Hero protector = MappedHero("pitProtector");
+            bool submitted = settlement != null &&
+                             FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+                                 FourberieOperation.OwnFightClubStable,
+                                 settlement,
+                                 protector?.IsHumanPlayerCharacter == false ? protector : null,
+                                 null,
+                                 0,
+                                 Array.Empty<FourberieLocalTroopSelection>())) == true;
+            if (!submitted) FourberieSafehouseTransferContext.ShowUnavailable();
+        }
+        return false;
+    }
+
+    public static bool FightClubStableRecruitmentPrefix(
+        TroopRoster leftMemberRoster,
+        TroopRoster leftPrisonRoster,
+        ref bool __result)
+    {
+        if (!ModInformation.IsClient) return true;
+        Settlement settlement = Settlement.CurrentSettlement;
+        FourberieLocalTroopSelection[] selected = Selections(leftMemberRoster, leftPrisonRoster);
+        bool submitted = settlement != null && selected.Length > 0 &&
+                         FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+                             FourberieOperation.RecruitFightClubStable,
+                             settlement,
+                             null,
+                             null,
+                             0,
+                             selected)) == true;
+        if (!submitted) FourberieSafehouseTransferContext.ShowUnavailable();
+        FourberiePartyCommitSuppression.Request();
+        __result = submitted;
+        return false;
+    }
+
+    public static bool FightClubMenuRefreshPrefix()
+    {
+        if (!ModInformation.IsClient) return false;
+        Settlement settlement = Settlement.CurrentSettlement;
+        if (settlement != null)
+            SubmitSettlement(FourberieOperation.RefreshFightClubMenu, settlement);
+        return true;
+    }
+
+    private static int ReadCrimeValue(int key)
+    {
+        Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
+        IDictionary crime = behavior == null
+            ? null
+            : AccessTools.Field(behavior, "_crimeValue")?.GetValue(null) as IDictionary;
+        return crime?.Contains(key) == true ? Convert.ToInt32(crime[key]) : 0;
+    }
+
+    private static int ReadIntField(Type type, object instance, string name) =>
+        AccessTools.Field(type, name)?.GetValue(instance) is int value ? value : 0;
+
+    private static bool ReadBoolField(Type type, string name) =>
+        AccessTools.Field(type, name)?.GetValue(null) is bool value && value;
+
+    private static Hero MappedHero(string key)
+    {
+        Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
+        IDictionary heroes = behavior == null
+            ? null
+            : AccessTools.Field(behavior, "_stringHeroIdDico")?.GetValue(null) as IDictionary;
+        return heroes?.Contains(key) == true ? Hero.Find(heroes[key] as string) : null;
+    }
+
     internal static FourberieOperation SchemeLifecycleOperation(int slot)
     {
         Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
@@ -1185,6 +1429,14 @@ internal static class FourberieAuthorityPatches
         }
         return selected.ToArray();
     }
+
+    private static FourberieLocalTroopSelection[] Selections(params TroopRoster[] rosters) =>
+        (rosters ?? Array.Empty<TroopRoster>())
+        .Where(roster => roster != null)
+        .SelectMany(Selections)
+        .GroupBy(selection => selection.Troop)
+        .Select(group => new FourberieLocalTroopSelection(group.Key, group.Sum(selection => selection.Count)))
+        .ToArray();
 
     private static FourberieLocalTroopSelection[] Difference(TroopRoster baseline, TroopRoster remaining)
     {

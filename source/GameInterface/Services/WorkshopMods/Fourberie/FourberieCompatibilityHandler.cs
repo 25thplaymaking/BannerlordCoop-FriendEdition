@@ -282,6 +282,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                             AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.ClientCrimeRoomReadPostfix)),
                         FourberiePatchKind.ClientSchemeFilter =>
                             AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.ClientSchemeFilterPostfix)),
+                        FourberiePatchKind.FightClubAdmission =>
+                            AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.FightClubAdmissionPostfix)),
                         _ => null,
                     };
                     return (Original: pair.Value, Prefix: prefix, Postfix: postfix);
@@ -484,6 +486,36 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                 break;
             case FourberiePatchKind.InsideMissionOutcome:
                 method = nameof(FourberieAuthorityPatches.InsideMissionOutcomePrefix);
+                break;
+            case FourberiePatchKind.FightClubOutcome:
+                method = nameof(FourberieAuthorityPatches.FightClubOutcomePrefix);
+                break;
+            case FourberiePatchKind.FightClubMissionLocal:
+                method = nameof(FourberieAuthorityPatches.FightClubMissionLocalPrefix);
+                break;
+            case FourberiePatchKind.FightClubFame:
+                method = nameof(FourberieAuthorityPatches.FightClubFamePrefix);
+                break;
+            case FourberiePatchKind.FightClubAdmission:
+                method = nameof(FourberieAuthorityPatches.FightClubAdmissionPrefix);
+                break;
+            case FourberiePatchKind.FightClubEnrollment:
+                method = nameof(FourberieAuthorityPatches.FightClubEnrollmentPrefix);
+                break;
+            case FourberiePatchKind.FightClubPatronRefusal:
+                method = nameof(FourberieAuthorityPatches.FightClubPatronRefusalPrefix);
+                break;
+            case FourberiePatchKind.FightClubStableOwnership:
+                method = nameof(FourberieAuthorityPatches.FightClubStableOwnershipPrefix);
+                break;
+            case FourberiePatchKind.FightClubStableRecruitment:
+                method = nameof(FourberieAuthorityPatches.FightClubStableRecruitmentPrefix);
+                break;
+            case FourberiePatchKind.FightClubMenuRefresh:
+                method = nameof(FourberieAuthorityPatches.FightClubMenuRefreshPrefix);
+                break;
+            case FourberiePatchKind.FightClubPatronPayment:
+                method = nameof(FourberieAuthorityPatches.FightClubPatronPaymentPrefix);
                 break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);

@@ -38,6 +38,12 @@ public sealed class FourberieManifestTests
 
         foreach (FourberieMethodSpec spec in FourberieCompatibilityManifest.Methods)
         {
+            if (spec.MetadataToken.HasValue)
+            {
+                Assert.Contains(assembly.GetProperty("methods").EnumerateArray(), method =>
+                    Convert.ToInt32(method.GetProperty("metadataToken").GetString(), 16) == spec.MetadataToken.Value);
+                continue;
+            }
             string requestedShape =
                 $"{spec.TypeName}::{spec.MethodName}({string.Join(",", spec.ParameterTypeNames)}):{spec.ReturnTypeName}";
             Assert.True(pinnedShapes.Contains(requestedShape),

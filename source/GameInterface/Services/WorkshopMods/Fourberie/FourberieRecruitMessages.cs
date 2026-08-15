@@ -64,6 +64,13 @@ internal enum FourberieOperation
     CompleteTavernBrawl = 53,
     CompleteLarcenyFight = 54,
     CompleteAlleyFight = 55,
+    CompleteFightClubMatch = 56,
+    StartFightClubMatch = 57,
+    EnrollFightClub = 58,
+    RefuteFightClubPatron = 59,
+    OwnFightClubStable = 60,
+    RecruitFightClubStable = 61,
+    RefreshFightClubMenu = 62,
 }
 
 internal enum FourberieOperationStatus
@@ -261,7 +268,10 @@ internal static class FourberieOperationProtocol
             !IsStableId(request.SettlementId, allowEmpty: true) ||
             !IsStableId(request.TargetId, allowEmpty: true) || request.IntValue < 0 ||
             !IsStableId(request.SecondaryTargetId, allowEmpty: true) ||
-            (request.Operation != FourberieOperation.SettleClanGrudge && request.IntValue > MaxSelectedTroops) ||
+            (request.Operation != FourberieOperation.SettleClanGrudge &&
+             request.Operation != FourberieOperation.CompleteFightClubMatch &&
+             request.Operation != FourberieOperation.StartFightClubMatch &&
+             request.IntValue > MaxSelectedTroops) ||
             request.Troops.Length > MaxTroopSelections || request.Items.Length > MaxItemSelections ||
             (request.Operation != FourberieOperation.TransferSafehouseItems && request.Items.Length != 0))
             return false;
@@ -383,6 +393,32 @@ internal static class FourberieOperationProtocol
                 FourberieOperation.CompleteAlleyFight =>
                 !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
                 request.IntValue >= 1 && request.IntValue <= 6 && request.Troops.Length == 0,
+            FourberieOperation.CompleteFightClubMatch =>
+                !string.IsNullOrEmpty(request.SettlementId) &&
+                string.IsNullOrEmpty(request.SecondaryTargetId) && request.Troops.Length == 0 &&
+                FourberieFightClubResultCodec.IsValid(request.IntValue),
+            FourberieOperation.StartFightClubMatch =>
+                !string.IsNullOrEmpty(request.SettlementId) &&
+                string.IsNullOrEmpty(request.SecondaryTargetId) && request.Troops.Length == 0 &&
+                FourberieFightClubResultCodec.IsValid(request.IntValue),
+            FourberieOperation.EnrollFightClub =>
+                !string.IsNullOrEmpty(request.SettlementId) && !string.IsNullOrEmpty(request.TargetId) &&
+                string.IsNullOrEmpty(request.SecondaryTargetId) &&
+                request.IntValue == 0 && request.Troops.Length == 0,
+            FourberieOperation.OwnFightClubStable =>
+                !string.IsNullOrEmpty(request.SettlementId) &&
+                string.IsNullOrEmpty(request.SecondaryTargetId) &&
+                request.IntValue == 0 && request.Troops.Length == 0,
+            FourberieOperation.RefuteFightClubPatron =>
+                !string.IsNullOrEmpty(request.SettlementId) && !string.IsNullOrEmpty(request.TargetId) &&
+                string.IsNullOrEmpty(request.SecondaryTargetId) && request.IntValue == 0 &&
+                request.Troops.Length == 0,
+            FourberieOperation.RecruitFightClubStable =>
+                !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
+                request.IntValue == 0 && request.Troops.Length > 0 && selected <= 50,
+            FourberieOperation.RefreshFightClubMenu =>
+                !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
+                request.IntValue == 0 && request.Troops.Length == 0,
             _ => false,
         };
     }

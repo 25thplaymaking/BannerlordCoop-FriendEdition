@@ -8,6 +8,7 @@ internal interface IPlayerSettlementPatchRuntime
     void NotifyFeatureBlocked(string method);
     void AddBehavior(object campaignGameStarter);
     void ValidateObjectRegistration(bool isSavedCampaign);
+    bool TrySubmitConstruction(object owner, MethodBase original, object[] arguments);
 }
 
 internal static class PlayerSettlementPatchRuntime
@@ -53,6 +54,21 @@ internal static class PlayerSettlementAuthorityPatches
     internal static bool ServerLifecyclePrefix() => ModInformation.IsServer;
     internal static bool RoleLifecyclePrefix() => true;
     internal static bool ClientPresentationPrefix() => ModInformation.IsClient;
+
+    internal static bool ConstructionCommitPrefix(
+        object __instance,
+        MethodBase __originalMethod,
+        object[] __args)
+    {
+        if (ModInformation.IsServer) return true;
+        var runtime = PlayerSettlementPatchRuntime.Current ??
+            throw new System.InvalidOperationException(
+                "Player Settlement compatibility runtime is unavailable during construction submission");
+        if (!runtime.TrySubmitConstruction(__instance, __originalMethod, __args))
+            throw new System.InvalidOperationException(
+                "Player Settlement construction intent could not be submitted safely");
+        return false;
+    }
 
     internal static bool BlockedPrefix(MethodBase __originalMethod)
     {

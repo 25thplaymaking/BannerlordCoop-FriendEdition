@@ -4,6 +4,8 @@ using Common.Messaging;
 using Common.Network;
 using GameInterface.Registry.Messages;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.Players;
+using GameInterface.Services.Barters;
 using HarmonyLib;
 using LiteNetLib;
 using Serilog;
@@ -15,6 +17,7 @@ using System.Linq;
 using System.Reflection;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Settlements;
+using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.Library;
 
 namespace GameInterface.Services.WorkshopMods.PlayerSettlement;
@@ -34,9 +37,13 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
     private readonly IMessageBroker messageBroker;
     private readonly INetwork network;
     private readonly IObjectManager objectManager;
+    private readonly IPlayerManager playerManager;
     private readonly Harmony adapterHarmony;
     private readonly HashSet<string> notifiedMethods = new HashSet<string>(StringComparer.Ordinal);
     private readonly PlayerSettlementRevisionGate revisionGate = new PlayerSettlementRevisionGate();
+    private readonly Dictionary<NetPeer, Dictionary<long, (string Key, NetworkPlayerSettlementConstructionResult Result)>> constructionLedger =
+        new Dictionary<NetPeer, Dictionary<long, (string, NetworkPlayerSettlementConstructionResult)>>();
+    private readonly HashSet<long> pendingConstructionRequests = new HashSet<long>();
 
     private Assembly assembly;
     private Type behaviorType;
@@ -47,16 +54,20 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
     private long serverRevision;
     private bool compatible;
     private bool objectRegistrationValidated;
+    private long nextConstructionRequestId;
+    private PlayerSettlementConstructionBridge constructionBridge;
 
     public PlayerSettlementCompatibilityHandler(
         IMessageBroker messageBroker,
         INetwork network,
         IObjectManager objectManager,
+        IPlayerManager playerManager,
         Harmony harmony)
     {
         this.messageBroker = messageBroker;
         this.network = network;
         this.objectManager = objectManager;
+        this.playerManager = playerManager;
         if (harmony == null) throw new ArgumentNullException(nameof(harmony));
         adapterHarmony = new Harmony(PlayerSettlementHarmonyIsolation.AdapterHarmonyOwner);
 
@@ -66,6 +77,8 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         messageBroker.Subscribe<AllGameObjectsRegistered>(HandleAllGameObjectsRegistered);
         messageBroker.Subscribe<NetworkRequestPlayerSettlementState>(HandleStateRequest);
         messageBroker.Subscribe<NetworkPlayerSettlementState>(HandleState);
+        messageBroker.Subscribe<NetworkRequestPlayerSettlementConstruction>(HandleConstructionRequest);
+        messageBroker.Subscribe<NetworkPlayerSettlementConstructionResult>(HandleConstructionResult);
     }
 
     public void Dispose()
@@ -73,6 +86,8 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         messageBroker.Unsubscribe<AllGameObjectsRegistered>(HandleAllGameObjectsRegistered);
         messageBroker.Unsubscribe<NetworkRequestPlayerSettlementState>(HandleStateRequest);
         messageBroker.Unsubscribe<NetworkPlayerSettlementState>(HandleState);
+        messageBroker.Unsubscribe<NetworkRequestPlayerSettlementConstruction>(HandleConstructionRequest);
+        messageBroker.Unsubscribe<NetworkPlayerSettlementConstructionResult>(HandleConstructionResult);
         if (ReferenceEquals(PlayerSettlementPatchRuntime.Current, this))
             PlayerSettlementPatchRuntime.Current = null;
     }
@@ -83,7 +98,7 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         if (!notifiedMethods.Add(method)) return;
 
         var message =
-            $"Player Settlement action '{method}' is disabled in co-op: its v7.5.0 path combines local placement, random XML/object creation, MainHero/MainParty, and save reload without a controller-authorized transaction.";
+            $"Player Settlement internal action '{method}' was rejected because it is outside the pinned v7.5.0 co-op route inventory.";
         Logger.Warning(message);
         if (ModInformation.IsClient)
             InformationManager.DisplayMessage(new InformationMessage(message));
@@ -103,6 +118,31 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         // RegisterEvents runs on both roles. Every subscribed callback has an exact role prefix:
         // clients keep placement/menu presentation and the host keeps persistence/completion.
         starter.AddBehavior(behavior);
+    }
+
+    public bool TrySubmitConstruction(object owner, MethodBase original, object[] arguments)
+    {
+        if (!compatible || !ModInformation.IsClient || constructionBridge == null || revisionGate.Revision < 0)
+            return false;
+        var requestId = ++nextConstructionRequestId;
+        if (!constructionBridge.TryCapture(
+                owner,
+                original,
+                arguments,
+                requestId,
+                revisionGate.Revision,
+                value => objectManager.TryGetId(value, out var id) ? id : string.Empty,
+                out var request,
+                out var failure))
+        {
+            Logger.Error("Player Settlement construction intent was rejected locally: {Failure}", failure);
+            InformationManager.DisplayMessage(new InformationMessage(
+                "Player Settlement placement could not be submitted: " + failure));
+            return false;
+        }
+        pendingConstructionRequests.Add(requestId);
+        network.SendAll(request);
+        return true;
     }
 
     public void ValidateObjectRegistration(bool isSavedCampaign)
@@ -282,6 +322,11 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         if (metadataField == null || metadataField.FieldType != metadataType)
             throw new InvalidOperationException(
                 "Player Settlement co-op compatibility validation failed: _metaV3 field shape changed");
+        constructionBridge = new PlayerSettlementConstructionBridge(
+            assembly,
+            behaviorType,
+            methods.Where(pair => pair.Key.Kind == PlayerSettlementPatchKind.ConstructionCommit)
+                .Select(pair => pair.Value));
 
         lock (PatchSync)
         {
@@ -326,7 +371,7 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         }
 
         Logger.Information(
-            "Player Settlement {Version} loaded in guarded/feature-blocked mode ({Removed} original/fixes patches removed; {Methods} entry points guarded)",
+            "Player Settlement {Version} loaded with host-authoritative construction and graph replication ({Removed} original/fixes patches removed; {Methods} entry points guarded)",
             PlayerSettlementCompatibilityManifest.ModuleVersion,
             removedOptionalPatches,
             methods.Count);
@@ -361,6 +406,10 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
                 return AccessTools.Method(
                     typeof(PlayerSettlementAuthorityPatches),
                     nameof(PlayerSettlementAuthorityPatches.ClientPresentationPrefix));
+            case PlayerSettlementPatchKind.ConstructionCommit:
+                return AccessTools.Method(
+                    typeof(PlayerSettlementAuthorityPatches),
+                    nameof(PlayerSettlementAuthorityPatches.ConstructionCommitPrefix));
             default:
                 return AccessTools.Method(
                     typeof(PlayerSettlementAuthorityPatches),
@@ -373,6 +422,9 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         if (!compatible) return;
 
         revisionGate.Reset();
+        constructionLedger.Clear();
+        pendingConstructionRequests.Clear();
+        nextConstructionRequestId = 0;
         if (ModInformation.IsClient)
         {
             network.SendAll(new NetworkRequestPlayerSettlementState());
@@ -424,6 +476,115 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
                 serverPeer.Disconnect();
             },
             context: nameof(PlayerSettlementCompatibilityHandler));
+    }
+
+    private void HandleConstructionRequest(MessagePayload<NetworkRequestPlayerSettlementConstruction> payload)
+    {
+        if (!compatible || !ModInformation.IsServer || payload.Who is not NetPeer peer) return;
+        GameThread.RunSafe(
+            () => ApplyConstructionRequest(peer, payload.What),
+            context: nameof(PlayerSettlementCompatibilityHandler));
+    }
+
+    private void ApplyConstructionRequest(NetPeer peer, NetworkRequestPlayerSettlementConstruction request)
+    {
+        if (!PlayerSettlementConstructionProtocol.TryValidate(request, out var failure))
+        {
+            Logger.Warning("Rejected malformed Player Settlement construction from peer {Peer}: {Failure}", peer.Id, failure);
+            return;
+        }
+        var key = PlayerSettlementConstructionProtocol.CommandKey(request);
+        if (!constructionLedger.TryGetValue(peer, out var peerEntries))
+        {
+            peerEntries = new Dictionary<long, (string, NetworkPlayerSettlementConstructionResult)>();
+            constructionLedger.Add(peer, peerEntries);
+        }
+        if (peerEntries.TryGetValue(request.RequestId, out var prior))
+        {
+            if (!string.Equals(prior.Key, key, StringComparison.Ordinal))
+            {
+                DenyPeerOrAbortSession(peer, "reused Player Settlement request ID with a different payload");
+                return;
+            }
+            network.Send(peer, prior.Result);
+            SendSnapshotOrAbort(peer);
+            return;
+        }
+        if (request.ExpectedRevision != serverRevision)
+        {
+            RecordConstructionResult(peer, key, new NetworkPlayerSettlementConstructionResult(
+                request.RequestId, PlayerSettlementConstructionStatus.StaleState, serverRevision,
+                "The settlement graph changed; refresh and confirm placement again."));
+            SendSnapshotOrAbort(peer);
+            return;
+        }
+        if (!playerManager.TryGetPlayer(peer, out var player) ||
+            !objectManager.TryGetObject(player.HeroId, out Hero actor) ||
+            !objectManager.TryGetObject(player.MobilePartyId, out MobileParty actorParty) ||
+            actor == null || actorParty == null || !actor.IsAlive || actor.Clan == null)
+        {
+            RecordConstructionResult(peer, key, new NetworkPlayerSettlementConstructionResult(
+                request.RequestId, PlayerSettlementConstructionStatus.Rejected, serverRevision,
+                "The connected controller has no eligible campaign hero and party."));
+            return;
+        }
+
+        var behavior = behaviorType.GetField("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+            ?.GetValue(null);
+        try
+        {
+            using (new BarterPlayerContext(actor, actorParty))
+            {
+                if (!constructionBridge.TryExecute(
+                        behavior,
+                        actor,
+                        actorParty,
+                        request,
+                        id => objectManager.TryGetObject(id, out Settlement settlement) ? settlement : null,
+                        id => objectManager.TryGetObject(id, out CultureObject culture) ? culture : null,
+                        out failure))
+                {
+                    RecordConstructionResult(peer, key, new NetworkPlayerSettlementConstructionResult(
+                        request.RequestId, PlayerSettlementConstructionStatus.Rejected, serverRevision, failure));
+                    return;
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            DenyPeerOrAbortSession(null,
+                "Player Settlement construction failed after creator mutation began: " + exception.Message);
+            return;
+        }
+
+        SendSnapshotOrAbort(peer: null);
+        var accepted = new NetworkPlayerSettlementConstructionResult(
+            request.RequestId, PlayerSettlementConstructionStatus.Accepted, serverRevision,
+            "Settlement construction committed by the host.");
+        RecordConstructionResult(peer, key, accepted);
+    }
+
+    private void RecordConstructionResult(
+        NetPeer peer,
+        string key,
+        NetworkPlayerSettlementConstructionResult result)
+    {
+        if (!constructionLedger.TryGetValue(peer, out var entries))
+        {
+            entries = new Dictionary<long, (string, NetworkPlayerSettlementConstructionResult)>();
+            constructionLedger.Add(peer, entries);
+        }
+        if (entries.Count >= 256) entries.Remove(entries.Keys.Min());
+        entries[result.RequestId] = (key, result);
+        network.Send(peer, result);
+    }
+
+    private void HandleConstructionResult(MessagePayload<NetworkPlayerSettlementConstructionResult> payload)
+    {
+        if (!compatible || !ModInformation.IsClient || payload.Who is not NetPeer serverPeer ||
+            !PlayerSettlementSnapshotOriginGuard.IsTrustedServerTransport(serverPeer, localIsClient: true) ||
+            payload.What == null || !pendingConstructionRequests.Remove(payload.What.RequestId)) return;
+        InformationManager.DisplayMessage(new InformationMessage(payload.What.Message));
     }
 
     private void SendSnapshotOrAbort(NetPeer peer)
@@ -589,7 +750,9 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
 
         if (!PlayerSettlementObjectGraphRegistry.TryVerify(
                 state.Entries,
-                id => objectManager.TryGetObject(id, out Settlement settlement) && settlement != null,
+                id => (objectManager.TryGetObject(id, out Settlement settlement) && settlement != null) ||
+                      Settlement.All.Any(candidate => candidate != null &&
+                          string.Equals(candidate.StringId, id, StringComparison.Ordinal)),
                 out rejection))
         {
             Logger.Fatal(rejection);

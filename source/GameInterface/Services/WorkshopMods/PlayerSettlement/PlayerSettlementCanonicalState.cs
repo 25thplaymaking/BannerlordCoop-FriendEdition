@@ -9,9 +9,8 @@ namespace GameInterface.Services.WorkshopMods.PlayerSettlement;
 /// <summary>
 /// Reads the save metadata already produced by Player Settlement without taking a compile-time
 /// dependency on it. The result contains the exact generated XML, stable object IDs, parent graph,
-/// prefab/version fields, and a deterministic component fingerprint. Adapter v1 does not apply
-/// non-empty results on clients because MBObjectManager registration has already passed by the time
-/// a late join snapshot arrives.
+/// prefab/version fields, and a deterministic component fingerprint. Non-empty results are admitted
+/// on clients only after every host-created Settlement resolves through the replicated graph.
 /// </summary>
 internal static class PlayerSettlementCanonicalState
 {

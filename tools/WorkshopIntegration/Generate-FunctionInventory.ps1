@@ -28,7 +28,7 @@ $moduleMetadata = [ordered]@{
     'Fourberie' = [ordered]@{ category = 'campaign-and-mission'; deployment = 'active guarded subset; unsafe creation routes fail closed' }
     'Bannerlord.Diplomacy' = [ordered]@{ category = 'campaign-and-ui'; deployment = 'active server-authoritative adapter' }
     'UnblockableThrust' = [ordered]@{ category = 'combat-rule'; deployment = 'active mission adapter' }
-    'PlayerSettlement' = [ordered]@{ category = 'campaign-and-map'; deployment = 'loads; construction and rebuild flows fail closed' }
+    'PlayerSettlement' = [ordered]@{ category = 'campaign-and-map'; deployment = 'client placement UI; authenticated host construction/rebuild/overwrite; replicated object graph' }
     'Separatism' = [ordered]@{ category = 'campaign'; deployment = 'integrated Friend Edition server-authoritative implementation' }
 }
 

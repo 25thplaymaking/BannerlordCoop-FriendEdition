@@ -267,26 +267,26 @@
         {
           "id": "placement-ui",
           "playerFunction": "Choose settlement type, culture, name, template, map position, gate, rotation, scale, deep edits, and optional port position on the client.",
-          "status": "ImplementationRequired",
-          "owner": "PlayerSettlementPlacementIntentPatch",
+          "status": "VerifiedWired",
+          "owner": "PlayerSettlementAuthorityPatches.ConstructionCommitPrefix and PlayerSettlementConstructionBridge",
           "routes": ["creator placement UI", "validated placement intent", "War Sails fields prohibited for v1.4.8 scope"],
-          "tests": ["PlayerSettlementPlacementIntentTests"]
+          "tests": ["PlayerSettlementConstructionTests.PlacementIntent_PreservesExactFloatBitsAndRejectsNonFiniteOrWarSailsFields", "PlayerSettlementConstructionTests.ConstructionCommit_RunsOriginalOnlyOnHostAndSubmitsOnceOnClient"]
         },
         {
           "id": "town-castle-village-build",
           "playerFunction": "Build towns, castles, standalone villages, and bound villages with stable IDs, owner/culture, components, buildings, economy, garrison, militia, notables, and recruitment hooks.",
-          "status": "ImplementationRequired",
-          "owner": "PlayerSettlementConstructionHandler",
+          "status": "VerifiedWired",
+          "owner": "PlayerSettlementCompatibilityHandler.ApplyConstructionRequest and PlayerSettlementConstructionBridge.TryExecute",
           "routes": ["authenticated construction command", "deterministic template/ID", "atomic object graph registration", "canonical result"],
-          "tests": ["PlayerSettlementConstructionTests"]
+          "tests": ["PlayerSettlementConstructionTests.CompleteConstructionSurface_RoutesAllFiveCreatorCommits", "PlayerSettlementConstructionTests.AuthenticatedConstructionProtocol_CoversEveryOperationShape"]
         },
         {
           "id": "rebuild-and-overwrite",
           "playerFunction": "Rebuild generated settlements and overwrite existing settlement visuals/components without changing identity or duplicating objects.",
-          "status": "ImplementationRequired",
-          "owner": "PlayerSettlementConstructionHandler",
+          "status": "VerifiedWired",
+          "owner": "PlayerSettlementCompatibilityHandler.ApplyConstructionRequest and PlayerSettlementConstructionBridge.FindMetadataItem",
           "routes": ["rebuild command", "overwrite command", "identity-preserving component replacement", "rollback"],
-          "tests": ["PlayerSettlementRebuildTests"]
+          "tests": ["PlayerSettlementRebuildTests.RebuildAndOverwrite_RequireStableTargetsAndRejectCrossOperationFields", "PlayerSettlementRebuildTests.DeepEditTransaction_IsBoundedAndRequiresCompleteFiniteTransforms"]
         },
         {
           "id": "completion-and-daily-lifecycle",

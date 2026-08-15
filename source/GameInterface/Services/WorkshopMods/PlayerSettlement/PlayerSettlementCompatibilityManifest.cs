@@ -15,6 +15,7 @@ internal enum PlayerSettlementPatchKind
     ServerLifecycle,
     RoleLifecycle,
     ClientPresentation,
+    ConstructionCommit,
     BlockedPlayerAction,
     BlockedSharedMutation,
     BlockedSaveMutation,
@@ -57,7 +58,7 @@ internal sealed class PlayerSettlementMethodSpec
 /// </summary>
 internal static class PlayerSettlementCompatibilityManifest
 {
-    internal const string AdapterVersion = "2";
+    internal const string AdapterVersion = "3";
     internal const string ModuleVersion = "v7.5.0";
     internal const string AssemblyName = "PlayerSettlement";
     internal const string FixesAssemblyName = "PlayerSettlementFixes";
@@ -133,27 +134,51 @@ internal static class PlayerSettlementCompatibilityManifest
                 "System.Void", PlayerSettlementPatchKind.ServerLifecycle,
                 "BannerlordPlayerSettlement.Saves.ISettlementItem"),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "Overwrite", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedPlayerAction,
+                "System.Void", PlayerSettlementPatchKind.ClientPresentation,
                 "TaleWorlds.CampaignSystem.Settlements.Settlement"),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "Rebuild", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedPlayerAction,
+                "System.Void", PlayerSettlementPatchKind.ClientPresentation,
                 "BannerlordPlayerSettlement.Saves.PlayerSettlementItem"),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "BuildCastle", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedPlayerAction),
+                "System.Void", PlayerSettlementPatchKind.ClientPresentation),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "BuildVillage", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedPlayerAction),
+                "System.Void", PlayerSettlementPatchKind.ClientPresentation),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "BuildVillageFor", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedPlayerAction,
+                "System.Void", PlayerSettlementPatchKind.ClientPresentation,
                 "TaleWorlds.CampaignSystem.Settlements.Settlement"),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "BuildTown", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedPlayerAction),
+                "System.Void", PlayerSettlementPatchKind.ClientPresentation),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "CalculateVillageOwner", false,
                 "TaleWorlds.CampaignSystem.Settlements.Settlement",
-                PlayerSettlementPatchKind.BlockedPlayerAction),
+                PlayerSettlementPatchKind.ClientPresentation),
+
+            // Exact compiler-generated final commits. Client placement/UI reaches these methods
+            // only after all creator prompts and confirmation; Coop captures the intent here and
+            // replays the same creator transaction on the authenticated host.
+            Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour",
+                "<BuildCastle>g__ApplyPlaced|124_2", false, "System.Void",
+                PlayerSettlementPatchKind.ConstructionCommit,
+                "System.String", "TaleWorlds.CampaignSystem.CultureObject"),
+            Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour",
+                "<BuildTown>g__ApplyPlaced|136_2", false, "System.Void",
+                PlayerSettlementPatchKind.ConstructionCommit,
+                "System.String", "TaleWorlds.CampaignSystem.CultureObject"),
+            Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour+<>c__DisplayClass129_0",
+                "<BuildVillageFor>g__ApplyPlaced|2", false, "System.Void",
+                PlayerSettlementPatchKind.ConstructionCommit,
+                "System.String", "TaleWorlds.CampaignSystem.CultureObject", "System.String"),
+            Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour+<>c__DisplayClass122_0",
+                "<Overwrite>g__ApplyPlaced|5", false, "System.Void",
+                PlayerSettlementPatchKind.ConstructionCommit,
+                "System.String", "TaleWorlds.CampaignSystem.CultureObject", "System.String"),
+            Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour+<>c__DisplayClass123_0",
+                "<Rebuild>g__ApplyPlaced|5", false, "System.Void",
+                PlayerSettlementPatchKind.ConstructionCommit,
+                "System.String", "TaleWorlds.CampaignSystem.CultureObject", "System.String"),
 
             Spec("BannerlordPlayerSettlement.UI.Viewmodels.PlayerSettlementBuildVM",
                 "ExecuteCreatePlayerSettlement", false, "System.Void",
-                PlayerSettlementPatchKind.BlockedPlayerAction),
+                PlayerSettlementPatchKind.ClientPresentation),
 
             Spec("BannerlordPlayerSettlement.SaveHandler", "SaveLoad", true, "System.Void",
                 PlayerSettlementPatchKind.BlockedSaveMutation,

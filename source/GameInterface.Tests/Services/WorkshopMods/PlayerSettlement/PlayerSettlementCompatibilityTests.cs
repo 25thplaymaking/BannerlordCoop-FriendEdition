@@ -286,7 +286,7 @@ public sealed class PlayerSettlementCompatibilityTests : IDisposable
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void ConstructionEntryPoint_IsDeniedOnEveryRole(bool isServer)
+    public void UnauditedEntryPoint_IsDeniedOnEveryRole(bool isServer)
     {
         ModInformation.IsServer = isServer;
         var runtime = new RecordingRuntime();
@@ -466,9 +466,15 @@ public sealed class PlayerSettlementCompatibilityTests : IDisposable
         public int Notifications { get; private set; }
         public int BootstrapCalls { get; private set; }
         public int ValidationCalls { get; private set; }
+        public int ConstructionCalls { get; private set; }
         public void NotifyFeatureBlocked(string method) => Notifications++;
         public void AddBehavior(object campaignGameStarter) => BootstrapCalls++;
         public void ValidateObjectRegistration(bool isSavedCampaign) => ValidationCalls++;
+        public bool TrySubmitConstruction(object owner, MethodBase original, object[] arguments)
+        {
+            ConstructionCalls++;
+            return true;
+        }
     }
 
     private sealed class ShapeProbe

@@ -108,6 +108,26 @@ internal class CompanionRolesPatches
         return false;
     }
 
+    [HarmonyPatch(nameof(CompanionRolesCampaignBehavior.turn_companion_to_lord_on_condition))]
+    [HarmonyPrefix]
+    public static bool TurnCompanionToLordOnConditionPrefix(ref bool __result)
+    {
+        if (CanPromoteConversationCompanion(
+                Hero.OneToOneConversationHero?.Clan,
+                Hero.MainHero?.Clan))
+        {
+            return true;
+        }
+
+        __result = false;
+        return false;
+    }
+
+    internal static bool CanPromoteConversationCompanion(Clan conversationClan, Clan mainHeroClan)
+    {
+        return conversationClan != null && conversationClan == mainHeroClan;
+    }
+
     [HarmonyPatch(nameof(CompanionRolesCampaignBehavior.end_rescue_companion))]
     [HarmonyPrefix]
     public static bool EndRescueCompanionPrefix(ref CompanionRolesCampaignBehavior __instance)

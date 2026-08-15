@@ -28,10 +28,14 @@ Branch: `25vid/fix-client-crashes-and-sync-floods` (base: `development`)
 - **Chipmunk/log flood:** the no-op AutoSync property-set guard implicated by the client logs is already on
   `development` as `1ea627d1e`; this candidate inherits it. The older upstream tracking PR #2758 remains a
   conflicting draft and is not imported wholesale.
+- **Upstream nightly easy win:** upstream PR #3019 is included with a stricter null-safe guard. A player can
+  promote a companion only when the conversation companion belongs to that player's own clan; another player's
+  companion (or unresolved clan context) is rejected before vanilla performs the promotion. Regression coverage
+  locks the same-clan, cross-clan, and unresolved-context cases.
 - **Verification:** affected projects build with zero errors. Direct xUnit execution passes 116 focused battle
-  E2Es and 2 issue-role tests. `dotnet test` itself aborts before execution because this machine's known vstest
-  loopback transport cannot connect to testhost. This phase is not merged, packaged, or deployed; live
-  submission requires Bryce's explicit approval.
+  E2Es, 2 issue-role tests, and 5 companion-promotion guard tests. `dotnet test` itself aborts before execution
+  because this machine's known vstest loopback transport cannot connect to testhost. This phase is not merged,
+  packaged, or deployed; live submission requires Bryce's explicit approval.
 
 ## Phase O — battle upkeep + siege result/village defense correction — SHIPPED (2026-08-14)
 

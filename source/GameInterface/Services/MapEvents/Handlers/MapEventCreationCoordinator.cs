@@ -62,6 +62,13 @@ internal class MapEventCreationCoordinator : IHandler
     private readonly INetworkConfig configuration;
     private readonly IVillageHostileActionInterface villageHostileActionInterface;
     private readonly ConcurrentDictionary<string, PendingRequest> pendingRequests = new ConcurrentDictionary<string, PendingRequest>();
+    private readonly AuthorityRequestLifecycle requestLifecycle;
+
+    /// <summary>
+    /// Bounded diagnostic state for the local side of authoritative map-event requests.
+    /// E2E tests use this to assert the whole client/server handshake reaches a terminal state.
+    /// </summary>
+    internal AuthorityRequestLifecycle RequestLifecycle => requestLifecycle;
 
     public MapEventCreationCoordinator(
         IMessageBroker messageBroker,
@@ -77,6 +84,7 @@ internal class MapEventCreationCoordinator : IHandler
         this.playerManager = playerManager;
         this.configuration = configuration;
         this.villageHostileActionInterface = villageHostileActionInterface;
+        requestLifecycle = new AuthorityRequestLifecycle("map-event.create", Logger);
 
         Instance = this;
 
@@ -118,6 +126,7 @@ internal class MapEventCreationCoordinator : IHandler
         var requestId = Guid.NewGuid().ToString();
         var pending = new PendingRequest();
         pendingRequests[requestId] = pending;
+        requestLifecycle.BeginClient(requestId);
 
         try
         {
@@ -129,6 +138,7 @@ internal class MapEventCreationCoordinator : IHandler
                 requestId, attackerId, defenderId);
 
             // On a client, SendAll targets the server (its only connected peer).
+            requestLifecycle.ClientSent(requestId);
             network.SendAll(new NetworkRequestCreateMapEvent(
                 requestId,
                 attackerId,
@@ -140,12 +150,14 @@ internal class MapEventCreationCoordinator : IHandler
             if (!GameThread.WaitWhilePumping(() => pending.Completed.IsSet, deadline))
             {
                 Logger.Error("Timed out after {Timeout} waiting for the server to create the map event. RequestId={RequestId}", timeout, requestId);
+                requestLifecycle.ClientTimedOut(requestId, $"Timeout:{timeout}");
                 return MapEventCreationResult.Unresolved();
             }
 
             if (pending.Outcome == MapEventCreationOutcome.Rejected)
             {
                 Logger.Error("Server reported that it could not create a map event. RequestId={RequestId}", requestId);
+                requestLifecycle.ClientRejected(requestId, pending.Outcome.ToString());
                 return MapEventCreationResult.Rejected();
             }
 
@@ -153,6 +165,7 @@ internal class MapEventCreationCoordinator : IHandler
                 string.IsNullOrEmpty(pending.MapEventId))
             {
                 Logger.Error("Server could not resolve the authoritative map event. RequestId={RequestId}", requestId);
+                requestLifecycle.ClientUnresolved(requestId, pending.Outcome.ToString());
                 return MapEventCreationResult.Unresolved();
             }
 
@@ -168,10 +181,12 @@ internal class MapEventCreationCoordinator : IHandler
                 Logger.Error(
                     "Server created map event {MapEventId} but it was not committed on this client before timeout. RequestId={RequestId}",
                     pending.MapEventId, requestId);
+                requestLifecycle.ClientUnresolved(requestId, $"ClientCommitTimeout:{pending.MapEventId}");
                 return MapEventCreationResult.Unresolved();
             }
 
             Logger.Debug("Resolved server-created map event {MapEventId}. RequestId={RequestId}", pending.MapEventId, requestId);
+            requestLifecycle.ClientApplied(requestId, $"Created:{pending.MapEventId}");
             return MapEventCreationResult.Created(mapEvent);
         }
         finally
@@ -187,6 +202,7 @@ internal class MapEventCreationCoordinator : IHandler
 
         var request = payload.What;
         var requestingPeer = payload.Who as NetPeer;
+        requestLifecycle.BeginServer(request.RequestId);
 
         GameThread.RunSafe(
             () =>
@@ -232,7 +248,10 @@ internal class MapEventCreationCoordinator : IHandler
     {
         var request = payload.What;
         if (!TryGetRequestingPeer(payload, request, out var requestingPeer))
+        {
+            requestLifecycle.ServerResolved(request.RequestId, "Rejected:missing-peer");
             return false;
+        }
 
         if (!TryResolveRequestParties(request, out var attacker, out var defender))
         {
@@ -284,6 +303,8 @@ internal class MapEventCreationCoordinator : IHandler
             outcome,
             mapEventId,
             request.RequestId);
+        requestLifecycle.ServerValidated(request.RequestId);
+        requestLifecycle.ServerResolved(request.RequestId, $"{outcome}:{mapEventId ?? "<none>"}");
         network.Send(requestingPeer, new NetworkMapEventCreated(request.RequestId, outcome, mapEventId));
     }
 
@@ -446,6 +467,8 @@ internal class MapEventCreationCoordinator : IHandler
     private void Handle_NetworkMapEventCreated(MessagePayload<NetworkMapEventCreated> payload)
     {
         var message = payload.What;
+
+        requestLifecycle.ClientReplyReceived(message.RequestId, $"{message.Outcome}:{message.MapEventId ?? "<none>"}");
 
         if (!pendingRequests.TryGetValue(message.RequestId, out var pending))
         {

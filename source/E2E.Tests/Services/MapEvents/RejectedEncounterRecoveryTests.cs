@@ -155,6 +155,21 @@ public class RejectedEncounterRecoveryTests : MapEventTestBase
         string? mapEventId = null;
         client.Call(() => Assert.True(client.ObjectManager.TryGetId(result, out mapEventId)));
         Assert.NotNull(mapEventId);
+        var request = Assert.Single(client.NetworkSentMessages.GetMessages<NetworkRequestCreateMapEvent>());
+        client.Call(() =>
+        {
+            var coordinator = client.Resolve<MapEventCreationCoordinator>();
+            Assert.True(coordinator.RequestLifecycle.TryGetSnapshot(request.RequestId, out var clientRequest));
+            Assert.Equal(AuthorityRequestPhase.ClientApplied, clientRequest.Phase);
+            Assert.Equal($"Created:{mapEventId}", clientRequest.Outcome);
+        });
+        Server.Call(() =>
+        {
+            var coordinator = Server.Resolve<MapEventCreationCoordinator>();
+            Assert.True(coordinator.RequestLifecycle.TryGetSnapshot(request.RequestId, out var serverRequest));
+            Assert.Equal(AuthorityRequestPhase.ServerResolved, serverRequest.Phase);
+            Assert.Equal($"Created:{mapEventId}", serverRequest.Outcome);
+        });
         Server.Call(() =>
         {
             Assert.True(Server.ObjectManager.TryGetObject<MapEvent>(mapEventId!, out var authoritativeMapEvent));

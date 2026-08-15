@@ -448,22 +448,17 @@
       "loadOrder": 120,
       "placement": "after Friend Edition and native campaign modules",
       "workshopId": "2875093027",
-      "steamManifestId": "4587731243779119835",
+      "steamManifestId": "751945004455697202",
       "workshopUrl": "https://steamcommunity.com/sharedfiles/filedetails/?id=2875093027",
       "moduleId": "DismembermentPlus",
-      "name": "Dismemberment (Plus) for v1.4.7",
-      "version": "v2.0.8.7",
+      "name": "Dismemberment (Plus) for v1.4.8",
+      "version": "v2.0.8.8",
       "creator": "The_Schwarz",
       "permission": {
         "status": "explicit private permission confirmed by project owner",
         "scope": "private three-person Friend Edition integration and distribution"
       },
       "exclusions": [
-        {
-          "glob": "bin/*/TaleWorlds.*.dll",
-          "minimumMatches": 1,
-          "reason": "Embedded game binaries can override the installed Bannerlord build and cause client/server type mismatches; the game is the canonical provider."
-        },
         {
           "glob": "bin/*/MCMv5.dll",
           "minimumMatches": 1,
@@ -480,11 +475,11 @@
       "loadOrder": 130,
       "placement": "after Friend Edition and native campaign modules",
       "workshopId": "2875710877",
-      "steamManifestId": "4391404683672989722",
+      "steamManifestId": "1598945672157391038",
       "workshopUrl": "https://steamcommunity.com/sharedfiles/filedetails/?id=2875710877",
       "moduleId": "Fourberie",
       "name": "Fourberie",
-      "version": "v1.4.7.5",
+      "version": "v1.4.7.6",
       "creator": "Spinozart1",
       "permission": {
         "status": "explicit private permission confirmed by project owner",

@@ -146,7 +146,7 @@ internal sealed class FourberieMethodSpec
 }
 
 /// <summary>
-/// Compatibility contract for the creator-authorized Fourberie 1.4.7.5 binary. File identity and
+/// Compatibility contract for the creator-authorized Fourberie 1.4.7.6 binary. File identity and
 /// every method we detour must match before any compatibility patch is installed. An upstream
 /// update therefore cannot silently inherit guards written for a different implementation.
 /// </summary>
@@ -155,9 +155,9 @@ internal static class FourberieCompatibilityManifest
     public const string AssemblyName = "Fourberie";
     public const string ModuleId = "Fourberie";
     public const string WorkshopId = "2875710877";
-    public const string SupportedModuleVersion = "v1.4.7.5";
-    public const string SupportedAssemblyVersion = "1.4.7.5";
-    public const string SupportedSha256 = "FD1C02158817FAE5B90E3C121DA474096CAA368CB35495D83CE81EA49D860C71";
+    public const string SupportedModuleVersion = "v1.4.7.6";
+    public const string SupportedAssemblyVersion = "1.4.7.6";
+    public const string SupportedSha256 = "29F6644BCCA8D5A3834EE51C72EC75D94214BEB76CB1FDCBC2027DA0EB544E92";
     public const string AdapterVersion = "1";
     public const string AdapterHarmonyId = "Bannerlord.Coop.Workshop.Fourberie";
     public const bool ApprovedBinaryDeclaresHarmonySurface = false;
@@ -533,7 +533,7 @@ internal static class FourberieCompatibilityManifest
             "System.Collections.Generic.List`1[TaleWorlds.Core.InquiryElement]");
 
         // These periodic entry points contain the random and persistent campaign decisions found
-        // in the 1.4.7.5 audit. They are separately guarded so a duplicate listener cannot execute
+        // in the 1.4.7.6 audit. They are separately guarded so a duplicate listener cannot execute
         // the same operation twice at the same campaign tick.
         Add("Fourberie.FourberieBehavior", "HourlyTick", FourberiePatchKind.ServerTick);
         Add("Fourberie.FourberieBehavior", "DailyTick", FourberiePatchKind.ServerTick);

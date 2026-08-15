@@ -79,7 +79,7 @@ internal sealed class RbmModule : CombatWorkshopModule
     protected override CombatModFamily Family => CombatModFamily.Rbm434;
 }
 
-/// <summary>DismembermentPlus 2.0.8.7.</summary>
+/// <summary>DismembermentPlus 2.0.8.8.</summary>
 internal sealed class DismembermentPlusModule : CombatWorkshopModule
 {
     internal DismembermentPlusModule() : base("DismembermentPlus") { }
@@ -87,7 +87,7 @@ internal sealed class DismembermentPlusModule : CombatWorkshopModule
     public override string ModuleId => "DismembermentPlus";
     public override ulong WorkshopId => 2875093027UL;
     public override string PatchCategory => WorkshopPatchCategories.DismembermentPlus;
-    protected override CombatModFamily Family => CombatModFamily.DismembermentPlus2087;
+    protected override CombatModFamily Family => CombatModFamily.DismembermentPlus2088;
 }
 
 /// <summary>

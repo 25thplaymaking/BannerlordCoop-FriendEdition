@@ -129,6 +129,7 @@ try {
     Write-TestFile -Path (Join-Path $coopInput 'bin\Win64_Shipping_Client\TaleWorlds.Core.dll') -Content 'stale game API copy'
     Write-TestFile -Path (Join-Path $coopInput 'bin\Win64_Shipping_Client\SandBox.View.dll') -Content 'stale game module copy'
     Write-TestFile -Path (Join-Path $coopInput 'bin\Win64_Shipping_Client\Newtonsoft.Json.dll') -Content 'stale JSON copy'
+    Write-TestFile -Path (Join-Path $coopInput 'WorkshopSuite\MANIFEST.json') -Content '{ "suiteId": "stale-suite-receipt" }'
     $fixtureHarmony = Get-Item -LiteralPath $managedFixture
     $fixtureHarmonyHash = (Get-FileHash -LiteralPath $managedFixture -Algorithm SHA256).Hash.ToLowerInvariant()
 
@@ -244,6 +245,7 @@ try {
         [int]$requestConstructor[0].genericArity -eq 0 -and
         [string]$requestConstructor[0].metadataToken -match '^0x06[0-9A-F]{6}$') 'method inventory must preserve declaring type, return type, parameter shape, arity, and token'
     Assert-True (@($plan.Coop.ExcludedFiles).Count -eq 4) 'Coop plan must exclude Harmony, TaleWorlds, Sandbox, and noncanonical JSON payloads'
+    Assert-True (@($plan.Coop.ReplacedGeneratedFiles).Count -eq 1) 'the generated receipt path must be reserved by the packager'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $testRoot 'dry-run-output'))) 'planning/dry run must not create output'
 
     $output = Join-Path $testRoot 'suite-output'
@@ -268,6 +270,8 @@ try {
     Assert-True (Test-Path -LiteralPath (Join-Path $output 'Run-ClientSetup.cmd')) 'double-click client setup launcher must be shipped'
     $managedReceipt = Get-Content -LiteralPath (Join-Path $output 'Modules\Coop\WorkshopSuite\MANIFEST.json') -Raw | ConvertFrom-Json
     $rootManifest = Get-Content -LiteralPath (Join-Path $output 'MANIFEST.json') -Raw | ConvertFrom-Json
+    Assert-True ([string]$managedReceipt.suiteId -ceq 'fixture-suite') 'the generated receipt must replace a stale Coop receipt from the build input'
+    Assert-True (@($rootManifest.coop.files | Where-Object { [string]$_.path -ieq 'WorkshopSuite/MANIFEST.json' }).Count -eq 0) 'the generated receipt must only be represented by managedSuiteManifest'
     Assert-True ([bool]$rootManifest.clientInstaller.activatesOnlyActiveModuleOrder -and @($rootManifest.clientInstaller.files).Count -eq 2) 'suite must pin the friendly active-only client installer'
     Assert-True ([bool]$rootManifest.coop.birthAndDeath.packagedDefaultEnabled -and -not [bool]$rootManifest.coop.birthAndDeath.runtimeValueVerified -and -not [bool]$rootManifest.coop.birthAndDeath.taleWorldsModuleActive) 'suite must distinguish the true seed default from an unverified runtime value while TaleWorlds BirthAndDeath stays disabled'
     $gameplayReceipt = @($managedReceipt.modules | Where-Object { [string]$_.moduleId -ceq 'Gameplay.Mod' })[0]

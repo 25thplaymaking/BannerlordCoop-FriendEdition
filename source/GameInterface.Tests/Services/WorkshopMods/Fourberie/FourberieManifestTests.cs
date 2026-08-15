@@ -49,9 +49,9 @@ public sealed class FourberieManifestTests
         (typeName ?? string.Empty).Replace('<', '[').Replace('>', ']');
 
     [Theory]
-    [InlineData("v1.4.7.5", "FD1C02158817FAE5B90E3C121DA474096CAA368CB35495D83CE81EA49D860C71", true)]
-    [InlineData("v1.4.7.4", "FD1C02158817FAE5B90E3C121DA474096CAA368CB35495D83CE81EA49D860C71", false)]
-    [InlineData("v1.4.7.5", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", false)]
+    [InlineData("v1.4.7.6", "29F6644BCCA8D5A3834EE51C72EC75D94214BEB76CB1FDCBC2027DA0EB544E92", true)]
+    [InlineData("v1.4.7.5", "29F6644BCCA8D5A3834EE51C72EC75D94214BEB76CB1FDCBC2027DA0EB544E92", false)]
+    [InlineData("v1.4.7.6", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", false)]
     public void IdentityGate_RequiresExactCreatorBinary(string version, string hash, bool expected)
     {
         Assert.Equal(expected, FourberieCompatibilityManifest.IsSupportedIdentity(version, hash));

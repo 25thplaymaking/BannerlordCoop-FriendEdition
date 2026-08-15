@@ -1,0 +1,230 @@
+{
+  "schemaVersion": 1,
+  "targetGameVersion": "v1.4.8",
+  "observedOn": "2026-08-15",
+  "warSails": {
+    "steamAppId": "2927200",
+    "enabled": false,
+    "navalDlcModulePresent": false,
+    "policy": "Out of scope. Keep DisabledDLC 2927200 and do not activate NavalDLC."
+  },
+  "client": {
+    "steamAppId": "261550",
+    "branch": "public",
+    "buildId": "24573425",
+    "depots": [
+      {
+        "depotId": "261552",
+        "manifestId": "652956066029874796"
+      },
+      {
+        "depotId": "261551",
+        "manifestId": "2130492496439118726"
+      },
+      {
+        "depotId": "2240111",
+        "manifestId": "6194812840481947105"
+      }
+    ],
+    "appManifestSha256": "5b7a5a2f1601e8720317bab5f439917182133f387431f5f3d183999831033bb4",
+    "fileInventory": {
+      "fileCount": 27259,
+      "totalBytes": 75646634831,
+      "inventorySha256": "152e19803cc17f0424922bb7183299c18d855c68852e3cb8079a41d04a63c972"
+    },
+    "officialManagedInventory": {
+      "dllCount": 4500,
+      "totalBytes": 713134436,
+      "inventorySha256": "a74aff4c5ac78faa9d47c7dff2d5c9cf95fe0a1f4e7dc106ed21d6489c3bb1c9"
+    },
+    "bannerlordExe": {
+      "size": 139224,
+      "sha256": "5b50b56a2e13e5d7a00fd6c6f940285be50eeac0391e76b90d766dd497ab56be"
+    }
+  },
+  "dedicatedServer": {
+    "steamAppId": "1863440",
+    "branch": "public",
+    "buildId": "24571419",
+    "depots": [
+      {
+        "depotId": "1863441",
+        "manifestId": "4619456710482553639"
+      }
+    ],
+    "appManifestSha256": "0fe5c59cca3b165327f8e39ea2231d7882b1a470613c18a07b0ec796d3fa199c",
+    "fileInventory": {
+      "fileCount": 3029,
+      "totalBytes": 3040220844,
+      "inventorySha256": "688479286fe624e31d989f1727555c9e471dfa7f4f570a03406367067131dd97"
+    },
+    "starter": {
+      "path": "bin/Win64_Shipping_Server/DedicatedCustomServer.Starter.exe",
+      "size": 156160,
+      "sha256": "a1a095ed807ce8ea710cc65dc0d6014a563ef7578eef9dc293e5e401d7deb41c"
+    },
+    "taleWorldsMountAndBladeSha256": "c40e283e72aa90e6ed3bd64d6b8081ac7005da76437cb3d463a12a2a9148c4ee",
+    "taleWorldsLibrary": {
+      "inputSha256": "f11400860476b5860457503b4090ba642bc29f183c36e0301d3c504f2720ac16",
+      "loaderPatchedSha256": "f1c8885ad5c908e6b2e4b0cc16c740627ef3202caab178170bdcafae0cea6d98"
+    }
+  },
+  "friendEditionServerPairing": {
+    "status": "offline-built-not-booted",
+    "runtime": "Serilog 2.12.0 headless build",
+    "officialDedicatedServerCoreInputSha256": "d766be598213e69f0cda4e146470025c49d6a2f16de8df63bc6bc9b7dfacfb20",
+    "loaderPatchedDedicatedServerCoreSha256": "8b67ff3491bf1f91d0a27bfd2a0425975603f6dfa5102cd7dcfc057e5f778449",
+    "pairedDedicatedServerCoreSha256": "6b3ed5a858aaf3afcab1f7770d76ef976e8bdc097adfcc374d368b4697daf74c",
+    "pairingReceiptSha256": "8b93ba231e9f822bf0a77b4c3688544b713ca0c1e45f78e0d1a8b634fbdf6c2f",
+    "startupHookSha256": "963ce773d2959286904b4fa9e6db369fe936a9eac75fbac367a61a9a8786d48b",
+    "modules": [
+      {
+        "fileName": "Common.dll",
+        "sha256": "324fe3c5703fa17752de64b55fe8b4a6ca037eca52c28e8925e5694459831748"
+      },
+      {
+        "fileName": "Coop.Core.dll",
+        "sha256": "305a69abf70a77ad11be04d220ede46637c84f14905335fe136a217376af8fb0"
+      },
+      {
+        "fileName": "Coop.Steam.dll",
+        "sha256": "590c41f7cc6186cbcef3cc5c46e725c073b5c326aaf83dc3830a2656fdef2f03"
+      },
+      {
+        "fileName": "GameInterface.dll",
+        "sha256": "16a50bbf768197a4e1d8eebc0cabf4e8ad9ea83caaa8aac8933d6a8558afc325"
+      }
+    ],
+    "releaseBoundary": "Exact core/module pairing built and receipt-verified offline. Full server module overlay, isolated save boot, and live promotion remain unverified."
+  },
+  "rollback": {
+    "gameVersion": "v1.4.7",
+    "buildId": "24127665",
+    "fileCount": 27251,
+    "totalBytes": 75647543389,
+    "inventorySha256": "238c50dd0f543e1b9fbe484e7002316b30d1dbbb401773ed4bd99b72bdcbbffa",
+    "managedInventorySha256": "0f82e642217531ef5fede85fdb4ac6830a35f15bfaac76a13b19c6d8f4ca442f"
+  },
+  "managedSuite": {
+    "suiteId": "friend-edition-private-workshop-suite",
+    "moduleCount": 10,
+    "rootManifestSha256": "b7274557638e8bfe96eea8de9d22fb972feafc79ac9f3557e6392ccb5f123a64",
+    "managedReceiptFileSha256": "b6b9cd635277716b3c9254a8a84937518ca350abc511f43b70084774e50ca3b0",
+    "receiptSha256": "d202ef52ef632708bb86dd0851e34d9e84473d73921847833ed31ae69f4b9362",
+    "archiveSha256": "bbdc850913fb3d943c8105ee26e6ee1eb2ce33c5c9df647c73e84850970bc825",
+    "verifiedFileCount": 847,
+    "sourceWorkshopSnapshotsUnchanged": true,
+    "modules": [
+      {
+        "moduleId": "Bannerlord.Harmony",
+        "workshopId": "2859188632",
+        "steamManifestId": "5023964903723709557",
+        "version": "v2.4.2.248",
+        "sourceDigest": "405775665e6363389843a5fcde50fd2a76fe34d770d95aa5a6399ec0fe7fa62a",
+        "contentSha256": "aa8000bc71b0c211ac9be50e60c4043116266bb03f9bb7b373ea46fe5af32eb9",
+        "configurationSha256": "1d79b2ddb38020c647a482d782c0dba3f07153ad6469fc2c696fdb8350c710c8",
+        "sourceFileCount": 60,
+        "stagedFileCount": 60
+      },
+      {
+        "moduleId": "Bannerlord.ButterLib",
+        "workshopId": "2859232415",
+        "steamManifestId": "6795008217820882669",
+        "version": "v2.11.1",
+        "sourceDigest": "fc26c212bc92dcf5c8ea333fdc73966ae263afe8d1805fd49cc589485d5c8103",
+        "contentSha256": "136a2509b095f27063ff61d2fb3417f3beea6be4d615d4672d79c70c1baf191f",
+        "configurationSha256": "ccfeff8ac7b39f378ce4b4905f62a11c672bbd1543125705a66680ea0c4332af",
+        "sourceFileCount": 234,
+        "stagedFileCount": 234
+      },
+      {
+        "moduleId": "Bannerlord.UIExtenderEx",
+        "workshopId": "2859222409",
+        "steamManifestId": "4162172930197019416",
+        "version": "v2.13.3",
+        "sourceDigest": "eea7e360adeed2bba2387e38f6f7a3209c63d8b2329a242e69b0c89934109135",
+        "contentSha256": "41a87625e6458e44d6b4c0bcdc7c95607bfa46f955edae71236323f0737dd293",
+        "configurationSha256": "1219a3f906a41a21265e2de10ee3ee1ff6b647586f2bfff0144d60fb36ef7c94",
+        "sourceFileCount": 32,
+        "stagedFileCount": 32
+      },
+      {
+        "moduleId": "Bannerlord.MBOptionScreen",
+        "workshopId": "2859238197",
+        "steamManifestId": "4045451207505706745",
+        "version": "v5.12.2",
+        "sourceDigest": "1fb0e878b88d42a51d689a66c4ec675b4c93f10d1bdf1cd86c7335356fad49bb",
+        "contentSha256": "b8d1098771ae90874ea905ca3e5a66aa7ae913e1ba36a8669a6455a0546f7b20",
+        "configurationSha256": "738afecd6a3331220cdd3ae20af1264fb098bdec65d5f15d2d0363e5377ccbd4",
+        "sourceFileCount": 116,
+        "stagedFileCount": 116
+      },
+      {
+        "moduleId": "ImprovedGarrisons",
+        "workshopId": "2859265386",
+        "steamManifestId": "5143458534246082850",
+        "version": "v4.2.0.7",
+        "sourceDigest": "549db5522533f6d0af6a8924e0124c06b4b6ce0bdde87dcbf7f801a67a0021b3",
+        "contentSha256": "4e7b2ae3919b1f06d264420e2d2f22cc7a18ee619bc72eb8b704cef0e1fc0dba",
+        "configurationSha256": "e5c6231cfbf33a8641a5c36f5b4cabc38082805c5d391ab46a65601754ceb29e",
+        "sourceFileCount": 21,
+        "stagedFileCount": 21
+      },
+      {
+        "moduleId": "DismembermentPlus",
+        "workshopId": "2875093027",
+        "steamManifestId": "751945004455697202",
+        "version": "v2.0.8.8",
+        "sourceDigest": "a41ab7f8974ae3f9f4211252515224b29f2846df5c2c2bb2f2f7fb1808cbaf84",
+        "contentSha256": "75a8186a873d104c01b503b473e1488aacb267005a7d78e5bf3e4f25bf683c57",
+        "configurationSha256": "fc7445aa60bc455c8d0b4cb31a40930588e8104effe39c4a69a8e07856ee24d5",
+        "sourceFileCount": 42,
+        "stagedFileCount": 38
+      },
+      {
+        "moduleId": "Fourberie",
+        "workshopId": "2875710877",
+        "steamManifestId": "1598945672157391038",
+        "version": "v1.4.7.6",
+        "sourceDigest": "48f9dcd0b6f1e03026264dddf0dcc276eec413cff20bbca8c5314aa0f6956a6c",
+        "contentSha256": "3488b62a0b71a905c4499724059672289bd7c3222eba295332b47bf73d8a0a07",
+        "configurationSha256": "103bb574563ebafc4199cadbb1a71a2bc9956f81f1db75a367bec8860ce3871e",
+        "sourceFileCount": 92,
+        "stagedFileCount": 92
+      },
+      {
+        "moduleId": "Bannerlord.Diplomacy",
+        "workshopId": "2881380744",
+        "steamManifestId": "3938505074920035905",
+        "version": "v1.4.7",
+        "sourceDigest": "3c3d511a21f8c9fb7924338a3b2de9395d815fdfc814e54a5c83af8a3bb80f05",
+        "contentSha256": "55342c2d7c08b87862f53229b3b8b41ac237044d5a7daabc08fc89b4ae872e86",
+        "configurationSha256": "1fa40c6db5e3946332aeb8b7e5ca183d231bea3786fa63a9832fe5c1b001a7dc",
+        "sourceFileCount": 109,
+        "stagedFileCount": 109
+      },
+      {
+        "moduleId": "UnblockableThrust",
+        "workshopId": "3614435151",
+        "steamManifestId": "3108412629025003964",
+        "version": "v1.1.3.1",
+        "sourceDigest": "dad80afaadcc75c8fe2ce8b1da17d4a28f3cec7695c95ef1383a80ccadba430b",
+        "contentSha256": "ac74144e10d6c1774976b95e0a8ffeca3a348a04e6ced822947a4f4172f4ed88",
+        "configurationSha256": "8220e05907ec9266e27ed205e73a7d09df2b81546d2f3647d06c4186b6b578bd",
+        "sourceFileCount": 4,
+        "stagedFileCount": 4
+      },
+      {
+        "moduleId": "PlayerSettlement",
+        "workshopId": "3720376888",
+        "steamManifestId": "6398100776119441137",
+        "version": "v7.5.0",
+        "sourceDigest": "5f4129930bdb841bce1535ea861dbbce7bee21a703920b39f35fd8cfb7e039ba",
+        "contentSha256": "8376e269187204c5b8aaf6f5f3c094bf0ca979453b273ca06943c1817af9ab79",
+        "configurationSha256": "b6966432588f052336d89c02defd9c3cc1a6af9a5bcca1888962d885912fb5f9",
+        "sourceFileCount": 85,
+        "stagedFileCount": 81
+      }
+    ]
+  }
+}

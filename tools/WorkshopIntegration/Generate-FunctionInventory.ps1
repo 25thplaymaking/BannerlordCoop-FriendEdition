@@ -32,9 +32,10 @@ $moduleMetadata = [ordered]@{
     'Separatism' = [ordered]@{ category = 'campaign'; deployment = 'integrated Friend Edition server-authoritative implementation' }
 }
 
-# Runtime-reachable, mod-owned assemblies for Bannerlord 1.4.7. Historical version-specific
+# Runtime-reachable, mod-owned assemblies for Bannerlord 1.4.8. Historical version-specific
 # implementation DLLs and third-party dependencies remain hash-audited by the suite builder but are
-# not mod-function surfaces because the 1.4.7 loaders cannot select them.
+# not mod-function surfaces because the 1.4.8 loaders cannot select them. Some retained framework
+# and mod assembly names include 1.4.7 because that is the publisher's selected compatible payload.
 $specs = @(
     [ordered]@{ moduleId='Bannerlord.Harmony'; role='entrypoint'; path='mb2\Modules\Bannerlord.Harmony\bin\Win64_Shipping_Client\Bannerlord.Harmony.dll' },
     [ordered]@{ moduleId='Bannerlord.ButterLib'; role='entrypoint'; path='mb2\Modules\Bannerlord.ButterLib\bin\Win64_Shipping_Client\Bannerlord.ButterLib.dll' },
@@ -130,7 +131,7 @@ $totalMethods = [int](($assemblies | ForEach-Object { [int]$_['methodCount'] } |
 $inventory = [ordered]@{
     schemaVersion = 1
     generatedFromCommit = $commit
-    scope = 'Runtime-reachable mod-owned Bannerlord 1.4.7 assemblies plus integrated GameInterface.Services.Separatism methods; third-party dependencies and dormant historical implementation DLLs are excluded.'
+    scope = 'Runtime-reachable mod-owned Bannerlord 1.4.8 assemblies plus integrated GameInterface.Services.Separatism methods; third-party dependencies and dormant historical implementation DLLs are excluded.'
     summary = [ordered]@{
         moduleCount = $modules.Count
         assemblyCount = $assemblies.Count

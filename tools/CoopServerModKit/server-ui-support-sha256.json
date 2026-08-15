@@ -1,70 +1,70 @@
 {
-  "gameVersion": "v1.4.7.117484",
+  "gameVersion": "v1.4.8",
   "purpose": "Exact client-only assembly closure required by the advertised Workshop runtimes on the Linux dedicated host.",
   "assemblies": [
     {
       "relativePath": "Coop/bin/Win64_Shipping_Server/SandBox.GauntletUI.dll",
-      "sha256": "d563ebf75faa30b10be61d53177c9946ccab15991ddf5e2fcc7c08b31ee6197e"
+      "sha256": "69f2a87c3c3883d04ece46200c5cddf39c188f0ee7c20e26c47fcf64c0f97ed3"
     },
     {
       "relativePath": "Coop/bin/Win64_Shipping_Server/SandBox.View.dll",
-      "sha256": "bb0c4cbb8d5975766e2545352c9fe43e20c66b076b86f3258fba7266fcdb66b2"
+      "sha256": "c7360e71da06799a0cb6c00c4a0cfab5877621197ba25101433ac28654d169e2"
     },
     {
       "relativePath": "Coop/bin/Win64_Shipping_Server/SandBox.ViewModelCollection.dll",
-      "sha256": "4527f25ebd191720da1e34e5593b18413891f5a6c53a2e5fccaa5951b0cd3940"
+      "sha256": "8c4b2ca448a3bc8789a6f8d7b4427e7a9832a31c45dd79e9034173535ebaebf4"
     },
     {
       "relativePath": "StoryMode/bin/Win64_Shipping_Client/StoryMode.dll",
-      "sha256": "6149baffe6fac3c53360006d2c7c601970515fc4587cb380373e0896e8bbe778"
+      "sha256": "cc205186bca26ea04197c543f06bfd14ec7ca8a94b559a3a2753921c4bb27ef0"
     },
     {
       "relativePath": "Coop/bin/Win64_Shipping_Server/TaleWorlds.CampaignSystem.ViewModelCollection.dll",
-      "sha256": "40f207922c1ef52b1fd4acf7e6568bf7ef72ce9c5dddcae1676c152479710492"
+      "sha256": "5d817a46456d07b5e4382a870795fd9f8d6f11b4707a91d8a8b5d5cd50e762a5"
     },
     {
       "relativePath": "Coop/bin/Win64_Shipping_Server/TaleWorlds.Core.ViewModelCollection.dll",
-      "sha256": "da5940072618b19d254069dbb40c6ffc98b9cb449c6689aacfcd2ef46d9b28b7"
+      "sha256": "5a48a04ff42b1b448fb8def314608a402fd4f872174c3a4cd858d5e866f44b23"
     },
     {
       "relativePath": "Coop/bin/Win64_Shipping_Server/TaleWorlds.Engine.GauntletUI.dll",
-      "sha256": "c67ef763aeba3f2a16151e37192f9027153d5e06669bbef80b2e166348cad85e"
+      "sha256": "8f96a2c31f04f294194f4c59867935d80008723758350997404710b220e290cf"
     },
     {
       "relativePath": "Coop/bin/Win64_Shipping_Server/TaleWorlds.GauntletUI.Data.dll",
-      "sha256": "4655207772baa99dad1ed32fc28fd57ee5831f60075a0f52462047252122a390"
+      "sha256": "fcd480210708f45850ee794cf59ec139c0e6aef77669c7370914d3b038c97d8c"
     },
     {
       "relativePath": "Coop/bin/Win64_Shipping_Server/TaleWorlds.GauntletUI.dll",
-      "sha256": "571413b98c83f1b9ce4e7209924e891318b68c8c769add0d88c7a2b3d30c1480"
+      "sha256": "3fe02171a2a8b455c0922689a24669ae91abe7914895b21f269897197433db1e"
     },
     {
       "relativePath": "Coop/bin/Win64_Shipping_Server/TaleWorlds.GauntletUI.ExtraWidgets.dll",
-      "sha256": "527d948cbdde058c9821441b27ce7417473174315f6cf4af802ada651ae9f56a"
+      "sha256": "8ca50050f4f67f7506588b26c16c7cbce83d9165a1e5db70efb4320422ac235e"
     },
     {
       "relativePath": "Coop/bin/Win64_Shipping_Server/TaleWorlds.GauntletUI.PrefabSystem.dll",
-      "sha256": "31b926a38bf49d29f8d9189813ed38ddffdd0682ad732ca86b7656f1ae538d96"
+      "sha256": "78422b519733ef27ddc4ade743381a286e51975997511c83a77055b634e015ed"
     },
     {
       "relativePath": "Coop/bin/Win64_Shipping_Server/TaleWorlds.MountAndBlade.GauntletUI.dll",
-      "sha256": "18b777217381058d4995c28f02afce7c427ee3f24daab4b4799ca0228f30533f"
+      "sha256": "75b070e0b1347c3f6c7e4526edc5370bba18b4d4b4747c115669e23477ad44e2"
     },
     {
       "relativePath": "Coop/bin/Win64_Shipping_Server/TaleWorlds.MountAndBlade.GauntletUI.Widgets.dll",
-      "sha256": "44ef7314672e8eac273543dd5608a5486f11a5ed06c9d6e8f9a9edde3cb80bed"
+      "sha256": "3828067e5bc61521d399bb237cac6488c7c999b045c2436e86906e1232bd9dbe"
     },
     {
       "relativePath": "Coop/bin/Win64_Shipping_Server/TaleWorlds.MountAndBlade.View.dll",
-      "sha256": "b34312a5e7c37fd4da60153b40eaa553ca0b812de5610def1d9773ae7428b227"
+      "sha256": "ffaac5ed867cd299f8c14f58ffee64f86e50d8b197db5f966759524c3e574ba1"
     },
     {
       "relativePath": "Coop/bin/Win64_Shipping_Server/TaleWorlds.MountAndBlade.ViewModelCollection.dll",
-      "sha256": "13a6162970b3d5c42955dbda7decccbf77ab19e1c55b4ba150fa893c356f24a2"
+      "sha256": "c7052d125863b9dbc898f6f95762f1b7754f25133a5bc3aaf3b87e8e85fd7acb"
     },
     {
       "relativePath": "Coop/bin/Win64_Shipping_Server/TaleWorlds.TwoDimension.dll",
-      "sha256": "3f4053192d581bd15038ce6e49ca4da84d99d96c3f19cc437bd73ba0104b62b4"
+      "sha256": "228a7534d395d5337887a438efdc9df533a1afd46d888af9fefaed5a4705998e"
     }
   ]
 }

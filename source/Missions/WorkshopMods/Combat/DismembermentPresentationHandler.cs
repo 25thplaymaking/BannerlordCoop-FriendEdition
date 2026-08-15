@@ -193,7 +193,7 @@ internal sealed class DismembermentPresentationHandler : IDismembermentPresentat
 
     private static bool IsCompatible() =>
         CombatModCompatibilityGuard.IsInitialized &&
-        CombatModCompatibilityGuard.IsFamilyCompatible(CombatModFamily.DismembermentPlus2087);
+        CombatModCompatibilityGuard.IsFamilyCompatible(CombatModFamily.DismembermentPlus2088);
 }
 
 internal sealed class DismembermentCapabilitySource : IWorkshopCapabilitySource
@@ -202,7 +202,7 @@ internal sealed class DismembermentCapabilitySource : IWorkshopCapabilitySource
     {
         bool enabled = CombatModAuthorityPolicy.AllowDismembermentCapability(
             CombatModCompatibilityGuard.IsInitialized,
-            CombatModCompatibilityGuard.IsFamilyCompatible(CombatModFamily.DismembermentPlus2087),
+            CombatModCompatibilityGuard.IsFamilyCompatible(CombatModFamily.DismembermentPlus2088),
             ModConfigProvider.ModOptions.IsWorkshopModuleEnabled(DismembermentPresentationHandler.ModuleId));
         yield return new WorkshopCapability(
             DismembermentPresentationHandler.ModuleId,

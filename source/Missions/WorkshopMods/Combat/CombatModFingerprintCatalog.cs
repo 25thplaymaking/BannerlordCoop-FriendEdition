@@ -8,7 +8,7 @@ namespace Missions.WorkshopMods.Combat;
 internal enum CombatModFamily
 {
     Rbm434,
-    DismembermentPlus2087,
+    DismembermentPlus2088,
     UnblockableThrust1131
 }
 
@@ -69,10 +69,10 @@ internal static class CombatModFingerprintCatalog
                 "1.0.0.0",
                 "2B0BA4783FD1D64218D45E7E4EAF9327024D707D27731F9403CFF74594CDDC41"),
             new CombatModFingerprint(
-                CombatModFamily.DismembermentPlus2087,
+                CombatModFamily.DismembermentPlus2088,
                 "DismembermentPlus",
-                "2.0.8.7",
-                "FC16D8C5F455710B7960848C8F27A3DB0551E1A028BB128BF7CE1C6A95F79DD1"),
+                "2.0.8.8",
+                "17ABFCC4EBA59C15CACA1BCE194C0791663ED692F21FFE22675DA49418A4E79B"),
             new CombatModFingerprint(
                 CombatModFamily.UnblockableThrust1131,
                 "UnblockableThrust",

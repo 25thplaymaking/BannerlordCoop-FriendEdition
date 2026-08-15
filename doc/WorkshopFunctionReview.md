@@ -1,12 +1,12 @@
 # Friend Edition mod-function review
 
-Review baseline: `ee7a3fc281df689d55f39434837f21f6213cd377` (2026-08-11)
+Review baseline: Bannerlord `v1.4.8` migration candidate (2026-08-15)
 
-Migration note (2026-08-15): this document is evidence for the pinned
-`v1.4.7` payload set, not proof that every player-visible function is complete
-or that its counts survive Bannerlord `v1.4.8`. The
-[`v1.4.8` migration guide](../docs/bannerlord-1.4.8-migration.md) requires a
-fresh inventory plus one reconciled strict gate before release.
+Migration note (2026-08-15): the generated ledgers now use the exact `v1.4.8`
+candidate payload, including DismembermentPlus `v2.0.8.8` and Fourberie
+`v1.4.7.6`. This is structural authority evidence, not proof that every
+player-visible function has passed rendered acceptance. See the
+[`v1.4.8` migration guide](../docs/bannerlord-1.4.8-migration.md).
 
 Binary ledger: [`generated/workshop-function-inventory.json`](generated/workshop-function-inventory.json)
 
@@ -17,19 +17,17 @@ Prior decompiler audit: [`WorkshopModIntegrationAudit.md`](WorkshopModIntegratio
 ## Scope and coverage
 
 This is the semantic review for every runtime-reachable, mod-owned assembly in
-the pinned Bannerlord 1.4.7 Friend Edition set, plus the integrated Separatism implementation. The generated
+the pinned Bannerlord 1.4.8 Friend Edition candidate, plus the integrated Separatism implementation. The generated
 ledger records every metadata method, including constructors, accessors, compiler-generated
 closures/state machines, private helpers, and methods with no body. Each record carries the exact
 assembly SHA-256, identity, declaring type, return/parameter shape, generic arity, method flags,
 metadata token, and RVA.
 
 The authority ledger reconciles one-for-one with all 41,050 method records. At
-this evidence baseline, 13,310 of the 13,729 metadata-required routes have a
-disposition. That count is not the release-completion count: the current strict
-Fourberie gameplay gate rejects **495** unique routes (419 unclassified plus 76
-unsafe presentation classifications), while the metadata ratchet retains 419
-reviewed open routes. The migration must regenerate both views and collapse
-them into one authoritative zero-open result. The shrink-only ratchet
+this evidence baseline, 13,309 of the 13,729 metadata-required routes have a
+disposition, 420 are unclassified, and zero are blocked. All 420 open routes are
+in Fourberie. This exact joined result supersedes the stale 419-route metadata
+and 495-route presentation-filter reports. The shrink-only ratchet
 (`tools/WorkshopIntegration/fourberie-open-routes.json`) records the un-adapted
 stealth/fight-club/banditry mission stack (`FStealthMissionLogic`, mission controllers, spawners,
 `FourbCom`, `InsideMissionsHelper` — end-of-mission consequences mutate campaign state on the
@@ -73,8 +71,8 @@ type's disposition rather than repeating identical prose for tens of thousands o
 | RBM | entry/XML merge; configuration; combat formula/damage/posture; AI/tactics/spawn; tournament roster/prize; UI/input | Retired from the production loadout after the native initialization crash. It is absent from the catalog, deployment package, launcher, and server/client active orders. Its pinned binaries remain only as an audited historical surface; do not revive individual slices during this plan. |
 | ImprovedGarrisons | initialization; campaign behaviors/events; party creation/removal; recruitment/upgrade; finance/food/speed models; settings/log UI; sidecar save managers | All 723 authority candidates are now classified. Management, templates, mobile parties, hostile encounters, culture, rosters, and building reserves have authenticated server routes; `v1.4.8` must re-prove every option, rollback, persistence, restart, and late-join path. |
 | DismembermentPlus | mission registration; blow validation; random limb choice; mesh/entity/effects; slow motion; settings/error UI | All 17 candidates are exact-classified. Live Coop suppresses the original local-random `RegisterBlow` path; the victim-authority peer validates once, derives a canonical event ID/seed, applies the original visual routine, and broadcasts a capability-gated cosmetic event. Receivers re-derive authority/identity, reject malformed/duplicate/stale/conflicting events, and never replay damage. Slow motion stays disabled in Coop. |
-| Fourberie | submodule/application/mission hooks; behavior registration and `SyncData`; menus/conversations; recruiting/spawning/party ticks; crime/safehouse/fight-club/contracts; fourteen models; mission controllers | Forty-seven explicit operation families now have typed server routes, but the strict gate still rejects 495 UI/mission/lifecycle routes. Mission callbacks, shared-state menu/dialog helpers, model composition, and every remaining canonical write need named owners and end-to-end proof. Existing fail-closed guards are safety evidence, not completed gameplay. |
-| Diplomacy | loader; campaign behaviors/managers; war/peace/agreement/cooldown/exhaustion; kingdom/clan/influence patches; UI/viewmodels; save types; civil war/rebel functions | Donate/fief/messenger/peace/war/alliance/pact operations and keep-fief/server callbacks are routed, including the persisted server messenger queue. The complete exact ledger, callbacks, UI lifecycle, and Separatism collision ownership still require one reconciled zero-open gate. |
+| Fourberie | submodule/application/mission hooks; behavior registration and `SyncData`; menus/conversations; recruiting/spawning/party ticks; crime/safehouse/fight-club/contracts; fourteen models; mission controllers | Forty-seven explicit operation families now have typed server routes, but the exact `v1.4.7.6` gate still records 420 open UI/mission/lifecycle routes. Mission callbacks, shared-state menu/dialog helpers, model composition, and every remaining canonical write need named owners and end-to-end proof. Existing fail-closed guards are safety evidence, not completed gameplay. |
+| Diplomacy | loader; campaign behaviors/managers; war/peace/agreement/cooldown/exhaustion; kingdom/clan/influence patches; UI/viewmodels; save types; civil war/rebel functions | Donate/fief/messenger/peace/war/alliance/pact operations and keep-fief/server callbacks are routed, including the persisted server messenger queue. All 4,121 exact authority candidates pass the structural validator; callbacks, UI lifecycle, and Separatism collision ownership still need rendered/same-save re-proof on `v1.4.8`. |
 | UnblockableThrust | submodule/config and defend-collision postfix | Kept as a pure rule inside Coop's accepted collision authority with no parallel damage path. The audited defaults now have combined foot/mounted, shield, parry, and chamber regression coverage; only an authority-owned non-shield blocked thrust crushes through. RBM interaction is irrelevant while RBM remains retired. |
 | PlayerSettlement | module load; template/blacklist loading; dynamic object registration; behavior/save schema; build/overwrite/rebuild; placement/map UI; AI/army/siege/null fixes | The original build/rebuild/overwrite outcome must be restored through Coop's existing object, building, map, siege and persistence owners. The current empty-state-only admission and blocked non-empty object graph are incomplete and fail release validation. No parallel custom settlement subsystem will be invented. |
 | Separatism | campaign-event adapter; chaos/lord/national/anarchy/union decisions; kingdom create/reactivate/destroy; clan move; hostile cleanup; relations/wars/policies; colors/names/text; readiness/territory/random helpers; loyalty thresholds; global friend/enemy and diplomatic-barter prefixes; fallen-clan conversation | All 57 candidates are exact-classified. Structural callbacks are server-gated; the restored option is capability-gated presentation plus an authenticated, revisioned, replay-safe server command with rollback. Configured settlement rebellion is forced off on clients. |

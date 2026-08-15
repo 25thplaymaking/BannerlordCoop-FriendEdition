@@ -84,7 +84,7 @@ internal sealed class FourberieSchemeSelectionSnapshot
 }
 
 /// <summary>
-/// Pinned Fourberie 1.4.7.5 scheme rules. The server supplies the target facts and random offset;
+/// Pinned Fourberie 1.4.7.6 scheme rules. The server supplies the target facts and random offset;
 /// clients send only stable target/type/lifecycle intent.
 /// </summary>
 internal static class FourberieSchemeAuthority

@@ -21,6 +21,53 @@ Changing `<GameVersion>` and the Workshop tag makes a source build identify as
 requires the binary, authority, packaging, same-save, and rendered-client gates
 in this guide.
 
+### Verified offline candidate — 2026-08-15
+
+The migration inputs and client payload have now been assembled and verified
+offline. The machine-readable source of truth is
+[`../deploy/bannerlord-1.4.8-inputs.json`](../deploy/bannerlord-1.4.8-inputs.json).
+
+- Client app `261550` is public build `24573425`; the complete 27,259-file
+  inventory hashes to
+  `152e19803cc17f0424922bb7183299c18d855c68852e3cb8079a41d04a63c972`.
+- Dedicated-server app `1863440` is build `24571419`, depot `1863441`, manifest
+  `4619456710482553639`; its 3,029-file inventory hashes to
+  `688479286fe624e31d989f1727555c9e471dfa7f4f570a03406367067131dd97`.
+- The complete rollback snapshot of client build `24127665` contains 27,251
+  files and hashes to
+  `238c50dd0f543e1b9fbe484e7002316b30d1dbbb401773ed4bd99b72bdcbbffa`.
+- All ten exact Workshop manifests were acquired. DismembermentPlus moved to
+  `v2.0.8.8`/`751945004455697202`; Fourberie moved to
+  `v1.4.7.6`/`1598945672157391038`; the other eight pins remain unchanged.
+- The verified client suite contains 847 files. Its ZIP SHA-256 is
+  `bbdc850913fb3d943c8105ee26e6ee1eb2ce33c5c9df647c73e84850970bc825`;
+  its root manifest SHA-256 is
+  `b7274557638e8bfe96eea8de9d22fb972feafc79ac9f3557e6392ccb5f123a64`.
+- The production solution builds against the `v1.4.8` assemblies with zero
+  errors. Workshop packaging/receipt tests and dedicated-server overlay tests
+  pass. The actual `v1.4.8` `TaleWorlds.Library.dll` loader boundary patches
+  exactly once and the 16-file server UI-support closure has been repinned.
+- A Serilog-2-compatible headless Coop bin was built and release-paired offline.
+  The paired `DedicatedServer.Core.dll` hashes to
+  `6b3ed5a858aaf3afcab1f7770d76ef976e8bdc097adfcc374d368b4697daf74c`;
+  its pairing receipt hashes to
+  `8b93ba231e9f822bf0a77b4c3688544b713ca0c1e45f78e0d1a8b634fbdf6c2f`.
+  This proves binary pairing, not a successful server boot.
+- The regenerated authority ledger contains 41,050 methods and 13,729 required
+  candidates: 13,309 classified, 420 unclassified, and zero blocked. Every exact
+  candidate for DismembermentPlus, Diplomacy, Improved Garrisons, Player
+  Settlement, Separatism, and Unblockable Thrust passes its current structural
+  validator. All 420 open routes are Fourberie mission/menu/behavior/VM work.
+- `Modules/NavalDLC` is absent and War Sails remains disabled in the staged
+  configuration and payload.
+
+This is an offline migration candidate, not a release. The paired Friend
+Edition server has not booted on an isolated save or passed rendered multi-client
+acceptance, or touched the live server/save. The 420 Fourberie routes and
+Player Settlement's deliberately blocked non-empty construction path remain
+functional-completion work even though the `v1.4.8` compilation and package
+compatibility checks pass.
+
 ## Evidence reviewed
 
 The migration is based on the repository's existing documentation and release
@@ -77,7 +124,7 @@ all the Bannerlord version:
 - `GameVersion` and the Coop Workshop compatibility tag are base-game pins and
   move to `v1.4.8`.
 - `Bannerlord.Diplomacy.1.4.7` is the pinned Diplomacy implementation assembly.
-- `Fourberie v1.4.7.5` is the pinned Fourberie module release.
+- `Fourberie v1.4.7.6` is the pinned Fourberie module release.
 - `Bannerlord.ButterLib.Implementation.1.4.7` and
   `Bannerlord.MBOptionScreen.v1.4.7` are loader-selected framework implementation
   assemblies contained in the currently pinned framework releases.
@@ -100,8 +147,8 @@ cutting a release; a new manifest is an input change, never an automatic upgrade
 | UIExtenderEx | `v2.13.3`, manifest `4162172930197019416` | Same release/manifest | Keep exact bytes | Low/medium. Render the Diplomacy UI lifecycle and verify no stale mixin callbacks. |
 | MCM v5 | `v5.12.2`, manifest `4045451207505706745` | Same release/manifest; contains `v1.4.7` implementation | Keep exact bytes; do not rename the selected implementation | Medium. Verify authoritative settings fingerprint and client-only presentation split. |
 | Improved Garrisons | `v4.2.0.7`, manifest `5143458534246082850` | Same manifest; Workshop compatibility tag remains `v1.4.5` | Keep exact audited payload and revalidate on `v1.4.8` | Medium. All 723 authority candidates, management commands, parties, persistence, and late join remain closed. |
-| DismembermentPlus | `v2.0.8.7`, manifest `4587731243779119835` | Workshop manifest `751945004455697202`, explicitly synchronized to Bannerlord `v1.4.8` and MCM `5.12.*` | Adopt the `v1.4.8` payload in its own audited increment | High but localized. Recompute all file/assembly hashes, re-decompile, reclassify the 17 authority candidates, revalidate `OnRegisterBlow` and visual calls, update receipts/catalog/tests, and render mounted and unmounted deaths. |
-| Fourberie | `v1.4.7.5`, manifest `4391404683672989722` | `v1.4.7.6`, manifest `1598945672157391038`; author describes the line as compatible with `v1.4.7` and later | Freeze `v1.4.7.5` for the base-game cut; evaluate `v1.4.7.6` as a separate audited increment | High if upgraded. Its persisted field shape, eight behaviors, fourteen models, explicit operation families, mission/menu routes, and exact Harmony isolation contract must all be re-proven. |
+| DismembermentPlus | `v2.0.8.8`, manifest `751945004455697202` | Exact current Workshop payload, explicitly synchronized to Bannerlord `v1.4.8` and MCM `5.12.*` | Adopt and audit the `v1.4.8` payload | High but localized. Recompute all file/assembly hashes, re-decompile, reclassify the authority candidates, revalidate `OnRegisterBlow` and visual calls, update receipts/catalog/tests, and render mounted and unmounted deaths. The new payload no longer bundles TaleWorlds assemblies. |
+| Fourberie | `v1.4.7.6`, manifest `1598945672157391038` | Exact current Workshop payload; the author describes the line as compatible with `v1.4.7` and later | Adopt and audit `v1.4.7.6` in the complete migration | High. Its persisted field shape, eight behaviors, fourteen models, explicit operation families, mission/menu routes, and exact Harmony isolation contract must all be re-proven. |
 | Diplomacy | `v1.4.7`, manifest `3938505074920035905` | Latest GitHub release remains `v1.4.7`; no `v1.4.8` payload exists | Keep exact payload and implementation assembly name | High-coupling validation, no payload upgrade. Re-prove 66 settings, four managers, sixteen UI extension types, commands/callbacks, persistence, and Kingdom screen lifecycle. |
 | Unblockable Thrust | `v1.1.3.1`, manifest `3108412629025003964` | Same manifest; Workshop advertises through `v1.4.7` | Keep exact payload and revalidate | Low. Re-prove its four candidates inside Coop's collision authority and run thrust combat cases. |
 | Player Settlement | `v7.5.0`, manifest `6398100776119441137` | Same manifest; page advertises base `v1.4.5` and later DLC support | Keep exact audited payload and revalidate without enabling War Sails | Medium/high. Verify load-before-Coop, empty and populated persistence, dynamic objects, siege behavior, snapshots, and the existing construction fail-closed boundary. |
@@ -112,13 +159,12 @@ added back incidentally.
 
 ## Function-piping completion gate
 
-Compatibility is not the finish line. The existing ledgers contain 41,050
-methods and 13,729 authority candidates, but the recorded completion counts are
-not yet a single trustworthy release result: the metadata view records 419 open
-Fourberie routes while the strict gameplay gate rejects 495 unique routes (419
-unclassified and 76 unsafe presentation classifications). The migration begins
-by regenerating both ledgers from the exact frozen payloads and producing one
-joined report. Stable requires zero active `Blocked`, `Unsupported`,
+Compatibility is not the finish line. The regenerated exact-payload ledger now
+provides one result: 41,050 methods, 13,729 authority candidates, 13,309
+classified, 420 unclassified, and zero blocked. The earlier 419-route metadata
+and 495-route strict reports are superseded; their disagreement came from stale
+Fourberie payload/token data and a separate presentation filter. All 420 current
+open candidates are in Fourberie. Stable requires zero active `Blocked`, `Unsupported`,
 `GuardedFeatureBlocked`, `NotAllowed`, placeholder, unsafe-presentation, or
 unclassified dispositions.
 
@@ -133,8 +179,8 @@ two-client convergence tests exist.
 | --- | --- | --- |
 | Harmony, ButterLib, UIExtenderEx, MCM | Framework lifecycle and client/server split exist | Re-inventory exact binaries; prove one Harmony owner, headless UI isolation, teardown, server-owned settings, and every loader/method-shape gate. Framework helpers do not receive fake server commands. |
 | Improved Garrisons | All 723 candidates are recorded closed and management routes exist | Re-run the exact gate and exercise all 29 management/template/mobile-party families, background ticks, sidecar import, hostile encounters, rollback, restart, and late join. Fix any route that only passes structurally but fails the visible option. |
-| DismembermentPlus | All 17 candidates are closed for the old payload | The `v1.4.8` payload invalidates that proof. Re-audit every function and re-prove the accepted-blow cosmetic route, dedupe, mounted deaths, ragdolls, teardown, and absence of damage replay. |
-| Fourberie | Forty-seven operation families are routed; strict gate rejects 495 routes | Close all UI/mission/lifecycle routes, including roughly 300 menu/dialog helpers that reach shared state, every mission callback and consequence, all fourteen model outcomes, canonical writes, persistence, and save/restart. Zero-open is required even if an option was previously hidden. |
+| DismembermentPlus | All 17 candidates close against `v2.0.8.8`; its public shape remains 286 methods/19 types | Render and re-prove the accepted-blow cosmetic route, dedupe, mounted deaths, ragdolls, teardown, and absence of damage replay on the new game build. |
+| Fourberie | Forty-seven operation families are routed; the exact `v1.4.7.6` ledger has 420 open routes | Close all UI/mission/lifecycle routes, including menu/dialog helpers that reach shared state, every mission callback and consequence, all fourteen model outcomes, canonical writes, persistence, and save/restart. Zero-open is required even if an option was previously hidden. |
 | Diplomacy | Donate/fief/messenger/peace/war/alliance/pact operations and server callbacks are routed | Close the complete exact ledger; prove all 66 settings, four managers, sixteen UI types, agreement/exhaustion/cooldown callbacks, Kingdom UI lifecycle, persistence, and the single-owner boundary where Separatism owns rebellion mutation. |
 | Unblockable Thrust | All four candidates are closed | Re-run exact-shape proof and the foot/mounted, shield, parry, chamber, remote-agent, malformed-config, and accepted-blow integration matrix. |
 | Player Settlement | Exact runtime and empty-state lifecycle load; non-empty construction is blocked | Implement server-owned build/rebuild/overwrite and the complete dynamic settlement/town/village/building graph. Prove stable IDs, payment rollback, placement rules, ordered registration, persistence, restart, late join, map visuals, armies, sieges, capture, and safe disable/migration rules. |
@@ -181,7 +227,7 @@ This isolates a base-game regression from a mod binary regression.
 1. Regenerate the function inventory and authority evidence from the exact
    frozen ten-module payload set.
 2. Join every manifest method to one disposition, named owner, route, and test;
-   reconcile the 419-route metadata ratchet with the 495-route strict gate.
+   use the regenerated 420-route Fourberie result as the only current ratchet.
 3. Reject stale owner/test references and any classification whose transitive IL
    still reaches shared mutation from a client-presentation path.
 4. Complete the mod slices in dependency order: framework lifecycle, Improved
@@ -221,17 +267,17 @@ input until all of the following pass:
    rider death, horse death, ragdolls, duplicate packets, reconnect, and mission
    teardown.
 
-No other mod payload changes in this increment.
+Complete and record this payload increment before assessing the Fourberie
+increment; both increments belong to the same migration candidate and PR.
 
-### 5. Resolve Fourberie drift separately
+### 5. Upgrade and close Fourberie
 
-The recommended `v1.4.8` base cut keeps the already-audited Fourberie `v1.4.7.5`
-payload because the author identifies that line as compatible with later game
-versions. After the base/Dismemberment release is stable, process `v1.4.7.6` in a
-separate increment using the full function inventory, persisted-schema,
-behavior/model, Harmony, command, menu, mission, and same-save gates. Never
-combine a Fourberie feature release with the base-game cut just to remove an
-upstream-drift warning.
+Adopt Fourberie `v1.4.7.6` manifest `1598945672157391038` as an explicit second
+payload increment. Regenerate its full function inventory, dispositions,
+persisted-schema proof, behavior/model contracts, Harmony isolation, commands,
+menus, missions, and same-save gates from the new bytes. This migration is not
+complete while any of the exact ledger's 420 open routes or a strict-gate
+rejection remains.
 
 ### 6. Regenerate release-owned artifacts
 
@@ -296,8 +342,8 @@ rejection caused by valid play, and repeated restart markers.
 ## Release decision
 
 The expected base-game code delta is small, but the release blast radius is not:
-Friend Edition deliberately fails closed on unknown game/module bytes. The safe
-path is therefore one base-game change, one DismembermentPlus payload change,
-and one later Fourberie payload change, each with independent proof. A passing
-build alone is insufficient; the exact-binary, authority, package, rendered,
-same-save, and rollback gates decide promotion.
+Friend Edition deliberately fails closed on unknown game/module bytes. The
+migration therefore records one base-game change plus independently proven
+DismembermentPlus and Fourberie payload increments in the same candidate. A
+passing build alone is insufficient; the exact-binary, authority, package,
+rendered, same-save, and rollback gates decide promotion.

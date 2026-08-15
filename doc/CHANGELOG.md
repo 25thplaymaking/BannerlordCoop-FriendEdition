@@ -1,30 +1,36 @@
 # Friend Edition Changelog
 
-## 2026-08-15 — Bannerlord v1.4.8 migration baseline (development; release held)
+## 2026-08-15 — Bannerlord v1.4.8 offline migration candidate (release held)
 
 Friend Edition now identifies Bannerlord `v1.4.8` as its source/build and Steam
-Workshop compatibility target, matching upstream Bannerlord Coop PR #2919. The
-repository also carries a dedicated `v1.4.8` runbook and phased plan covering the
-ten-module contract, exact binary/authority gates, dedicated-server pairing,
-same-save canary, and rollback. War Sails remains disabled and out of scope; RBM
-remains retired.
+Workshop compatibility target. Exact client build `24573425`, dedicated-server
+build `24571419`, depot manifests, full inventories, the complete `v1.4.7`
+rollback inventory, and all ten Workshop manifests are recorded in
+`deploy/bannerlord-1.4.8-inputs.json`. War Sails remains disabled and absent;
+RBM remains retired.
 
-The migration is also the completion boundary for existing mod-function piping.
-The runbook reconciles the 419-route metadata and 495-route strict
-Fourberie results, requires zero blocked/unclassified gameplay routes, and adds
-explicit completion slices for Diplomacy's exact ledger, Player Settlement's
-non-empty construction graph, Fourberie models/menus/missions, all 723 Improved
-Garrisons candidates, and the changed DismembermentPlus payload.
+The candidate adopts DismembermentPlus `v2.0.8.8` manifest
+`751945004455697202` and Fourberie `v1.4.7.6` manifest
+`1598945672157391038`; the other eight Workshop pins remain exact. The verified
+847-file client suite ZIP hashes to
+`bbdc850913fb3d943c8105ee26e6ee1eb2ce33c5c9df647c73e84850970bc825`.
+Production code builds against the actual `v1.4.8` assemblies with zero errors,
+the package/overlay gates pass, and the dedicated-server loader and 16-file UI
+support closure are repinned to actual `v1.4.8` bytes. A Serilog-2 headless Coop
+bin was release-paired offline: paired core SHA-256
+`6b3ed5a858aaf3afcab1f7770d76ef976e8bdc097adfcc374d368b4697daf74c`,
+receipt SHA-256
+`8b93ba231e9f822bf0a77b4c3688544b713ca0c1e45f78e0d1a8b634fbdf6c2f`.
 
-This milestone does not change any pinned Workshop payload or claim that a
-`v1.4.8` Friend Edition client/server release has been built, rendered, deployed,
-or proven on the live save. DismembermentPlus's new `v1.4.8` Workshop payload
-requires an isolated re-audit, while Fourberie `v1.4.7.6` is explicitly deferred
-to a separately reversible follow-on. Mod release/implementation names such as
-`Bannerlord.Diplomacy.1.4.7`, Fourberie `v1.4.7.5`, and the BUTR `1.4.7`
-implementation DLLs remain exact binary identifiers rather than base-game pins.
-Stable stays held until the runbook's official-binary, frozen-suite, module,
-package, rendered, same-save, and rollback gates pass.
+The regenerated authority audit classifies 13,309 of 13,729 required candidates
+with zero blocked and 420 unclassified, all in Fourberie. The older conflicting
+419/495 counts are superseded. Structural validators pass for Diplomacy,
+Improved Garrisons, Player Settlement, DismembermentPlus, Unblockable Thrust,
+and Separatism, but this does not substitute for rendered functional proof.
+Stable stays held: the 420 Fourberie mission/menu/VM routes, Player Settlement's
+non-empty construction path, full server overlay/isolated-save boot,
+rendered two-client matrix, and live promotion remain incomplete. No production
+server or save was changed.
 
 ## 2026-08-11 — Separatism authority closure (development; stable held)
 

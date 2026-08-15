@@ -30,7 +30,7 @@ using TaleWorlds.Localization;
 namespace GameInterface.Services.WorkshopMods.Fourberie;
 
 /// <summary>
-/// Late-bound safety boundary for Fourberie 1.4.7.5. The original assembly stays a separate
+/// Late-bound safety boundary for Fourberie 1.4.7.6. The original assembly stays a separate
 /// runtime module, while this adapter blocks its overlapping campaign/model surface and
 /// unrouteable singleton-player actions, fingerprints external configuration, and supplies a
 /// revisioned stable-ID snapshot format for its audited persisted fields.

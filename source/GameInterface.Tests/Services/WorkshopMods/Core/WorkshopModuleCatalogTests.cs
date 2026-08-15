@@ -18,8 +18,8 @@ public class WorkshopModuleCatalogTests
             module => AssertModule(module, "Bannerlord.UIExtenderEx", "2859222409", "v2.13.3"),
             module => AssertModule(module, "Bannerlord.MBOptionScreen", "2859238197", "v5.12.2"),
             module => AssertModule(module, "ImprovedGarrisons", "2859265386", "v4.2.0.7"),
-            module => AssertModule(module, "DismembermentPlus", "2875093027", "v2.0.8.7"),
-            module => AssertModule(module, "Fourberie", "2875710877", "v1.4.7.5"),
+            module => AssertModule(module, "DismembermentPlus", "2875093027", "v2.0.8.8"),
+            module => AssertModule(module, "Fourberie", "2875710877", "v1.4.7.6"),
             module => AssertModule(module, "Bannerlord.Diplomacy", "2881380744", "v1.4.7"),
             module => AssertModule(module, "UnblockableThrust", "3614435151", "v1.1.3.1"),
             module => AssertModule(module, "PlayerSettlement", "3720376888", "v7.5.0"));

@@ -15,17 +15,22 @@ contract from Bannerlord `v1.4.7` to `v1.4.8` without enabling War Sails,
 reintroducing RBM, losing campaign state, weakening exact-binary/authority
 controls, or mixing game/mod upgrades into one unverifiable cut.
 
+Current milestone: exact official/Workshop inputs acquired, client candidate
+packaged, and structural gates green. The candidate is intentionally held for
+420 Fourberie routes, Player Settlement construction, server pairing, and
+rendered/same-save acceptance. See the runbook's verified evidence section.
+
 ## Baseline decisions
 
 1. Reproduce upstream Bannerlord Coop PR #2919's `GameVersion` bump.
 2. Keep War Sails and TaleWorlds `BirthAndDeath` disabled.
 3. Preserve mod release identifiers that happen to contain `1.4.7` unless the
    corresponding payload changes.
-4. Freeze all currently pinned Workshop payloads for the first base-game proof.
-5. Adopt DismembermentPlus's explicit `v1.4.8` payload as the only required
-   gameplay payload increment.
-6. Keep Fourberie `v1.4.7.5` for the base cut; audit `v1.4.7.6` in a subsequent
-   increment.
+4. Keep the eight unchanged Workshop manifests byte-pinned.
+5. Adopt DismembermentPlus `v2.0.8.8` manifest `751945004455697202` as an
+   independently audited gameplay payload increment.
+6. Adopt Fourberie `v1.4.7.6` manifest `1598945672157391038` as a second
+   independently audited payload increment in the same migration candidate.
 7. Keep the existing campaign and deploy only after a byte-verified rollback
    snapshot and canary proof.
 8. Use the migration to finish the active mod-function piping: zero blocked,
@@ -51,13 +56,13 @@ reviewable execution contract. This phase alone is not release-ready.
 
 ## Phase 1 — acquire and reconcile Bannerlord v1.4.8
 
-- [ ] Create isolated `v1.4.7` and `v1.4.8` client inventories.
-- [ ] Acquire the matching `v1.4.8` dedicated-server distribution.
-- [ ] Enumerate versions, sizes, and hashes of all official base/module DLLs used
+- [x] Create isolated `v1.4.7` and `v1.4.8` client inventories.
+- [x] Acquire the matching `v1.4.8` dedicated-server distribution.
+- [x] Enumerate versions, sizes, and hashes of all official base/module DLLs used
   by Friend Edition and the server support closure.
-- [ ] Confirm War Sails is absent from both activation lists.
+- [x] Confirm War Sails is absent from both activation lists.
 - [ ] Diff managed public APIs plus the exact Harmony target shapes used by Coop.
-- [ ] Generate a new `server-ui-support-sha256.json` from actual `v1.4.8` bytes;
+- [x] Generate a new `server-ui-support-sha256.json` from actual `v1.4.8` bytes;
   retain the old manifest in release provenance, not as the active record.
 
 Exit: every official input is identified and the compatibility diff has no
@@ -65,9 +70,9 @@ unresolved target or reference changes.
 
 ## Phase 2 — base Coop and frozen-suite proof
 
-- [ ] Build all production/test projects against `v1.4.8` assemblies.
+- [x] Build all production/test projects against `v1.4.8` assemblies.
 - [ ] Run unit/integration suites and all eight E2E shards.
-- [ ] Run exact Harmony target-resolution and module identity tests.
+- [x] Run exact Harmony target-resolution and module identity tests.
 - [ ] Run development and release authority validation with the frozen ten-module
   payload set.
 - [ ] Boot the dedicated server and one rendered client on an isolated copy of
@@ -82,14 +87,13 @@ payload upgrade, not the base game.
 
 ### 3A. Reconcile the authority ledgers
 
-- [ ] Regenerate the 41,050-method function inventory and authority evidence
+- [x] Regenerate the 41,050-method function inventory and authority evidence
   from the exact frozen payloads.
-- [ ] Reconcile the 419-route Fourberie metadata ratchet with the strict
-  495-route rejection result; publish one joined count and make it the only
-  release gate.
+- [x] Supersede the stale 419/495 Fourberie reports with the exact current
+  420-route joined result and make it the only current ratchet.
 - [ ] Require every active authority-sensitive method to resolve to one allowed
   disposition, named owner, live route, and focused test.
-- [ ] Reject stale owner/test references, client-presentation paths that reach
+- [x] Reject stale owner/test references, client-presentation paths that reach
   shared mutation, hidden blocked options, and placeholder-only handlers.
 - [ ] Re-run the cross-mod single-owner matrix after every module increment.
 
@@ -107,7 +111,7 @@ success count is inferred from an older payload or a weaker validator.
 
 ### 3C. Improved Garrisons closure re-proof
 
-- [ ] Re-run all 723 exact candidate classifications and resolve every owner and
+- [x] Re-run all 723 exact candidate classifications and resolve every owner and
   test reference.
 - [ ] Exercise all 29 management/template/mobile-party families through visible
   client options, including hostile encounters, building reserves, rollback,
@@ -117,7 +121,7 @@ success count is inferred from an older payload or a weaker validator.
 
 ### 3D. Diplomacy exact closure
 
-- [ ] Reconcile the complete Diplomacy method ledger rather than accepting only
+- [x] Reconcile the complete Diplomacy method ledger rather than accepting only
   the already-routed operation list.
 - [ ] Prove all 66 settings, four managers, sixteen UI types, explicit player
   commands, server callbacks, messenger persistence, and Kingdom close/reopen.
@@ -134,8 +138,12 @@ success count is inferred from an older payload or a weaker validator.
 - [ ] Prove non-empty save/restart, late join, map visuals, parties, armies,
   sieges, capture, workshops, village binding, and safe disable/migration rules.
 
-### 3F. Fourberie zero-open closure
+### 3F. Fourberie v1.4.7.6 zero-open closure
 
+- [x] Acquire exact Workshop manifest `1598945672157391038` and confirm module
+  version `v1.4.7.6`.
+- [x] Reconcile the new assembly hashes, metadata tokens, persisted fields,
+  dependencies, and Harmony targets before carrying any prior disposition.
 - [ ] Close every strict-gate rejection, including the roughly 300 menu/dialog
   helpers that transitively reach shared state.
 - [ ] Assign explicit authority/controller ownership to all mission callbacks,
@@ -146,12 +154,12 @@ success count is inferred from an older payload or a weaker validator.
 
 ### 3G. DismembermentPlus v1.4.8
 
-- [ ] Archive Workshop manifest `751945004455697202` and calculate complete
+- [x] Archive Workshop manifest `751945004455697202` and calculate complete
   content/configuration/file hashes.
-- [ ] Diff `SubModule.xml`, dependencies, assemblies, public/IL surfaces, assets,
+- [x] Diff `SubModule.xml`, dependencies, assemblies, public/IL surfaces, assets,
   and Harmony targets against pinned manifest `4587731243779119835`.
-- [ ] Regenerate and close all DismembermentPlus function/authority records.
-- [ ] Update the combat compatibility family, exact identities, target shapes,
+- [x] Regenerate and close all DismembermentPlus function/authority records.
+- [x] Update the combat compatibility family, exact identities, target shapes,
   catalog, deployment manifest, suite receipt, server role overlay, and focused
   tests as one atomic increment.
 - [ ] Verify deterministic victim-authority cosmetic routing with no damage
@@ -159,47 +167,35 @@ success count is inferred from an older payload or a weaker validator.
 
 ### 3H. Remaining closed modules
 
-- [ ] Revalidate Unblockable Thrust `v1.1.3.1` and its four collision candidates.
+- [x] Revalidate Unblockable Thrust `v1.1.3.1` and its four collision candidates.
 - [ ] Revalidate Separatism's 57 candidates, four rebellion/union modes,
   fallen-clan transaction, rollback, and Diplomacy/vanilla collisions.
-- [ ] Prove RBM remains absent from catalog, payload, capabilities, options, and
+- [x] Prove RBM remains absent from catalog, payload, capabilities, options, and
   both role orders.
 
 Exit: the ten-module release set has no unknown bytes, unclassified authority
 candidate, missing target, unsupported role, or unresolved save-shape change.
 
-## Phase 4 — Fourberie v1.4.7.6 follow-on
+## Phase 4 — package and dedicated-server pairing
 
-Do not block the base `v1.4.8` release on this optional upstream drift. After the
-base release is stable:
-
-- [ ] Archive manifest `1598945672157391038` and reconcile permissions/assets.
-- [ ] Re-run the complete Fourberie binary/function/authority/persistence audit.
-- [ ] Update all exact identities, receipts, method shapes, canonical snapshot
-  logic, tests, and docs together.
-- [ ] Run the full Fourberie action/mission/menu/same-save acceptance matrix.
-- [ ] Release and deploy as an independently reversible increment.
-
-Exit: Fourberie upstream drift is removed without obscuring the base-game
-migration's evidence.
-
-## Phase 5 — package and dedicated-server pairing
-
-- [ ] Regenerate `deploy/workshop-mods.json`, the code catalog, compact suite
+- [x] Regenerate `deploy/workshop-mods.json`, the code catalog, compact suite
   manifest, server UI support manifest, authority inventory, and dispositions
   from exact final inputs.
 - [ ] Rebuild server module bins, loader/ButterLib patches, startup hook, and both
   release-paired `DedicatedServer.Core.dll` locations.
-- [ ] Run Workshop builder validate-only, dry-run, fixture tests, dependency
-  closure, source re-hash, and release authority validation.
+- [x] Run Workshop builder validate-only, dry-run, fixture tests, dependency
+  closure, and source re-hash.
+- [ ] Pass zero-open release authority validation (currently held by 420 exact
+  Fourberie routes).
 - [ ] Build the client archive and server pair; verify every staged hash, receipt,
   load order, module role, and excluded duplicate.
-- [ ] Confirm no War Sails module or DLL entered either payload.
+- [x] Confirm no War Sails module or DLL entered the client payload or acquired
+  dedicated-server distribution; repeat this check after final server pairing.
 
 Exit: one exact client archive and one exact paired server release pass all
 offline gates.
 
-## Phase 6 — same-save canary and promotion
+## Phase 5 — same-save canary and promotion
 
 - [ ] Stop production and reconcile the actual live inventory.
 - [ ] Create and verify a complete immutable `v1.4.7` rollback snapshot.
@@ -216,17 +212,17 @@ Exit: Friend Edition `v1.4.8` is deployed, reversible, and verified without War
 Sails. Until every item in this phase is complete, documentation must say
 "migration candidate" rather than "shipped" or "live".
 
-## Required PR sequence
+## Required increment sequence in this PR
 
-1. Source version + runbook/plan (this PR).
-2. Official `v1.4.8` binary inventory/API/server-support update.
-3. Authority-ledger reconciliation and common strict gate.
-4. Improved Garrisons re-proof and Diplomacy exact closure.
-5. Player Settlement construction/object-graph completion.
-6. Fourberie zero-open model/menu/mission closure.
-7. DismembermentPlus `v1.4.8` re-audit and payload update.
-8. All-mod collision, package/pairing, and canary release evidence.
-9. Fourberie `v1.4.7.6` follow-on after the base release is stable.
+1. Source version + runbook/plan.
+2. Official `v1.4.8` client/server inventory, API diff, and server-support update.
+3. DismembermentPlus `v2.0.8.8` payload re-audit.
+4. Fourberie `v1.4.7.6` payload re-audit and zero-open closure.
+5. Authority-ledger reconciliation and common strict gate for all modules.
+6. Improved Garrisons, Diplomacy, Player Settlement, Unblockable Thrust, and
+   Separatism functional re-proof/closure.
+7. All-mod collision, package/pairing, and canary evidence.
 
-Each PR must keep a single input class, update the owning documentation, and
-carry enough tests/provenance to roll back independently.
+Each increment must update its owning documentation and carry enough
+tests/provenance to distinguish and roll back the changed input even though the
+completed migration is reviewed in one PR.

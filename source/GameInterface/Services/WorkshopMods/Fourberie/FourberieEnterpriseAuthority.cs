@@ -5,7 +5,7 @@ namespace GameInterface.Services.WorkshopMods.Fourberie;
 
 /// <summary>
 /// Explicit server transaction for Fourberie's criminal-enterprise dictionary. The keys, costs,
-/// and limits mirror the pinned 1.4.7.5 CriminalVM without invoking its client UI layer.
+/// and limits mirror the pinned 1.4.7.6 CriminalVM without invoking its client UI layer.
 /// </summary>
 internal static class FourberieEnterpriseAuthority
 {

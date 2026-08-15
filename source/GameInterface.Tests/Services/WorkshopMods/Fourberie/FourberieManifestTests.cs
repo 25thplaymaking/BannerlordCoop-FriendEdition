@@ -74,6 +74,21 @@ public sealed class FourberieManifestTests
         }
     }
 
+    [Fact]
+    public void MainMenuPatchPlan_DefersOnlyCampaignDependentFourberieType()
+    {
+        FourberieMethodSpec deferred = Assert.Single(
+            FourberieCompatibilityManifest.Methods,
+            spec => FourberieCompatibilityManifest.RequiresCampaignAtPatchTime(spec));
+
+        Assert.Equal(FourberieCompatibilityManifest.CampaignReadyWorkshopConsequenceToken,
+            deferred.MetadataToken);
+        Assert.Equal(FourberiePatchKind.CriminalConsequence, deferred.Kind);
+        Assert.All(
+            FourberieCompatibilityManifest.Methods.Where(spec => !ReferenceEquals(spec, deferred)),
+            spec => Assert.False(FourberieCompatibilityManifest.RequiresCampaignAtPatchTime(spec)));
+    }
+
     private static string NormalizeInventoryTypeName(string? typeName) =>
         (typeName ?? string.Empty).Replace('<', '[').Replace('>', ']');
 

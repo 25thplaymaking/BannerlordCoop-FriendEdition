@@ -39,6 +39,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
 {
     private static readonly ILogger Logger = LogManager.GetLogger<FourberieCompatibilityHandler>();
     private static readonly object PatchSync = new object();
+    private static Assembly startupPatchedAssembly;
     private static Assembly patchedAssembly;
 
     private readonly IMessageBroker messageBroker;
@@ -67,6 +68,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
     private bool compatible;
     private bool stateReady;
     private FourberieOperationExecutor operationExecutor;
+    private (FourberieMethodSpec Spec, MethodInfo Original, MethodInfo Prefix, MethodInfo Postfix)[] expectedGuards;
 
     public FourberieCompatibilityHandler(
         IMessageBroker messageBroker,
@@ -306,7 +308,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                 throw new InvalidOperationException(failure);
             }
 
-            var expected = methods
+            expectedGuards = methods
                 .Select(pair =>
                 {
                     var prefix = PrefixFor(pair.Key.Kind);
@@ -340,20 +342,33 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                             AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.CampaignConsequencePostfix)),
                         _ => null,
                     };
-                    return (Original: pair.Value, Prefix: prefix, Postfix: postfix);
+                    return (Spec: pair.Key, Original: pair.Value, Prefix: prefix, Postfix: postfix);
                 })
+                .ToArray();
+
+            var startupGuards = expectedGuards
+                .Where(guard => !FourberieCompatibilityManifest.RequiresCampaignAtPatchTime(guard.Spec))
                 .ToArray();
 
             if (ReferenceEquals(patchedAssembly, assembly))
             {
-                FourberieHarmonyIsolation.AssertOnlyAdapterGuards(expected, harmony.Id);
+                AssertOnlyAdapterGuards(expectedGuards);
                 return true;
             }
 
-            var applied = new List<(MethodInfo Original, MethodInfo Prefix, MethodInfo Postfix)>();
+            if (ReferenceEquals(startupPatchedAssembly, assembly))
+            {
+                AssertOnlyAdapterGuards(startupGuards);
+                if (Campaign.Current != null) InstallCampaignReadyGuardsLocked();
+                return true;
+            }
+
+            var guardsToInstall = Campaign.Current == null ? startupGuards : expectedGuards;
+
+            var applied = new List<(FourberieMethodSpec Spec, MethodInfo Original, MethodInfo Prefix, MethodInfo Postfix)>();
             try
             {
-                foreach (var guard in expected)
+                foreach (var guard in guardsToInstall)
                 {
                     harmony.Patch(
                         guard.Original,
@@ -362,7 +377,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                     applied.Add(guard);
                 }
 
-                FourberieHarmonyIsolation.AssertOnlyAdapterGuards(expected, harmony.Id);
+                AssertOnlyAdapterGuards(guardsToInstall);
                 // See HarmonyPatchInfoStabilizer for why this reads Harmony's inventory more than once
                 // before failing closed: an unretried misread here aborts Coop startup outright, and
                 // PurgeAndAssertAuditedSurface has already proved this surface empty a few lines above
@@ -375,7 +390,10 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                         string.Join("; ", FourberieHarmonyIsolation.DescribeAssemblyPatches(assembly)));
                 }
 
-                patchedAssembly = assembly;
+                if (guardsToInstall.Length == expectedGuards.Length)
+                    patchedAssembly = assembly;
+                else
+                    startupPatchedAssembly = assembly;
             }
             catch (Exception exception)
             {
@@ -392,13 +410,76 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         }
 
         Logger.Information(
-            "Fourberie {Version} co-op authority adapter enabled ({Methods} routed methods, config {Fingerprint}, files {Files})",
+            "Fourberie {Version} co-op authority adapter enabled ({Methods} routed methods, {Deferred} campaign-ready guards deferred, config {Fingerprint}, files {Files})",
             FourberieCompatibilityManifest.SupportedModuleVersion,
             methods.Count,
+            ReferenceEquals(patchedAssembly, assembly) ? 0 : expectedGuards.Count(guard =>
+                FourberieCompatibilityManifest.RequiresCampaignAtPatchTime(guard.Spec)),
             configurationFingerprint,
             string.Join(", ", selectedFiles.Select(System.IO.Path.GetFileName)));
         return true;
     }
+
+    private void InstallCampaignReadyGuards()
+    {
+        lock (PatchSync)
+            InstallCampaignReadyGuardsLocked();
+    }
+
+    private void InstallCampaignReadyGuardsLocked()
+    {
+        if (ReferenceEquals(patchedAssembly, assembly))
+        {
+            AssertOnlyAdapterGuards(expectedGuards);
+            return;
+        }
+        if (Campaign.Current == null)
+            throw new InvalidOperationException(
+                "Fourberie campaign-ready guards cannot be installed before Campaign.Current exists.");
+        if (!ReferenceEquals(startupPatchedAssembly, assembly))
+            throw new InvalidOperationException(
+                "Fourberie campaign-ready guards cannot be installed before startup guards are verified.");
+
+        var deferred = expectedGuards
+            .Where(guard => FourberieCompatibilityManifest.RequiresCampaignAtPatchTime(guard.Spec))
+            .ToArray();
+        var applied = new List<(FourberieMethodSpec Spec, MethodInfo Original, MethodInfo Prefix, MethodInfo Postfix)>();
+        try
+        {
+            foreach (var guard in deferred)
+            {
+                harmony.Patch(
+                    guard.Original,
+                    prefix: new HarmonyMethod(guard.Prefix),
+                    postfix: guard.Postfix == null ? null : new HarmonyMethod(guard.Postfix));
+                applied.Add(guard);
+            }
+
+            AssertOnlyAdapterGuards(expectedGuards);
+            patchedAssembly = assembly;
+            Logger.Information(
+                "Fourberie campaign-ready authority guards installed ({Methods} routed methods)",
+                expectedGuards.Length);
+        }
+        catch (Exception exception)
+        {
+            foreach (var patch in applied)
+            {
+                harmony.Unpatch(patch.Original, patch.Prefix);
+                if (patch.Postfix != null) harmony.Unpatch(patch.Original, patch.Postfix);
+            }
+            Logger.Fatal(exception, "Fourberie campaign-ready guard installation failed");
+            throw new InvalidOperationException(
+                "Fourberie campaign-ready guard installation failed. Coop startup was aborted after rolling back deferred detours.",
+                exception);
+        }
+    }
+
+    private void AssertOnlyAdapterGuards(
+        IEnumerable<(FourberieMethodSpec Spec, MethodInfo Original, MethodInfo Prefix, MethodInfo Postfix)> guards) =>
+        FourberieHarmonyIsolation.AssertOnlyAdapterGuards(
+            guards.Select(guard => (guard.Original, guard.Prefix, guard.Postfix)),
+            harmony.Id);
 
     private static MethodInfo PrefixFor(FourberiePatchKind kind)
     {
@@ -687,6 +768,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
     private void HandleAllGameObjectsRegistered(MessagePayload<AllGameObjectsRegistered> _)
     {
         if (!compatible) return;
+
+        InstallCampaignReadyGuards();
 
         if (!FourberieRuntimeSurface.TryAssertNoActiveCampaignSurface(assembly, out var runtimeFailure))
             throw new InvalidOperationException(runtimeFailure);

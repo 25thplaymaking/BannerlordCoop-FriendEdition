@@ -29,6 +29,79 @@ public class CoopTroopSupplier : IMissionTroopSupplier
 {
     private static readonly ILogger Logger = LogManager.GetLogger<CoopTroopSupplier>();
 
+    public readonly struct AllocationSnapshot
+    {
+        private readonly int[] partyOffsets;
+        private readonly int[] partyCounts;
+        private readonly int playerOwnedPartyCount;
+        private readonly bool ownsReceiverPlayerParty;
+        private readonly int receiverPlayerRank;
+
+        public long Revision { get; }
+        public int BattleSize { get; }
+        public int SideTotalTroops { get; }
+        public int TotalTroops { get; }
+        public int SuppliedTroops { get; }
+
+        internal AllocationSnapshot(long revision, int battleSize, int sideTotalTroops, int totalTroops,
+            int suppliedTroops,
+            int playerOwnedPartyCount, bool ownsReceiverPlayerParty, int receiverPlayerRank,
+            int[] partyOffsets, int[] partyCounts)
+        {
+            Revision = revision;
+            BattleSize = battleSize;
+            SideTotalTroops = sideTotalTroops;
+            TotalTroops = totalTroops;
+            SuppliedTroops = suppliedTroops;
+            this.playerOwnedPartyCount = playerOwnedPartyCount;
+            this.ownsReceiverPlayerParty = ownsReceiverPlayerParty;
+            this.receiverPlayerRank = receiverPlayerRank;
+            this.partyOffsets = partyOffsets;
+            this.partyCounts = partyCounts;
+        }
+
+        public int OwnedShareOf(int sideAllocation)
+        {
+            if (sideAllocation <= 0 || TotalTroops <= 0) return 0;
+
+            int total = SideTotalTroops;
+            if (total <= 0) return 0;
+            if (TotalTroops >= total) return sideAllocation;
+
+            if (playerOwnedPartyCount > 0)
+            {
+                if (sideAllocation < playerOwnedPartyCount)
+                    return receiverPlayerRank >= 0 && receiverPlayerRank < sideAllocation ? 1 : 0;
+
+                int share = ApportionByInterval(sideAllocation - playerOwnedPartyCount, total);
+                if (ownsReceiverPlayerParty) share += 1;
+                return Math.Min(share, sideAllocation);
+            }
+
+            return Math.Min(ApportionByInterval(sideAllocation, total), sideAllocation);
+        }
+
+        private int ApportionByInterval(int allocation, int total)
+        {
+            if (allocation <= 0 || partyOffsets == null || partyCounts == null) return 0;
+
+            int share = 0;
+            for (int i = 0; i < partyCounts.Length; i++)
+            {
+                int count = partyCounts[i];
+                if (count <= 0) continue;
+
+                int start = ScaleToAllocation(partyOffsets[i], total, allocation);
+                int end = ScaleToAllocation(partyOffsets[i] + count, total, allocation);
+                share += end - start;
+            }
+            return share;
+        }
+
+        private static int ScaleToAllocation(int position, int total, int allocation)
+            => (int)((long)position * allocation / total);
+    }
+
     private sealed class PartyState
     {
         public string PartyId;
@@ -49,6 +122,8 @@ public class CoopTroopSupplier : IMissionTroopSupplier
     private bool populated;
     private int sideTotalTroops;
     private int playerOwnedPartyCount;
+    private long allocationRevision;
+    private int battleSize;
     private int reserveRevision;
     private int numWounded, numKilled, numRouted;
     // Injected at construction (a stable per-session singleton) so the per-agent supply path resolves troop/party
@@ -82,15 +157,28 @@ public class CoopTroopSupplier : IMissionTroopSupplier
     /// </para>
     /// </summary>
     public IReadOnlyList<(string PartyId, int Supplied)> SetReserve(IReadOnlyList<PartyReserve> reserve,
-        int sideTotal = 0, int playerOwnedParties = 0)
+        int sideTotal = 0, int playerOwnedParties = 0, int authoritativeBattleSize = 0,
+        long snapshotRevision = 0)
     {
         var dropped = new List<(string PartyId, int Supplied)>();
         lock (gate)
         {
-            // 0 means the server sent no total (older peer): keep the previous value rather than forgetting it.
-            if (sideTotal > 0) sideTotalTroops = sideTotal;
-            // Same rule: 0 reads as "not sent" rather than "this side holds no players".
-            if (playerOwnedParties > 0) playerOwnedPartyCount = playerOwnedParties;
+            if (snapshotRevision > 0)
+            {
+                // New peers send a complete allocation snapshot, so zero is an authoritative value.
+                sideTotalTroops = Math.Max(0, sideTotal);
+                playerOwnedPartyCount = Math.Max(0, playerOwnedParties);
+                battleSize = Math.Max(0, authoritativeBattleSize);
+                allocationRevision = snapshotRevision;
+            }
+            else
+            {
+                // Legacy peers omit these values. Preserve the last useful values rather than treating an
+                // omitted protobuf field as an authoritative zero.
+                if (sideTotal > 0) sideTotalTroops = sideTotal;
+                if (playerOwnedParties > 0) playerOwnedPartyCount = playerOwnedParties;
+                if (authoritativeBattleSize > 0) battleSize = authoritativeBattleSize;
+            }
 
             // Capture the current per-party pointers before rebuilding. A resend can carry a STALE pointer: the
             // server's ledger lags our local supply by up to one report interval, and on migration it re-sends
@@ -186,6 +274,46 @@ public class CoopTroopSupplier : IMissionTroopSupplier
 
     /// <summary>Monotonic count of authoritative reserve snapshots applied to this supplier.</summary>
     public int ReserveRevision { get { lock (gate) { return reserveRevision; } } }
+
+    /// <summary>The server-authored complete two-side snapshot generation.</summary>
+    public long AllocationRevision { get { lock (gate) { return allocationRevision; } } }
+
+    public AllocationSnapshot CaptureAllocationSnapshot()
+    {
+        lock (gate)
+        {
+            int total = 0;
+            int supplied = 0;
+            int receiverPlayerRank = -1;
+            var partyOffsets = new int[parties.Count];
+            var partyCounts = new int[parties.Count];
+            for (int i = 0; i < parties.Count; i++)
+            {
+                var party = parties[i];
+                int count = party.Entries.Length;
+                partyOffsets[i] = party.SideOffset;
+                partyCounts[i] = count;
+                total += count;
+                supplied += party.Supplied;
+                if (party.PartyId != playerPartyId) continue;
+
+                receiverPlayerRank = party.PlayerOwnedRank;
+            }
+
+            int effectiveSideTotal = sideTotalTroops > 0 ? sideTotalTroops : total;
+            return new AllocationSnapshot(
+                allocationRevision,
+                battleSize,
+                effectiveSideTotal,
+                total,
+                supplied,
+                playerOwnedPartyCount,
+                playerPartyId != null,
+                receiverPlayerRank,
+                partyOffsets,
+                partyCounts);
+        }
+    }
 
     /// <summary>Remaining troop count for each party in the current authoritative reserve.</summary>
     public IReadOnlyList<(string partyId, int remaining)> GetRemainingByParty()
@@ -295,128 +423,16 @@ public class CoopTroopSupplier : IMissionTroopSupplier
             }
         }
     }
+    public int PlayerOwnedPartyCount { get { lock (gate) { return playerOwnedPartyCount; } } }
+
+    public int BattleSize { get { lock (gate) { return battleSize; } } }
 
     /// <summary>
     /// This client's slice of a side-wide allocation, in proportion to the troops it owns. Every owner runs
     /// the same sum, so the slices add up to the allocation instead of each owner serving all of it.
     /// </summary>
     public int OwnedShareOf(int sideAllocation)
-    {
-        if (sideAllocation <= 0) return 0;
-
-        lock (gate)
-        {
-            int owned = 0;
-            foreach (var party in parties) owned += party.Entries.Length;
-            if (owned <= 0) return 0;
-
-            var total = sideTotalTroops > 0 ? sideTotalTroops : owned;
-            if (owned >= total) return sideAllocation;
-
-            // One troop of the allocation is set aside for each PLAYER-owned party on the side, before any
-            // proportional split happens. That is what makes "every player fields an agent" and "the slices
-            // add up to exactly the allocation" hold at the same time: the reserved troops are taken off the
-            // top, so nobody has to be topped up afterwards at another owner's expense.
-            //
-            // Too small an allocation to give every player one is the only case where somebody misses out,
-            // and the ranks decide it the same way on every client because the server assigns them.
-            if (playerOwnedPartyCount > 0)
-            {
-                if (sideAllocation < playerOwnedPartyCount)
-                    return ReceiverPlayerRankWithin(sideAllocation) ? 1 : 0;
-
-                var remainder = sideAllocation - playerOwnedPartyCount;
-                var reserved = ApportionByInterval(remainder, total);
-                if (OwnsReceiverPlayerParty()) reserved += 1;
-                return Math.Min(reserved, sideAllocation);
-            }
-
-            // No player-party information: a reserve from a peer that does not send it. Fall back to the older
-            // apportionment plus its inexact top-up rather than silently fielding nobody.
-            var share = ApportionByInterval(sideAllocation, total);
-
-            // Legacy path only, and knowingly inexact: without the ranks there is no way to know how many
-            // other owners are also topping themselves up, so this can exceed the allocation by one per
-            // player-owned party that floors to zero. Kept because the alternative is that player fielding
-            // nobody, which wedges the whole side's deployment.
-            if (share <= 0 && ReceiverPlayerPartyHasTroops()) share = 1;
-
-            return Math.Min(share, sideAllocation);
-        }
-    }
-
-    /// <summary>Cumulative-flooring apportionment of <paramref name="allocation"/> over this client's parties.</summary>
-    /// <remarks>
-    /// Each party takes the difference between the allocation scaled to the END of its range and to its
-    /// START. Because every party on the side occupies one contiguous, non-overlapping range of [0, total),
-    /// the slices taken by ALL owners sum to exactly the allocation - no owner needs to know what the others
-    /// hold. Callers hold <see cref="gate"/>.
-    /// </remarks>
-    private int ApportionByInterval(int allocation, int total)
-    {
-        if (allocation <= 0) return 0;
-
-        var share = 0;
-        foreach (var party in parties)
-        {
-            var count = party.Entries.Length;
-            if (count <= 0) continue;
-
-            var start = ScaleToAllocation(party.SideOffset, total, allocation);
-            var end = ScaleToAllocation(party.SideOffset + count, total, allocation);
-            share += end - start;
-        }
-
-        return share;
-    }
-
-    /// <summary>
-    /// Whether this client's own player party is one of the first <paramref name="allocation"/> player-owned
-    /// parties on the side - the tie-break for a wave too small to give every player a troop.
-    /// </summary>
-    private bool ReceiverPlayerRankWithin(int allocation)
-    {
-        foreach (var party in parties)
-        {
-            if (party.PartyId != playerPartyId) continue;
-
-            return party.PlayerOwnedRank >= 0 && party.PlayerOwnedRank < allocation;
-        }
-
-        return false;
-    }
-
-    /// <summary>Where a position within the side falls once the side is scaled to the allocation.</summary>
-    /// <remarks>
-    /// long arithmetic because position * allocation overflows int for a large side and a large wave, and
-    /// an overflow here would silently hand out a negative or wrapped share.
-    /// </remarks>
-    private static int ScaleToAllocation(int position, int total, int allocation)
-        => (int)((long)position * allocation / total);
-
-    /// <summary>Whether this client holds the receiver's own player party in this battle.</summary>
-    private bool OwnsReceiverPlayerParty() => playerPartyId != null;
-
-    /// <summary>
-    /// Whether this client owns the receiver's own party in this battle AND that party still has troops left
-    /// to field. Callers already hold <see cref="gate"/>; Monitor is reentrant, so this is safe either way.
-    /// </summary>
-    private bool ReceiverPlayerPartyHasTroops()
-    {
-        if (playerPartyId == null) return false;
-
-        lock (gate)
-        {
-            foreach (var party in parties)
-            {
-                if (party.PartyId != playerPartyId) continue;
-
-                return party.Supplied < party.Entries.Length;
-            }
-        }
-
-        return false;
-    }
+        => CaptureAllocationSnapshot().OwnedShareOf(sideAllocation);
 
     public int NumTroopsNotSupplied
     {

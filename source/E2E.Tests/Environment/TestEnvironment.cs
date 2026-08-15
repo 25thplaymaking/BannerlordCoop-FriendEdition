@@ -16,6 +16,7 @@ using GameInterface.Services.WorkshopMods.Core;
 using GameInterface.Services.WorkshopMods.Diplomacy;
 using FriendEdition.WorkshopCompatibility;
 using IModConfig = GameInterface.Configuration.IModConfig;
+using Missions.Battles;
 using Xunit.Abstractions;
 
 namespace E2E.Tests.Environment;
@@ -136,6 +137,8 @@ public class TestEnvironment
         builder.RegisterType<MockDiplomacyClientUiLifecycle>()
             .As<IDiplomacyClientUiLifecycle>()
             .InstancePerLifetimeScope();
+        builder.RegisterInstance(new FixedBattleSizeProvider(1000))
+            .As<IBattleSizeProvider>();
 
         builder.RegisterType<TestMessageBroker>().AsSelf().As<IMessageBroker>().InstancePerLifetimeScope();
         builder.RegisterType<TestPolicy>().As<ISyncPolicy>().InstancePerLifetimeScope();
@@ -143,6 +146,18 @@ public class TestEnvironment
         //builder.RegisterType<SurrogateCollection>().As<ISurrogateCollection>().InstancePerLifetimeScope().AutoActivate();
 
         return builder;
+    }
+
+    private sealed class FixedBattleSizeProvider : IBattleSizeProvider
+    {
+        private readonly int battleSize;
+
+        public FixedBattleSizeProvider(int battleSize)
+        {
+            this.battleSize = battleSize;
+        }
+
+        public int GetBattleSize(TaleWorlds.CampaignSystem.MapEvents.MapEvent mapEvent) => battleSize;
     }
 }
 

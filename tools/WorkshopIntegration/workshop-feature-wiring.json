@@ -174,10 +174,10 @@
         {
           "id": "fight-club",
           "playerFunction": "Enroll, train, fight, select patrons, record career performance, and receive authoritative fame, relation, XP, and payouts.",
-          "status": "ImplementationRequired",
-          "owner": "FourberieFightClubOutcomeHandler",
-          "routes": ["fight admission", "mission rounds", "patron trial", "career result transaction"],
-          "tests": ["FourberieFightClubOutcomeTests"]
+          "status": "VerifiedWired",
+          "owner": "FourberieOperationHandler fight-club lifecycle and FourberieFightClubAuthority career transaction",
+          "routes": ["authenticated admission and enrollment", "mission-local rounds", "patron and stable lifecycle", "bounded career result transaction", "authoritative nightly refresh"],
+          "tests": ["FourberieFightClubOutcomeTests.ProtocolAndManifest_PinOneAuthenticatedCareerCommit", "FourberieFightClubOutcomeTests.ResultCodec_RoundTripsEveryCareerInputWithoutFreeFormValues", "FourberieFightClubOutcomeTests.LifecycleProtocol_PinsAdmissionEnrollmentPatronStableAndRecruitment"]
         },
         {
           "id": "banditry-and-submenus",

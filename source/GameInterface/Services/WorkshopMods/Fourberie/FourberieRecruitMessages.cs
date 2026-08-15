@@ -56,6 +56,14 @@ internal enum FourberieOperation
     CompleteSafehouseReturn = 45,
     EnslavePrisoners = 46,
     TransferSafehouseItems = 47,
+    CompleteGrabAndRun = 48,
+    CompleteGangLeaderBashing = 49,
+    CompleteIsolatedRobbery = 50,
+    CompletePickpocketFight = 51,
+    CompleteGrudgeAssassination = 52,
+    CompleteTavernBrawl = 53,
+    CompleteLarcenyFight = 54,
+    CompleteAlleyFight = 55,
 }
 
 internal enum FourberieOperationStatus
@@ -365,6 +373,16 @@ internal static class FourberieOperationProtocol
                 string.IsNullOrEmpty(request.SettlementId) && !string.IsNullOrEmpty(request.TargetId) &&
                 string.IsNullOrEmpty(request.SecondaryTargetId) &&
                 request.IntValue <= FourberieGrudgeAuthority.MaximumPayment && request.Troops.Length == 0,
+            FourberieOperation.CompleteGrabAndRun or
+                FourberieOperation.CompleteGangLeaderBashing or
+                FourberieOperation.CompleteIsolatedRobbery or
+                FourberieOperation.CompletePickpocketFight or
+                FourberieOperation.CompleteGrudgeAssassination or
+                FourberieOperation.CompleteTavernBrawl or
+                FourberieOperation.CompleteLarcenyFight or
+                FourberieOperation.CompleteAlleyFight =>
+                !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
+                request.IntValue >= 1 && request.IntValue <= 6 && request.Troops.Length == 0,
             _ => false,
         };
     }

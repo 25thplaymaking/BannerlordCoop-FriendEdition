@@ -482,6 +482,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.ContractProposalLegacyConsequence:
                 method = nameof(FourberieAuthorityPatches.ContractProposalLegacyConsequencePrefix);
                 break;
+            case FourberiePatchKind.InsideMissionOutcome:
+                method = nameof(FourberieAuthorityPatches.InsideMissionOutcomePrefix);
+                break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
                 break;

@@ -65,6 +65,7 @@ internal enum FourberiePatchKind
     GrudgeSettlementConsequence,
     ContractTickReplacement,
     ContractProposalLegacyConsequence,
+    InsideMissionOutcome,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -684,6 +685,25 @@ internal static class FourberieCompatibilityManifest
         Add("Fourberie.Main", "OnApplicationTick", FourberiePatchKind.ClientPresentation, "System.Single");
         Add("Fourberie.Main", "OnMissionBehaviorInitialize", FourberiePatchKind.MissionInitialization,
             "TaleWorlds.MountAndBlade.Mission");
+
+        // Exact final callbacks for the mission-local fights. Their mission cleanup stays on the
+        // controlling client; every persistent consequence is recomputed by the host transaction.
+        Add("Fourberie.InsideMissionsHelper", "AfterMathsGrabAndRun",
+            FourberiePatchKind.InsideMissionOutcome, "System.Boolean");
+        Add("Fourberie.InsideMissionsHelper", "AfterMathsBashing",
+            FourberiePatchKind.InsideMissionOutcome, "System.Boolean");
+        Add("Fourberie.InsideMissionsHelper", "AfterMathsIsoRob",
+            FourberiePatchKind.InsideMissionOutcome, "System.Boolean");
+        Add("Fourberie.InsideMissionsHelper", "AfterMathsPickFail",
+            FourberiePatchKind.InsideMissionOutcome, "System.Boolean");
+        Add("Fourberie.InsideMissionsHelper", "AfterMathsGrudgeAssassin",
+            FourberiePatchKind.InsideMissionOutcome, "System.Boolean");
+        Add("Fourberie.InsideMissionsHelper", "AfterMathsTavernBrawl",
+            FourberiePatchKind.InsideMissionOutcome, "System.Boolean");
+        Add("Fourberie.InsideMissionsHelper", "AfterMathsLarceny",
+            FourberiePatchKind.InsideMissionOutcome, "System.Boolean");
+        Add("Fourberie.InsideMissionsHelper", "AfterMathsEncounterAlley",
+            FourberiePatchKind.InsideMissionOutcome, "System.Boolean");
 
         // Screen registration is presentation-only. The adapter owns exact model compatibility, so
         // OnGameInitializationFinished keeps only the server-owned hero-dictionary rebuild.

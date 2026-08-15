@@ -256,6 +256,16 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.CompleteSafehouseReturn:
                     ApplySafehouseReturn(actorParty, request.SettlementId);
                     break;
+                case FourberieOperation.CompleteGrabAndRun:
+                case FourberieOperation.CompleteGangLeaderBashing:
+                case FourberieOperation.CompleteIsolatedRobbery:
+                case FourberieOperation.CompletePickpocketFight:
+                case FourberieOperation.CompleteGrudgeAssassination:
+                case FourberieOperation.CompleteTavernBrawl:
+                case FourberieOperation.CompleteLarcenyFight:
+                case FourberieOperation.CompleteAlleyFight:
+                    ApplyInsideMissionOutcome(actor, actorParty, request);
+                    break;
                 default:
                     throw new InvalidOperationException("unknown Fourberie operation");
             }
@@ -323,6 +333,39 @@ internal sealed class FourberieOperationExecutor
     }
 
     public void Reset() => grudgeQuotes.Clear();
+
+    private void ApplyInsideMissionOutcome(
+        Hero actor,
+        MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        if (!TryResolveCurrentSettlement(actorParty, request.SettlementId, out Settlement settlement))
+            throw new InvalidOperationException("the mission settlement is no longer current");
+
+        FourberieInsideMissionResult result = FourberieInsideMissionResultCodec.Decode(request.IntValue);
+        if (result.Outcome == FourberieInsideMissionOutcome.None)
+            throw new InvalidOperationException("the mission result is invalid");
+
+        IDictionary crime = GetDictionary("_crimeValue");
+        IDictionary heroes = GetDictionary("_stringHeroIdDico");
+        using (new BarterPlayerContext(actor, actorParty))
+        using (new AllowedThread())
+            FourberieInsideMissionAuthority.Commit(
+                request.Operation,
+                result,
+                actor,
+                settlement,
+                crime,
+                heroes,
+                ResolveHero,
+                (minimum, maximum) => MBRandom.RandomInt(minimum, maximum));
+    }
+
+    private Hero ResolveHero(string stableId)
+    {
+        if (string.IsNullOrEmpty(stableId)) return null;
+        return objectManager.TryGetObject(stableId, out Hero hero) ? hero : Hero.Find(stableId);
+    }
 
     private void ApplyPrisonerEnslavement(
         Hero actor,

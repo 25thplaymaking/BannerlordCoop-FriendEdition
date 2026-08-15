@@ -8446,6 +8446,27 @@
       "tests": [
         "PlayerSettlementCompatibilityTests"
       ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": [
+        "0x060005ED",
+        "0x060005EF",
+        "0x060005F1",
+        "0x060005F3",
+        "0x060005F5",
+        "0x060005F7",
+        "0x060005F9",
+        "0x060005FB"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieInsideMissionAuthority",
+      "capability": "InsideMissionOutcome",
+      "tests": [
+        "FourberieMissionOutcomeTests.Protocol_RequiresCurrentSettlementAndExactOutcomeShape",
+        "FourberieMissionOutcomeTests.ExactAftermathCallback_MapsToOneTypedServerOperation"
+      ]
     }
   ]
 }

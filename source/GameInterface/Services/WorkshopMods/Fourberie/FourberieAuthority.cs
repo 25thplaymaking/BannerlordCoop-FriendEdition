@@ -17,6 +17,7 @@ using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
+using TaleWorlds.MountAndBlade;
 
 namespace GameInterface.Services.WorkshopMods.Fourberie;
 
@@ -870,6 +871,53 @@ internal static class FourberieAuthorityPatches
     }
 
     public static bool ContractProposalLegacyConsequencePrefix() => false;
+
+    public static bool InsideMissionOutcomePrefix(MethodBase __originalMethod, object[] __args)
+    {
+        if (!ModInformation.IsClient) return false;
+
+        FourberieOperation? operation = InsideMissionOperationForMethod(__originalMethod?.Name);
+        bool won = __args?.Length > 0 && __args[0] is bool value && value;
+        FourberieInsideMissionOutcome outcome = won
+            ? FourberieInsideMissionOutcome.Won
+            : Agent.Main == null || !Agent.Main.IsActive()
+                ? FourberieInsideMissionOutcome.Incapacitated
+                : FourberieInsideMissionOutcome.Escaped;
+        Settlement settlement = Settlement.CurrentSettlement;
+        if (operation.HasValue && settlement != null)
+        {
+            int encoded = FourberieInsideMissionResultCodec.Encode(
+                outcome,
+                Campaign.Current?.IsMainHeroDisguised == true);
+            bool submitted = FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+                operation.Value,
+                settlement,
+                null,
+                null,
+                encoded,
+                Array.Empty<FourberieLocalTroopSelection>())) == true;
+            if (!submitted) FourberieSafehouseTransferContext.ShowUnavailable();
+        }
+
+        // The creator callback mixes campaign mutation with these local teardown calls. Once the
+        // host owns the former, end the client fight without executing a second campaign result.
+        try { Mission.Current?.EndMission(); }
+        catch { /* mission teardown is best effort after an accepted result */ }
+        return false;
+    }
+
+    internal static FourberieOperation? InsideMissionOperationForMethod(string methodName) => methodName switch
+    {
+        "AfterMathsGrabAndRun" => FourberieOperation.CompleteGrabAndRun,
+        "AfterMathsBashing" => FourberieOperation.CompleteGangLeaderBashing,
+        "AfterMathsIsoRob" => FourberieOperation.CompleteIsolatedRobbery,
+        "AfterMathsPickFail" => FourberieOperation.CompletePickpocketFight,
+        "AfterMathsGrudgeAssassin" => FourberieOperation.CompleteGrudgeAssassination,
+        "AfterMathsTavernBrawl" => FourberieOperation.CompleteTavernBrawl,
+        "AfterMathsLarceny" => FourberieOperation.CompleteLarcenyFight,
+        "AfterMathsEncounterAlley" => FourberieOperation.CompleteAlleyFight,
+        _ => null,
+    };
 
     internal static FourberieOperation SchemeLifecycleOperation(int slot)
     {

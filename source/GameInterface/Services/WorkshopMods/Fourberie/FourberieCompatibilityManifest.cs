@@ -104,6 +104,7 @@ internal enum FourberiePatchKind
     KingdomLeaveConsequence,
     GuardKillConsequence,
     SafehouseEncounterConsequence,
+    CriminalConsequence,
     MissionLocal,
     MissionInitialization,
     SeparatismLoyaltyComposition,
@@ -773,6 +774,13 @@ internal static class FourberieCompatibilityManifest
         AddTokens(FourberiePatchKind.KingdomLeaveConsequence, 0x06000375);
         AddTokens(FourberiePatchKind.GuardKillConsequence, 0x06000313);
         AddTokens(FourberiePatchKind.SafehouseEncounterConsequence, 0x060004A3);
+        AddTokens(FourberiePatchKind.CriminalConsequence,
+            0x0600032E, 0x06000810, 0x06000824, 0x06000825,
+            0x0600084D, 0x06000850, 0x06000866, 0x0600086E, 0x06000877,
+            0x06000A3D, 0x06000A3F, 0x06000A41, 0x060005DB, 0x06000A52,
+            0x0600031A, 0x0600046E, 0x0600055B, 0x06000563, 0x060005A2, 0x060005B5,
+            0x0600095B, 0x06000991, 0x060009BB, 0x060009F4,
+            0x0600082E, 0x0600082F, 0x06000830, 0x06000831, 0x06000833, 0x06000835);
         AddTokens(FourberiePatchKind.MissionLocal,
             0x060003E2, 0x06000464, 0x0600046A, 0x060008C8, 0x060004A2,
             0x06000487, 0x0600048C, 0x060004CC, 0x060004DD);

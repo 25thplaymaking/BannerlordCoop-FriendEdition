@@ -1,5 +1,37 @@
 # Friend Edition Changelog
 
+## 2026-08-15 — Bannerlord v1.4.8 zero-open wiring candidate
+
+Completed the active ten-module function-piping boundary for Bannerlord
+`v1.4.8` without adding War Sails. The exact authority audit now passes all
+13,729 required routes with zero unclassified, zero blocked, and zero issues;
+the feature ledger passes all 30 families across all 10 modules with zero open.
+Strict gameplay validation passes UnblockableThrust 4, DismembermentPlus 17,
+Separatism 57, ImprovedGarrisons 723, Fourberie 1,865, Diplomacy 4,121, and
+PlayerSettlement 625 records.
+
+Fourberie's final 47 consequence methods and all 272 formerly rejected
+transitive records now terminate in typed, authenticated host operations.
+Server-side implementations re-resolve targets and recompute costs, RNG,
+influence, faction changes, war, banishment, encounter/scenario outcomes, and
+workshop conversion; clients retain only local inquiries and rendering.
+Repository tests add a persistent-call-tree ownership proof and exact campaign
+consequence coverage. The complete in-process xUnit run passes 1,751 tests with
+zero failures or errors (11 existing regeneration skips).
+
+Regenerated the private ten-module payload from the final client build: 850
+files, root manifest SHA-256
+`c75c8d3f170633907e0d79463c53f3aaf56c4beebea322767d9595d2acc04b91`,
+ZIP SHA-256
+`bb9dd97d1f9fc4f39dda66776cb317a67226ca9850e7a4e9c4196506393eeb57`.
+Regenerated the Serilog-2 dedicated-server pair from the same revision: paired
+core SHA-256
+`8b5457947505cfc5891d79818ffdc41a3fc2a01ee8c1fff44b41428c78d5035d`
+and receipt SHA-256
+`676a42faef9a6a58afb2966c89e17bdfd30558dd4a7349c6c5fac85a78a083ff`.
+The live server/save were not changed; isolated-save boot and rendered
+multi-client validation remain promotion gates, not missing function wiring.
+
 ## 2026-08-15 — Fourberie finalization review (draft PR; release still held)
 
 The final bounded `v1.4.8` review classified Fourberie's remaining local mission

@@ -10,6 +10,29 @@ namespace GameInterface.Tests.Services.WorkshopMods.Fourberie;
 
 public sealed class FourberieManifestTests
 {
+    [Fact]
+    public void EveryPersistentFunctionTerminatesInAnOwnedRoute()
+    {
+        string auditPath = FindRepositoryFile("doc", "generated", "workshop-authority-audit.json");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(auditPath));
+        JsonElement[] required = document.RootElement.GetProperty("records").EnumerateArray()
+            .Where(record => record.GetProperty("moduleId").GetString() == "Fourberie" &&
+                             record.GetProperty("active").GetBoolean() &&
+                             record.GetProperty("requiresDisposition").GetBoolean())
+            .ToArray();
+
+        Assert.NotEmpty(required);
+        Assert.DoesNotContain(required, record =>
+            record.GetProperty("disposition").GetString() is "Unclassified" or "Blocked" ||
+            string.IsNullOrWhiteSpace(record.GetProperty("owner").GetString()) ||
+            record.GetProperty("tests").GetArrayLength() == 0);
+        Assert.DoesNotContain(required, record =>
+            record.GetProperty("disposition").GetString() == "ClientPresentation" &&
+            record.GetProperty("evidence").EnumerateArray().Any(signal =>
+                signal.GetString()?.StartsWith("campaign-mutation:", StringComparison.Ordinal) == true ||
+                signal.GetString()?.StartsWith("calls-authority-sensitive:", StringComparison.Ordinal) == true));
+    }
+
     private sealed class ShapeFixture
     {
         private static void Target(ref int value, bool enabled, List<string> names)

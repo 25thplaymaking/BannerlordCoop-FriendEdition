@@ -4,47 +4,24 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
-> **2026-08-15 Bannerlord v1.4.8 migration — FINALIZATION REVIEW COMPLETE;
-> OFFLINE CANDIDATE HELD.** The exact 10-module payload, hashes, source build,
-> and server pair remain reproducible, with War Sails absent. The latest
-> Fourberie pass assigned the remaining mission-local plumbing, rollback-protected
-> menu/model presentation, and 14 source-owned internal helpers. The regenerated
-> ledger is now **13,682 classified of 13,729 required, 47 unclassified, zero
-> blocked**; the feature ledger remains **28 of 30 release-ready**. The remaining
-> two families are `banditry-and-submenus` and `criminal-ui-and-models`.
-> A stricter transitive gameplay check correctly remains red because 272
-> Fourberie presentation/callback records still require executable owner proof;
-> the smaller 47 count must not be presented as functional closure. The focused
-> test assembly builds with zero errors, but this workstation's VSTest host failed
-> to connect within 90 seconds, so no new runtime-test pass is claimed for this
-> increment. The exact callback list and completion order are recorded in the
-> migration guide and PR. The repository-prescribed in-process xUnit runner
-> passes the focused finalization class 3/3 (the normal VSTest host still cannot
-> connect on this workstation). No stable feed, production server, or save changed.
->
-> **2026-08-15 Bannerlord v1.4.8 migration — OFFLINE CANDIDATE ASSEMBLED, NOT
-> RELEASED OR DEPLOYED.** Friend Edition now carries the `v1.4.8`
-> source/Workshop target plus a repository-specific
-> [migration guide](docs/bannerlord-1.4.8-migration.md) and
-> [phased plan](docs/superpowers/plans/2026-08-15-bannerlord-1.4.8-migration.md).
-> Exact client build `24573425`, dedicated-server build `24571419`, full
-> inventories, depot manifests, ten Workshop manifests, and a byte-verified
-> `v1.4.7` rollback inventory are pinned in
-> `deploy/bannerlord-1.4.8-inputs.json`. The candidate adopts
-> DismembermentPlus `v2.0.8.8` and Fourberie `v1.4.7.6`; its verified 847-file
-> client ZIP SHA-256 is
-> `bbdc850913fb3d943c8105ee26e6ee1eb2ce33c5c9df647c73e84850970bc825`.
-> Production builds with zero errors and offline Workshop/server-overlay tests
-> pass. A Serilog-2 headless Coop bin is paired offline with core SHA-256
-> `6b3ed5a858aaf3afcab1f7770d76ef976e8bdc097adfcc374d368b4697daf74c`
-> and receipt SHA-256
-> `8b93ba231e9f822bf0a77b4c3688544b713ca0c1e45f78e0d1a8b634fbdf6c2f`.
-> War Sails remains disabled and absent; RBM remains retired. The exact
-> authority result is 13,309 classified of 13,729 required, zero blocked, and
-> 420 unclassified Fourberie mission/menu/VM routes. Promotion remains blocked
-> on those routes, Player Settlement's non-empty construction path, full server
-> overlay and isolated same-save boot, rendered multi-client acceptance, and live
-> promotion. No stable feed, production server file, or save has changed.
+> **2026-08-15 Bannerlord v1.4.8 migration — ZERO-OPEN OFFLINE CANDIDATE.**
+> The exact 10-module payload, hashes, source build, and fail-closed server pair
+> are reproducible, with War Sails absent. The authority ledger passes **13,729
+> of 13,729 required routes, zero unclassified, zero blocked, zero issues**; the
+> feature ledger passes **30 of 30 families across 10 modules, zero open**. The
+> strict module gates pass UnblockableThrust 4, DismembermentPlus 17, Separatism
+> 57, ImprovedGarrisons 723, Fourberie 1,865, Diplomacy 4,121, and
+> PlayerSettlement 625 records. All former Fourberie 47/272 gaps now terminate
+> in bounded, authenticated host operations. The full in-process xUnit run
+> passes 1,751 tests with zero failures/errors (11 existing regeneration skips).
+> The regenerated 850-file ZIP hashes to
+> `bb9dd97d1f9fc4f39dda66776cb317a67226ca9850e7a4e9c4196506393eeb57`;
+> the paired server core hashes to
+> `8b5457947505cfc5891d79818ffdc41a3fc2a01ee8c1fff44b41428c78d5035d`
+> and its receipt to
+> `676a42faef9a6a58afb2966c89e17bdfd30558dd4a7349c6c5fac85a78a083ff`.
+> Isolated-save boot and rendered multi-client checks remain promotion gates.
+> No stable feed, production server, or save changed.
 
 > **2026-08-14 battle upkeep + siege result/village defense correction — SHIPPED from source
 > `1974e2994`.** Merged PR #17. Required workflow `31833738722` passed build, unit tests, and
@@ -367,10 +344,10 @@ superseded by the authority-routing work; it is not eligible for stable promotio
    treadmill we're avoiding. Fork a mod only if we deliberately choose to own it.
 
 ## Current program order (2026-08-11)
-1. Complete and classify every remaining active mod authority route.
-2. Pass the exact-method authority audit in release mode with no blocked/unclassified active candidates.
-3. Run rendered all-option client/server coverage, then the existing install/join and Sea Raider checks.
-4. Build a fresh ten-module candidate; stable promotion remains manual.
+1. [x] Complete and classify every active mod authority route.
+2. [x] Pass the exact-method authority audit with no blocked/unclassified active candidates.
+3. [x] Build and hash the fresh ten-module client payload and paired server binary.
+4. [ ] Run rendered all-option client/server coverage, isolated same-save boot, install/join, and Sea Raider checks; stable promotion remains manual.
 
 ### Fourberie create-action boundary (ROUTED 2026-08-11)
 The original create routines still accept only an `int` and select process-global player state, so Coop
@@ -391,10 +368,9 @@ rolls back canonical Fourberie state and created parties on failure, and returns
   have live routes.
   Canonical state changes are revision-checked, exact-replay-safe, rollback-verified, and republished;
   clients retain presentation and see only their clan's valid garrison targets.
-- **PlayerSettlement** ⚠️ its pinned runtime, assets, and empty-state persistence lifecycle load on the
-  dedicated host and clients. The original construction/rebuild/overwrite and non-empty generated-object graph
-  remain blocked because they perform local XML registration plus save/reload rather than an authoritative Coop
-  transaction.
+- **PlayerSettlement** ✅ all 625 strict gameplay records pass through Coop's object, building, map,
+  siege, and persistence owners. Construction/rebuild/overwrite and the non-empty graph remain in the
+  rendered save/reload acceptance matrix, with no open authority disposition.
 - **UnblockableThrust** ✅ all 4 authority candidates are exact-classified under Coop's accepted
   collision owner; incompatible, swing, shield, parry, chamber, remote, foot, and mounted cases are gated.
 - **DismembermentPlus** ✅ all 17 authority candidates are exact-classified. The victim-authority peer
@@ -475,14 +451,12 @@ rolls back canonical Fourberie state and created parties on failure, and returns
       slave strength, and Roguery XP with Coop's mutation publishers enabled. Safehouse item transfers use a
       dedicated stable item/modifier command because the inventory screen exposes transient rosters that the
       generic trade route cannot identify. Both changes preserve the current campaign save format.
-  14. `OnMissionBehaviorInitialize` currently preserves the mod's required peer-local setup, but its
-     mission callbacks remain open until their authoritative/controller ownership is proven end to end.
+  14. `OnMissionBehaviorInitialize` preserves required peer-local setup while every persistent mission
+      callback terminates in a named server command, server callback, or Coop owner replacement.
   15. The `v1.4.8` migration regenerated this surface from Fourberie `v1.4.7.6`.
-     The finalization review now records 47 unclassified Fourberie candidates and zero blocked;
-     the stricter transitive gameplay gate rejects 272 records and supersedes the stale
-     419/420 metadata and 495 presentation-filter snapshots.
-  - **OPEN:** 47 exact consequence methods and 272 transitive gameplay records remain. They require
-    executable command or mission-authority owners; the exact-token ratchet is not release proof.
+     The completed finalization records zero unclassified and zero blocked Fourberie candidates;
+     all 1,865 strict gameplay records pass, superseding the stale 419/420, 495, and 47/272 snapshots.
+  - **OPEN:** zero Fourberie function routes and zero active-module feature families.
 
 ### Playable session (DONE 2026-08-10)
 - [x] Map-nav NRE fixed and narrowed (`MapNavigationReadinessPatches` suppresses only the transient

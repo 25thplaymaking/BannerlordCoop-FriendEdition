@@ -1732,6 +1732,175 @@ internal static class FourberieAuthorityPatches
         return false;
     }
 
+    public static bool CriminalConsequencePrefix(object __instance, MethodBase __originalMethod, object[] __args)
+    {
+        if (!ModInformation.IsClient) return false;
+        FourberieCriminalConsequence consequence = (__originalMethod?.MetadataToken ?? 0) switch
+        {
+            0x0600032E => FourberieCriminalConsequence.PrisonBreakSuccess,
+            0x06000810 => FourberieCriminalConsequence.EstablishCrimeBase,
+            0x06000824 => FourberieCriminalConsequence.DominancePartnership,
+            0x06000825 => FourberieCriminalConsequence.DominanceTakeover,
+            0x0600084D => FourberieCriminalConsequence.Fortune,
+            0x06000850 => FourberieCriminalConsequence.ClearRivalry,
+            0x06000866 => FourberieCriminalConsequence.GatherFollowers,
+            0x0600086E => FourberieCriminalConsequence.PromoteCompanion,
+            0x06000877 => FourberieCriminalConsequence.EscapeCaptivity,
+            0x06000A3D => FourberieCriminalConsequence.SabotageFood,
+            0x06000A3F => FourberieCriminalConsequence.SabotageWalls,
+            0x06000A41 => FourberieCriminalConsequence.SabotageWater,
+            0x06000A52 => FourberieCriminalConsequence.ManageWorkshopOwner,
+            0x060005DB => FourberieCriminalConsequence.ConvertWorkshop,
+            0x0600031A => FourberieCriminalConsequence.PickAction,
+            0x0600046E => FourberieCriminalConsequence.PickFailure,
+            0x0600055B => FourberieCriminalConsequence.CaravanAmbushResult,
+            0x06000563 => FourberieCriminalConsequence.TributeResult,
+            0x060005A2 => FourberieCriminalConsequence.ExtortionResult,
+            0x060005B5 => FourberieCriminalConsequence.RiotResult,
+            0x0600095B => FourberieCriminalConsequence.CaravanAmbushHire,
+            0x06000991 => FourberieCriminalConsequence.AbandonGreedyMilitia,
+            0x060009BB => FourberieCriminalConsequence.AbandonLarceny,
+            0x060009F4 => FourberieCriminalConsequence.StartRiot,
+            0x0600082F or 0x06000830 => FourberieCriminalConsequence.PayRiotInfluence,
+            0x0600082E => FourberieCriminalConsequence.DefectRiotVictim,
+            0x06000831 => FourberieCriminalConsequence.DeclareRiotWar,
+            0x06000833 or 0x06000835 => FourberieCriminalConsequence.BanishRiotActor,
+            _ => 0,
+        };
+        Settlement settlement = Settlement.CurrentSettlement ??
+            AccessTools.Field(__instance?.GetType(), "set")?.GetValue(__instance) as Settlement;
+        Hero target = null;
+        string secondaryId = null;
+        var objects = new List<object>();
+        IEnumerable<InquiryElement> selection = __args?.OfType<IEnumerable<InquiryElement>>().FirstOrDefault();
+        if (selection != null)
+        {
+            foreach (InquiryElement element in selection)
+            {
+                if (element.Identifier is Hero hero) target ??= hero;
+                else if (element.Identifier is MobileParty party && !party.IsMainParty) objects.Add(party);
+                else if (element.Identifier is string value && consequence == FourberieCriminalConsequence.Fortune &&
+                         int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int attempts))
+                    secondaryId = "attempts." + attempts.ToString(CultureInfo.InvariantCulture);
+                else if (element.Identifier is MobileParty main && main.IsMainParty)
+                {
+                    Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
+                    if (AccessTools.Field(behavior, "_banditsFollowers")?.GetValue(null) is IEnumerable followers)
+                        objects.AddRange(followers.Cast<object>().OfType<MobileParty>().Where(value => !value.IsMainParty));
+                }
+            }
+        }
+        if (consequence is FourberieCriminalConsequence.ManageWorkshopOwner or FourberieCriminalConsequence.ConvertWorkshop)
+        {
+            object workshop = null;
+            string workshopTypeId = null;
+            foreach (object argument in __args ?? Array.Empty<object>())
+            {
+                if (argument is not IEnumerable values || argument is string) continue;
+                foreach (object value in values)
+                {
+                    object candidate = value is InquiryElement inquiry ? inquiry.Identifier : value;
+                    if (candidate?.GetType().Name == "Workshop") workshop = candidate;
+                    else if (candidate?.GetType().Name == "WorkshopType")
+                        workshopTypeId = AccessTools.Property(candidate.GetType(), "StringId")?.GetValue(candidate) as string ??
+                                         AccessTools.Field(candidate.GetType(), "StringId")?.GetValue(candidate) as string;
+                }
+            }
+            Type helper = AccessTools.TypeByName("Fourberie.HelperSubTerritory");
+            workshop ??= AccessTools.Field(helper, "_lastSelectedWorkshop")?.GetValue(null);
+            if (workshop != null && settlement?.Town?.Workshops is IList workshops)
+            {
+                int index = workshops.IndexOf(workshop);
+                if (index >= 0) secondaryId = "workshop." + index.ToString(CultureInfo.InvariantCulture) +
+                    (workshopTypeId == null ? string.Empty : "|type." + workshopTypeId);
+            }
+            if (consequence == FourberieCriminalConsequence.ManageWorkshopOwner)
+                target = AccessTools.Field(__instance?.GetType(), "heroConv")?.GetValue(__instance) as Hero ??
+                         Hero.OneToOneConversationHero;
+        }
+        if (consequence is FourberieCriminalConsequence.PickAction or FourberieCriminalConsequence.PickFailure)
+        {
+            Agent agent = __args?.OfType<Agent>().FirstOrDefault();
+            target = agent?.Character is CharacterObject character ? character.HeroObject : null;
+            string characterId = agent?.Character is CharacterObject picked ? picked.StringId : string.Empty;
+            int[] numbers = (__args ?? Array.Empty<object>()).Where(value => value is int).Cast<int>().ToArray();
+            bool carrying = agent != null && agent.ActionSet.GetName() is string action &&
+                            (action.Contains("carry") || action.Contains("backpack"));
+            secondaryId = consequence == FourberieCriminalConsequence.PickAction
+                ? "pick." + (numbers.FirstOrDefault()).ToString(CultureInfo.InvariantCulture) + "." + (carrying ? "1" : "0")
+                : "fail." + string.Join(".", numbers.Select(value => value.ToString(CultureInfo.InvariantCulture)));
+            if (target == null && !string.IsNullOrEmpty(characterId))
+                secondaryId += "|character." + characterId;
+        }
+        if (consequence is FourberieCriminalConsequence.CaravanAmbushResult or
+            FourberieCriminalConsequence.TributeResult or FourberieCriminalConsequence.ExtortionResult)
+            secondaryId = "result." + ((__args?.OfType<bool>().FirstOrDefault() ?? false) ? "1" : "0");
+        if (consequence == FourberieCriminalConsequence.RiotResult)
+        {
+            int survivors = __args?.OfType<int>().FirstOrDefault() ?? 0;
+            Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
+            TroopRoster ai = AccessTools.Field(behavior, "_AiEncounterRoster")?.GetValue(null) as TroopRoster;
+            secondaryId = "riot." + survivors.ToString(CultureInfo.InvariantCulture) + "." +
+                          (ai?.TotalHealthyCount == 0 ? "1" : "0");
+        }
+        target ??= AccessTools.Field(__instance?.GetType(), "needClearingGl")?.GetValue(__instance) as Hero;
+        if (consequence == FourberieCriminalConsequence.AbandonLarceny)
+            target = AccessTools.Field(__instance?.GetType(), "larcenyJob")?.GetValue(__instance) as Hero;
+        if (consequence == FourberieCriminalConsequence.AbandonGreedyMilitia)
+            settlement = AccessTools.Field(__instance?.GetType(), "village")?.GetValue(__instance) as Settlement ?? settlement;
+        if (consequence is FourberieCriminalConsequence.PayRiotInfluence or
+            FourberieCriminalConsequence.DefectRiotVictim or FourberieCriminalConsequence.DeclareRiotWar)
+            target = FindClosureField<Hero>(__instance, "victimHero");
+        if (consequence == FourberieCriminalConsequence.BanishRiotActor)
+            target = FindClosureField<Hero>(__instance, "playerFactionLeader");
+        if (consequence == FourberieCriminalConsequence.PromoteCompanion)
+            settlement = AccessTools.Field(__instance?.GetType(), "set")?.GetValue(__instance) as Settlement ?? settlement;
+        if (consequence == 0 || settlement == null ||
+            FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+                FourberieOperation.CommitCriminalConsequence,
+                settlement,
+                target,
+                null,
+                (int)consequence,
+                Array.Empty<FourberieLocalTroopSelection>(),
+                targetObjects: objects.Distinct().ToArray(),
+                secondaryId: secondaryId)) != true)
+            FourberieSafehouseTransferContext.ShowUnavailable();
+        if (consequence == FourberieCriminalConsequence.PrisonBreakSuccess && PlayerEncounter.Current != null)
+        {
+            if (PlayerEncounter.InsideSettlement) PlayerEncounter.LeaveSettlement();
+            PlayerEncounter.Finish(true);
+        }
+        if (consequence == FourberieCriminalConsequence.EscapeCaptivity && settlement != null)
+        {
+            PlayerCaptivity.EndCaptivity();
+            EncounterManager.StartSettlementEncounter(MobileParty.MainParty, settlement);
+            Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");
+            AccessTools.Field(behavior, "_sceneString")?.SetValue(null, "prison");
+            AccessTools.Field(behavior, "_isDisguisedGuard")?.SetValue(null, false);
+            AccessTools.Method(behavior, "StartDisguiseMission", new[] { typeof(string), typeof(string), typeof(string) })?
+                .Invoke(null, new object[] { "prison", "sp_prison_break_prisoner", "prison_break" });
+        }
+        return consequence is FourberieCriminalConsequence.PickAction or FourberieCriminalConsequence.PickFailure;
+    }
+
+    private static T FindClosureField<T>(object instance, string name, int depth = 0) where T : class
+    {
+        if (instance == null || depth > 4) return null;
+        foreach (FieldInfo field in instance.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            object value = field.GetValue(instance);
+            if (field.Name == name && value is T match) return match;
+        }
+        foreach (FieldInfo field in instance.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            if (!field.Name.Contains("locals") || field.GetValue(instance) is not object nested) continue;
+            T match = FindClosureField<T>(nested, name, depth + 1);
+            if (match != null) return match;
+        }
+        return null;
+    }
+
     internal static void CompleteBanditPresentation(Assembly assembly, FourberieBanditEvent banditEvent)
     {
         if (!ModInformation.IsClient || assembly == null) return;

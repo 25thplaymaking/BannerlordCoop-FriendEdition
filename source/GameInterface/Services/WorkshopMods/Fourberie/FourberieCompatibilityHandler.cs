@@ -54,6 +54,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
     private readonly Dictionary<long, FourberieOperation> pendingOperations = new Dictionary<long, FourberieOperation>();
     private readonly Dictionary<long, FourberieBanditEvent> pendingBanditEvents = new Dictionary<long, FourberieBanditEvent>();
     private readonly Dictionary<long, Clan> pendingOperationClans = new Dictionary<long, Clan>();
+    private readonly Dictionary<long, FourberieLocalOperation> pendingCriminalOperations =
+        new Dictionary<long, FourberieLocalOperation>();
     private NetworkFourberieContractProposal pendingContractProposal;
     private string shownContractProposalKey;
 
@@ -200,6 +202,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             FourberieOperationProtocol.IsBanditEvent(operation.IntValue))
             pendingBanditEvents[requestId] = (FourberieBanditEvent)operation.IntValue;
         if (operation.TargetClan != null) pendingOperationClans[requestId] = operation.TargetClan;
+        if (operation.Operation == FourberieOperation.CommitCriminalConsequence)
+            pendingCriminalOperations[requestId] = operation;
         network.SendAll(request);
         return true;
     }
@@ -651,6 +655,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.SafehouseEncounterConsequence:
                 method = nameof(FourberieAuthorityPatches.SafehouseEncounterConsequencePrefix);
                 break;
+            case FourberiePatchKind.CriminalConsequence:
+                method = nameof(FourberieAuthorityPatches.CriminalConsequencePrefix);
+                break;
             case FourberiePatchKind.MissionLocal:
                 method = nameof(FourberieAuthorityPatches.MissionLocalPrefix);
                 break;
@@ -815,6 +822,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         pendingBanditEvents.Remove(payload.What.RequestId);
         pendingOperationClans.TryGetValue(payload.What.RequestId, out Clan targetClan);
         pendingOperationClans.Remove(payload.What.RequestId);
+        pendingCriminalOperations.TryGetValue(payload.What.RequestId, out FourberieLocalOperation criminalOperation);
+        pendingCriminalOperations.Remove(payload.What.RequestId);
 
         if (payload.What.Status == FourberieOperationStatus.Accepted)
         {
@@ -869,12 +878,74 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                 CompleteSafehouseReturnPresentation();
             if (operation == FourberieOperation.CommitBanditEvent)
                 FourberieAuthorityPatches.CompleteBanditPresentation(assembly, banditEvent);
+            if (operation == FourberieOperation.CommitCriminalConsequence && criminalOperation != null)
+            {
+                var consequence = (FourberieCriminalConsequence)criminalOperation.IntValue;
+                if (consequence == FourberieCriminalConsequence.RiotResult && payload.What.IntValue is >= 1 and <= 3)
+                    ShowRiotPoliticalChoice(criminalOperation.Settlement, payload.What.IntValue);
+                if (consequence == FourberieCriminalConsequence.BanishRiotActor && payload.What.IntValue == 4)
+                    ShowLeaveKingdomChoice(criminalOperation.Settlement);
+            }
         }
         else
         {
             InformationManager.DisplayMessage(new InformationMessage(
                 "The Fourberie action could not be applied because its campaign state changed. Reopen the option and try again."));
         }
+    }
+
+    private void ShowRiotPoliticalChoice(Settlement settlement, int choice)
+    {
+        Hero victim = settlement?.Owner;
+        Hero leader = Hero.MainHero?.MapFaction?.Leader;
+        if (victim == null || leader == null) return;
+        int cost = choice == 1 ? 400 : choice == 2 ? 200 : 100;
+        FourberieCriminalConsequence negative = choice == 1
+            ? FourberieCriminalConsequence.DefectRiotVictim
+            : choice == 2 ? FourberieCriminalConsequence.BanishRiotActor
+            : FourberieCriminalConsequence.DeclareRiotWar;
+        Hero negativeTarget = choice == 2 ? leader : victim;
+        InformationManager.ShowInquiry(new InquiryData(
+            new TextObject("{=Fov1506x008}Your are uncovered!").ToString(),
+            new TextObject("{=Fov1506x009}{VAL} influence is required to limit the repercussions of your underhanded maneuvers.")
+                .SetTextVariable("VAL", cost).ToString(),
+            true, true,
+            new TextObject("{=FoCom39}A close one...").ToString(),
+            new TextObject("{=FoCom24}Damn it!").ToString(),
+            () => SubmitRiotPoliticalChoice(settlement, victim, FourberieCriminalConsequence.PayRiotInfluence),
+            () => SubmitRiotPoliticalChoice(settlement, negativeTarget, negative)), true, false);
+    }
+
+    private void SubmitRiotPoliticalChoice(
+        Settlement settlement, Hero target, FourberieCriminalConsequence consequence)
+    {
+        if (!TrySubmit(new FourberieLocalOperation(
+                FourberieOperation.CommitCriminalConsequence, settlement, target, null, (int)consequence,
+                Array.Empty<FourberieLocalTroopSelection>())))
+            FourberieSafehouseTransferContext.ShowUnavailable();
+    }
+
+    private void ShowLeaveKingdomChoice(Settlement settlement)
+    {
+        var choices = new List<InquiryElement>
+        {
+            new InquiryElement("keep", new TextObject("{=z8h0BRAb}Keep all holdings").ToString(), null, true,
+                new TextObject("{=Fov1407x002}Owned settlements remain under your control but the kingdom will declare war on you.").ToString()),
+            new InquiryElement("dontkeep", new TextObject("{=JIr3Jc7b}Relinquish all holdings").ToString(), null, true,
+                new TextObject("{=Fov1407x003}Owned settlements are returned to the kingdom. This will avert a war.").ToString()),
+        };
+        MBInformationManager.ShowMultiSelectionInquiry(new MultiSelectionInquiryData(
+            new TextObject("{=3sxtCWPe}Leaving Kingdom").ToString(),
+            new TextObject("{=Fov1407x004}Choose how you want to leave the kingdom.").ToString(),
+            choices, false, 1, 1, new TextObject("{=FoCom79}Confirm").ToString(), string.Empty,
+            selected =>
+            {
+                string option = selected.FirstOrDefault()?.Identifier as string;
+                if (option == null || !TrySubmit(new FourberieLocalOperation(
+                        FourberieOperation.LeaveKingdom, settlement, null, null, 0,
+                        Array.Empty<FourberieLocalTroopSelection>(), secondaryId: option)))
+                    FourberieSafehouseTransferContext.ShowUnavailable();
+            }, null, string.Empty, false), true, false);
     }
 
     private void CompleteSafehouseReturnPresentation()

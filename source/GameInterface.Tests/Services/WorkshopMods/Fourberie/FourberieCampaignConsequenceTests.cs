@@ -87,6 +87,41 @@ public sealed class FourberieCampaignConsequenceTests
         Assert.True(FourberieOperationProtocol.IsRequestShapeValid(request));
     }
 
+    [Fact]
+    public void CriminalConsequences_AreExactTypedHostTransactions()
+    {
+        int[] tokens =
+        {
+            0x0600032E, 0x06000810, 0x06000824, 0x06000825,
+            0x0600084D, 0x06000850, 0x06000866, 0x0600086E, 0x06000877,
+            0x06000A3D, 0x06000A3F, 0x06000A41,
+            0x060005DB, 0x06000A52,
+            0x0600031A, 0x0600046E,
+            0x0600055B, 0x06000563, 0x060005A2, 0x060005B5,
+            0x0600095B, 0x06000991, 0x060009BB, 0x060009F4,
+            0x0600082E, 0x0600082F, 0x06000830, 0x06000831, 0x06000833, 0x06000835,
+        };
+        Assert.All(tokens, token => Assert.Single(FourberieCompatibilityManifest.Methods.Where(spec =>
+            spec.MetadataToken == token && spec.Kind == FourberiePatchKind.CriminalConsequence)));
+
+        Assert.True(FourberieOperationProtocol.IsRequestShapeValid(CriminalRequest(
+            FourberieCriminalConsequence.PrisonBreakSuccess)));
+        Assert.True(FourberieOperationProtocol.IsRequestShapeValid(CriminalRequest(
+            FourberieCriminalConsequence.Fortune, secondary: "attempts.10")));
+        Assert.True(FourberieOperationProtocol.IsRequestShapeValid(CriminalRequest(
+            FourberieCriminalConsequence.ClearRivalry, target: "hero.rival")));
+        Assert.True(FourberieOperationProtocol.IsRequestShapeValid(CriminalRequest(
+            FourberieCriminalConsequence.GatherFollowers, objects: new[] { "party.follower" })));
+        Assert.True(FourberieOperationProtocol.IsRequestShapeValid(CriminalRequest(
+            FourberieCriminalConsequence.PromoteCompanion, target: "hero.companion")));
+        Assert.False(FourberieOperationProtocol.IsRequestShapeValid(CriminalRequest(
+            FourberieCriminalConsequence.Fortune, secondary: "attempts.11")));
+        Assert.False(FourberieOperationProtocol.IsRequestShapeValid(CriminalRequest(
+            FourberieCriminalConsequence.GatherFollowers)));
+        Assert.True(FourberieOperationProtocol.IsRequestShapeValid(CriminalRequest(
+            FourberieCriminalConsequence.PayRiotInfluence, target: "hero.victim")));
+    }
+
     private static NetworkRequestFourberieOperation LeaveRequest(string choice) =>
         new NetworkRequestFourberieOperation(
             Guid.NewGuid().ToString("N"), 1, 0, FourberieOperation.LeaveKingdom,
@@ -103,5 +138,18 @@ public sealed class FourberieCampaignConsequenceTests
             Array.Empty<FourberieTroopSelection>(),
             Array.Empty<FourberieItemSelection>(),
             Array.Empty<string>(),
+            Array.Empty<FourberieRosterSelection>());
+
+    private static NetworkRequestFourberieOperation CriminalRequest(
+        FourberieCriminalConsequence consequence,
+        string target = "",
+        string secondary = "",
+        string[] objects = null) => new NetworkRequestFourberieOperation(
+            Guid.NewGuid().ToString("N"), 1, 0,
+            FourberieOperation.CommitCriminalConsequence,
+            "town.test", target, secondary, (int)consequence,
+            Array.Empty<FourberieTroopSelection>(),
+            Array.Empty<FourberieItemSelection>(),
+            objects ?? Array.Empty<string>(),
             Array.Empty<FourberieRosterSelection>());
 }

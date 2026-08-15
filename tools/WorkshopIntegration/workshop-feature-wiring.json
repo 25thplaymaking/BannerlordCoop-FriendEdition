@@ -182,18 +182,18 @@
         {
           "id": "banditry-and-submenus",
           "playerFunction": "Run bandit diplomacy, war-dog, fleet/horde, robbery, extortion, tribute, caravan ambush, sabotage, riot, and insurance outcomes.",
-          "status": "ImplementationRequired",
-          "owner": "FourberieOperationExecutor.ApplyBanditEvent (completed operations; scenario consequences remain open)",
-          "routes": ["authenticated bandit operation", "canonical snapshot", "open scenario consequence routes"],
-          "tests": ["FourberieBanditAuthorityTests.ExactBanditConsequences_MapToExecutableOwners"]
+          "status": "VerifiedWired",
+          "owner": "FourberieOperationExecutor.ApplyBanditEvent and ApplyCriminalConsequence",
+          "routes": ["authenticated bandit operation", "canonical snapshot", "typed scenario and encounter consequences", "server-authoritative cost, RNG, crime, relation, and kingdom mutations"],
+          "tests": ["FourberieBanditAuthorityTests.ExactBanditConsequences_MapToExecutableOwners", "FourberieCampaignConsequenceTests.CriminalConsequences_AreExactTypedHostTransactions"]
         },
         {
           "id": "criminal-ui-and-models",
           "playerFunction": "Render the Criminal VM, menus, hints, filters, scores, and Fourberie models without allowing refresh/filter code to replace canonical state.",
-          "status": "ImplementationRequired",
-          "owner": "FourberieAuthorityPatches.ClientPresentationPrefix/ClientPresentationPostfix (remaining selection consequences open)",
-          "routes": ["canonical snapshot", "presentation snapshot/restore", "open selection consequence routes"],
-          "tests": ["FourberiePresentationAuthorityTests.ExactCanonicalPresentationCallbacks_HaveTypedRoutes"]
+          "status": "VerifiedWired",
+          "owner": "FourberieAuthorityPatches.ClientPresentationPrefix and CriminalConsequencePrefix",
+          "routes": ["canonical snapshot", "presentation snapshot/restore", "typed selection consequences", "authenticated political and holdings choices"],
+          "tests": ["FourberiePresentationAuthorityTests.ExactCanonicalPresentationCallbacks_HaveTypedRoutes", "FourberieManifestTests.EveryPersistentFunctionTerminatesInAnOwnedRoute"]
         }
       ]
     },

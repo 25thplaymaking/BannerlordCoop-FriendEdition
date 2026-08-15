@@ -5,7 +5,12 @@ Target: Bannerlord Coop Friend Edition, game/nightly line 1.4.7
 Workshop source: `P:\SteamLibrary\steamapps\workshop\content\261550`  
 Decompiler evidence: `C:\Users\Bryce\Documents\ServerWork\workshop-decompile-audit`
 
-> **Release-baseline notice (2026-08-09):** Steam currently reports Fourberie Workshop item `2875710877` at a newer manifest than the installed audited copy. The Fourberie manifest ID and fingerprint below are therefore historical audit evidence, not releasable package pins. Packaging must remain fail-closed until Steam installs the new bytes and the fingerprint/method-surface review is repeated.
+> **Historical baseline notice (2026-08-09):** The audit-time dispositions below
+> describe the original guarded baseline. They are retained as migration history.
+> The current exact payload uses Fourberie `v1.4.7.6`, manifest
+> `1598945672157391038`; its repeated fingerprint and method-surface review is
+> complete. Current release evidence is in `WorkshopFunctionReview.md` and the
+> `v1.4.8` migration guide.
 
 ## Executive decision
 
@@ -53,12 +58,13 @@ The 2 stable GameInterface failures are `WorkshopCompatibilityManifestTests.Prot
 
 Beyond that pair, the Workshop test suites are otherwise green and non-flaky as of this pass. A prior investigation of the same suites found genuine run-to-run instability (failure counts varying 6→8→7 in GameInterface's WorkshopMods namespace and 1→0→2, always inside `CombatModCompatibilityTests`, in E2E's) traced to a real HarmonyLib defect: `Harmony.GetPatchInfo` persists patches by serializing them into `HarmonySharedState` and re-deserializing on every read, and that round trip has been observed, under GC pressure from a busy test process, to intermittently reconstruct the wrong `MethodInfo` for a patch's `PatchMethod` — confirmed by hash mismatch against the original object, not merely reference inequality. Every Workshop module's Harmony isolation guard (ImprovedGarrisons, Fourberie, Diplomacy, Player Settlement, the shared Frameworks cohort, and Missions' CombatModCompatibilityGuard) now retries its patch-info read via a shared `HarmonyPatchInfoStabilizer` before failing closed, plus a module initializer disabling HarmonyLib's legacy BinaryFormatter serialization path. Verified stable at the time: 20/20 consecutive runs of the GameInterface namespace and 5/5 of the E2E namespace, identical failure counts every time — measured on the pre-merge suites (233/63), and re-confirmed at 3/3 each on the merged counts above. Note the BinaryFormatter initializer is a test-only mitigation: HarmonyLib reads that AppContext switch only in its net5.0-and-newer builds, and the net472 `0Harmony.dll` the game loads has no such path, so the stabilizer's retry budget is the sole production mitigation and is sized accordingly.
 
-The exact Fourberie `v1.4.7.6` payload is now installed, fingerprinted, and in
-the `v1.4.8` candidate. The 2026-08-15 finalization review supersedes the former
-420-open snapshot: the basic audit now has 47 unclassified methods, while the
-stricter transitive gameplay gate rejects 272 Fourberie records. Publication
-remains blocked by those executable-owner proofs plus rendered/same-save gates;
-acquiring newer bytes did not make unadapted consequences safe for co-op.
+The exact Fourberie `v1.4.7.6` payload is installed, fingerprinted, and in the
+`v1.4.8` candidate. The completed 2026-08-15 wiring pass supersedes both the
+former 420-open snapshot and the interim 47/272 snapshot: all 13,729 required
+authority routes are classified with zero blocked, all 1,865 strict Fourberie
+records pass, and all 30 feature families are release-ready. The remaining
+rendered/same-save gates validate deployment behavior; they are not unowned
+function routes.
 
 ## Evidence and scope
 

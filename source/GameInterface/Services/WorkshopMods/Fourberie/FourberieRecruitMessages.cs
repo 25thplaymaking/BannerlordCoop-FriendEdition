@@ -83,6 +83,39 @@ internal enum FourberieOperation
     LeaveKingdom = 71,
     CommitGuardKills = 72,
     CommitSafehouseEncounter = 73,
+    CommitCriminalConsequence = 74,
+}
+
+internal enum FourberieCriminalConsequence
+{
+    PrisonBreakSuccess = 1,
+    EstablishCrimeBase = 2,
+    DominancePartnership = 3,
+    DominanceTakeover = 4,
+    Fortune = 5,
+    ClearRivalry = 6,
+    GatherFollowers = 7,
+    PromoteCompanion = 8,
+    EscapeCaptivity = 9,
+    SabotageFood = 10,
+    SabotageWalls = 11,
+    SabotageWater = 12,
+    ManageWorkshopOwner = 13,
+    ConvertWorkshop = 14,
+    PickAction = 15,
+    PickFailure = 16,
+    CaravanAmbushResult = 17,
+    TributeResult = 18,
+    ExtortionResult = 19,
+    RiotResult = 20,
+    CaravanAmbushHire = 21,
+    AbandonGreedyMilitia = 22,
+    AbandonLarceny = 23,
+    StartRiot = 24,
+    PayRiotInfluence = 25,
+    DefectRiotVictim = 26,
+    DeclareRiotWar = 27,
+    BanishRiotActor = 28,
 }
 
 internal enum FourberieStealthEvent
@@ -382,6 +415,7 @@ internal static class FourberieOperationProtocol
             (request.Operation != FourberieOperation.TransferSafehouseItems &&
              request.Operation != FourberieOperation.CommitBanditEvent && request.Items.Length != 0) ||
             (request.Operation != FourberieOperation.CommitBanditEvent &&
+             request.Operation != FourberieOperation.CommitCriminalConsequence &&
              (request.ObjectIds.Length != 0 || request.Roster.Length != 0)))
             return false;
 
@@ -572,6 +606,7 @@ internal static class FourberieOperationProtocol
             FourberieOperation.CommitSafehouseEncounter =>
                 !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
                 request.IntValue >= 2 && request.IntValue <= 5 && request.Troops.Length == 0,
+            FourberieOperation.CommitCriminalConsequence => IsCriminalConsequenceShapeValid(request),
             _ => false,
         };
     }
@@ -756,6 +791,69 @@ internal static class FourberieOperationProtocol
         if (consequence == FourberieCampaignConsequence.BribeGuard)
             return !string.IsNullOrEmpty(request.SettlementId) && string.IsNullOrEmpty(request.TargetId);
         return string.IsNullOrEmpty(request.TargetId);
+    }
+
+    private static bool IsCriminalConsequenceShapeValid(NetworkRequestFourberieOperation request)
+    {
+        if (!Enum.IsDefined(typeof(FourberieCriminalConsequence), request.IntValue) ||
+            request.Troops.Length != 0 || request.Items.Length != 0 || request.Roster.Length != 0)
+            return false;
+        var value = (FourberieCriminalConsequence)request.IntValue;
+        bool political = value is FourberieCriminalConsequence.PayRiotInfluence or
+            FourberieCriminalConsequence.DefectRiotVictim or FourberieCriminalConsequence.DeclareRiotWar or
+            FourberieCriminalConsequence.BanishRiotActor;
+        if (!political && string.IsNullOrEmpty(request.SettlementId)) return false;
+        return value switch
+        {
+            FourberieCriminalConsequence.ClearRivalry or FourberieCriminalConsequence.PromoteCompanion =>
+                !string.IsNullOrEmpty(request.TargetId) && string.IsNullOrEmpty(request.SecondaryTargetId) &&
+                request.ObjectIds.Length == 0,
+            FourberieCriminalConsequence.GatherFollowers =>
+                string.IsNullOrEmpty(request.TargetId) && string.IsNullOrEmpty(request.SecondaryTargetId) &&
+                request.ObjectIds.Length > 0,
+            FourberieCriminalConsequence.Fortune =>
+                string.IsNullOrEmpty(request.TargetId) && request.ObjectIds.Length == 0 &&
+                request.SecondaryTargetId.StartsWith("attempts.", StringComparison.Ordinal) &&
+                int.TryParse(request.SecondaryTargetId.Substring(9), NumberStyles.None,
+                    CultureInfo.InvariantCulture, out int attempts) && attempts >= 1 && attempts <= 10,
+            FourberieCriminalConsequence.ManageWorkshopOwner =>
+                !string.IsNullOrEmpty(request.TargetId) && request.ObjectIds.Length == 0 &&
+                IsWorkshopSelection(request.SecondaryTargetId, requireType: false),
+            FourberieCriminalConsequence.ConvertWorkshop =>
+                string.IsNullOrEmpty(request.TargetId) && request.ObjectIds.Length == 0 &&
+                IsWorkshopSelection(request.SecondaryTargetId, requireType: true),
+            FourberieCriminalConsequence.PickAction or FourberieCriminalConsequence.PickFailure =>
+                request.ObjectIds.Length == 0 &&
+                (!string.IsNullOrEmpty(request.TargetId) || request.SecondaryTargetId.Contains("|character.")) &&
+                request.SecondaryTargetId.StartsWith(value == FourberieCriminalConsequence.PickAction ? "pick." : "fail.",
+                    StringComparison.Ordinal),
+            FourberieCriminalConsequence.CaravanAmbushResult or FourberieCriminalConsequence.TributeResult or
+            FourberieCriminalConsequence.ExtortionResult =>
+                string.IsNullOrEmpty(request.TargetId) && request.ObjectIds.Length == 0 &&
+                (request.SecondaryTargetId == "result.0" || request.SecondaryTargetId == "result.1"),
+            FourberieCriminalConsequence.RiotResult =>
+                string.IsNullOrEmpty(request.TargetId) && request.ObjectIds.Length == 0 &&
+                request.SecondaryTargetId.StartsWith("riot.", StringComparison.Ordinal),
+            FourberieCriminalConsequence.AbandonLarceny =>
+                !string.IsNullOrEmpty(request.TargetId) && string.IsNullOrEmpty(request.SecondaryTargetId) &&
+                request.ObjectIds.Length == 0,
+            FourberieCriminalConsequence.PayRiotInfluence or FourberieCriminalConsequence.DefectRiotVictim or
+            FourberieCriminalConsequence.DeclareRiotWar or FourberieCriminalConsequence.BanishRiotActor =>
+                !string.IsNullOrEmpty(request.TargetId) && string.IsNullOrEmpty(request.SecondaryTargetId) &&
+                request.ObjectIds.Length == 0,
+            _ => string.IsNullOrEmpty(request.SecondaryTargetId) &&
+                 string.IsNullOrEmpty(request.TargetId) && request.ObjectIds.Length == 0,
+        };
+    }
+
+    private static bool IsWorkshopSelection(string value, bool requireType)
+    {
+        if (string.IsNullOrEmpty(value)) return false;
+        string[] parts = value.Split('|');
+        if (parts.Length != (requireType ? 2 : 1) || !parts[0].StartsWith("workshop.", StringComparison.Ordinal) ||
+            !int.TryParse(parts[0].Substring(9), NumberStyles.None, CultureInfo.InvariantCulture, out int index) ||
+            index < 0 || index >= 64) return false;
+        return !requireType || parts[1].StartsWith("type.", StringComparison.Ordinal) && parts[1].Length > 5;
     }
 
     private static bool IsLegacyCallbackShapeValid(NetworkRequestFourberieOperation request) =>

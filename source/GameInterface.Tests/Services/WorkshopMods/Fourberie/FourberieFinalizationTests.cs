@@ -31,7 +31,7 @@ public sealed class FourberieFinalizationTests
     }
 
     [Fact]
-    public void RemainingMissionPlumbing_IsClientLocalWithoutClassifyingPersistentChildren()
+    public void MissionPlumbing_IsClientLocalAndPersistentChildrenAreHostTransactions()
     {
         int[] local =
         {
@@ -44,8 +44,9 @@ public sealed class FourberieFinalizationTests
         Assert.True(FourberieAuthorityPatches.MissionLocalPrefix());
 
         int[] persistentChildren = { 0x0600046E, 0x0600055B, 0x06000563, 0x060005A2, 0x060005B5 };
-        Assert.All(persistentChildren, token => Assert.DoesNotContain(
-            FourberieCompatibilityManifest.Methods, spec => spec.MetadataToken == token));
+        Assert.All(persistentChildren, token => Assert.Single(
+            FourberieCompatibilityManifest.Methods.Where(spec =>
+                spec.MetadataToken == token && spec.Kind == FourberiePatchKind.CriminalConsequence)));
     }
 
     [Fact]

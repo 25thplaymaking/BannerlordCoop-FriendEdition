@@ -74,25 +74,25 @@
     "runtime": "Serilog 2.12.0 headless build",
     "officialDedicatedServerCoreInputSha256": "d766be598213e69f0cda4e146470025c49d6a2f16de8df63bc6bc9b7dfacfb20",
     "loaderPatchedDedicatedServerCoreSha256": "8b67ff3491bf1f91d0a27bfd2a0425975603f6dfa5102cd7dcfc057e5f778449",
-    "pairedDedicatedServerCoreSha256": "6b3ed5a858aaf3afcab1f7770d76ef976e8bdc097adfcc374d368b4697daf74c",
-    "pairingReceiptSha256": "8b93ba231e9f822bf0a77b4c3688544b713ca0c1e45f78e0d1a8b634fbdf6c2f",
+    "pairedDedicatedServerCoreSha256": "8b5457947505cfc5891d79818ffdc41a3fc2a01ee8c1fff44b41428c78d5035d",
+    "pairingReceiptSha256": "676a42faef9a6a58afb2966c89e17bdfd30558dd4a7349c6c5fac85a78a083ff",
     "startupHookSha256": "963ce773d2959286904b4fa9e6db369fe936a9eac75fbac367a61a9a8786d48b",
     "modules": [
       {
         "fileName": "Common.dll",
-        "sha256": "324fe3c5703fa17752de64b55fe8b4a6ca037eca52c28e8925e5694459831748"
+        "sha256": "5624093b284b0737e70b321f3ce45a7a5553db4b86a5a9b6ab2e71c2f5f8b604"
       },
       {
         "fileName": "Coop.Core.dll",
-        "sha256": "305a69abf70a77ad11be04d220ede46637c84f14905335fe136a217376af8fb0"
+        "sha256": "63b326273376ad8e188034fec8eb1b9edc0a8cd6dc09c25bf17313af376578a4"
       },
       {
         "fileName": "Coop.Steam.dll",
-        "sha256": "590c41f7cc6186cbcef3cc5c46e725c073b5c326aaf83dc3830a2656fdef2f03"
+        "sha256": "1a21528da251c641583b3781c23eaac9e490f919d55ac73c825316b65e3ca4c2"
       },
       {
         "fileName": "GameInterface.dll",
-        "sha256": "16a50bbf768197a4e1d8eebc0cabf4e8ad9ea83caaa8aac8933d6a8558afc325"
+        "sha256": "5cd6f2ad6c7f653cf77d19ef47db56092e807626a86e2c287bdcdcc61d2966e7"
       }
     ],
     "releaseBoundary": "Exact core/module pairing built and receipt-verified offline. Full server module overlay, isolated save boot, and live promotion remain unverified."
@@ -108,11 +108,11 @@
   "managedSuite": {
     "suiteId": "friend-edition-private-workshop-suite",
     "moduleCount": 10,
-    "rootManifestSha256": "b7274557638e8bfe96eea8de9d22fb972feafc79ac9f3557e6392ccb5f123a64",
+    "rootManifestSha256": "c75c8d3f170633907e0d79463c53f3aaf56c4beebea322767d9595d2acc04b91",
     "managedReceiptFileSha256": "b6b9cd635277716b3c9254a8a84937518ca350abc511f43b70084774e50ca3b0",
     "receiptSha256": "d202ef52ef632708bb86dd0851e34d9e84473d73921847833ed31ae69f4b9362",
-    "archiveSha256": "bbdc850913fb3d943c8105ee26e6ee1eb2ce33c5c9df647c73e84850970bc825",
-    "verifiedFileCount": 847,
+    "archiveSha256": "bb9dd97d1f9fc4f39dda66776cb317a67226ca9850e7a4e9c4196506393eeb57",
+    "verifiedFileCount": 850,
     "sourceWorkshopSnapshotsUnchanged": true,
     "modules": [
       {

@@ -192,6 +192,42 @@ public sealed class FourberieManifestTests
     }
 
     [Theory]
+    [InlineData("OpenSub")]
+    [InlineData("FOpenStash")]
+    [InlineData("RespecPerks")]
+    [InlineData("AgentsList")]
+    [InlineData("HintSchemeRoutine")]
+    [InlineData("ListKingTribF")]
+    [InlineData("ListToTownNet")]
+    [InlineData("ListPartnerF")]
+    [InlineData("ListCrimPactF")]
+    [InlineData("ListKCrimPactF")]
+    public void CriminalRoomBrowsers_AreClientPresentation(string method)
+    {
+        FourberieMethodSpec spec = Assert.Single(
+            FourberieCompatibilityManifest.Methods,
+            candidate => candidate.TypeName == "Fourberie.CriminalVM" &&
+                         candidate.MethodName == method);
+
+        Assert.Equal(FourberiePatchKind.ClientPresentation, spec.Kind);
+    }
+
+    [Fact]
+    public void EnlistMutationHelper_IsOwnedByTypedEnlistTransactions()
+    {
+        FourberieMethodSpec spec = Assert.Single(
+            FourberieCompatibilityManifest.Methods,
+            candidate => candidate.TypeName == "Fourberie.CriminalVM" &&
+                         candidate.MethodName == "EnlistAgentsDoneRoutine");
+
+        Assert.Equal(FourberiePatchKind.SchemeOwnedReplacement, spec.Kind);
+        Assert.Equal(
+            new[] { "TaleWorlds.CampaignSystem.Roster.TroopRoster" },
+            spec.ParameterTypeNames);
+        Assert.False(FourberieAuthorityPatches.SchemeOwnedReplacementPrefix());
+    }
+
+    [Theory]
     [InlineData("Fourberie.Main", "InitializeCampaignBehaviors", "BehaviorsAndModels")]
     [InlineData("Fourberie.Main", "OnGameInitializationFinished", "RefreshHeroDicoOnly")]
     public void ReplacedInitializationEntryPoints_UseTheirAuditedAdapters(

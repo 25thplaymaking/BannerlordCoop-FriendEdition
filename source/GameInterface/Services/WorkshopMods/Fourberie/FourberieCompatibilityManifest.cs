@@ -349,6 +349,21 @@ internal static class FourberieCompatibilityManifest
         // requests and server-side explicit-context transactions.
         const string TroopRoster = "TaleWorlds.CampaignSystem.Roster.TroopRoster";
         const string FlattenedTroopRoster = "TaleWorlds.CampaignSystem.Roster.FlattenedTroopRoster";
+        // These VM methods only build/switch client UI, browse selections, or open TaleWorlds
+        // screens. Their writes target Fourberie's temporary presentation caches rather than the
+        // campaign save graph. Keep them available on clients and suppress them on the server.
+        Add("Fourberie.CriminalVM", "OpenSub", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM", "FOpenStash", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM", "RespecPerks", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM", "AgentsList", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM", "HintSchemeRoutine", FourberiePatchKind.ClientPresentation,
+            "System.Int32");
+        Add("Fourberie.CriminalVM", "ListKingTribF", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM", "ListToTownNet", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM", "ListPartnerF", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM", "ListCrimPactF", FourberiePatchKind.ClientPresentation);
+        Add("Fourberie.CriminalVM", "ListKCrimPactF", FourberiePatchKind.ClientPresentation);
+
         Add("Fourberie.CriminalVM", "AgentsEnlistRoutine", FourberiePatchKind.ClientOperationPresentation, "System.Int32");
         AddReturning("Fourberie.CriminalVM", "EnlistFromPartyDone", "System.Boolean",
             FourberiePatchKind.EnlistPartyConsequence,
@@ -356,6 +371,11 @@ internal static class FourberieCompatibilityManifest
             FlattenedTroopRoster, FlattenedTroopRoster, "System.Boolean", PartyBase, PartyBase);
         Add("Fourberie.CriminalVM", "EnlistFromLadsDone", FourberiePatchKind.EnlistLadsConsequence,
             PartyBase, TroopRoster, TroopRoster, PartyBase, TroopRoster, TroopRoster, "System.Boolean");
+        // Both public enlist completion entry points above submit the complete roster transaction.
+        // The original helper mutates the static crime pool and is therefore never allowed to run
+        // as a second, implicit consequence on either role.
+        Add("Fourberie.CriminalVM", "EnlistAgentsDoneRoutine",
+            FourberiePatchKind.SchemeOwnedReplacement, TroopRoster);
         AddReturning("Fourberie.FourberieBehavior", "OnDoneEnslaved", "System.Boolean",
             FourberiePatchKind.EnslavePrisonersConsequence,
             TroopRoster, TroopRoster, TroopRoster, TroopRoster,

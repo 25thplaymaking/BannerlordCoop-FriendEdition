@@ -7643,6 +7643,42 @@
       ]
     },
     {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": [
+        "0x06000038",
+        "0x0600004C",
+        "0x06000055",
+        "0x06000058",
+        "0x0600007E",
+        "0x060000AB",
+        "0x060000AC",
+        "0x060000B7",
+        "0x0600018A",
+        "0x0600018B"
+      ],
+      "disposition": "ClientPresentation",
+      "owner": "FourberieAuthorityPatches.ClientPresentationPrefix",
+      "capability": "ClientPresentation",
+      "tests": [
+        "FourberieManifestTests.CriminalRoomBrowsers_AreClientPresentation"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": [
+        "0x0600005F"
+      ],
+      "disposition": "CoopOwnerReplacement",
+      "owner": "FourberieAuthorityPatches.SchemeOwnedReplacementPrefix",
+      "capability": "ExplicitOperations",
+      "tests": [
+        "FourberieManifestTests.EnlistMutationHelper_IsOwnedByTypedEnlistTransactions",
+        "FourberieAuthorityTests.AgentPartyAuthority_CapsCreationAndRefillAtTwenty"
+      ]
+    },
+    {
       "moduleId": "PlayerSettlement",
       "assemblySha256": "74f9ab2ebc82bdc755886c6ad0802500c2df89015d7c65cd5018c543dbf18119",
       "metadataTokens": [

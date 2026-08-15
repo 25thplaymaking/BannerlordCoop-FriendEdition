@@ -1,5 +1,17 @@
 # Friend Edition Changelog
 
+## 2026-08-15 — Portal production-host fallback
+
+- Added a thin Node 24 host adapter for the Worker-compatible campaign portal, with atomic file-backed
+  stats/deduplication state and the same bounded report rate limit.
+- Replaced the unavailable Workers/KV credential path with an immutable SSH deployment to the existing
+  co-op host and a dedicated Cloudflare Tunnel health check.
+- Kept all GitHub and publisher credentials server-side and added pinned-host-key deployment.
+- Made the launcher version-gate test deterministic and carried the game version inside the client
+  build artifact so the checkout-free publisher can generate its manifest.
+- Removed a race from the clan-leader disconnect test by waiting for the queued parking callback's
+  completed party state rather than its intermediate separation call.
+
 ## 2026-08-15 — Bannerlord v1.4.8 zero-open wiring candidate
 
 Completed the active ten-module function-piping boundary for Bannerlord

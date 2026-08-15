@@ -1,0 +1,17 @@
+[Unit]
+Description=Calradia Co-op campaign portal
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/bannerlord-coop/portal
+EnvironmentFile=%h/bannerlord-coop/portal/portal.env
+ExecStart=/usr/bin/node --experimental-strip-types %h/bannerlord-coop/portal/current/src/server.ts
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

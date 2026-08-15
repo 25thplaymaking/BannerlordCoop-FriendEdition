@@ -15,22 +15,27 @@
 
 ## Deployment contract
 
-The Worker deploy is intentionally credential-gated. Configure these repository secrets:
+The portal handler stays Worker-compatible, but production runs as a user-level Node 24 service on
+the co-op host and is exposed only through the dedicated Cloudflare Tunnel at
+`https://calradia-coop.frontir.solutions`. Configure these repository secrets:
 
-- `CLOUDFLARE_API_TOKEN`: Worker/KV edit token for the target Cloudflare account.
-- `CLOUDFLARE_ACCOUNT_ID`: target account id.
-- `PORTAL_GITHUB_TOKEN`: fine-grained token scoped only to Issues: write on
-  `25thplaymaking/BannerlordCoop-FriendEdition`.
-- `PORTAL_PUBLISH_TOKEN`: random high-entropy value shared only with the dedicated server.
+- `PORTAL_SERVER_HOST`: SSH hostname or address.
+- `PORTAL_SERVER_USER`: restricted deployment user.
+- `PORTAL_SERVER_SSH_KEY`: dedicated private deployment key.
+- `PORTAL_SERVER_HOST_KEY`: pinned `known_hosts` entry for the host.
 
-Run **Campaign Portal Deploy**. Wrangler provisions the KV namespace, deploys the Worker, installs
-the two runtime secrets, and publishes `portal.json` to the rolling `portal-config` GitHub release.
-Launchers discover the assigned `workers.dev` URL from that document; it is not hard-coded.
+Run **Campaign Portal Deploy**. It tests the handler, deploys an immutable release over SSH, restarts
+the service, verifies `/health`, and publishes `portal.json` to the rolling `portal-config` GitHub
+release. The host stores `GITHUB_TOKEN` and `PUBLISH_TOKEN` in its mode-`0600` service environment
+file; neither credential is sent to the launcher or committed.
+
+The checked-in user service units under `services/coop-portal/deploy` run the portal on loopback port
+4211 and its dedicated tunnel. `portal.env` and the tunnel credential/config remain host-only.
 
 Set these environment variables in the dedicated server service and restart it:
 
 ```text
-COOP_PORTAL_URL=https://<deployed-worker>.workers.dev
+COOP_PORTAL_URL=https://calradia-coop.frontir.solutions
 COOP_PORTAL_PUBLISH_TOKEN=<same value as PORTAL_PUBLISH_TOKEN>
 ```
 

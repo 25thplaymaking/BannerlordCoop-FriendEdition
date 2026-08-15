@@ -213,8 +213,7 @@ public class PlayerPartyVisibilityHandlerTests : IDisposable
         broker.Publish(this, new PlayerDisconnected(peer, default));
 
         Assert.True(SpinWait.SpinUntil(
-            () => membership.Invocations.Any(invocation =>
-                invocation.Method.Name == nameof(IPlayerClanMembershipService.TrySeparate)),
+            () => !party.IsActive && !party.IsVisible,
             TimeSpan.FromSeconds(5)));
         Assert.Single(membership.Invocations, invocation =>
             invocation.Method.Name == nameof(IPlayerClanMembershipService.TrySeparate));

@@ -9,6 +9,8 @@
 - Kept all GitHub and publisher credentials server-side and added pinned-host-key deployment.
 - Made the launcher version-gate test deterministic and carried the game version inside the client
   build artifact so the checkout-free publisher can generate its manifest.
+- Removed a race from the clan-leader disconnect test by waiting for the queued parking callback's
+  completed party state rather than its intermediate separation call.
 
 ## 2026-08-15 — Bannerlord v1.4.8 zero-open wiring candidate
 

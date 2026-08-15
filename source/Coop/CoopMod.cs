@@ -554,7 +554,7 @@ namespace Coop
 
             if (gameStarterObject is CampaignGameStarter campaignGameStarter)
             {
-                if (isServer && campaignStatsPublisher == null)
+                if (!ModInformation.IsClient && campaignStatsPublisher == null)
                 {
                     campaignStatsPublisher = new CampaignStatsPublisher();
                     Updateables.Add(campaignStatsPublisher);

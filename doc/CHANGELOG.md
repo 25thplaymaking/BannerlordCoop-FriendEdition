@@ -2,6 +2,8 @@
 
 ## 2026-08-15 — Portal production-host fallback
 
+- Register the campaign stats publisher from the authoritative dedicated-host role instead of the
+  optional launcher `/server` flag, so the production dedicated process publishes its live roster.
 - Added a thin Node 24 host adapter for the Worker-compatible campaign portal, with atomic file-backed
   stats/deduplication state and the same bounded report rate limit.
 - Replaced the unavailable Workers/KV credential path with an immutable SSH deployment to the existing

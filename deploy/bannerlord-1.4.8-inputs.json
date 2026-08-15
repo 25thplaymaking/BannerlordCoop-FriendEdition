@@ -70,7 +70,7 @@
     }
   },
   "friendEditionServerPairing": {
-    "status": "offline-built-not-booted",
+    "status": "live-same-save-serving",
     "runtime": "Serilog 2.12.0 headless build",
     "officialDedicatedServerCoreInputSha256": "d766be598213e69f0cda4e146470025c49d6a2f16de8df63bc6bc9b7dfacfb20",
     "loaderPatchedDedicatedServerCoreSha256": "8b67ff3491bf1f91d0a27bfd2a0425975603f6dfa5102cd7dcfc057e5f778449",
@@ -95,7 +95,26 @@
         "sha256": "d0b07454846f1be18654817429f44db123486acc8c9562ded248af0ccd0510ce"
       }
     ],
-    "releaseBoundary": "Exact core/module pairing built and receipt-verified offline. Full server module overlay, isolated save boot, and live promotion remain unverified."
+    "campaignSystemSetterPatch": {
+      "inputSha256": "1f8e33e2ed73e6ec653d7629180afb70649ddc6e5bd1657a802a264efda1c3ae",
+      "outputSha256": "5ab3c3948c3d1cee68e43e7e1d167bd534064ebc94407ad3b150d9ce06ecee02",
+      "concreteSetterCount": 1264
+    },
+    "sandboxServerDescriptorPatch": {
+      "inputSha256": "179168441d5696c64e9a7bb53ea93c0b61302e40fd20b504c0fc57141a9c02ec",
+      "outputSha256": "960e047adcc054ab9b6805862bfb1531d03212b814843782fc97034a60bc8b5b",
+      "policy": "Load the Sandbox gameplay submodule headlessly; retain the view and GauntletUI dedicated-server exclusions."
+    },
+    "sameSaveProof": {
+      "saveName": "friendallmods1",
+      "observedSha256": "2bbae2ac0e3e0b66a4e94bcc4c484192c51f9a49f5f8d56b45e16e965ee32875",
+      "observedSize": 5959371,
+      "campaignLoaded": true,
+      "autosaveSucceeded": true,
+      "udpPort": 4200,
+      "serviceRestarts": 0
+    },
+    "releaseBoundary": "Exact v1.4.8 core/module pairing is live on the preserved friendallmods1 save. Campaign load, autosave, UDP 4200, sustained pulses, and zero restarts are verified."
   },
   "rollback": {
     "gameVersion": "v1.4.7",
@@ -108,11 +127,11 @@
   "managedSuite": {
     "suiteId": "friend-edition-private-workshop-suite",
     "moduleCount": 10,
-    "rootManifestSha256": "a3775f73c73e67b182b95f53a94f08771a5ef7aa8496e0b488ceaf46c3b7ef20",
+    "rootManifestSha256": "197e5f5069d8ff308f1e2b8cf37a358bb5595865b87a936d72e6b74b1b33edcb",
     "managedReceiptFileSha256": "b6b9cd635277716b3c9254a8a84937518ca350abc511f43b70084774e50ca3b0",
     "receiptSha256": "d202ef52ef632708bb86dd0851e34d9e84473d73921847833ed31ae69f4b9362",
-    "archiveSha256": "9b7f449fa890cddf373164536c2c45a408ccf95bf473d8198998a25b1e1eecf6",
-    "verifiedFileCount": 853,
+    "archiveSha256": "d6821bc28d0e3d24f36dd95a29f6ac62c60a0130e4178471a3955291fe6e683a",
+    "verifiedFileCount": 851,
     "sourceWorkshopSnapshotsUnchanged": true,
     "modules": [
       {

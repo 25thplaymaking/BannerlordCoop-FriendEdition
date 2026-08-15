@@ -4,7 +4,7 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
-> **2026-08-15 Bannerlord v1.4.8 migration — ZERO-OPEN OFFLINE CANDIDATE.**
+> **2026-08-15 Bannerlord v1.4.8 migration — LIVE, SAME SAVE, ZERO OPEN.**
 > The exact 10-module payload, hashes, source build, and fail-closed server pair
 > are reproducible, with War Sails absent. The authority ledger passes **13,729
 > of 13,729 required routes, zero unclassified, zero blocked, zero issues**; the
@@ -14,14 +14,22 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > PlayerSettlement 625 records. All former Fourberie 47/272 gaps now terminate
 > in bounded, authenticated host operations. The full in-process xUnit run
 > passes 1,758 tests with zero failures/errors (11 existing regeneration skips).
-> The regenerated 853-file ZIP hashes to
-> `9b7f449fa890cddf373164536c2c45a408ccf95bf473d8198998a25b1e1eecf6`;
+> The final 851-file ZIP hashes to
+> `d6821bc28d0e3d24f36dd95a29f6ac62c60a0130e4178471a3955291fe6e683a`;
 > the paired server core hashes to
 > `d6fd7239dfa6d2e5a2546fecc5bb2751ef363dfc9613f0e131d68e32f188446e`
 > and its receipt to
 > `620f0ff2994bce4db88d6ea328321ef2a12d0a481eec626b656e76e74de74b95`.
-> Isolated-save boot and rendered multi-client checks remain promotion gates.
-> No stable feed, production server, or save changed.
+> Bannerlord v1.4.8 added a dedicated-server exclusion to the gameplay
+> `Sandbox` submodule. A hash-pinned server descriptor correction restores that
+> gameplay assembly while keeping the view/UI submodules excluded; the paired
+> CampaignSystem setter preparation is also exact-hash pinned. Production loaded
+> the preserved `friendallmods1` campaign (493 settlements, 2,058 heroes, 1,545
+> parties), reached `SERVING`, bound UDP 4200, autosaved, emitted sustained
+> pulses, and remains at `NRestarts=0`. Birth/death remains authenticated
+> base-campaign behavior; the optional presentation-only `BirthAndDeath` module
+> and `NavalDLC` are disabled. Rendered multi-client play remains the final
+> player-facing smoke check, not an open implementation or deployment defect.
 >
 > **2026-08-15 Auburn/settlement client crash correction — SHIPPED from source `d7d548fde`.**
 > Auburn's `CalradiaCoop-Logs-2026-08-15_06-29-56.zip` ended without a managed exception while this

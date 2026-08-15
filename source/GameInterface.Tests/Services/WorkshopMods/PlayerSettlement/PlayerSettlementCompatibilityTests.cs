@@ -74,6 +74,13 @@ public sealed class PlayerSettlementCompatibilityTests : IDisposable
         Assert.Contains("BuildVillage", names);
         Assert.Contains("SaveLoad", names);
         Assert.Contains("UpdateBlacklist", names);
+
+        var legacyLoadRoutes = contract
+            .Where(spec => spec.TypeName == "BannerlordPlayerSettlement.Saves.PlayerSettlementInfo")
+            .ToArray();
+        Assert.Equal(2, legacyLoadRoutes.Length);
+        Assert.All(legacyLoadRoutes,
+            spec => Assert.Equal(PlayerSettlementPatchKind.RoleLifecycle, spec.Kind));
     }
 
     [Fact]

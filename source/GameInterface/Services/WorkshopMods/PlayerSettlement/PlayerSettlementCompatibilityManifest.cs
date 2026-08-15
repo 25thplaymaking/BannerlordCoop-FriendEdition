@@ -197,10 +197,10 @@ internal static class PlayerSettlementCompatibilityManifest
                 "TaleWorlds.SaveSystem.Load.LoadResult"),
 
             Spec("BannerlordPlayerSettlement.Saves.PlayerSettlementInfo", "set_Instance", true,
-                "System.Void", PlayerSettlementPatchKind.BlockedSharedMutation,
+                "System.Void", PlayerSettlementPatchKind.RoleLifecycle,
                 "BannerlordPlayerSettlement.Saves.PlayerSettlementInfo"),
             Spec("BannerlordPlayerSettlement.Saves.PlayerSettlementInfo", "OnLoad", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedSharedMutation),
+                "System.Void", PlayerSettlementPatchKind.RoleLifecycle),
         };
 
     // The companion fixes DLL has already run once before Coop starts. These exact re-entry points

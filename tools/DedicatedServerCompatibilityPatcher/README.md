@@ -36,3 +36,38 @@ output, or existing receipt. It never modifies an input in place.
    restarts, UDP game port bound, `phase":"serving"`, and repeated `[DedicatedServer] pulse:` lines.
 
 Do not redistribute the patched third-party DLL. The tool contains no third-party binary.
+
+## Campaign-system setter preparation
+
+The Coop runtime patches campaign property setters. The former working v1.4.7 server input differs
+from TaleWorlds' client assembly only by `NoInlining` on every concrete property setter: 1,264 of
+1,274 setters, with identical IL bodies and all abstract setters untouched. Prepare the exact v1.4.8
+assembly with the same fail-closed transformation:
+
+```powershell
+dotnet run --project tools/DedicatedServerCompatibilityPatcher -- campaign-setters `
+  C:\staging\TaleWorlds.CampaignSystem.dll `
+  C:\staging\TaleWorlds.CampaignSystem.server.dll
+```
+
+The command accepts only the pinned v1.4.8 SHA-256 and exact setter shape, never edits its input in
+place, and refuses an existing output.
+
+## Prepare the v1.4.8 SandBox server descriptor
+
+Bannerlord v1.4.8 added `DedicatedServerType=none` to `SandBox.SandBoxSubModule`. The Coop campaign
+host needs that gameplay submodule to run `SandBoxManager.InitializeSandboxXMLs`; without it, the
+engine reaches map loading with unresolved NPCs and settlements and fails while registering the
+settlement distance cache. View and GauntletUI remain excluded.
+
+```powershell
+dotnet run --project tools/DedicatedServerCompatibilityPatcher -- `
+  sandbox-server-descriptor `
+  C:\staging\Modules\SandBox\SubModule.xml `
+  C:\staging\Modules\SandBox\SubModule.server.xml
+```
+
+The command accepts only the exact v1.4.8 descriptor hash, proves the gameplay and presentation
+submodule shape, removes only the gameplay submodule's two server-exclusion tags, and pins the
+resulting output hash. `BirthAndDeath` does not need this treatment: its descriptor and presentation-
+only DLL are unchanged from v1.4.7, while Coop owns the configured campaign birth/death lifecycle.

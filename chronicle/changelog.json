@@ -1,5 +1,16 @@
 [
   {
+    "version": "2026.08.15.1930",
+    "date": "2026-08-15",
+    "title": "Bannerlord 1.4.8 is live",
+    "highlights": [
+      "The server and all ten Friend Edition mods now run on Bannerlord 1.4.8; War Sails remains disabled and out of scope.",
+      "The existing friendallmods1 campaign loaded and autosaved successfully, so no new save was required.",
+      "All active mod functions are wired: the 13,729-route authority audit, all 47 Fourberie consequence methods, and the complete 1,865-record Fourberie closure have zero open entries.",
+      "A hash-pinned server fix restores Sandbox gameplay initialization while keeping its UI modules headless; BirthAndDeath remains base-campaign behavior without loading the optional UI module."
+    ]
+  },
+  {
     "version": "2026.08.14.0001",
     "date": "2026-08-14",
     "title": "The join freeze is dead",

@@ -15,7 +15,7 @@ using System.Threading.Tasks;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Party;
 
-namespace Coop
+namespace Coop.Core
 {
     /// <summary>
     /// Publishes a bounded public projection of the host's save. Values are recalculated from the

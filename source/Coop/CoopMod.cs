@@ -73,7 +73,6 @@ namespace Coop
         private bool startupModuleWarningReady;
         private bool automaticCrashReportsRequested;
         private DateTime nextWatchdogRetryUtc;
-        private CampaignStatsPublisher campaignStatsPublisher;
 
 #if DEBUG
         private LiveTestControlServer liveTestControlServer;
@@ -472,7 +471,6 @@ namespace Coop
             Coop = new CoopartiveMultiplayerExperience(isServer, CrashDiagnostics.SetPhase);
 
             Updateables.Add(GameThread.Instance);
-            campaignStatsPublisher = CampaignStatsPublisher.CreateIfConfigured();
 
 #if DEBUG
             if (isAutoConnect)
@@ -604,8 +602,6 @@ namespace Coop
         protected override void OnSubModuleUnloaded()
         {
             CrashDiagnostics.SetPhase("module-unloading");
-            campaignStatsPublisher?.Dispose();
-            campaignStatsPublisher = null;
 #if DEBUG
             liveTestControlServer?.Dispose();
             liveTestControlServer = null;

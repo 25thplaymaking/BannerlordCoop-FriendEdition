@@ -44,6 +44,7 @@ namespace Coop.Core
         private volatile bool coopStarting;
         private volatile bool hostedSession;
         private volatile bool clientConnectedOnce;
+        private CampaignStatsPublisher campaignStatsPublisher;
         private bool passwordInquiryPending;
         private int coopStartGeneration;
         // Bumped when a new host attempt starts, so a prior attempt's deferred exit handling drops out.
@@ -439,6 +440,7 @@ namespace Coop.Core
             container = builder.Build();
 
             GameInterface.ContainerProvider.SetContainer(container);
+            campaignStatsPublisher = CampaignStatsPublisher.CreateIfConfigured();
 
             var gameInterface = container.Resolve<IGameInterface>();
             var loadingInterface = container.Resolve<ILoadingInterface>();
@@ -640,6 +642,9 @@ namespace Coop.Core
         {
             Interlocked.Increment(ref coopStartGeneration);
             coopStarting = false;
+
+            campaignStatsPublisher?.Dispose();
+            campaignStatsPublisher = null;
 
             IContainer oldContainer = container;
             container = null;

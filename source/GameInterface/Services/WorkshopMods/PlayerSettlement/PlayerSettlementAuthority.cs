@@ -6,8 +6,9 @@ namespace GameInterface.Services.WorkshopMods.PlayerSettlement;
 internal interface IPlayerSettlementPatchRuntime
 {
     void NotifyFeatureBlocked(string method);
-    void AddPersistenceBehavior(object campaignGameStarter);
-    void ValidateEmptyObjectRegistration(bool isSavedCampaign);
+    void AddBehavior(object campaignGameStarter);
+    void ValidateObjectRegistration(bool isSavedCampaign);
+    bool TrySubmitConstruction(object owner, MethodBase original, object[] arguments);
 }
 
 internal static class PlayerSettlementPatchRuntime
@@ -16,27 +17,20 @@ internal static class PlayerSettlementPatchRuntime
 }
 
 /// <summary>
-/// Player Settlement 7.5.0 performs construction as a single local UI operation. It chooses a
-/// random template and ID, reads MainHero/MainParty, loads generated XML into MBObjectManager,
-/// mutates many campaign behaviors, and finally saves/reloads the game. Running any part of that
-/// sequence on a client or trying to replay only its tail on the host is not atomic. The adapter
-/// therefore keeps host persistence readable but denies the feature entry points on both roles.
+/// Exact role boundary for Player Settlement 7.5.0. The behavior and client UI remain live, while
+/// XML registration, persistence, completion, and future construction commits are host-owned.
 /// </summary>
 internal static class PlayerSettlementAuthorityPatches
 {
     internal static bool BootstrapPersistenceBehaviorPrefix(object __0)
     {
-        if (ModInformation.IsServer)
-        {
-            var runtime = PlayerSettlementPatchRuntime.Current ??
-                throw new System.InvalidOperationException(
-                    "Player Settlement compatibility runtime is unavailable during behavior bootstrap");
-            runtime.AddPersistenceBehavior(__0);
-        }
+        var runtime = PlayerSettlementPatchRuntime.Current ??
+            throw new System.InvalidOperationException(
+                "Player Settlement compatibility runtime is unavailable during behavior bootstrap");
+        runtime.AddBehavior(__0);
 
-        // The original method also adds optional compatibility behaviors whose ticks and random
-        // state have not been audited for Coop. Only the reflection-created persistence behavior
-        // above is admitted on the host.
+        // The original also adds optional compatibility behaviors with unaudited authority. The
+        // exact PlayerSettlementBehaviour above is the only admitted behavior on either role.
         return false;
     }
 
@@ -47,16 +41,34 @@ internal static class PlayerSettlementAuthorityPatches
             var runtime = PlayerSettlementPatchRuntime.Current ??
                 throw new System.InvalidOperationException(
                     "Player Settlement compatibility runtime is unavailable during object registration");
-            runtime.ValidateEmptyObjectRegistration(__0);
+            runtime.ValidateObjectRegistration(__0);
         }
 
-        // Never invoke Player Settlement's original RegisterSubModuleObjects: it calls LoadXml and
-        // creates a dynamic object graph before Coop registries exist. ValidateEmptyObjectRegistration
-        // reads only the save metadata and aborts if that graph would be needed.
-        return false;
+        // On the host, Player Settlement loads the validated generated XML before Coop's registry
+        // enumeration. RegisterAllObjects then captures the complete resulting object graph. A
+        // client never loads XML from disk; it receives that graph from the authoritative host.
+        return ModInformation.IsServer;
     }
 
     internal static bool ServerPersistencePrefix() => ModInformation.IsServer;
+    internal static bool ServerLifecyclePrefix() => ModInformation.IsServer;
+    internal static bool RoleLifecyclePrefix() => true;
+    internal static bool ClientPresentationPrefix() => ModInformation.IsClient;
+
+    internal static bool ConstructionCommitPrefix(
+        object __instance,
+        MethodBase __originalMethod,
+        object[] __args)
+    {
+        if (ModInformation.IsServer) return true;
+        var runtime = PlayerSettlementPatchRuntime.Current ??
+            throw new System.InvalidOperationException(
+                "Player Settlement compatibility runtime is unavailable during construction submission");
+        if (!runtime.TrySubmitConstruction(__instance, __originalMethod, __args))
+            throw new System.InvalidOperationException(
+                "Player Settlement construction intent could not be submitted safely");
+        return false;
+    }
 
     internal static bool BlockedPrefix(MethodBase __originalMethod)
     {

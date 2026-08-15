@@ -3,6 +3,9 @@ using Common.Logging;
 using Common.Messaging;
 using Common.Network;
 using GameInterface.Registry.Messages;
+using GameInterface.Services.ObjectManager;
+using GameInterface.Services.Players;
+using GameInterface.Services.Barters;
 using HarmonyLib;
 using LiteNetLib;
 using Serilog;
@@ -13,15 +16,17 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Settlements;
+using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.Library;
 
 namespace GameInterface.Services.WorkshopMods.PlayerSettlement;
 
 /// <summary>
-/// Fail-closed Player Settlement 7.5.0 boundary. The module remains separately packaged for its
-/// assets and save type definitions, but construction/rebuild/overwrite is feature-blocked until a
-/// controller-scoped transaction can register and roll back the complete generated object graph on
-/// every peer. Empty-state campaigns and late joiners receive a revisioned readiness snapshot.
+/// Exact-binary Player Settlement 7.5.0 boundary. Generated XML is loaded only by the host before
+/// Coop registry enumeration; clients receive the resulting object graph through the normal
+/// registries and verify it against a revisioned metadata snapshot. Player placement commits remain
+/// separately guarded until their controller-scoped transaction is installed.
 /// </summary>
 internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSettlementPatchRuntime
 {
@@ -31,9 +36,14 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
 
     private readonly IMessageBroker messageBroker;
     private readonly INetwork network;
+    private readonly IObjectManager objectManager;
+    private readonly IPlayerManager playerManager;
     private readonly Harmony adapterHarmony;
     private readonly HashSet<string> notifiedMethods = new HashSet<string>(StringComparer.Ordinal);
     private readonly PlayerSettlementRevisionGate revisionGate = new PlayerSettlementRevisionGate();
+    private readonly Dictionary<NetPeer, Dictionary<long, (string Key, NetworkPlayerSettlementConstructionResult Result)>> constructionLedger =
+        new Dictionary<NetPeer, Dictionary<long, (string, NetworkPlayerSettlementConstructionResult)>>();
+    private readonly HashSet<long> pendingConstructionRequests = new HashSet<long>();
 
     private Assembly assembly;
     private Type behaviorType;
@@ -43,16 +53,21 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
     private string lastServerFingerprint;
     private long serverRevision;
     private bool compatible;
-    private bool limitationNoticeShown;
     private bool objectRegistrationValidated;
+    private long nextConstructionRequestId;
+    private PlayerSettlementConstructionBridge constructionBridge;
 
     public PlayerSettlementCompatibilityHandler(
         IMessageBroker messageBroker,
         INetwork network,
+        IObjectManager objectManager,
+        IPlayerManager playerManager,
         Harmony harmony)
     {
         this.messageBroker = messageBroker;
         this.network = network;
+        this.objectManager = objectManager;
+        this.playerManager = playerManager;
         if (harmony == null) throw new ArgumentNullException(nameof(harmony));
         adapterHarmony = new Harmony(PlayerSettlementHarmonyIsolation.AdapterHarmonyOwner);
 
@@ -62,6 +77,8 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         messageBroker.Subscribe<AllGameObjectsRegistered>(HandleAllGameObjectsRegistered);
         messageBroker.Subscribe<NetworkRequestPlayerSettlementState>(HandleStateRequest);
         messageBroker.Subscribe<NetworkPlayerSettlementState>(HandleState);
+        messageBroker.Subscribe<NetworkRequestPlayerSettlementConstruction>(HandleConstructionRequest);
+        messageBroker.Subscribe<NetworkPlayerSettlementConstructionResult>(HandleConstructionResult);
     }
 
     public void Dispose()
@@ -69,6 +86,8 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         messageBroker.Unsubscribe<AllGameObjectsRegistered>(HandleAllGameObjectsRegistered);
         messageBroker.Unsubscribe<NetworkRequestPlayerSettlementState>(HandleStateRequest);
         messageBroker.Unsubscribe<NetworkPlayerSettlementState>(HandleState);
+        messageBroker.Unsubscribe<NetworkRequestPlayerSettlementConstruction>(HandleConstructionRequest);
+        messageBroker.Unsubscribe<NetworkPlayerSettlementConstructionResult>(HandleConstructionResult);
         if (ReferenceEquals(PlayerSettlementPatchRuntime.Current, this))
             PlayerSettlementPatchRuntime.Current = null;
     }
@@ -79,29 +98,54 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         if (!notifiedMethods.Add(method)) return;
 
         var message =
-            $"Player Settlement action '{method}' is disabled in co-op: its v7.5.0 path combines local placement, random XML/object creation, MainHero/MainParty, and save reload without a controller-authorized transaction.";
+            $"Player Settlement internal action '{method}' was rejected because it is outside the pinned v7.5.0 co-op route inventory.";
         Logger.Warning(message);
         if (ModInformation.IsClient)
             InformationManager.DisplayMessage(new InformationMessage(message));
     }
 
-    public void AddPersistenceBehavior(object campaignGameStarter)
+    public void AddBehavior(object campaignGameStarter)
     {
-        if (!ModInformation.IsServer || campaignGameStarter is not CampaignGameStarter starter)
+        if (campaignGameStarter is not CampaignGameStarter starter)
             throw new InvalidOperationException(
-                "Player Settlement persistence behavior bootstrap received an invalid host starter");
+                "Player Settlement behavior bootstrap received an invalid campaign starter");
 
         var behavior = Activator.CreateInstance(behaviorType) as CampaignBehaviorBase;
         if (behavior == null)
             throw new InvalidOperationException(
                 "Player Settlement persistence behavior could not be constructed");
 
-        // AddBehavior invokes RegisterEvents; that method is separately patched to return without
-        // registering ticks, menus, MainHero/MainParty callbacks, or compatibility behaviors.
+        // RegisterEvents runs on both roles. Every subscribed callback has an exact role prefix:
+        // clients keep placement/menu presentation and the host keeps persistence/completion.
         starter.AddBehavior(behavior);
     }
 
-    public void ValidateEmptyObjectRegistration(bool isSavedCampaign)
+    public bool TrySubmitConstruction(object owner, MethodBase original, object[] arguments)
+    {
+        if (!compatible || !ModInformation.IsClient || constructionBridge == null || revisionGate.Revision < 0)
+            return false;
+        var requestId = ++nextConstructionRequestId;
+        if (!constructionBridge.TryCapture(
+                owner,
+                original,
+                arguments,
+                requestId,
+                revisionGate.Revision,
+                value => objectManager.TryGetId(value, out var id) ? id : string.Empty,
+                out var request,
+                out var failure))
+        {
+            Logger.Error("Player Settlement construction intent was rejected locally: {Failure}", failure);
+            InformationManager.DisplayMessage(new InformationMessage(
+                "Player Settlement placement could not be submitted: " + failure));
+            return false;
+        }
+        pendingConstructionRequests.Add(requestId);
+        network.SendAll(request);
+        return true;
+    }
+
+    public void ValidateObjectRegistration(bool isSavedCampaign)
     {
         if (!ModInformation.IsServer)
             throw new InvalidOperationException(
@@ -164,15 +208,20 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             var fallbackLegacyInfo = legacyInfoType
                 .GetProperty("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
                 ?.GetValue(null);
-            PlayerSettlementUnavailableStoreAdmission.RequireEmpty(
-                fallbackMetadataCaptured,
-                fallbackMetadataEntries,
-                fallbackMetadataFailure,
-                fallbackLegacyInfo != null && LegacyInfoHasGeneratedObjects(fallbackLegacyInfo),
-                LegacyConfigDirectoryExists());
+            if (!fallbackMetadataCaptured)
+                throw new InvalidOperationException(
+                    "Player Settlement failed closed during unavailable early-store admission: " +
+                    (fallbackMetadataFailure ?? "metadata capture failed"));
+            if (fallbackLegacyInfo != null && LegacyInfoHasGeneratedObjects(fallbackLegacyInfo))
+                throw new InvalidOperationException(
+                    "Player Settlement failed closed during unavailable early-store admission: in-process legacy metadata contains generated settlements");
+            if (LegacyConfigDirectoryExists())
+                throw new InvalidOperationException(
+                    "Player Settlement failed closed during unavailable early-store admission: legacy external settlement metadata exists for this campaign");
 
-            Logger.Warning(
-                "Player Settlement early save store is unavailable on the dedicated host; admitted the campaign after proving embedded, in-process, and legacy generated settlement state is empty");
+            Logger.Information(
+                "Player Settlement early save store is unavailable on the dedicated host; admitting {Count} already-captured v3 generated objects for authoritative XML registration",
+                fallbackMetadataEntries.Length);
             objectRegistrationValidated = true;
             return;
         }
@@ -193,11 +242,10 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             out var metadataEntries,
             out _,
             out var metadataFailure);
-        PlayerSettlementStateAdmission.RequireEmpty(
-            metadataCaptured,
-            metadataEntries,
-            metadataFailure,
-            "object registration");
+        if (!metadataCaptured)
+            throw new InvalidOperationException(
+                "Player Settlement failed closed during object registration: " +
+                (metadataFailure ?? "metadata capture failed"));
 
         var hasLegacyInfo = ReadStoreValue(
             store,
@@ -219,6 +267,9 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         // graph, legacy, and non-empty check above has completed successfully, so a rejected save
         // leaves the behavior's original metadata field untouched.
         metadataField.SetValue(behavior, metadata);
+        Logger.Information(
+            "Player Settlement admitted {Count} validated generated objects for authoritative XML registration",
+            metadataEntries.Length);
         objectRegistrationValidated = true;
     }
 
@@ -271,6 +322,11 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         if (metadataField == null || metadataField.FieldType != metadataType)
             throw new InvalidOperationException(
                 "Player Settlement co-op compatibility validation failed: _metaV3 field shape changed");
+        constructionBridge = new PlayerSettlementConstructionBridge(
+            assembly,
+            behaviorType,
+            methods.Where(pair => pair.Key.Kind == PlayerSettlementPatchKind.ConstructionCommit)
+                .Select(pair => pair.Value));
 
         lock (PatchSync)
         {
@@ -315,7 +371,7 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         }
 
         Logger.Information(
-            "Player Settlement {Version} loaded in guarded/feature-blocked mode ({Removed} original/fixes patches removed; {Methods} entry points guarded)",
+            "Player Settlement {Version} loaded with host-authoritative construction and graph replication ({Removed} original/fixes patches removed; {Methods} entry points guarded)",
             PlayerSettlementCompatibilityManifest.ModuleVersion,
             removedOptionalPatches,
             methods.Count);
@@ -338,6 +394,22 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
                 return AccessTools.Method(
                     typeof(PlayerSettlementAuthorityPatches),
                     nameof(PlayerSettlementAuthorityPatches.ServerPersistencePrefix));
+            case PlayerSettlementPatchKind.ServerLifecycle:
+                return AccessTools.Method(
+                    typeof(PlayerSettlementAuthorityPatches),
+                    nameof(PlayerSettlementAuthorityPatches.ServerLifecyclePrefix));
+            case PlayerSettlementPatchKind.RoleLifecycle:
+                return AccessTools.Method(
+                    typeof(PlayerSettlementAuthorityPatches),
+                    nameof(PlayerSettlementAuthorityPatches.RoleLifecyclePrefix));
+            case PlayerSettlementPatchKind.ClientPresentation:
+                return AccessTools.Method(
+                    typeof(PlayerSettlementAuthorityPatches),
+                    nameof(PlayerSettlementAuthorityPatches.ClientPresentationPrefix));
+            case PlayerSettlementPatchKind.ConstructionCommit:
+                return AccessTools.Method(
+                    typeof(PlayerSettlementAuthorityPatches),
+                    nameof(PlayerSettlementAuthorityPatches.ConstructionCommitPrefix));
             default:
                 return AccessTools.Method(
                     typeof(PlayerSettlementAuthorityPatches),
@@ -350,9 +422,11 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         if (!compatible) return;
 
         revisionGate.Reset();
+        constructionLedger.Clear();
+        pendingConstructionRequests.Clear();
+        nextConstructionRequestId = 0;
         if (ModInformation.IsClient)
         {
-            ShowLimitationNotice();
             network.SendAll(new NetworkRequestPlayerSettlementState());
             return;
         }
@@ -404,12 +478,121 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             context: nameof(PlayerSettlementCompatibilityHandler));
     }
 
+    private void HandleConstructionRequest(MessagePayload<NetworkRequestPlayerSettlementConstruction> payload)
+    {
+        if (!compatible || !ModInformation.IsServer || payload.Who is not NetPeer peer) return;
+        GameThread.RunSafe(
+            () => ApplyConstructionRequest(peer, payload.What),
+            context: nameof(PlayerSettlementCompatibilityHandler));
+    }
+
+    private void ApplyConstructionRequest(NetPeer peer, NetworkRequestPlayerSettlementConstruction request)
+    {
+        if (!PlayerSettlementConstructionProtocol.TryValidate(request, out var failure))
+        {
+            Logger.Warning("Rejected malformed Player Settlement construction from peer {Peer}: {Failure}", peer.Id, failure);
+            return;
+        }
+        var key = PlayerSettlementConstructionProtocol.CommandKey(request);
+        if (!constructionLedger.TryGetValue(peer, out var peerEntries))
+        {
+            peerEntries = new Dictionary<long, (string, NetworkPlayerSettlementConstructionResult)>();
+            constructionLedger.Add(peer, peerEntries);
+        }
+        if (peerEntries.TryGetValue(request.RequestId, out var prior))
+        {
+            if (!string.Equals(prior.Key, key, StringComparison.Ordinal))
+            {
+                DenyPeerOrAbortSession(peer, "reused Player Settlement request ID with a different payload");
+                return;
+            }
+            network.Send(peer, prior.Result);
+            SendSnapshotOrAbort(peer);
+            return;
+        }
+        if (request.ExpectedRevision != serverRevision)
+        {
+            RecordConstructionResult(peer, key, new NetworkPlayerSettlementConstructionResult(
+                request.RequestId, PlayerSettlementConstructionStatus.StaleState, serverRevision,
+                "The settlement graph changed; refresh and confirm placement again."));
+            SendSnapshotOrAbort(peer);
+            return;
+        }
+        if (!playerManager.TryGetPlayer(peer, out var player) ||
+            !objectManager.TryGetObject(player.HeroId, out Hero actor) ||
+            !objectManager.TryGetObject(player.MobilePartyId, out MobileParty actorParty) ||
+            actor == null || actorParty == null || !actor.IsAlive || actor.Clan == null)
+        {
+            RecordConstructionResult(peer, key, new NetworkPlayerSettlementConstructionResult(
+                request.RequestId, PlayerSettlementConstructionStatus.Rejected, serverRevision,
+                "The connected controller has no eligible campaign hero and party."));
+            return;
+        }
+
+        var behavior = behaviorType.GetField("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+            ?.GetValue(null);
+        try
+        {
+            using (new BarterPlayerContext(actor, actorParty))
+            {
+                if (!constructionBridge.TryExecute(
+                        behavior,
+                        actor,
+                        actorParty,
+                        request,
+                        id => objectManager.TryGetObject(id, out Settlement settlement) ? settlement : null,
+                        id => objectManager.TryGetObject(id, out CultureObject culture) ? culture : null,
+                        out failure))
+                {
+                    RecordConstructionResult(peer, key, new NetworkPlayerSettlementConstructionResult(
+                        request.RequestId, PlayerSettlementConstructionStatus.Rejected, serverRevision, failure));
+                    return;
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            DenyPeerOrAbortSession(null,
+                "Player Settlement construction failed after creator mutation began: " + exception.Message);
+            return;
+        }
+
+        SendSnapshotOrAbort(peer: null);
+        var accepted = new NetworkPlayerSettlementConstructionResult(
+            request.RequestId, PlayerSettlementConstructionStatus.Accepted, serverRevision,
+            "Settlement construction committed by the host.");
+        RecordConstructionResult(peer, key, accepted);
+    }
+
+    private void RecordConstructionResult(
+        NetPeer peer,
+        string key,
+        NetworkPlayerSettlementConstructionResult result)
+    {
+        if (!constructionLedger.TryGetValue(peer, out var entries))
+        {
+            entries = new Dictionary<long, (string, NetworkPlayerSettlementConstructionResult)>();
+            constructionLedger.Add(peer, entries);
+        }
+        if (entries.Count >= 256) entries.Remove(entries.Keys.Min());
+        entries[result.RequestId] = (key, result);
+        network.Send(peer, result);
+    }
+
+    private void HandleConstructionResult(MessagePayload<NetworkPlayerSettlementConstructionResult> payload)
+    {
+        if (!compatible || !ModInformation.IsClient || payload.Who is not NetPeer serverPeer ||
+            !PlayerSettlementSnapshotOriginGuard.IsTrustedServerTransport(serverPeer, localIsClient: true) ||
+            payload.What == null || !pendingConstructionRequests.Remove(payload.What.RequestId)) return;
+        InformationManager.DisplayMessage(new InformationMessage(payload.What.Message));
+    }
+
     private void SendSnapshotOrAbort(NetPeer peer)
     {
         PlayerSettlementStateEntry[] entries;
         try
         {
-            entries = AssertEmptyStateOrThrow("snapshot publication");
+            entries = CaptureStateOrThrow("snapshot publication");
         }
         catch (Exception exception)
         {
@@ -429,7 +612,7 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         var state = new NetworkPlayerSettlementState(
             PlayerSettlementCompatibilityManifest.AdapterVersion,
             nextRevision,
-            PlayerSettlementFeatureStatus.GuardedFeatureBlocked,
+            PlayerSettlementFeatureStatus.Enabled,
             fingerprint,
             entries);
         if (!PlayerSettlementStateCodec.TryValidate(state, out var failure))
@@ -522,22 +705,21 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             campaignId));
     }
 
-    internal PlayerSettlementStateEntry[] AssertEmptyStateOrThrow(string phase)
+    internal PlayerSettlementStateEntry[] CaptureStateOrThrow(string phase)
     {
         var captured = PlayerSettlementCanonicalState.TryCapture(
             assembly,
             out var entries,
             out _,
             out var failure);
-        try
+        if (!captured)
         {
-            return PlayerSettlementStateAdmission.RequireEmpty(captured, entries, failure, phase);
+            var message =
+                $"Player Settlement failed closed during {phase}: metadata capture failed ({failure ?? "unknown failure"}).";
+            Logger.Fatal(message);
+            throw new InvalidOperationException(message);
         }
-        catch (InvalidOperationException exception)
-        {
-            Logger.Fatal(exception.Message);
-            throw;
-        }
+        return entries ?? Array.Empty<PlayerSettlementStateEntry>();
     }
 
     internal bool ApplySnapshot(NetworkPlayerSettlementState state, out string rejection)
@@ -566,12 +748,14 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             return false;
         }
 
-        if ((state.Entries?.Length ?? 0) != 0)
+        if (!PlayerSettlementObjectGraphRegistry.TryVerify(
+                state.Entries,
+                id => (objectManager.TryGetObject(id, out Settlement settlement) && settlement != null) ||
+                      Settlement.All.Any(candidate => candidate != null &&
+                          string.Equals(candidate.StringId, id, StringComparison.Ordinal)),
+                out rejection))
         {
-            const string message =
-                "Player Settlement objects were found in the host save, but this guarded build cannot safely register their generated object/component graph for a late joiner. The snapshot was rejected without mutating client state.";
-            Logger.Fatal(message);
-            rejection = message;
+            Logger.Fatal(rejection);
             return false;
         }
 
@@ -580,7 +764,6 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             rejection = "snapshot revision changed before it could be committed";
             return false;
         }
-        ShowLimitationNotice();
         rejection = null;
         return true;
     }
@@ -602,14 +785,6 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             failure);
         throw new InvalidOperationException(
             "The Coop session cannot continue without authoritative Player Settlement state: " + failure);
-    }
-
-    private void ShowLimitationNotice()
-    {
-        if (limitationNoticeShown || !ModInformation.IsClient) return;
-        limitationNoticeShown = true;
-        InformationManager.DisplayMessage(new InformationMessage(
-            "Player Settlement 7.5.0 safety is active. Existing empty-state campaigns can load, but build, rebuild, overwrite, delete/edit, and save-reload actions are disabled until their generated object graph is server-authoritative."));
     }
 
     private static Assembly FindAssembly(string name) =>

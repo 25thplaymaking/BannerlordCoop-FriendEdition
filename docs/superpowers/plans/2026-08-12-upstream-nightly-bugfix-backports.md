@@ -1,8 +1,14 @@
 # Upstream Nightly Bugfix Backports Implementation Plan
 
+Status: completed historical `v1.4.7` backport plan. Its version constraint is
+superseded for new work by the
+[`v1.4.8` migration guide](../../bannerlord-1.4.8-migration.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Selectively backport the upstream nightly bug fixes that remain compatible with the Friend Edition's Bannerlord 1.4.7 runtime, existing save, and launcher-managed client/server release contract.
+**Historical goal:** Selectively backport the upstream nightly bug fixes that
+remained compatible with the Friend Edition's Bannerlord 1.4.7 runtime,
+existing save, and launcher-managed client/server release contract.
 
 **Architecture:** Import final pull-request diffs instead of merging upstream `development`. Keep every backport isolated and traceable to its upstream PR, exercise the intended regression before production changes, then gate the combined patch through the repository build/test workflow. Do not import the upstream 1.4.8 project-version change, nightly module identity, save-breaking redesigns, or fixes that overlap Friend Edition's custom mission/auto-resolve authority work without a separate reconciliation pass.
 

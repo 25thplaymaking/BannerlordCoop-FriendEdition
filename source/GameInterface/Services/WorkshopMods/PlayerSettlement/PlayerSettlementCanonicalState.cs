@@ -9,9 +9,8 @@ namespace GameInterface.Services.WorkshopMods.PlayerSettlement;
 /// <summary>
 /// Reads the save metadata already produced by Player Settlement without taking a compile-time
 /// dependency on it. The result contains the exact generated XML, stable object IDs, parent graph,
-/// prefab/version fields, and a deterministic component fingerprint. Adapter v1 does not apply
-/// non-empty results on clients because MBObjectManager registration has already passed by the time
-/// a late join snapshot arrives.
+/// prefab/version fields, and a deterministic component fingerprint. Non-empty results are admitted
+/// on clients only after every host-created Settlement resolves through the replicated graph.
 /// </summary>
 internal static class PlayerSettlementCanonicalState
 {
@@ -226,6 +225,38 @@ internal static class PlayerSettlementCanonicalState
         var property = type.GetProperty(name, flags);
         if (property != null) return property.GetValue(instance);
         return type.GetField(name, flags)?.GetValue(instance);
+    }
+}
+
+/// <summary>
+/// Final late-join barrier between validated host metadata and Coop's replicated settlement
+/// registry. A snapshot is accepted only after every generated stable ID resolves locally.
+/// </summary>
+internal static class PlayerSettlementObjectGraphRegistry
+{
+    internal static bool TryVerify(
+        IEnumerable<PlayerSettlementStateEntry> entries,
+        Func<string, bool> isRegistered,
+        out string failure)
+    {
+        if (isRegistered == null)
+        {
+            failure = "settlement registry lookup is unavailable";
+            return false;
+        }
+
+        foreach (PlayerSettlementStateEntry entry in entries ?? Array.Empty<PlayerSettlementStateEntry>())
+        {
+            if (entry == null || string.IsNullOrEmpty(entry.StringId) || !isRegistered(entry.StringId))
+            {
+                failure =
+                    $"generated settlement {entry?.StringId ?? "<missing>"} was absent from the replicated object registry";
+                return false;
+            }
+        }
+
+        failure = null;
+        return true;
     }
 }
 

@@ -17,7 +17,7 @@ public sealed class CombatModCompatibilityTests
     private const string SyntheticRbmOwner = "com.rbmcombat";
 
     [Theory]
-    [InlineData("DismembermentPlus", "2.0.8.7", "FC16D8C5F455710B7960848C8F27A3DB0551E1A028BB128BF7CE1C6A95F79DD1")]
+    [InlineData("DismembermentPlus", "2.0.8.8", "17ABFCC4EBA59C15CACA1BCE194C0791663ED692F21FFE22675DA49418A4E79B")]
     [InlineData("UnblockableThrust", "1.1.3.1", "FF73B80A598BCE31E8D620FAE84E21C7F633F767F03E5F192E05169425DC83DF")]
     [InlineData("RBMCombat", "1.0.0.0", "4629E2E331AC551D40F998413F2FB5400D4D74E958CBAECC675A312CE615A7E1")]
     public void AuditedBinaryFingerprints_AreAccepted(string name, string version, string hash)

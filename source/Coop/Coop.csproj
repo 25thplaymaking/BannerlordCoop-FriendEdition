@@ -46,6 +46,10 @@
     <RunPostBuildEvent>Always</RunPostBuildEvent>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="netstandard" Condition="Exists('$(FrameworkPathOverride)\Facades\netstandard.dll')">
+      <HintPath>$(FrameworkPathOverride)\Facades\netstandard.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="0Harmony, Version=2.4.2.0, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>..\packages\Lib.Harmony.2.4.2\lib\net472\0Harmony.dll</HintPath>
     </Reference>
@@ -260,7 +264,7 @@
     <ModName>Coop</ModName>
     <MainClass>CoopMod</MainClass>
     <ModVersion>v$(CoopVersion)</ModVersion>
-    <GameVersion>v1.4.7</GameVersion>
+    <GameVersion>v1.4.8</GameVersion>
   </PropertyGroup>
   <Import Project="$(MSBuildProjectDirectory)\..\..\Deploy.targets" />
 </Project>

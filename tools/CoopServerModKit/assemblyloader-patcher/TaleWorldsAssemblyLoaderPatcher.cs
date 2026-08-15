@@ -7,7 +7,7 @@ namespace CoopServerModKit.TaleWorlds;
 
 public static class TaleWorldsAssemblyLoaderPatcher
 {
-    public const string PinnedInputSha256 = "4a23b67965f0c928dde0121f08dca1eedd988167b447a11c1ebb3d64db11562c";
+    public const string PinnedInputSha256 = "f11400860476b5860457503b4090ba642bc29f183c36e0301d3c504f2720ac16";
 
     public static void Patch(string inputPath, string outputPath) =>
         Patch(inputPath, outputPath, PinnedInputSha256);

@@ -7,6 +7,7 @@ using System.Linq;
 using System.Reflection;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Roster;
+using TaleWorlds.Core;
 
 namespace GameInterface.Services.WorkshopMods.Fourberie;
 
@@ -64,7 +65,7 @@ internal sealed class FourberieStateApplyTransaction
 }
 
 /// <summary>
-/// Stable-ID representation of every field FourberieBehavior.SyncData persists in 1.4.7.5.
+/// Stable-ID representation of every field FourberieBehavior.SyncData persists in 1.4.7.6.
 /// Mission-only/transient fields are deliberately excluded because mission state is owned by the
 /// active Coop mission instance rather than the campaign snapshot.
 /// </summary>
@@ -203,6 +204,8 @@ internal static class FourberieCanonicalState
                 return true;
             case FourberieStateValueKind.TroopRosterElement:
                 return CaptureTroops(spec, value as IEnumerable, objectManager, entries, out failure);
+            case FourberieStateValueKind.ItemRosterElement:
+                return CaptureItems(spec, value as IEnumerable, objectManager, entries, out failure);
             case FourberieStateValueKind.StringList:
             case FourberieStateValueKind.ObjectList:
                 return CaptureList(spec, value as IEnumerable, objectManager, entries, out failure);
@@ -351,6 +354,46 @@ internal static class FourberieCanonicalState
         return true;
     }
 
+    private static bool CaptureItems(
+        FourberieStateFieldSpec spec,
+        IEnumerable list,
+        IObjectManager objectManager,
+        ICollection<FourberieStateEntry> entries,
+        out string failure)
+    {
+        failure = null;
+        if (list == null)
+        {
+            failure = $"Fourberie field {spec.FieldName} is null";
+            return false;
+        }
+
+        entries.Add(new FourberieStateEntry(spec.FieldName, spec.Kind, string.Empty, string.Empty));
+        var ordinal = 1;
+        foreach (var item in list)
+        {
+            if (item is not ItemRosterElement rosterItem || rosterItem.EquipmentElement.Item == null ||
+                rosterItem.Amount <= 0 ||
+                !TryObjectId(rosterItem.EquipmentElement.Item, objectManager, allowNull: false, out var itemId, out failure))
+            {
+                failure ??= $"Fourberie field {spec.FieldName} contains an invalid item";
+                return false;
+            }
+
+            string modifierId = string.Empty;
+            if (rosterItem.EquipmentElement.ItemModifier != null &&
+                !TryObjectId(rosterItem.EquipmentElement.ItemModifier, objectManager, allowNull: false, out modifierId, out failure))
+                return false;
+            entries.Add(new FourberieStateEntry(
+                spec.FieldName,
+                spec.Kind,
+                itemId,
+                modifierId + "," + rosterItem.Amount.ToString(CultureInfo.InvariantCulture),
+                ordinal++));
+        }
+        return true;
+    }
+
     private static bool TryBuildReplacement(
         FourberieStateFieldSpec spec,
         FieldInfo field,
@@ -408,6 +451,8 @@ internal static class FourberieCanonicalState
 
         if (spec.Kind == FourberieStateValueKind.TroopRosterElement)
             return TryBuildTroopList(items, objectManager, out replacement, out failure);
+        if (spec.Kind == FourberieStateValueKind.ItemRosterElement)
+            return TryBuildItemRoster(items, objectManager, out replacement, out failure);
 
         replacement = Activator.CreateInstance(field.FieldType);
         if (replacement is IDictionary dictionary)
@@ -537,6 +582,44 @@ internal static class FourberieCanonicalState
 
         replacement = troops;
         failure = null;
+        return true;
+    }
+
+    private static bool TryBuildItemRoster(
+        IEnumerable<FourberieStateEntry> entries,
+        IObjectManager objectManager,
+        out object replacement,
+        out string failure)
+    {
+        failure = null;
+        var roster = new ItemRoster();
+        foreach (var entry in entries)
+        {
+            int separator = (entry.Value ?? string.Empty).LastIndexOf(',');
+            if (separator < 0 ||
+                !int.TryParse(entry.Value.Substring(separator + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out int count) ||
+                count <= 0 ||
+                !TryResolveObject(objectManager, typeof(ItemObject), entry.Key, allowNull: false, out var resolvedItem, out failure))
+            {
+                replacement = null;
+                failure ??= "invalid Fourberie item roster element";
+                return false;
+            }
+
+            string modifierId = entry.Value.Substring(0, separator);
+            ItemModifier modifier = null;
+            if (modifierId.Length > 0 &&
+                (!TryResolveObject(objectManager, typeof(ItemModifier), modifierId, allowNull: false, out var resolvedModifier, out failure) ||
+                 (modifier = resolvedModifier as ItemModifier) == null))
+            {
+                replacement = null;
+                failure ??= "invalid Fourberie item modifier";
+                return false;
+            }
+            roster.AddToCounts(new EquipmentElement((ItemObject)resolvedItem, modifier), count);
+        }
+
+        replacement = roster;
         return true;
     }
 
@@ -681,6 +764,8 @@ internal static class FourberieCanonicalState
             "System.Collections.Generic.List`1[TaleWorlds.CampaignSystem.Party.MobileParty]");
         Add("_playerTroopsF", FourberieStateValueKind.TroopRosterElement,
             "System.Collections.Generic.List`1[TaleWorlds.CampaignSystem.Roster.TroopRosterElement]");
+        Add("_stash", FourberieStateValueKind.ItemRosterElement,
+            "TaleWorlds.CampaignSystem.Roster.ItemRoster");
 
         return fields;
     }

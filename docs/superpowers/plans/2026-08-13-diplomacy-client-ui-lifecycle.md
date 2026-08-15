@@ -1,5 +1,11 @@
 # Diplomacy Client UI Lifecycle Implementation Plan
 
+Status: completed historical `v1.4.7` implementation plan. Its base-game
+constraint is superseded for new work by the
+[`v1.4.8` migration guide](../../bannerlord-1.4.8-migration.md); the exact
+Diplomacy payload and assembly name remain valid inputs until deliberately
+upgraded.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make every Diplomacy-backed kingdom and encyclopedia surface construct only after a valid host snapshot exists, with a usable client settings object and no exception-swallowing finalizers.
@@ -12,7 +18,7 @@
 
 ## Global Constraints
 
-- Bannerlord remains pinned to `v1.4.7`.
+- This implementation increment remained pinned to Bannerlord `v1.4.7`.
 - Diplomacy remains the byte-exact supported Workshop DLL; do not fork or modify it.
 - The server remains authoritative for all Diplomacy state and operations.
 - A missing, malformed, stale, or conflicting snapshot must keep the client UI disabled and disconnect through the existing compatibility failure path.

@@ -37,6 +37,7 @@ function Test-AuthorityAudit {
     param(
         [Parameter(Mandatory)][object[]]$Records,
         [string[]]$AllowedDispositions = $script:DefaultAllowedDispositions,
+        [hashtable]$EvidenceIndex,
         [switch]$Release
     )
 
@@ -88,6 +89,19 @@ function Test-AuthorityAudit {
         if (@($record.tests | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -eq 0) {
             $issues.Add("$label has no route test")
         }
+        elseif ($null -ne $EvidenceIndex) {
+            foreach ($test in @($record.tests | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
+                if (-not (Test-EvidenceReference -Reference ([string]$test) -Index $EvidenceIndex -Kind Test)) {
+                    $issues.Add("$label names missing route test '$test'")
+                }
+            }
+        }
+
+        if ($null -ne $EvidenceIndex -and
+            $disposition -in @('ServerCallback', 'ServerCommand', 'ReplicatedCosmetic', 'CoopOwnerReplacement') -and
+            -not (Test-EvidenceReference -Reference ([string]$record.owner) -Index $EvidenceIndex -Kind Owner)) {
+            $issues.Add("$label names missing executable owner '$($record.owner)'")
+        }
     }
 
     $result = [pscustomobject]@{
@@ -107,17 +121,77 @@ function Test-AuthorityAudit {
     return $result
 }
 
+function New-EvidenceIndex {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$RepoRoot)
+
+    $index = @{}
+    $roots = @(
+        (Join-Path $RepoRoot 'source'),
+        (Join-Path $RepoRoot 'tools\WorkshopIntegration')
+    )
+    foreach ($root in $roots) {
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+        foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File |
+                     Where-Object { $_.Extension -in @('.cs', '.ps1') }) {
+            $content = Get-Content -LiteralPath $file.FullName -Raw
+            foreach ($match in [regex]::Matches($content, '\b[A-Za-z_][A-Za-z0-9_]*\b')) {
+                $index[$match.Value] = $true
+            }
+        }
+    }
+    return $index
+}
+
+function Test-EvidenceReference {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Reference,
+        [Parameter(Mandatory)][hashtable]$Index,
+        [Parameter(Mandatory)][ValidateSet('Owner', 'Test')][string]$Kind
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Reference)) { return $false }
+
+    # Audit references are intentionally human-readable, but the final identifier must still
+    # resolve to executable code. For tests, require the exact method name. For owners, accept
+    # either the final member or the final type when the owner names a class-level transaction.
+    $identifiers = @([regex]::Matches($Reference, '[A-Za-z_][A-Za-z0-9_]*') |
+        ForEach-Object { $_.Value })
+    if ($identifiers.Count -eq 0) { return $false }
+
+    $candidates = if ($Kind -eq 'Test') {
+        @($identifiers[-1])
+    }
+    else {
+        # Owner descriptions may append a transaction label or commit note after the executable
+        # type/member. Check every meaningful identifier, longest first, instead of accidentally
+        # treating the final prose word (for example "transaction") as the implementation.
+        @($identifiers | Where-Object { $_.Length -ge 8 } |
+            Sort-Object { $_.Length } -Descending)
+    }
+
+    foreach ($candidate in $candidates | Select-Object -Unique) {
+        if ($Index.ContainsKey($candidate)) { return $true }
+    }
+    return $false
+}
+
 function Assert-SelfTest {
     param([bool]$Condition, [string]$Message)
     if (-not $Condition) { throw "AUTHORITY AUDIT SELF-TEST: $Message" }
 }
 
 function Invoke-SelfTest {
+    $evidence = @{
+        ExampleHandler = $true
+        Routes = $true
+    }
     $valid = [pscustomobject]@{
         active = $true
         requiresDisposition = $true
         disposition = 'ServerCommand'
-        owner = 'Example.Handler'
+        owner = 'Example.ExampleHandler'
         tests = @('ExampleTests.Routes')
     }
     $unclassified = [pscustomobject]@{
@@ -142,6 +216,25 @@ function Invoke-SelfTest {
     Assert-SelfTest ($unclassifiedDevelopment.Unclassified -eq 1 -and $unclassifiedDevelopment.Issues.Count -eq 1) 'development mode hid an unclassified route'
     Assert-SelfTest ($blockedDevelopment.Blocked -eq 1 -and $blockedDevelopment.Issues.Count -eq 1) 'development mode hid a blocked route'
 
+    $validEvidence = Test-AuthorityAudit -Records @($valid) -EvidenceIndex $evidence
+    Assert-SelfTest ($validEvidence.Issues.Count -eq 0) 'valid executable evidence was rejected'
+    $missingOwner = [pscustomobject]@{
+        active = $true
+        requiresDisposition = $true
+        disposition = 'ServerCommand'
+        owner = 'Example.MissingOwner'
+        tests = @('ExampleTests.Routes')
+    }
+    $missingTest = [pscustomobject]@{
+        active = $true
+        requiresDisposition = $true
+        disposition = 'ServerCommand'
+        owner = 'Example.ExampleHandler'
+        tests = @('ExampleTests.MissingTest')
+    }
+    Assert-SelfTest ((Test-AuthorityAudit -Records @($missingOwner) -EvidenceIndex $evidence).Issues.Count -eq 1) 'missing owner evidence was accepted'
+    Assert-SelfTest ((Test-AuthorityAudit -Records @($missingTest) -EvidenceIndex $evidence).Issues.Count -eq 1) 'missing test evidence was accepted'
+
     Test-AuthorityAudit -Records @($valid) -Release | Out-Null
     foreach ($invalid in @($unclassified, $blocked)) {
         $threw = $false
@@ -152,6 +245,7 @@ function Invoke-SelfTest {
 
     Write-Host 'PASS: development authority audit reports unclassified and blocked routes'
     Write-Host 'PASS: release authority audit rejects unclassified and blocked routes'
+    Write-Host 'PASS: authority audit requires executable owners and focused test symbols'
 }
 
 if ($SelfTest) {
@@ -219,7 +313,9 @@ foreach ($record in $records) {
     }
 }
 
-$result = Test-AuthorityAudit -Records $records -AllowedDispositions @($policy.allowedDispositions) -Release:$Release
-Write-Host ("PASS: records={0} required={1} classified={2} unclassified={3} blocked={4} inactive={5} issues={6}" -f `
-    $result.Records, $result.Required, $result.Classified, $result.Unclassified, $result.Blocked, $result.Inactive, $result.Issues.Count)
+$evidenceIndex = New-EvidenceIndex -RepoRoot $repo
+$result = Test-AuthorityAudit -Records $records -AllowedDispositions @($policy.allowedDispositions) -EvidenceIndex $evidenceIndex -Release:$Release
+$resultLabel = if ($result.Issues.Count -eq 0) { 'PASS' } else { 'REVIEW' }
+Write-Host ("{0}: records={1} required={2} classified={3} unclassified={4} blocked={5} inactive={6} issues={7}" -f `
+    $resultLabel, $result.Records, $result.Required, $result.Classified, $result.Unclassified, $result.Blocked, $result.Inactive, $result.Issues.Count)
 exit 0

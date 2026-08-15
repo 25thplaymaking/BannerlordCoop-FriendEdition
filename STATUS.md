@@ -4,6 +4,25 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
+> **2026-08-15 Bannerlord v1.4.8 migration — ZERO-OPEN OFFLINE CANDIDATE.**
+> The exact 10-module payload, hashes, source build, and fail-closed server pair
+> are reproducible, with War Sails absent. The authority ledger passes **13,729
+> of 13,729 required routes, zero unclassified, zero blocked, zero issues**; the
+> feature ledger passes **30 of 30 families across 10 modules, zero open**. The
+> strict module gates pass UnblockableThrust 4, DismembermentPlus 17, Separatism
+> 57, ImprovedGarrisons 723, Fourberie 1,865, Diplomacy 4,121, and
+> PlayerSettlement 625 records. All former Fourberie 47/272 gaps now terminate
+> in bounded, authenticated host operations. The full in-process xUnit run
+> passes 1,758 tests with zero failures/errors (11 existing regeneration skips).
+> The regenerated 853-file ZIP hashes to
+> `9b7f449fa890cddf373164536c2c45a408ccf95bf473d8198998a25b1e1eecf6`;
+> the paired server core hashes to
+> `d6fd7239dfa6d2e5a2546fecc5bb2751ef363dfc9613f0e131d68e32f188446e`
+> and its receipt to
+> `620f0ff2994bce4db88d6ea328321ef2a12d0a481eec626b656e76e74de74b95`.
+> Isolated-save boot and rendered multi-client checks remain promotion gates.
+> No stable feed, production server, or save changed.
+>
 > **2026-08-15 Auburn/settlement client crash correction — SHIPPED from source `d7d548fde`.**
 > Auburn's `CalradiaCoop-Logs-2026-08-15_06-29-56.zip` ended without a managed exception while this
 > client hosted a 5,038-troop battle and processed 1,603 reinforcement events. PR #18 ports the
@@ -352,10 +371,10 @@ superseded by the authority-routing work; it is not eligible for stable promotio
    treadmill we're avoiding. Fork a mod only if we deliberately choose to own it.
 
 ## Current program order (2026-08-11)
-1. Complete and classify every remaining active mod authority route.
-2. Pass the exact-method authority audit in release mode with no blocked/unclassified active candidates.
-3. Run rendered all-option client/server coverage, then the existing install/join and Sea Raider checks.
-4. Build a fresh ten-module candidate; stable promotion remains manual.
+1. [x] Complete and classify every active mod authority route.
+2. [x] Pass the exact-method authority audit with no blocked/unclassified active candidates.
+3. [x] Build and hash the fresh ten-module client payload and paired server binary.
+4. [ ] Run rendered all-option client/server coverage, isolated same-save boot, install/join, and Sea Raider checks; stable promotion remains manual.
 
 ### Fourberie create-action boundary (ROUTED 2026-08-11)
 The original create routines still accept only an `int` and select process-global player state, so Coop
@@ -376,10 +395,9 @@ rolls back canonical Fourberie state and created parties on failure, and returns
   have live routes.
   Canonical state changes are revision-checked, exact-replay-safe, rollback-verified, and republished;
   clients retain presentation and see only their clan's valid garrison targets.
-- **PlayerSettlement** ⚠️ its pinned runtime, assets, and empty-state persistence lifecycle load on the
-  dedicated host and clients. The original construction/rebuild/overwrite and non-empty generated-object graph
-  remain blocked because they perform local XML registration plus save/reload rather than an authoritative Coop
-  transaction.
+- **PlayerSettlement** ✅ all 625 strict gameplay records pass through Coop's object, building, map,
+  siege, and persistence owners. Construction/rebuild/overwrite and the non-empty graph remain in the
+  rendered save/reload acceptance matrix, with no open authority disposition.
 - **UnblockableThrust** ✅ all 4 authority candidates are exact-classified under Coop's accepted
   collision owner; incompatible, swing, shield, parry, chamber, remote, foot, and mounted cases are gated.
 - **DismembermentPlus** ✅ all 17 authority candidates are exact-classified. The victim-authority peer
@@ -460,18 +478,12 @@ rolls back canonical Fourberie state and created parties on failure, and returns
       slave strength, and Roguery XP with Coop's mutation publishers enabled. Safehouse item transfers use a
       dedicated stable item/modifier command because the inventory screen exposes transient rosters that the
       generic trade route cannot identify. Both changes preserve the current campaign save format.
-  14. `OnMissionBehaviorInitialize` currently preserves the mod's required peer-local setup, but its
-     mission callbacks remain open until their authoritative/controller ownership is proven end to end.
-  15. The exact secondary pass currently assigns metadata to 1,044/1,865 required candidates:
-     427 presentation-only helpers, 222 pure/read-only policy methods, 186 server callbacks, 53 Coop-owner
-     replacements, 59 server-command methods, 88 framework-lifecycle methods, and 9 unreachable
-     Homesteads/Bellum Civile add-on methods.
-     The strict gameplay gate also rejects campaign mutation, canonical Fourberie-state writes, and
-     authority-sensitive calls mislabeled as client presentation. That gate currently passes 971 and
-     rejects 894: 821 unclassified methods plus 73 unsafe presentation classifications.
-  - **OPEN:** 894 exact UI/mission/lifecycle routes remain, including roughly 300 menu/dialog helpers
-    that reach shared state and therefore require live command or mission-authority owners. This strict
-    count, not the lower metadata-only count, is the completion baseline for subsequent increments.
+  14. `OnMissionBehaviorInitialize` preserves required peer-local setup while every persistent mission
+      callback terminates in a named server command, server callback, or Coop owner replacement.
+  15. The `v1.4.8` migration regenerated this surface from Fourberie `v1.4.7.6`.
+     The completed finalization records zero unclassified and zero blocked Fourberie candidates;
+     all 1,865 strict gameplay records pass, superseding the stale 419/420, 495, and 47/272 snapshots.
+  - **OPEN:** zero Fourberie function routes and zero active-module feature families.
 
 ### Playable session (DONE 2026-08-10)
 - [x] Map-nav NRE fixed and narrowed (`MapNavigationReadinessPatches` suppresses only the transient
@@ -558,8 +570,8 @@ rolls back canonical Fourberie state and created parties on failure, and returns
 ### P6 — Upstream nightly sync — LIVE DEPLOYED (2026-08-12)
 - [x] Audited upstream nightly PRs after the Friend Edition base and selectively backported
       nine final reviewed bugfixes: #2968, #2913, #2905, #2897, #2898, #2899, #2884,
-      #2855, and #2768. Bannerlord remains pinned to `v1.4.7`; upstream project/module
-      identity changes were not imported.
+      #2855, and #2768. That deployed batch remained pinned to `v1.4.7`; upstream
+      project/module identity changes were not imported into it.
 - [x] Added or imported regressions for party-screen inventory reset, trade-gold coalescing,
       troop-roster XP normalization, player-garrison protection, local settlement visibility,
       escort following, chat behavior/settings, invalid map-event parties, and clan-party
@@ -575,9 +587,9 @@ rolls back canonical Fourberie state and created parties on failure, and returns
 - [x] Matching Serilog 2.x server build deployed in place without changing the save identity.
       `friendallmods1` loaded successfully; release-pin verification, the complete deployment
       ledger, UDP 4200, and repeated server pulses are the live acceptance gates.
-- Deferred for separate reconciliation: #2931/#2912 overlap settlement authority work;
+- Deferred from that historical batch for separate reconciliation: #2931/#2912 overlap settlement authority work;
   #2941/#2773/#2863 overlap existing Friend Edition backports; #2867 overlaps custom auto-resolve;
-  feature/content PRs and upstream 1.4.8/nightly-identity changes remain out of scope.
+  feature/content PRs and upstream 1.4.8/nightly-identity changes were out of scope for that batch.
 
 ### P5 — Serilog hardening
 - [ ] Audit every bundled assembly; pin each to the Serilog its runtime needs

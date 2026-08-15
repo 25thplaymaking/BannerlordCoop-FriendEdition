@@ -8,7 +8,7 @@ using System.Reflection;
 namespace GameInterface.Services.WorkshopMods.Fourberie;
 
 /// <summary>
-/// Harmony surface audited from the exact Fourberie 1.4.7.5 creator binary. That DLL has no
+/// Harmony surface audited from the exact Fourberie 1.4.7.6 creator binary. That DLL has no
 /// 0Harmony assembly reference, Harmony attributes, patch classes, PatchAll call, or declared
 /// owner id. Consequently any runtime patch implemented by that exact assembly is an unknown
 /// surface: remove it by exact assembly identity, verify removal, then fail startup rather than

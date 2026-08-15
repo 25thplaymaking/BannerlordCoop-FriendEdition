@@ -325,7 +325,7 @@ internal static class DismembermentMissionInitializerPatch
         return CombatModAuthorityPolicy.AllowDismembermentPresentation(
             CombatModCompatibilityGuard.IsInitialized
                 && CombatModCompatibilityGuard.IsFamilyCompatible(
-                    CombatModFamily.DismembermentPlus2087),
+                    CombatModFamily.DismembermentPlus2088),
             ModInformation.IsServer,
             BattleSpawnGate.IsCoopBattleActive);
     }
@@ -359,7 +359,7 @@ internal static class DismembermentRegisterBlowPatch
     {
         bool compatible = CombatModCompatibilityGuard.IsInitialized
             && CombatModCompatibilityGuard.IsFamilyCompatible(
-                CombatModFamily.DismembermentPlus2087);
+                CombatModFamily.DismembermentPlus2088);
         if (!BattleSpawnGate.IsCoopBattleActive)
             return CombatModAuthorityPolicy.AllowDismembermentPresentation(
                 compatible,
@@ -407,7 +407,7 @@ internal static class DismembermentSlowMotionPatch
     {
         return CombatModCompatibilityGuard.IsInitialized
             && CombatModCompatibilityGuard.IsFamilyCompatible(
-                CombatModFamily.DismembermentPlus2087)
+                CombatModFamily.DismembermentPlus2088)
             && !BattleSpawnGate.IsCoopBattleActive;
     }
 }

@@ -1,5 +1,87 @@
 # Friend Edition Changelog
 
+## 2026-08-15 — Bannerlord v1.4.8 zero-open wiring candidate
+
+Completed the active ten-module function-piping boundary for Bannerlord
+`v1.4.8` without adding War Sails. The exact authority audit now passes all
+13,729 required routes with zero unclassified, zero blocked, and zero issues;
+the feature ledger passes all 30 families across all 10 modules with zero open.
+Strict gameplay validation passes UnblockableThrust 4, DismembermentPlus 17,
+Separatism 57, ImprovedGarrisons 723, Fourberie 1,865, Diplomacy 4,121, and
+PlayerSettlement 625 records.
+
+Fourberie's final 47 consequence methods and all 272 formerly rejected
+transitive records now terminate in typed, authenticated host operations.
+Server-side implementations re-resolve targets and recompute costs, RNG,
+influence, faction changes, war, banishment, encounter/scenario outcomes, and
+workshop conversion; clients retain only local inquiries and rendering.
+Repository tests add a persistent-call-tree ownership proof and exact campaign
+consequence coverage. The complete in-process xUnit run passes 1,758 tests with
+zero failures or errors (11 existing regeneration skips).
+
+Regenerated the private ten-module payload from the final client build: 853
+files, root manifest SHA-256
+`a3775f73c73e67b182b95f53a94f08771a5ef7aa8496e0b488ceaf46c3b7ef20`,
+ZIP SHA-256
+`9b7f449fa890cddf373164536c2c45a408ccf95bf473d8198998a25b1e1eecf6`.
+Regenerated the Serilog-2 dedicated-server pair from the same revision: paired
+core SHA-256
+`d6fd7239dfa6d2e5a2546fecc5bb2751ef363dfc9613f0e131d68e32f188446e`
+and receipt SHA-256
+`620f0ff2994bce4db88d6ea328321ef2a12d0a481eec626b656e76e74de74b95`.
+The live server/save were not changed; isolated-save boot and rendered
+multi-client validation remain promotion gates, not missing function wiring.
+
+## 2026-08-15 — Fourberie finalization review (draft PR; release still held)
+
+The final bounded `v1.4.8` review classified Fourberie's remaining local mission
+plumbing, rollback-protected menu/model presentation, and 14 internal helpers
+already reached through source-derived Coop transactions. The exact authority
+ledger moved from 13,309/13,729 with 420 unclassified to 13,682/13,729 with 47
+unclassified and zero blocked. Focused structural coverage was added for these
+classifications, production/test code builds with zero errors, and the focused
+in-process xUnit class passes 3/3.
+
+This is not a functional-completion claim. The transitive gameplay validator
+still rejects 272 Fourberie records and the feature ledger remains 28/30; the
+remaining consequence callbacks require bounded host commands and focused
+tests. A proposed generic callback/closure bridge was rejected because it would
+trust client-captured costs and outcomes. The exact remaining families and
+execution order are now recorded in `docs/bannerlord-1.4.8-migration.md`. War
+Sails remains absent, and no package was published or server/save changed.
+
+## 2026-08-15 — Bannerlord v1.4.8 offline migration candidate (release held)
+
+Friend Edition now identifies Bannerlord `v1.4.8` as its source/build and Steam
+Workshop compatibility target. Exact client build `24573425`, dedicated-server
+build `24571419`, depot manifests, full inventories, the complete `v1.4.7`
+rollback inventory, and all ten Workshop manifests are recorded in
+`deploy/bannerlord-1.4.8-inputs.json`. War Sails remains disabled and absent;
+RBM remains retired.
+
+The candidate adopts DismembermentPlus `v2.0.8.8` manifest
+`751945004455697202` and Fourberie `v1.4.7.6` manifest
+`1598945672157391038`; the other eight Workshop pins remain exact. The verified
+847-file client suite ZIP hashes to
+`bbdc850913fb3d943c8105ee26e6ee1eb2ce33c5c9df647c73e84850970bc825`.
+Production code builds against the actual `v1.4.8` assemblies with zero errors,
+the package/overlay gates pass, and the dedicated-server loader and 16-file UI
+support closure are repinned to actual `v1.4.8` bytes. A Serilog-2 headless Coop
+bin was release-paired offline: paired core SHA-256
+`6b3ed5a858aaf3afcab1f7770d76ef976e8bdc097adfcc374d368b4697daf74c`,
+receipt SHA-256
+`8b93ba231e9f822bf0a77b4c3688544b713ca0c1e45f78e0d1a8b634fbdf6c2f`.
+
+The regenerated authority audit classifies 13,309 of 13,729 required candidates
+with zero blocked and 420 unclassified, all in Fourberie. The older conflicting
+419/495 counts are superseded. Structural validators pass for Diplomacy,
+Improved Garrisons, Player Settlement, DismembermentPlus, Unblockable Thrust,
+and Separatism, but this does not substitute for rendered functional proof.
+Stable stays held: the 420 Fourberie mission/menu/VM routes, Player Settlement's
+non-empty construction path, full server overlay/isolated-save boot,
+rendered two-client matrix, and live promotion remain incomplete. No production
+server or save was changed.
+
 ## 2026-08-11 — Separatism authority closure (development; stable held)
 
 Separatism now has exact authority closure for all 57 required candidates. The recovered

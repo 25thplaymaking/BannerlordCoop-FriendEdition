@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "suiteId": "friend-edition-private-workshop-suite",
   "moduleCount": 10,
-  "receiptSha256": "a9883b904bec4bc9b65ea2eab52db0d2199fcc4e93679e0811b85bdc0acfecbf",
+  "receiptSha256": "d202ef52ef632708bb86dd0851e34d9e84473d73921847833ed31ae69f4b9362",
   "modules": [
     {
       "moduleId": "Bannerlord.ButterLib",
@@ -52,20 +52,20 @@
     {
       "moduleId": "DismembermentPlus",
       "workshopId": "2875093027",
-      "steamManifestId": "4587731243779119835",
-      "version": "v2.0.8.7",
+      "steamManifestId": "751945004455697202",
+      "version": "v2.0.8.8",
       "loadOrder": 120,
-      "contentSha256": "04b85938b7d4b46ca20019050d667ab7f18d4cf671488d456e75211ba36a49ac",
-      "configurationSha256": "f9322571249aa64fc01820d99c47e666e5a77150b3cf3c6555c01f19e6c0880a"
+      "contentSha256": "75a8186a873d104c01b503b473e1488aacb267005a7d78e5bf3e4f25bf683c57",
+      "configurationSha256": "fc7445aa60bc455c8d0b4cb31a40930588e8104effe39c4a69a8e07856ee24d5"
     },
     {
       "moduleId": "Fourberie",
       "workshopId": "2875710877",
-      "steamManifestId": "4391404683672989722",
-      "version": "v1.4.7.5",
+      "steamManifestId": "1598945672157391038",
+      "version": "v1.4.7.6",
       "loadOrder": 130,
-      "contentSha256": "59d75792002d5ad77c6c7e00e7a59516b902064c2518e77fdbb6927a70916e5f",
-      "configurationSha256": "a8b41ef4fbebe7dde67a87f6c89fadb4a947c1c6215297f75af3300d57c729c0"
+      "contentSha256": "3488b62a0b71a905c4499724059672289bd7c3222eba295332b47bf73d8a0a07",
+      "configurationSha256": "103bb574563ebafc4199cadbb1a71a2bc9956f81f1db75a367bec8860ce3871e"
     },
     {
       "moduleId": "ImprovedGarrisons",

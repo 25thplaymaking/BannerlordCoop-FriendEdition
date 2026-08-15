@@ -5,7 +5,12 @@ Target: Bannerlord Coop Friend Edition, game/nightly line 1.4.7
 Workshop source: `P:\SteamLibrary\steamapps\workshop\content\261550`  
 Decompiler evidence: `C:\Users\Bryce\Documents\ServerWork\workshop-decompile-audit`
 
-> **Release-baseline notice (2026-08-09):** Steam currently reports Fourberie Workshop item `2875710877` at a newer manifest than the installed audited copy. The Fourberie manifest ID and fingerprint below are therefore historical audit evidence, not releasable package pins. Packaging must remain fail-closed until Steam installs the new bytes and the fingerprint/method-surface review is repeated.
+> **Historical baseline notice (2026-08-09):** The audit-time dispositions below
+> describe the original guarded baseline. They are retained as migration history.
+> The current exact payload uses Fourberie `v1.4.7.6`, manifest
+> `1598945672157391038`; its repeated fingerprint and method-surface review is
+> complete. Current release evidence is in `WorkshopFunctionReview.md` and the
+> `v1.4.8` migration guide.
 
 ## Executive decision
 
@@ -53,7 +58,13 @@ The 2 stable GameInterface failures are `WorkshopCompatibilityManifestTests.Prot
 
 Beyond that pair, the Workshop test suites are otherwise green and non-flaky as of this pass. A prior investigation of the same suites found genuine run-to-run instability (failure counts varying 6→8→7 in GameInterface's WorkshopMods namespace and 1→0→2, always inside `CombatModCompatibilityTests`, in E2E's) traced to a real HarmonyLib defect: `Harmony.GetPatchInfo` persists patches by serializing them into `HarmonySharedState` and re-deserializing on every read, and that round trip has been observed, under GC pressure from a busy test process, to intermittently reconstruct the wrong `MethodInfo` for a patch's `PatchMethod` — confirmed by hash mismatch against the original object, not merely reference inequality. Every Workshop module's Harmony isolation guard (ImprovedGarrisons, Fourberie, Diplomacy, Player Settlement, the shared Frameworks cohort, and Missions' CombatModCompatibilityGuard) now retries its patch-info read via a shared `HarmonyPatchInfoStabilizer` before failing closed, plus a module initializer disabling HarmonyLib's legacy BinaryFormatter serialization path. Verified stable at the time: 20/20 consecutive runs of the GameInterface namespace and 5/5 of the E2E namespace, identical failure counts every time — measured on the pre-merge suites (233/63), and re-confirmed at 3/3 each on the merged counts above. Note the BinaryFormatter initializer is a test-only mitigation: HarmonyLib reads that AppContext switch only in its net5.0-and-newer builds, and the net472 `0Harmony.dll` the game loads has no such path, so the stabilizer's retry budget is the sole production mitigation and is sized accordingly.
 
-Package publication remains blocked because Steam reports a newer Fourberie manifest than the audited installed copy; the updated bytes must be installed, fingerprinted, reviewed, and revalidated before a distributable, commit, release, or deployment is approved.
+The exact Fourberie `v1.4.7.6` payload is installed, fingerprinted, and in the
+`v1.4.8` candidate. The completed 2026-08-15 wiring pass supersedes both the
+former 420-open snapshot and the interim 47/272 snapshot: all 13,729 required
+authority routes are classified with zero blocked, all 1,865 strict Fourberie
+records pass, and all 30 feature families are release-ready. The remaining
+rendered/same-save gates validate deployment behavior; they are not unowned
+function routes.
 
 ## Evidence and scope
 
@@ -72,7 +83,7 @@ The review covers the eleven active Workshop items named below. It does not clai
 | `2859251492` | `RBM` / `v4.3.4` | `RBM.dll` 1.0.0.0 plus `RBMAI.dll`, `RBMCombat.dll`, `RBMConfig.dll`, `RBMTournament.dll` | `RBM.SubModule` | Combat, AI, tournament, UI, and XML gameplay; `DedicatedServerType=none`, render required; Native dependency v1.4.6, BirthAndDeath optional |
 | `2859265386` | `ImprovedGarrisons` / `v4.2.0.7` | `ImprovedGarrisons.dll` 1.0.0.0 | `ImprovedGarrisons.Main` | Campaign AI/state/UI; `DedicatedServerType=none`, render required |
 | `2875093027` | `DismembermentPlus` / `v2.0.8.7` | `DismembermentPlus.dll` 2.0.8.7 | `DismembermentPlus.Main` | Mission combat visual/assets; `DedicatedServerType=none`, render required |
-| `2875710877` | `Fourberie` / `v1.4.7.5` | `Fourberie.dll` 1.4.7.5 | `Fourberie.Main` | Campaign, mission, UI, and content gameplay; single-player only; `DedicatedServerType=none`, render required |
+| `2875710877` | `Fourberie` / `v1.4.7.6` | `Fourberie.dll` 1.4.7.6 | `Fourberie.Main` | Campaign, mission, UI, and content gameplay; single-player only; `DedicatedServerType=none`, render required |
 | `2881380744` | `Bannerlord.Diplomacy` / `v1.4.7` | loader `Bannerlord.ModuleLoader.Bannerlord.Diplomacy.dll` 1.0.1.50; implementation `Bannerlord.Diplomacy.1.4.7.dll` 1.4.7.0 (`e6bfda7...`) | `Bannerlord.ModuleLoader.Bannerlord_Diplomacy`, then `Diplomacy.SubModule` | Campaign/UI gameplay; single-player only |
 | `3614435151` | `UnblockableThrust` / `v1.1.3.1` | `UnblockableThrust.dll` 1.1.3.1 | `UnblockableThrust.UnblockableThrustSubmodule` | Mission combat rule; single-player only; `DedicatedServerType=none`, render required |
 | `3720376888` | `PlayerSettlement` / `v7.5.0` | `PlayerSettlement.dll` 7.5.0.0 and `PlayerSettlementFixes.dll` 1.0.0.0 | `BannerlordPlayerSettlement.Main`; `PlayerSettlementFixes.PlayerSettlementFixesSubModule` | Dynamic campaign objects, map/siege UI/content; single-player only |
@@ -358,8 +369,8 @@ These SHA-256 values identify the audited Win64 inputs. A Workshop update change
 | `2859238197` | `MCMv5.dll` | `7aef3e20ce73eb4409a670f9c2778e2894ed5897a0433bdbe9475e13cac67638` |
 | `2859251492` | `RBM.dll` | `1dce47879190c09ac85f097da91abe2b4915455b72031e75917c963bab3f99c2` |
 | `2859265386` | `ImprovedGarrisons.dll` | `fedab4041748951282634101871a9c41219bf3f2fa90d4e9cd6a4cbec082ce15` |
-| `2875093027` | `DismembermentPlus.dll` | `fc16d8c5f455710b7960848c8f27a3db0551e1a028bb128bf7ce1c6a95f79dd1` |
-| `2875710877` | `Fourberie.dll` | `fd1c02158817fae5b90e3c121da474096caa368cb35495d83ce81ea49d860c71` |
+| `2875093027` | `DismembermentPlus.dll` | `17abfcc4eba59c15caca1bce194c0791663ed692f21ffe22675da49418a4e79b` |
+| `2875710877` | `Fourberie.dll` | `29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92` |
 | `2881380744` | `Bannerlord.ModuleLoader.Bannerlord.Diplomacy.dll` | `444af0df8f00feb1c3860f0786fa483b9297c99d9f3a51deb22ba0d7855df959` |
 | `2881380744` | `Bannerlord.Diplomacy.1.4.7.dll` | `90930a1dfb48c8cf040b8bd2c89156a69838a8dc86b8ed97e0cd8475f2081257` |
 | `3614435151` | `UnblockableThrust.dll` | `ff73b80a598bce31e8d620fae84e21c7f633f767f03e5f192e05169425dc83df` |

@@ -29,6 +29,7 @@ internal enum FourberieStateValueKind
     [ProtoEnum] StringObjectDictionary = 9,
     [ProtoEnum] ObjectList = 10,
     [ProtoEnum] TroopRosterElement = 11,
+    [ProtoEnum] ItemRosterElement = 12,
 }
 
 [ProtoContract(SkipConstructor = true)]

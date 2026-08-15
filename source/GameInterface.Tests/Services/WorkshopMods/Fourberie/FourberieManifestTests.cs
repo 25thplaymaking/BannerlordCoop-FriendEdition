@@ -10,6 +10,29 @@ namespace GameInterface.Tests.Services.WorkshopMods.Fourberie;
 
 public sealed class FourberieManifestTests
 {
+    [Fact]
+    public void EveryPersistentFunctionTerminatesInAnOwnedRoute()
+    {
+        string auditPath = FindRepositoryFile("doc", "generated", "workshop-authority-audit.json");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(auditPath));
+        JsonElement[] required = document.RootElement.GetProperty("records").EnumerateArray()
+            .Where(record => record.GetProperty("moduleId").GetString() == "Fourberie" &&
+                             record.GetProperty("active").GetBoolean() &&
+                             record.GetProperty("requiresDisposition").GetBoolean())
+            .ToArray();
+
+        Assert.NotEmpty(required);
+        Assert.DoesNotContain(required, record =>
+            record.GetProperty("disposition").GetString() is "Unclassified" or "Blocked" ||
+            string.IsNullOrWhiteSpace(record.GetProperty("owner").GetString()) ||
+            record.GetProperty("tests").GetArrayLength() == 0);
+        Assert.DoesNotContain(required, record =>
+            record.GetProperty("disposition").GetString() == "ClientPresentation" &&
+            record.GetProperty("evidence").EnumerateArray().Any(signal =>
+                signal.GetString()?.StartsWith("campaign-mutation:", StringComparison.Ordinal) == true ||
+                signal.GetString()?.StartsWith("calls-authority-sensitive:", StringComparison.Ordinal) == true));
+    }
+
     private sealed class ShapeFixture
     {
         private static void Target(ref int value, bool enabled, List<string> names)
@@ -38,6 +61,12 @@ public sealed class FourberieManifestTests
 
         foreach (FourberieMethodSpec spec in FourberieCompatibilityManifest.Methods)
         {
+            if (spec.MetadataToken.HasValue)
+            {
+                Assert.Contains(assembly.GetProperty("methods").EnumerateArray(), method =>
+                    Convert.ToInt32(method.GetProperty("metadataToken").GetString(), 16) == spec.MetadataToken.Value);
+                continue;
+            }
             string requestedShape =
                 $"{spec.TypeName}::{spec.MethodName}({string.Join(",", spec.ParameterTypeNames)}):{spec.ReturnTypeName}";
             Assert.True(pinnedShapes.Contains(requestedShape),
@@ -49,9 +78,9 @@ public sealed class FourberieManifestTests
         (typeName ?? string.Empty).Replace('<', '[').Replace('>', ']');
 
     [Theory]
-    [InlineData("v1.4.7.5", "FD1C02158817FAE5B90E3C121DA474096CAA368CB35495D83CE81EA49D860C71", true)]
-    [InlineData("v1.4.7.4", "FD1C02158817FAE5B90E3C121DA474096CAA368CB35495D83CE81EA49D860C71", false)]
-    [InlineData("v1.4.7.5", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", false)]
+    [InlineData("v1.4.7.6", "29F6644BCCA8D5A3834EE51C72EC75D94214BEB76CB1FDCBC2027DA0EB544E92", true)]
+    [InlineData("v1.4.7.5", "29F6644BCCA8D5A3834EE51C72EC75D94214BEB76CB1FDCBC2027DA0EB544E92", false)]
+    [InlineData("v1.4.7.6", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", false)]
     public void IdentityGate_RequiresExactCreatorBinary(string version, string hash, bool expected)
     {
         Assert.Equal(expected, FourberieCompatibilityManifest.IsSupportedIdentity(version, hash));
@@ -189,6 +218,42 @@ public sealed class FourberieManifestTests
             spec => spec.TypeName == type &&
                     spec.MethodName == method &&
                     spec.Kind == FourberiePatchKind.ClientPresentation);
+    }
+
+    [Theory]
+    [InlineData("OpenSub")]
+    [InlineData("FOpenStash")]
+    [InlineData("RespecPerks")]
+    [InlineData("AgentsList")]
+    [InlineData("HintSchemeRoutine")]
+    [InlineData("ListKingTribF")]
+    [InlineData("ListToTownNet")]
+    [InlineData("ListPartnerF")]
+    [InlineData("ListCrimPactF")]
+    [InlineData("ListKCrimPactF")]
+    public void CriminalRoomBrowsers_AreClientPresentation(string method)
+    {
+        FourberieMethodSpec spec = Assert.Single(
+            FourberieCompatibilityManifest.Methods,
+            candidate => candidate.TypeName == "Fourberie.CriminalVM" &&
+                         candidate.MethodName == method);
+
+        Assert.Equal(FourberiePatchKind.ClientPresentation, spec.Kind);
+    }
+
+    [Fact]
+    public void EnlistMutationHelper_IsOwnedByTypedEnlistTransactions()
+    {
+        FourberieMethodSpec spec = Assert.Single(
+            FourberieCompatibilityManifest.Methods,
+            candidate => candidate.TypeName == "Fourberie.CriminalVM" &&
+                         candidate.MethodName == "EnlistAgentsDoneRoutine");
+
+        Assert.Equal(FourberiePatchKind.SchemeOwnedReplacement, spec.Kind);
+        Assert.Equal(
+            new[] { "TaleWorlds.CampaignSystem.Roster.TroopRoster" },
+            spec.ParameterTypeNames);
+        Assert.False(FourberieAuthorityPatches.SchemeOwnedReplacementPrefix());
     }
 
     [Theory]

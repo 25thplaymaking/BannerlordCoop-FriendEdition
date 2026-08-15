@@ -557,6 +557,9 @@ function New-CoopModulePlan {
     $counts = @{}
     foreach ($rule in @($Manifest.coopModule.exclusions)) { $counts[[string]$rule.glob] = 0 }
     foreach ($file in $snapshot.Files) {
+        if ([string]$file.RelativePath -ieq 'WorkshopSuite/MANIFEST.json') {
+            continue
+        }
         $matched = $null
         foreach ($rule in @($Manifest.coopModule.exclusions)) {
             if (Test-RelativeGlob -RelativePath $file.RelativePath -Glob ([string]$rule.glob)) { $matched = $rule; break }
@@ -587,6 +590,7 @@ function New-CoopModulePlan {
         ModuleRoot = $root; Descriptor = $descriptor; SourceSnapshot = $snapshot
         IncludedFiles = @($included | Sort-Object RelativePath)
         ExcludedFiles = @($excluded | Sort-Object RelativePath)
+        ReplacedGeneratedFiles = @($snapshot.Files | Where-Object { [string]$_.RelativePath -ieq 'WorkshopSuite/MANIFEST.json' })
         BirthAndDeathConfig = [pscustomobject]@{
             RelativePath = [string]$birthAndDeathConfig[0].RelativePath
             Sha256 = [string]$birthAndDeathConfig[0].Sha256
@@ -686,7 +690,10 @@ function Get-ClientInstallerFiles {
 
 function Invoke-AssemblyInspector {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][object[]]$Files)
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Files,
+        [ValidateRange(1, 128)][int]$BatchSize = 8
+    )
 
     $inspector = Get-AssemblyInspectorPath
     $dotnet = if (Test-Path -LiteralPath 'C:\Program Files\dotnet\dotnet.exe') {
@@ -698,19 +705,28 @@ function Invoke-AssemblyInspector {
     $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('friend-edition-assembly-audit-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
     try {
-        $requestPath = Join-Path $temporaryRoot 'request.json'
-        $resultPath = Join-Path $temporaryRoot 'result.json'
-        Write-Utf8File -Path $requestPath -Content (([ordered]@{ files = $Files } | ConvertTo-Json -Depth 10) + "`n")
-        $toolOutput = & $dotnet $inspector $requestPath $resultPath 2>&1
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
-            throw "Assembly metadata inspection failed:`n$($toolOutput -join "`n")"
+        $inspections = New-Object System.Collections.Generic.List[object]
+        for ($offset = 0; $offset -lt $Files.Count; $offset += $BatchSize) {
+            $last = [Math]::Min($offset + $BatchSize - 1, $Files.Count - 1)
+            $batch = @($Files[$offset..$last])
+            $batchNumber = [int]($offset / $BatchSize)
+            $requestPath = Join-Path $temporaryRoot ("request-{0:D4}.json" -f $batchNumber)
+            $resultPath = Join-Path $temporaryRoot ("result-{0:D4}.json" -f $batchNumber)
+            Write-Utf8File -Path $requestPath -Content (([ordered]@{ files = $batch } | ConvertTo-Json -Depth 10) + "`n")
+            $toolOutput = & $dotnet $inspector $requestPath $resultPath 2>&1
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
+                throw "Assembly metadata inspection batch $batchNumber failed:`n$($toolOutput -join "`n")"
+            }
+            $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+            $errors = @($result.files | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.error) })
+            if ($errors.Count -gt 0) {
+                throw "Assembly metadata inspection errors: $(@($errors | ForEach-Object { "$($_.moduleId)/$($_.relativePath): $($_.error)" }) -join '; ')"
+            }
+            foreach ($inspection in @($result.files)) {
+                $inspections.Add($inspection)
+            }
         }
-        $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
-        $errors = @($result.files | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.error) })
-        if ($errors.Count -gt 0) {
-            throw "Assembly metadata inspection errors: $(@($errors | ForEach-Object { "$($_.moduleId)/$($_.relativePath): $($_.error)" }) -join '; ')"
-        }
-        return @($result.files)
+        return @($inspections.ToArray())
     }
     finally {
         if (Test-Path -LiteralPath $temporaryRoot) {

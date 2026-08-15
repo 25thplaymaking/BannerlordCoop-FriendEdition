@@ -1,0 +1,3 @@
+# Names only for generated binding types. Replace these values in an ignored .dev.vars for local integration tests.
+GITHUB_TOKEN=local-placeholder
+PUBLISH_TOKEN=local-placeholder

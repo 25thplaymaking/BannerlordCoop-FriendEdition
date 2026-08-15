@@ -36,6 +36,62 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="WarComboItem" TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="{StaticResource Parchment}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="ItemBorder" Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="{StaticResource LeatherLight}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource GoldBright}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="WarComboBox" TargetType="ComboBox">
+            <Setter Property="Foreground" Value="{StaticResource Parchment}" />
+            <Setter Property="Background" Value="{StaticResource Leather}" />
+            <Setter Property="BorderBrush" Value="#66C9A24B" />
+            <Setter Property="ItemContainerStyle" Value="{StaticResource WarComboItem}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" />
+                            <ContentPresenter Margin="9,0,30,0" VerticalAlignment="Center"
+                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" />
+                            <ToggleButton Background="Transparent" BorderThickness="0"
+                                          HorizontalAlignment="Right" Width="30" Focusable="False"
+                                          IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                                <TextBlock Text="&#x25BE;" Foreground="{StaticResource Gold}" FontSize="12"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </ToggleButton>
+                            <Popup IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom"
+                                   AllowsTransparency="True" Focusable="False">
+                                <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                                        MaxHeight="320" Background="{StaticResource Ink}"
+                                        BorderBrush="{StaticResource Gold}" BorderThickness="1">
+                                    <ScrollViewer><ItemsPresenter /></ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <!-- Double frame: gold hairline outside, ink field inside — a forged plaque grown to a hall. -->
@@ -64,6 +120,8 @@
                         <RadioButton x:Name="MusterTab" Style="{StaticResource NavTab}" Content="MUSTER"
                                      GroupName="Nav" IsChecked="True" />
                         <RadioButton x:Name="ChronicleTab" Style="{StaticResource NavTab}" Content="CHRONICLE"
+                                     GroupName="Nav" />
+                        <RadioButton x:Name="RosterTab" Style="{StaticResource NavTab}" Content="ROSTER"
                                      GroupName="Nav" />
                         <RadioButton x:Name="OptionsTab" Style="{StaticResource NavTab}" Content="OPTIONS"
                                      GroupName="Nav" />
@@ -383,6 +441,58 @@
                         </ScrollViewer>
                     </Grid>
 
+                    <!-- ══ ROSTER / AUTHORITATIVE CAMPAIGN LEADERBOARD ══ -->
+                    <Grid x:Name="RosterPanel" Margin="330,34,60,34" MaxWidth="820"
+                          Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+                            <TextBlock Text="T H E   C A M P A I G N   R O S T E R"
+                                       FontSize="12" Foreground="{StaticResource Steel}" />
+                            <TextBlock Text="Character Leaderboard"
+                                       FontFamily="{StaticResource Display}" FontSize="34" FontWeight="Bold"
+                                       Foreground="{StaticResource Parchment}" Margin="0,2,0,0" />
+                            <Rectangle Height="1" Width="170" HorizontalAlignment="Left"
+                                       Fill="{StaticResource Gold}" Opacity="0.55" Margin="0,10,0,0" />
+                        </StackPanel>
+                        <TextBlock x:Name="RosterSummaryText" Grid.Row="1" Margin="0,0,0,10"
+                                   FontFamily="{StaticResource Dispatch}" FontSize="11.5"
+                                   Foreground="{StaticResource Steel}" Text="Fetching the host's campaign ledger…" />
+                        <DataGrid x:Name="RosterGrid" Grid.Row="2" IsReadOnly="True" AutoGenerateColumns="False"
+                                  CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column"
+                                  GridLinesVisibility="Horizontal" Background="#99140F0B"
+                                  Foreground="{StaticResource Parchment}" BorderBrush="#55C9A24B"
+                                  RowBackground="#44170F0C" AlternatingRowBackground="#66170F0C"
+                                  HorizontalGridLinesBrush="#33C9A24B" FontSize="12">
+                            <DataGrid.ColumnHeaderStyle>
+                                <Style TargetType="DataGridColumnHeader">
+                                    <Setter Property="Background" Value="{StaticResource Leather}" />
+                                    <Setter Property="Foreground" Value="{StaticResource Gold}" />
+                                    <Setter Property="BorderBrush" Value="#33C9A24B" />
+                                    <Setter Property="BorderThickness" Value="0,0,1,1" />
+                                    <Setter Property="Padding" Value="6,5" />
+                                    <Setter Property="FontFamily" Value="{StaticResource Dispatch}" />
+                                </Style>
+                            </DataGrid.ColumnHeaderStyle>
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="#" Binding="{Binding Rank}" Width="38" />
+                                <DataGridTextColumn Header="CHARACTER" Binding="{Binding Name}" Width="150" />
+                                <DataGridTextColumn Header="CLAN" Binding="{Binding Clan}" Width="125" />
+                                <DataGridTextColumn Header="LVL" Binding="{Binding Level}" Width="48" />
+                                <DataGridTextColumn Header="GOLD" Binding="{Binding Gold, StringFormat=N0}" Width="78" />
+                                <DataGridTextColumn Header="RENOWN" Binding="{Binding Renown, StringFormat=N0}" Width="72" />
+                                <DataGridTextColumn Header="INFL." Binding="{Binding Influence, StringFormat=N0}" Width="62" />
+                                <DataGridTextColumn Header="TIER" Binding="{Binding ClanTier}" Width="48" />
+                                <DataGridTextColumn Header="PARTY" Binding="{Binding PartySize}" Width="58" />
+                                <DataGridTextColumn Header="FIEFS" Binding="{Binding Fiefs}" Width="48" />
+                                <DataGridCheckBoxColumn Header="ON" Binding="{Binding Online}" Width="42" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+
                     <!-- ══ OPTIONS ══ -->
                     <Grid x:Name="OptionsPanel" Margin="330,34,60,34" MaxWidth="760"
                           Visibility="Collapsed">
@@ -407,7 +517,7 @@
 
                                 <!-- Game location -->
                                 <TextBlock Style="{StaticResource SectionHeader}" Text="THE MUSTER GROUND" />
-                                <Grid Margin="0,0,0,22">
+                                <Grid Margin="0,0,0,8">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
@@ -427,6 +537,23 @@
                                     <Button x:Name="RedetectGameButton" Grid.Column="2" Style="{StaticResource GhostButton}"
                                             Margin="8,0,0,0" Content="RE-DETECT"
                                             ToolTip="Forget the manual path and auto-detect from the Steam library again" />
+                                </Grid>
+                                <Grid Margin="0,0,0,22">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="30" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="130" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Style="{StaticResource OptionLabel}" Text="GAME VERSION" />
+                                    <ComboBox x:Name="GameVersionPicker" Grid.Column="1" Height="30"
+                                              Style="{StaticResource WarComboBox}" DisplayMemberPath="DisplayName"
+                                              ToolTip="Select one of the Bannerlord installations found on this computer" />
+                                    <TextBlock x:Name="RequiredGameVersionText" Grid.Row="1" Grid.Column="1" Margin="0,4,0,0"
+                                               FontFamily="{StaticResource Dispatch}" FontSize="10.5"
+                                               Foreground="{StaticResource Steel}" Text="Host requires Bannerlord 1.4.8" />
                                 </Grid>
 
                                 <!-- Update channels -->
@@ -473,12 +600,50 @@
                                           Content="Verbose launcher log (more detail for troubleshooting)" />
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                                     <Button x:Name="GatherLogsButton" Style="{StaticResource GhostButton}"
-                                            Content="&#x2709;  GATHER LOGS TO SEND"
-                                            ToolTip="Package your launcher + game logs into one zip on your Desktop to send to Bishop" />
+                                            Content="&#x2709;  EXPORT FULL LOG ZIP"
+                                            ToolTip="Package full launcher and game logs locally for advanced diagnostics" />
                                     <Button x:Name="OpenLogsFolderButton" Style="{StaticResource GhostButton}"
                                             Margin="10,0,0,0" Content="OPEN LOG FOLDER" />
                                     <Button x:Name="GithubButton" Style="{StaticResource GhostButton}"
                                             Margin="10,0,0,0" Content="PROJECT ON GITHUB" />
+                                </StackPanel>
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="REPORT TO THE STEWARDS"
+                                           Margin="0,10,0,8" />
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="30" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="130" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Row="0" Style="{StaticResource OptionLabel}" Text="TYPE" Margin="0,0,0,4" />
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource OptionLabel}"
+                                               Text="SHORT TITLE" Margin="8,0,0,4" />
+                                    <ComboBox x:Name="ReportKindPicker" Grid.Row="1" Height="30" SelectedIndex="0"
+                                              Style="{StaticResource WarComboBox}">
+                                        <ComboBoxItem Content="BUG" Tag="bug" />
+                                        <ComboBoxItem Content="FEATURE REQUEST" Tag="feature" />
+                                    </ComboBox>
+                                    <TextBox x:Name="ReportTitleText" Grid.Row="1" Grid.Column="1" Height="30" Margin="8,0,0,0"
+                                             MaxLength="120" Background="{StaticResource Leather}"
+                                             Foreground="{StaticResource Parchment}" BorderBrush="#66C9A24B"
+                                             VerticalContentAlignment="Center" Padding="8,0"
+                                             ToolTip="Short issue title" />
+                                </Grid>
+                                <TextBlock Style="{StaticResource OptionLabel}" Text="DETAILS, EXPECTED RESULT, AND REPRODUCTION STEPS"
+                                           Margin="0,0,0,4" />
+                                <TextBox x:Name="ReportDescriptionText" Height="70" MaxLength="4000"
+                                         AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                                         Background="{StaticResource Leather}" Foreground="{StaticResource Parchment}"
+                                         BorderBrush="#66C9A24B" Padding="8,6"
+                                         ToolTip="What happened, what you expected, and how to reproduce it" />
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,8">
+                                    <CheckBox x:Name="AttachLogsCheck" Style="{StaticResource WarCheck}"
+                                              IsChecked="True" Content="Attach a redacted excerpt of launcher and game logs" />
+                                    <Button x:Name="SubmitReportButton" Style="{StaticResource GhostButton}"
+                                            Margin="18,0,0,0" Content="CREATE GITHUB ISSUE" />
                                 </StackPanel>
                                 <TextBlock x:Name="OptionsStatusText" FontFamily="{StaticResource Dispatch}"
                                            FontSize="11" Foreground="{StaticResource Steel}"

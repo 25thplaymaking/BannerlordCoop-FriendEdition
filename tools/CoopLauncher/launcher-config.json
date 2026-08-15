@@ -10,6 +10,7 @@
 
   // Empty = auto-detect the Bannerlord install from Steam.
   "gamePath": "",
+  "requiredGameVersion": "1.4.8",
 
   // Launcher executable feed. Swap launcher-app → launcher-nightly for bleeding edge.
   "launcherManifestUrl": "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/launcher-app/launcher.json",
@@ -18,5 +19,7 @@
   "updateManifestUrl": "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/client-stable/launcher.json",
 
   // Full mod-suite feed (frameworks + workshop mods, byte-exact). Empty to skip if mods already present.
-  "suiteManifestUrl": "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/suite-stable/suite.json"
+  "suiteManifestUrl": "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/suite-stable/suite.json",
+  "portalUrl": "",
+  "portalManifestUrl": "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/portal-config/portal.json"
 }

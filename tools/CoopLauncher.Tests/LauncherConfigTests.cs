@@ -27,6 +27,7 @@ public sealed class LauncherConfigTests
         Assert.Equal(
             "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/launcher-app/launcher.json",
             config.LauncherManifestUrl);
+        Assert.Equal("1.4.8", config.RequiredGameVersion);
     }
 
     [Fact]

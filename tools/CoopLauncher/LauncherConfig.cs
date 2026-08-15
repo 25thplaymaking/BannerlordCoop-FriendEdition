@@ -39,6 +39,9 @@ public sealed class LauncherConfig
     /// </summary>
     public string GamePath { get; set; } = "";
 
+    /// <summary>Bannerlord version the host accepts. The client feed may override this value.</summary>
+    public string RequiredGameVersion { get; set; } = "1.4.8";
+
     /// <summary>
     /// Launcher executable update manifest. Empty disables launcher self-update. The stable rolling
     /// release is the default; a private config may opt into the distinct nightly feed.
@@ -72,6 +75,13 @@ public sealed class LauncherConfig
     /// <summary>Shown as a link in Options; the project this launcher belongs to.</summary>
     public string ProjectUrl { get; set; } =
         "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition";
+
+    /// <summary>HTTPS portal endpoints for authoritative campaign stats and issue submission.</summary>
+    public string PortalUrl { get; set; } = "";
+
+    /// <summary>Public discovery document used when the Worker URL is assigned during deployment.</summary>
+    public string PortalManifestUrl { get; set; } =
+        "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/portal-config/portal.json";
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -111,6 +121,9 @@ public sealed class UpdateManifest
 
     /// <summary>Optional one-line changelog surfaced under the update rail.</summary>
     [JsonPropertyName("notes")] public string Notes { get; set; } = "";
+
+    /// <summary>Exact Bannerlord version required by this client build.</summary>
+    [JsonPropertyName("gameVersion")] public string GameVersion { get; set; } = "";
 }
 
 /// <summary>The remote feed used to update the portable launcher executable itself.</summary>

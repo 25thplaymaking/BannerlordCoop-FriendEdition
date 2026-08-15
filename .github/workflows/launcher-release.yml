@@ -210,8 +210,10 @@ jobs:
 
           for tag in $tags; do
             zipurl="https://github.com/${GITHUB_REPOSITORY}/releases/download/$tag/Coop-client.zip"
-            jq -n --arg v "$version" --arg u "$zipurl" --arg s "$sha" --arg n "$notes" \
-              '{version:$v, clientZipUrl:$u, sha256:$s, notes:$n}' > launcher.json
+            game_version=$(sed -n 's/.*<GameVersion>\([^<]*\)<\/GameVersion>.*/\1/p' "$GITHUB_WORKSPACE/source/Coop/Coop.csproj")
+            test -n "$game_version"
+            jq -n --arg v "$version" --arg u "$zipurl" --arg s "$sha" --arg n "$notes" --arg gv "$game_version" \
+              '{version:$v, clientZipUrl:$u, sha256:$s, notes:$n, gameVersion:$gv}' > launcher.json
             echo "== $tag =="; cat launcher.json
 
             # client-stable is the default channel the shipped launcher follows → mark it "latest".

@@ -1,0 +1,84 @@
+name: Campaign Portal Deploy
+
+on:
+  push:
+    branches: [development]
+    paths:
+      - 'services/coop-portal/**'
+      - '.github/workflows/portal-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: campaign-portal-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PORTAL_GITHUB_TOKEN: ${{ secrets.PORTAL_GITHUB_TOKEN }}
+      PORTAL_PUBLISH_TOKEN: ${{ secrets.PORTAL_PUBLISH_TOKEN }}
+    defaults:
+      run:
+        working-directory: services/coop-portal
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: services/coop-portal/package-lock.json
+
+      - run: npm ci
+      - run: npm run types -- --check
+      - run: npm run check
+      - run: npm test
+      - run: npx wrangler deploy --dry-run
+
+      - name: Verify deployment credentials
+        shell: bash
+        run: |
+          set -eu
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'CLOUDFLARE_API_TOKEN is not configured' >&2; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'CLOUDFLARE_ACCOUNT_ID is not configured' >&2; exit 1; }
+          test -n "$PORTAL_GITHUB_TOKEN" || { echo 'PORTAL_GITHUB_TOKEN is not configured' >&2; exit 1; }
+          test -n "$PORTAL_PUBLISH_TOKEN" || { echo 'PORTAL_PUBLISH_TOKEN is not configured' >&2; exit 1; }
+
+      - name: Deploy code and provision KV
+        run: npx wrangler deploy
+
+      - name: Install Worker secrets without logging values
+        shell: bash
+        run: |
+          set -eu
+          node -e "require('fs').writeFileSync(process.env.RUNNER_TEMP + '/portal-secrets.json', JSON.stringify({GITHUB_TOKEN:process.env.PORTAL_GITHUB_TOKEN,PUBLISH_TOKEN:process.env.PORTAL_PUBLISH_TOKEN}))"
+          npx wrangler secret bulk "$RUNNER_TEMP/portal-secrets.json"
+          rm -f "$RUNNER_TEMP/portal-secrets.json"
+
+      - name: Publish portal discovery document
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          output=$(npx wrangler deploy 2>&1)
+          printf '%s\n' "$output"
+          portal_url=$(printf '%s\n' "$output" | grep -Eo 'https://[^[:space:]]+\.workers\.dev' | tail -1)
+          test -n "$portal_url"
+          mkdir -p "$RUNNER_TEMP/portal-release"
+          printf '{"portalUrl":"%s","source":"%s"}\n' "$portal_url" "$GITHUB_SHA" \
+            > "$RUNNER_TEMP/portal-release/portal.json"
+          if ! gh release view portal-config >/dev/null 2>&1; then
+            gh release create portal-config --title 'Calradia Co-op portal discovery' \
+              --notes 'Rolling launcher discovery document for the campaign portal.'
+          fi
+          gh release upload portal-config "$RUNNER_TEMP/portal-release/portal.json" --clobber
+          printf 'Portal: %s\n' "$portal_url" >> "$GITHUB_STEP_SUMMARY"

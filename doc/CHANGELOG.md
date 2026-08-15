@@ -16,19 +16,19 @@ Server-side implementations re-resolve targets and recompute costs, RNG,
 influence, faction changes, war, banishment, encounter/scenario outcomes, and
 workshop conversion; clients retain only local inquiries and rendering.
 Repository tests add a persistent-call-tree ownership proof and exact campaign
-consequence coverage. The complete in-process xUnit run passes 1,751 tests with
+consequence coverage. The complete in-process xUnit run passes 1,758 tests with
 zero failures or errors (11 existing regeneration skips).
 
-Regenerated the private ten-module payload from the final client build: 850
+Regenerated the private ten-module payload from the final client build: 853
 files, root manifest SHA-256
-`c75c8d3f170633907e0d79463c53f3aaf56c4beebea322767d9595d2acc04b91`,
+`a3775f73c73e67b182b95f53a94f08771a5ef7aa8496e0b488ceaf46c3b7ef20`,
 ZIP SHA-256
-`bb9dd97d1f9fc4f39dda66776cb317a67226ca9850e7a4e9c4196506393eeb57`.
+`9b7f449fa890cddf373164536c2c45a408ccf95bf473d8198998a25b1e1eecf6`.
 Regenerated the Serilog-2 dedicated-server pair from the same revision: paired
 core SHA-256
-`8b5457947505cfc5891d79818ffdc41a3fc2a01ee8c1fff44b41428c78d5035d`
+`d6fd7239dfa6d2e5a2546fecc5bb2751ef363dfc9613f0e131d68e32f188446e`
 and receipt SHA-256
-`676a42faef9a6a58afb2966c89e17bdfd30558dd4a7349c6c5fac85a78a083ff`.
+`620f0ff2994bce4db88d6ea328321ef2a12d0a481eec626b656e76e74de74b95`.
 The live server/save were not changed; isolated-save boot and rendered
 multi-client validation remain promotion gates, not missing function wiring.
 

@@ -13,13 +13,13 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > 57, ImprovedGarrisons 723, Fourberie 1,865, Diplomacy 4,121, and
 > PlayerSettlement 625 records. All former Fourberie 47/272 gaps now terminate
 > in bounded, authenticated host operations. The full in-process xUnit run
-> passes 1,751 tests with zero failures/errors (11 existing regeneration skips).
-> The regenerated 850-file ZIP hashes to
-> `bb9dd97d1f9fc4f39dda66776cb317a67226ca9850e7a4e9c4196506393eeb57`;
+> passes 1,758 tests with zero failures/errors (11 existing regeneration skips).
+> The regenerated 853-file ZIP hashes to
+> `9b7f449fa890cddf373164536c2c45a408ccf95bf473d8198998a25b1e1eecf6`;
 > the paired server core hashes to
-> `8b5457947505cfc5891d79818ffdc41a3fc2a01ee8c1fff44b41428c78d5035d`
+> `d6fd7239dfa6d2e5a2546fecc5bb2751ef363dfc9613f0e131d68e32f188446e`
 > and its receipt to
-> `676a42faef9a6a58afb2966c89e17bdfd30558dd4a7349c6c5fac85a78a083ff`.
+> `620f0ff2994bce4db88d6ea328321ef2a12d0a481eec626b656e76e74de74b95`.
 > Isolated-save boot and rendered multi-client checks remain promotion gates.
 > No stable feed, production server, or save changed.
 >

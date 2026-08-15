@@ -42,7 +42,7 @@ reconciled as one release boundary. The result is zero unwired active modules:
 - Strict gameplay validation also passes UnblockableThrust 4/4,
   DismembermentPlus 17/17, Separatism 57/57, ImprovedGarrisons 723/723,
   Diplomacy 4,121/4,121, and PlayerSettlement 625/625.
-- The complete in-process xUnit run passes 1,751 tests with zero failures or
+- The complete in-process xUnit run passes 1,758 tests with zero failures or
   errors (11 pre-existing regeneration skips). The source and test projects
   build with zero errors.
 
@@ -68,19 +68,19 @@ offline. The machine-readable source of truth is
 - All ten exact Workshop manifests were acquired. DismembermentPlus moved to
   `v2.0.8.8`/`751945004455697202`; Fourberie moved to
   `v1.4.7.6`/`1598945672157391038`; the other eight pins remain unchanged.
-- The verified client suite contains 850 files. Its ZIP SHA-256 is
-  `bb9dd97d1f9fc4f39dda66776cb317a67226ca9850e7a4e9c4196506393eeb57`;
+- The verified client suite contains 853 files. Its ZIP SHA-256 is
+  `9b7f449fa890cddf373164536c2c45a408ccf95bf473d8198998a25b1e1eecf6`;
   its root manifest SHA-256 is
-  `c75c8d3f170633907e0d79463c53f3aaf56c4beebea322767d9595d2acc04b91`.
+  `a3775f73c73e67b182b95f53a94f08771a5ef7aa8496e0b488ceaf46c3b7ef20`.
 - The production solution builds against the `v1.4.8` assemblies with zero
   errors. Workshop packaging/receipt tests and dedicated-server overlay tests
   pass. The actual `v1.4.8` `TaleWorlds.Library.dll` loader boundary patches
   exactly once and the 16-file server UI-support closure has been repinned.
 - A Serilog-2-compatible headless Coop bin was built and release-paired offline.
   The paired `DedicatedServer.Core.dll` hashes to
-  `8b5457947505cfc5891d79818ffdc41a3fc2a01ee8c1fff44b41428c78d5035d`;
+  `d6fd7239dfa6d2e5a2546fecc5bb2751ef363dfc9613f0e131d68e32f188446e`;
   its pairing receipt hashes to
-  `676a42faef9a6a58afb2966c89e17bdfd30558dd4a7349c6c5fac85a78a083ff`.
+  `620f0ff2994bce4db88d6ea328321ef2a12d0a481eec626b656e76e74de74b95`.
   This proves binary pairing, not a successful server boot.
 - The regenerated authority ledger contains 41,050 methods and 13,729 required
   candidates: all 13,729 classified, zero unclassified, zero blocked. Every

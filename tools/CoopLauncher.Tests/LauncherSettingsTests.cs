@@ -16,6 +16,17 @@ public sealed class LauncherSettingsTests : IDisposable
     private string SettingsPath => Path.Combine(_dir, "launcher-settings.json");
 
     [Fact]
+    public void ReportClientId_IsStableAndAnonymous()
+    {
+        var settings = new LauncherSettings();
+        string first = settings.GetOrCreateReportClientId();
+        string second = settings.GetOrCreateReportClientId();
+
+        Assert.True(System.Guid.TryParse(first, out _));
+        Assert.Equal(first, second);
+    }
+
+    [Fact]
     public void RoundTrip_PersistsEveryPreference()
     {
         var settings = new LauncherSettings
@@ -27,6 +38,7 @@ public sealed class LauncherSettingsTests : IDisposable
             RememberPassword = true,
             CloseAfterLaunch = false,
             VerboseLogging = true,
+            ReportClientId = "5f98966d-15c1-4640-bf87-cdfa26fa3e74",
         };
         settings.Save(SettingsPath);
 
@@ -38,6 +50,7 @@ public sealed class LauncherSettingsTests : IDisposable
         Assert.True(loaded.RememberPassword);
         Assert.False(loaded.CloseAfterLaunch);
         Assert.True(loaded.VerboseLogging);
+        Assert.Equal(settings.ReportClientId, loaded.ReportClientId);
     }
 
     [Fact]

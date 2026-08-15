@@ -37,6 +37,16 @@ public sealed class LauncherSettings
 
     public bool VerboseLogging { get; set; }
 
+    /// <summary>Anonymous installation id used only for report rate limiting; contains no account identity.</summary>
+    public string ReportClientId { get; set; } = "";
+
+    public string GetOrCreateReportClientId()
+    {
+        if (!Guid.TryParse(ReportClientId, out _))
+            ReportClientId = Guid.NewGuid().ToString("D");
+        return ReportClientId;
+    }
+
     // Fixed entropy so a copied settings file from another user profile fails closed instead of
     // decrypting to garbage silently. Not a secret; DPAPI's per-user key is the protection.
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("CalradiaCoop.JoinPassword.v1");
@@ -96,7 +106,10 @@ public sealed class LauncherSettings
             ServerPassword = config.ServerPassword,
             ModuleToken = config.ModuleToken,
             GamePath = string.IsNullOrWhiteSpace(GamePathOverride) ? config.GamePath : GamePathOverride,
+            RequiredGameVersion = config.RequiredGameVersion,
             ProjectUrl = config.ProjectUrl,
+            PortalUrl = config.PortalUrl,
+            PortalManifestUrl = config.PortalManifestUrl,
             ChronicleUrl = config.ChronicleUrl,
             LauncherManifestUrl = RewriteChannel(config.LauncherManifestUrl, "launcher-app", "launcher-nightly", LauncherChannel),
             UpdateManifestUrl = RewriteChannel(config.UpdateManifestUrl, "client-stable", "client-nightly", ClientChannel),

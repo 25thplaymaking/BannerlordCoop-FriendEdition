@@ -18,6 +18,8 @@ public partial class MainWindow : Window
     private ArmoryUpdateCoordinator _updates;
     private readonly bool _continuePreparation;
     private readonly DispatcherTimer _statusTimer = new() { Interval = TimeSpan.FromSeconds(12) };
+    private PortalClient _portal;
+    private IReadOnlyList<GameLocator.GameInstallation> _installations = [];
 
     private string? _bannerlordExe;
     private string? _modulesDir;
@@ -44,6 +46,7 @@ public partial class MainWindow : Window
         _settings = LauncherSettings.Load(LauncherSettings.DefaultPath);
         _config = _settings.ApplyTo(_shipped);
         _updates = new ArmoryUpdateCoordinator(_config);
+        _portal = new PortalClient(_config.PortalUrl, _config.PortalManifestUrl);
         TitleText.Text = _config.GroupName;
         Title = _config.GroupName;
 
@@ -102,6 +105,11 @@ public partial class MainWindow : Window
             ShowPanel(ChroniclePanel);
             if (!_shootMode) await LoadChronicleAsync();
         };
+        RosterTab.Checked += async (_, _) =>
+        {
+            ShowPanel(RosterPanel);
+            await LoadRosterAsync();
+        };
         OptionsTab.Checked += (_, _) => ShowPanel(OptionsPanel);
         WireOptions();
 
@@ -113,6 +121,7 @@ public partial class MainWindow : Window
         if (MusterPanel is null) return; // Checked can fire during InitializeComponent.
         MusterPanel.Visibility = ReferenceEquals(active, MusterPanel) ? Visibility.Visible : Visibility.Collapsed;
         ChroniclePanel.Visibility = ReferenceEquals(active, ChroniclePanel) ? Visibility.Visible : Visibility.Collapsed;
+        RosterPanel.Visibility = ReferenceEquals(active, RosterPanel) ? Visibility.Visible : Visibility.Collapsed;
         OptionsPanel.Visibility = ReferenceEquals(active, OptionsPanel) ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -137,6 +146,9 @@ public partial class MainWindow : Window
         ChronicleTab.IsChecked = true;
         ShowPanel(ChroniclePanel);
         RenderToFile(Sibling("-chronicle"));
+        RosterTab.IsChecked = true;
+        ShowPanel(RosterPanel);
+        RenderToFile(Sibling("-roster"));
         OptionsTab.IsChecked = true;
         ShowPanel(OptionsPanel);
         RenderToFile(Sibling("-options"));
@@ -170,7 +182,7 @@ public partial class MainWindow : Window
         SpawnEmbers();
         Log.Begin();
 
-        _bannerlordExe = GameLocator.FindBannerlordExe(_config.GamePath);
+        RefreshGameInstallations();
         Log.Write(_bannerlordExe is null
             ? $"Bannerlord.exe NOT found (configured gamePath='{_config.GamePath}')"
             : $"Found Bannerlord.exe: {_bannerlordExe}");
@@ -390,6 +402,30 @@ public partial class MainWindow : Window
             ? "TRY PREPARING AGAIN"
             : PrimaryButtonText(snapshot.PrimaryAction);
         JoinButton.IsEnabled = !_operationActive;
+        RenderGameVersionState(snapshot);
+    }
+
+    private string RequiredGameVersion =>
+        string.IsNullOrWhiteSpace(_snapshot?.Mods.ClientManifest?.GameVersion)
+            ? _config.RequiredGameVersion
+            : _snapshot!.Mods.ClientManifest!.GameVersion;
+
+    private void RenderGameVersionState(ArmorySnapshot? snapshot = null)
+    {
+        string required = RequiredGameVersion;
+        RequiredGameVersionText.Text = $"Host requires Bannerlord {required}";
+        GameLocator.GameInstallation? selected = GameVersionPicker.SelectedItem as GameLocator.GameInstallation;
+        bool match = selected is not null && GameLocator.VersionsMatch(selected.Version, required);
+        RequiredGameVersionText.Foreground = match ? Gold : Steel;
+        if (snapshot?.PrimaryAction == ArmoryPrimaryAction.Launch && !match)
+        {
+            ArmoryHeadline.Text = "THE GAME VERSION DOES NOT MATCH";
+            ArmoryDetail.Text = selected is null
+                ? $"Select a Bannerlord {required} installation in Options."
+                : $"Selected {selected.Version}; this host requires {required}. Select the matching installation in Options.";
+            JoinButton.Content = $"SELECT BANNERLORD {required}";
+            JoinButton.IsEnabled = false;
+        }
     }
 
     private void RenderComponent(TextBlock target, ComponentUpdateStatus status)
@@ -516,7 +552,8 @@ public partial class MainWindow : Window
             if (result.Success && result.ZipPath is not null)
             {
                 LogPackager.RevealInExplorer(result.ZipPath);
-                OptionsStatusText.Text = $"Packaged {result.FileCount} log(s) → {result.ZipPath}  —  send this zip to Bishop.";
+                OptionsStatusText.Text = $"Packaged {result.FileCount} full log(s) → {result.ZipPath}. " +
+                                         "Use the report form below for automatic redacted GitHub issues.";
             }
             else
             {
@@ -601,6 +638,7 @@ public partial class MainWindow : Window
 
         BrowseGameButton.Click += OnBrowseGameClicked;
         RedetectGameButton.Click += OnRedetectGameClicked;
+        GameVersionPicker.SelectionChanged += OnGameVersionSelected;
         LauncherChannelToggle.Click += (_, _) => OnChannelChanged();
         SuiteChannelToggle.Click += (_, _) => OnChannelChanged();
         ClientChannelToggle.Click += (_, _) => OnChannelChanged();
@@ -609,6 +647,8 @@ public partial class MainWindow : Window
         VerboseLoggingCheck.Click += (_, _) => SaveSimpleToggles();
         OpenLogsFolderButton.Click += (_, _) => OpenPathInExplorer(Path.GetDirectoryName(Log.Path)!);
         GithubButton.Click += (_, _) => OpenUrl(_config.ProjectUrl);
+        SubmitReportButton.Click += OnSubmitReportClicked;
+        RefreshGameInstallations();
     }
 
     private static bool IsNightly(string channel) =>
@@ -632,7 +672,7 @@ public partial class MainWindow : Window
 
         _settings.GamePathOverride = dialog.FolderName;
         _settings.Save(LauncherSettings.DefaultPath);
-        GamePathText.Text = dialog.FolderName;
+        RefreshGameInstallations();
         OptionsStatusText.Text = "Game path saved. Re-checking the muster ground…";
         _ = ReapplySettingsAsync();
     }
@@ -645,6 +685,47 @@ public partial class MainWindow : Window
             ? "Auto-detected from Steam"
             : _shipped.GamePath;
         OptionsStatusText.Text = "Auto-detecting from the Steam library…";
+        RefreshGameInstallations();
+        _ = ReapplySettingsAsync();
+    }
+
+    private void RefreshGameInstallations()
+    {
+        _installations = GameLocator.FindInstallations(_config.GamePath);
+        bool previousWiring = _optionsWiring;
+        _optionsWiring = true;
+        GameLocator.GameInstallation? selected = _installations.FirstOrDefault(item =>
+            !string.IsNullOrWhiteSpace(_settings.GamePathOverride) &&
+            string.Equals(item.RootPath, Path.GetFullPath(_settings.GamePathOverride), StringComparison.OrdinalIgnoreCase))
+            ?? _installations.FirstOrDefault(item => GameLocator.VersionsMatch(item.Version, _config.RequiredGameVersion))
+            ?? _installations.FirstOrDefault();
+        try
+        {
+            GameVersionPicker.ItemsSource = _installations;
+            GameVersionPicker.SelectedItem = selected;
+        }
+        finally
+        {
+            _optionsWiring = previousWiring;
+        }
+        _bannerlordExe = selected?.ExePath;
+        _modulesDir = selected is null ? null : GameLocator.FindModulesDir(selected.ExePath);
+        GamePathText.Text = selected?.RootPath ?? "No Bannerlord installation found";
+        RenderGameVersionState(_snapshot);
+    }
+
+    private void OnGameVersionSelected(object sender, SelectionChangedEventArgs e)
+    {
+        if (_optionsWiring) return;
+        if (GameVersionPicker.SelectedItem is not GameLocator.GameInstallation selected) return;
+        _settings.GamePathOverride = selected.RootPath;
+        _settings.Save(LauncherSettings.DefaultPath);
+        _config = _settings.ApplyTo(_shipped);
+        _bannerlordExe = selected.ExePath;
+        _modulesDir = GameLocator.FindModulesDir(selected.ExePath);
+        GamePathText.Text = selected.RootPath;
+        OptionsStatusText.Text = $"Selected Bannerlord {selected.Version}. Re-checking the armory…";
+        RenderGameVersionState(_snapshot);
         _ = ReapplySettingsAsync();
     }
 
@@ -692,6 +773,7 @@ public partial class MainWindow : Window
     private async Task ReapplySettingsAsync()
     {
         _config = _settings.ApplyTo(_shipped);
+        _portal = new PortalClient(_config.PortalUrl, _config.PortalManifestUrl);
         if (_operationActive)
         {
             OptionsStatusText.Text += "  (applies after the current operation)";
@@ -699,8 +781,7 @@ public partial class MainWindow : Window
         }
 
         _updates = new ArmoryUpdateCoordinator(_config);
-        _bannerlordExe = GameLocator.FindBannerlordExe(_config.GamePath);
-        _modulesDir = _bannerlordExe is null ? null : GameLocator.FindModulesDir(_bannerlordExe);
+        RefreshGameInstallations();
         if (_bannerlordExe is null || _modulesDir is null)
         {
             SetStatus(online: false, "Bannerlord not found — set the game path in OPTIONS");
@@ -758,6 +839,125 @@ public partial class MainWindow : Window
             Log.Write($"Chronicle load failed: {ex}");
             ChronicleEmptyText.Visibility = Visibility.Visible;
         }
+    }
+
+    // ─────────────────────────── Roster / reports ───────────────────────────
+
+    private async Task LoadRosterAsync()
+    {
+        if (!_portal.IsConfigured)
+        {
+            RosterSummaryText.Text = "The campaign portal is not configured in this launcher build.";
+            RosterGrid.ItemsSource = null;
+            return;
+        }
+        try
+        {
+            RosterSummaryText.Text = "Fetching the host's campaign ledger…";
+            CampaignStatsSnapshot? stats = await _portal.LoadStatsAsync();
+            if (stats is null)
+            {
+                RosterSummaryText.Text = "The campaign ledger is temporarily unavailable.";
+                RosterGrid.ItemsSource = null;
+                return;
+            }
+            var rows = stats.Players
+                .OrderByDescending(player => player.Renown)
+                .ThenByDescending(player => player.Level)
+                .ThenBy(player => player.Name, StringComparer.OrdinalIgnoreCase)
+                .Select((player, index) => new RankedCharacterStats(player, index + 1))
+                .ToArray();
+            RosterGrid.ItemsSource = rows;
+            string age = stats.UpdatedAt == default ? "just now" : stats.UpdatedAt.LocalDateTime.ToString("g");
+            RosterSummaryText.Text =
+                $"Campaign day {stats.CampaignDay:N0}  •  {stats.OnlinePlayers} online  •  " +
+                $"Bannerlord {stats.GameVersion}  •  updated {age}  •  ranked by renown";
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"Roster load failed: {ex}");
+            RosterSummaryText.Text = "The campaign ledger is temporarily unavailable.";
+            RosterGrid.ItemsSource = null;
+        }
+    }
+
+    private async void OnSubmitReportClicked(object sender, RoutedEventArgs e)
+    {
+        string title = ReportTitleText.Text.Trim();
+        string description = ReportDescriptionText.Text.Trim();
+        if (title.Length < 5 || description.Length < 10)
+        {
+            OptionsStatusText.Foreground = Steel;
+            OptionsStatusText.Text = "Add a short title and enough detail to reproduce or understand the request.";
+            return;
+        }
+
+        SubmitReportButton.IsEnabled = false;
+        object previous = SubmitReportButton.Content;
+        SubmitReportButton.Content = "CREATING ISSUE…";
+        try
+        {
+            string kind = (ReportKindPicker.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "bug";
+            string gameVersion = (GameVersionPicker.SelectedItem as GameLocator.GameInstallation)?.Version ?? "unknown";
+            string logs = AttachLogsCheck.IsChecked == true
+                ? await Task.Run(() => LogPackager.BuildReportExcerpt(_bannerlordExe))
+                : string.Empty;
+            string reportClientId = _settings.GetOrCreateReportClientId();
+            _settings.Save(LauncherSettings.DefaultPath);
+            var submission = new ReportSubmission(
+                reportClientId, kind, title, description,
+                Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown",
+                gameVersion, logs);
+            ReportResult result = await _portal.SubmitReportAsync(submission);
+            OptionsStatusText.Foreground = result.Success ? Gold : Steel;
+            OptionsStatusText.Text = result.Message;
+            if (result.Success)
+            {
+                ReportTitleText.Clear();
+                ReportDescriptionText.Clear();
+                if (!string.IsNullOrWhiteSpace(result.IssueUrl)) OpenUrl(result.IssueUrl);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"Report submission failed: {ex}");
+            OptionsStatusText.Foreground = Steel;
+            OptionsStatusText.Text = $"Could not create the issue — {ex.Message}";
+        }
+        finally
+        {
+            SubmitReportButton.Content = previous;
+            SubmitReportButton.IsEnabled = true;
+        }
+    }
+
+    private sealed class RankedCharacterStats
+    {
+        public RankedCharacterStats(CharacterStats source, int rank)
+        {
+            Rank = rank;
+            Name = source.Name;
+            Clan = source.Clan;
+            Level = source.Level;
+            Gold = source.Gold;
+            Renown = source.Renown;
+            Influence = source.Influence;
+            ClanTier = source.ClanTier;
+            PartySize = source.PartySize;
+            Fiefs = source.Fiefs;
+            Online = source.Online;
+        }
+        public int Rank { get; }
+        public string Name { get; }
+        public string Clan { get; }
+        public int Level { get; }
+        public int Gold { get; }
+        public int Renown { get; }
+        public int Influence { get; }
+        public int ClanTier { get; }
+        public int PartySize { get; }
+        public int Fiefs { get; }
+        public bool Online { get; }
     }
 
     // ─────────────────────────── Embers ───────────────────────────
@@ -827,6 +1027,14 @@ public partial class MainWindow : Window
     {
         if (_bannerlordExe is null || _snapshot?.PrimaryAction != ArmoryPrimaryAction.Launch)
             return;
+
+        if (GameVersionPicker.SelectedItem is not GameLocator.GameInstallation selected ||
+            !GameLocator.VersionsMatch(selected.Version, RequiredGameVersion))
+        {
+            OptionsStatusText.Text = $"Select a Bannerlord {RequiredGameVersion} installation before joining.";
+            OptionsTab.IsChecked = true;
+            return;
+        }
 
         _operationActive = true;
         try

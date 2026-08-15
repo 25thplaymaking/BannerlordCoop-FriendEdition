@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "calradia-coop-portal",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "vars": {
+    "GITHUB_REPOSITORY": "25thplaymaking/BannerlordCoop-FriendEdition"
+  },
+  "kv_namespaces": [
+    { "binding": "PORTAL_KV" }
+  ],
+  "ratelimits": [
+    {
+      "name": "REPORT_RATE_LIMITER",
+      "namespace_id": "261550148",
+      "simple": { "limit": 3, "period": 60 }
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}

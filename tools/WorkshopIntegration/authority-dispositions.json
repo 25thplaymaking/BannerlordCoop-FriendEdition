@@ -8702,6 +8702,20 @@
         "FourberieStealthAuthorityTests.EveryStealthEvent_HasOneBoundedAuthenticatedRequestShape",
         "FourberieStealthAuthorityTests.ExactStealthSurface_SeparatesLocalSimulationFromHostConsequences"
       ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": [
+        "0x06000013", "0x06000014", "0x06000278", "0x06000291", "0x06000292",
+        "0x0600029A", "0x060002B8", "0x060002B9", "0x060002BA", "0x060002BD"
+      ],
+      "disposition": "ClientPresentation",
+      "owner": "FourberieAuthorityPatches.ClientPresentationPrefix",
+      "capability": "BanditMissionAndMenuPresentation",
+      "tests": [
+        "FourberieBanditAuthorityTests.ExactBanditPresentationSurface_ExcludesEverySelectionConsequence"
+      ]
     }
   ]
 }

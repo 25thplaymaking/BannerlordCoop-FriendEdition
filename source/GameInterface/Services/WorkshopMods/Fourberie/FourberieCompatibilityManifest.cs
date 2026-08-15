@@ -853,6 +853,12 @@ internal static class FourberieCompatibilityManifest
             // is likewise excluded until its existing Coop alley-acquisition route has run.
             0x060005EB, 0x060005EC, 0x060005EE, 0x060005F0, 0x060005F2, 0x060005F4,
             0x060005F6, 0x060005F8, 0x060005FA, 0x06000601, 0x06000A6E);
+        // Bandit mission bookkeeping and menu/condition builders are local presentation. Their
+        // nested selection callbacks (truce, war-dog, follower, roster, and ship transfer) are
+        // intentionally excluded until their authenticated operation routes commit on the host.
+        AddTokens(FourberiePatchKind.ClientPresentation,
+            0x06000013, 0x06000014, 0x06000278, 0x06000291, 0x06000292,
+            0x0600029A, 0x060002B8, 0x060002B9, 0x060002BA, 0x060002BD);
         // Exact presentation/mission helpers whose apparent writes are confined to Gauntlet VM,
         // Mission Agent/navigation, encounter-position, score, and transient controller fields.
         AddTokens(FourberiePatchKind.ClientPresentation,

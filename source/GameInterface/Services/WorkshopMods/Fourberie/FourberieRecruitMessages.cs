@@ -71,6 +71,8 @@ internal enum FourberieOperation
     OwnFightClubStable = 60,
     RecruitFightClubStable = 61,
     RefreshFightClubMenu = 62,
+    EnsureSchemeRoomDefaults = 63,
+    ClearDominanceConversation = 64,
 }
 
 internal enum FourberieOperationStatus
@@ -419,6 +421,8 @@ internal static class FourberieOperationProtocol
             FourberieOperation.RefreshFightClubMenu =>
                 !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
                 request.IntValue == 0 && request.Troops.Length == 0,
+            FourberieOperation.EnsureSchemeRoomDefaults or FourberieOperation.ClearDominanceConversation =>
+                EmptyContext(request) && request.IntValue == 0,
             _ => false,
         };
     }
@@ -456,7 +460,9 @@ internal static class FourberieOperationProtocol
         FourberieOperation.SetCorruptionLevel or
         FourberieOperation.SetAutoInvestment or
         FourberieOperation.SetLadsDuty or
-        FourberieOperation.SetSlavesDuty;
+        FourberieOperation.SetSlavesDuty or
+        FourberieOperation.EnsureSchemeRoomDefaults or
+        FourberieOperation.ClearDominanceConversation;
 
     private static bool IsStableId(string value, bool allowEmpty)
     {

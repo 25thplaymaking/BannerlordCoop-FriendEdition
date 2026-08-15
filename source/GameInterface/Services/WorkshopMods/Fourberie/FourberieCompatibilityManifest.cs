@@ -78,6 +78,8 @@ internal enum FourberiePatchKind
     FightClubPatronPayment,
     AlleyAcquisition,
     AlleyClear,
+    SchemeRoomOpen,
+    DominanceCondition,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -737,6 +739,8 @@ internal static class FourberieCompatibilityManifest
             FourberiePatchKind.InsideMissionOutcome, "System.Boolean");
         AddTokens(FourberiePatchKind.AlleyAcquisition, 0x060005FD);
         AddTokens(FourberiePatchKind.AlleyClear, 0x060005FF);
+        AddTokens(FourberiePatchKind.SchemeRoomOpen, 0x060007B7, 0x060007B8, 0x060007B9);
+        AddTokens(FourberiePatchKind.DominanceCondition, 0x06000314);
         AddReturning("Fourberie.FourbFightClubController", "OnEndMissionRequest",
             "TaleWorlds.Library.InquiryData", FourberiePatchKind.FightClubOutcome, "System.Boolean&");
         Add("Fourberie.FourbFightClubBehavior", "PitFightFameLoss",

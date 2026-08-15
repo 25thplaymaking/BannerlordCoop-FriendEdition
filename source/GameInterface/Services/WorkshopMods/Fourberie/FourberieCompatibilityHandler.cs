@@ -284,6 +284,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                             AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.ClientSchemeFilterPostfix)),
                         FourberiePatchKind.FightClubAdmission =>
                             AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.FightClubAdmissionPostfix)),
+                        FourberiePatchKind.DominanceCondition =>
+                            AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.DominanceConditionPostfix)),
                         _ => null,
                     };
                     return (Original: pair.Value, Prefix: prefix, Postfix: postfix);
@@ -522,6 +524,12 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                 break;
             case FourberiePatchKind.AlleyClear:
                 method = nameof(FourberieAuthorityPatches.AlleyClearPrefix);
+                break;
+            case FourberiePatchKind.SchemeRoomOpen:
+                method = nameof(FourberieAuthorityPatches.SchemeRoomOpenPrefix);
+                break;
+            case FourberiePatchKind.DominanceCondition:
+                method = nameof(FourberieAuthorityPatches.DominanceConditionPrefix);
                 break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);

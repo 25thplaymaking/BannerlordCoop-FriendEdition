@@ -1,5 +1,6 @@
 using GameInterface.Services.WorkshopMods.Fourberie;
 using System.Linq;
+using System;
 using Xunit;
 
 namespace GameInterface.Tests.Services.WorkshopMods.Fourberie;
@@ -45,5 +46,29 @@ public sealed class FourberiePresentationAuthorityTests
             Assert.Single(FourberieCompatibilityManifest.Methods.Where(spec =>
                 spec.TypeName == item.Type && spec.MethodName == item.Method && spec.Kind == item.Kind));
         }
+    }
+
+    [Theory]
+    [InlineData(63)]
+    [InlineData(64)]
+    public void CanonicalPresentationCleanup_IsAnAuthenticatedAbsoluteTransaction(int operationValue)
+    {
+        var operation = (FourberieOperation)operationValue;
+        var request = new NetworkRequestFourberieOperation(
+            Guid.NewGuid().ToString("N"), 1, 0, operation,
+            string.Empty, string.Empty, string.Empty, 0,
+            Array.Empty<FourberieTroopSelection>());
+        Assert.True(FourberieOperationProtocol.IsRequestShapeValid(request));
+        Assert.True(FourberieOperationProtocol.IsAbsoluteSetting(operation));
+    }
+
+    [Fact]
+    public void ExactCanonicalPresentationCallbacks_HaveTypedRoutes()
+    {
+        Assert.All(new[] { 0x060007B7, 0x060007B8, 0x060007B9 }, token =>
+            Assert.Contains(FourberieCompatibilityManifest.Methods, spec =>
+                spec.MetadataToken == token && spec.Kind == FourberiePatchKind.SchemeRoomOpen));
+        Assert.Contains(FourberieCompatibilityManifest.Methods, spec =>
+            spec.MetadataToken == 0x06000314 && spec.Kind == FourberiePatchKind.DominanceCondition);
     }
 }

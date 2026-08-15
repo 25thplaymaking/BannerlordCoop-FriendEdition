@@ -7644,6 +7644,18 @@
     {
       "moduleId": "Fourberie",
       "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": ["0x06000314", "0x060007B7", "0x060007B8", "0x060007B9"],
+      "disposition": "ServerCommand",
+      "owner": "FourberieOperationExecutor.ApplyPresentationState",
+      "capability": "CanonicalPresentationState",
+      "tests": [
+        "FourberiePresentationAuthorityTests.CanonicalPresentationCleanup_IsAnAuthenticatedAbsoluteTransaction",
+        "FourberiePresentationAuthorityTests.ExactCanonicalPresentationCallbacks_HaveTypedRoutes"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
       "metadataTokens": [
         "0x06000038",
         "0x0600004C",

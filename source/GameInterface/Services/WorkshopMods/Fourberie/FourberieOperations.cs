@@ -224,6 +224,10 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.SetSlavesDuty:
                     ApplyCrimeRoomSetting(request.Operation, request.IntValue);
                     break;
+                case FourberieOperation.EnsureSchemeRoomDefaults:
+                case FourberieOperation.ClearDominanceConversation:
+                    ApplyPresentationState(request.Operation);
+                    break;
                 case FourberieOperation.EnableContractOffers:
                 case FourberieOperation.DisableContractOffers:
                 case FourberieOperation.AbortContract:
@@ -351,6 +355,24 @@ internal sealed class FourberieOperationExecutor
     }
 
     public void Reset() => grudgeQuotes.Clear();
+
+    private void ApplyPresentationState(FourberieOperation operation)
+    {
+        IDictionary crime = GetDictionary("_crimeValue");
+        if (operation == FourberieOperation.EnsureSchemeRoomDefaults)
+        {
+            if (!crime.Contains(500)) crime[500] = 2;
+            return;
+        }
+
+        if (operation == FourberieOperation.ClearDominanceConversation)
+        {
+            crime.Remove(92);
+            return;
+        }
+
+        throw new InvalidOperationException("operation is not a presentation-state transaction");
+    }
 
     private void ApplyInsideMissionOutcome(
         Hero actor,

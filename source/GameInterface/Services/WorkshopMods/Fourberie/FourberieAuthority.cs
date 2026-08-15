@@ -1176,6 +1176,21 @@ internal static class FourberieAuthorityPatches
         return false;
     }
 
+    public static bool SchemeRoomOpenPrefix()
+    {
+        if (!ModInformation.IsClient) return false;
+        SubmitBusiness(FourberieOperation.EnsureSchemeRoomDefaults, 0);
+        return true;
+    }
+
+    public static bool DominanceConditionPrefix() => ModInformation.IsClient;
+
+    public static void DominanceConditionPostfix(bool __result)
+    {
+        if (ModInformation.IsClient && !__result)
+            SubmitBusiness(FourberieOperation.ClearDominanceConversation, 0);
+    }
+
     private static int ReadCrimeValue(int key)
     {
         Type behavior = AccessTools.TypeByName("Fourberie.FourberieBehavior");

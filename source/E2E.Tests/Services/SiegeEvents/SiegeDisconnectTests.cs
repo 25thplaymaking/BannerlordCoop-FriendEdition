@@ -591,6 +591,36 @@ public class SiegeDisconnectTests : MapEventTestBase
         client.Call(() => Assert.False(mission.EndMissionCalled));
     }
 
+    [Theory]
+    [InlineData(nameof(SiegeEventCampaignBehavior.game_menu_siege_strategies_lead_assault_on_condition))]
+    [InlineData(nameof(SiegeEventCampaignBehavior.game_menu_siege_strategies_order_assault_on_condition))]
+    public void SiegeAssaultCommands_MissingReplicatedLeader_DoNotLockSiegeMenu(string conditionName)
+    {
+        var client = Clients.First();
+        var (_, partyId) = CreatePlayerHeroParty("UnresolvedSiegeLeader");
+        var siege = SetupSiege(partyId);
+
+        client.Call(() =>
+        {
+            Assert.True(client.ObjectManager.TryGetObject<MobileParty>(partyId, out var party));
+            Assert.True(client.ObjectManager.TryGetObject<SiegeEvent>(siege.SiegeEventId, out var siegeEvent));
+
+            Campaign.Current.MainParty = party;
+            siegeEvent.BesiegerCamp._leaderParty = null;
+
+            var behavior = ObjectHelper.SkipConstructor<SiegeEventCampaignBehavior>();
+            var args = new MenuCallbackArgs((MenuContext)null, null);
+            var condition = AccessTools.Method(typeof(SiegeEventCampaignBehavior), conditionName);
+            Assert.NotNull(condition);
+
+            var shown = (bool)condition.Invoke(behavior, new object[] { args });
+
+            Assert.False(shown);
+            Assert.False(args.IsEnabled);
+            Assert.NotNull(args.Tooltip);
+        });
+    }
+
     private SiegeContext SetupSiege(params string[] attackerPartyIds)
     {
         var siegeEventId = TestEnvironment.CreateRegisteredObject<SiegeEvent>(SiegeCreationDisabledMethods);

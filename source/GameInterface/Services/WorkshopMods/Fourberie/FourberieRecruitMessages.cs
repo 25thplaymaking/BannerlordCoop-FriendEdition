@@ -1,6 +1,7 @@
 using Common.Messaging;
 using ProtoBuf;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
@@ -74,6 +75,8 @@ internal enum FourberieOperation
     EnsureSchemeRoomDefaults = 63,
     ClearDominanceConversation = 64,
     CommitStealthEvent = 65,
+    CommitBanditEvent = 66,
+    CommitLegacyCallback = 67,
 }
 
 internal enum FourberieStealthEvent
@@ -94,6 +97,30 @@ internal enum FourberieStealthEvent
     FailedVillage = 14,
     FinishMissionAlerted = 15,
     GreedyMilitiaImmediate = 16,
+}
+
+internal enum FourberieBanditEvent
+{
+    RepairShips = 1,
+    HealWounds = 2,
+    ReleaseAllFollowers = 3,
+    RefuseBanditJoin = 4,
+    FollowParties = 5,
+    StopFollower = 6,
+    AcceptTruce = 7,
+    BreakTruce = 8,
+    BetrayBandits = 9,
+    SelectWarDogKingdom = 10,
+    AcquireCoveShip = 11,
+    TransferFollowerShip = 12,
+    DonatePrisoners = 13,
+    CommitBanditRoster = 14,
+    PrepareRecruitment = 15,
+    OpenBanditStash = 16,
+    RefreshBlackMarket = 17,
+    StartHideoutWait = 18,
+    StopHideoutWait = 19,
+    DonateLoot = 20,
 }
 
 internal enum FourberieOperationStatus
@@ -142,6 +169,25 @@ internal sealed class FourberieItemSelection
 }
 
 [ProtoContract(SkipConstructor = true)]
+internal sealed class FourberieRosterSelection
+{
+    [ProtoMember(1)] public string TroopId { get; private set; }
+    [ProtoMember(2)] public int MemberDeltaToActor { get; private set; }
+    [ProtoMember(3)] public int PrisonerDeltaToActor { get; private set; }
+
+    private FourberieRosterSelection()
+    {
+    }
+
+    public FourberieRosterSelection(string troopId, int memberDeltaToActor, int prisonerDeltaToActor)
+    {
+        TroopId = troopId;
+        MemberDeltaToActor = memberDeltaToActor;
+        PrisonerDeltaToActor = prisonerDeltaToActor;
+    }
+}
+
+[ProtoContract(SkipConstructor = true)]
 internal sealed class NetworkRequestFourberieOperation : ICommand
 {
     [ProtoMember(1)] public string SessionId { get; private set; }
@@ -154,9 +200,13 @@ internal sealed class NetworkRequestFourberieOperation : ICommand
     [ProtoMember(8)] public int IntValue { get; private set; }
     [ProtoMember(9)] private FourberieTroopSelection[] troops;
     [ProtoMember(10)] private FourberieItemSelection[] items;
+    [ProtoMember(11)] private string[] objectIds;
+    [ProtoMember(12)] private FourberieRosterSelection[] roster;
 
     public FourberieTroopSelection[] Troops => troops ?? Array.Empty<FourberieTroopSelection>();
     public FourberieItemSelection[] Items => items ?? Array.Empty<FourberieItemSelection>();
+    public string[] ObjectIds => objectIds ?? Array.Empty<string>();
+    public FourberieRosterSelection[] Roster => roster ?? Array.Empty<FourberieRosterSelection>();
 
     private NetworkRequestFourberieOperation()
     {
@@ -201,7 +251,9 @@ internal sealed class NetworkRequestFourberieOperation : ICommand
         string secondaryTargetId,
         int intValue,
         FourberieTroopSelection[] troops,
-        FourberieItemSelection[] items)
+        FourberieItemSelection[] items,
+        string[] objectIds = null,
+        FourberieRosterSelection[] roster = null)
     {
         SessionId = sessionId;
         RequestId = requestId;
@@ -213,6 +265,8 @@ internal sealed class NetworkRequestFourberieOperation : ICommand
         IntValue = intValue;
         this.troops = troops ?? Array.Empty<FourberieTroopSelection>();
         this.items = items ?? Array.Empty<FourberieItemSelection>();
+        this.objectIds = objectIds ?? Array.Empty<string>();
+        this.roster = roster ?? Array.Empty<FourberieRosterSelection>();
     }
 }
 
@@ -279,6 +333,8 @@ internal static class FourberieOperationProtocol
 {
     internal const int MaxTroopSelections = 64;
     internal const int MaxItemSelections = 256;
+    internal const int MaxObjectSelections = 64;
+    internal const int MaxRosterSelections = 128;
     internal const int MaxStableIdLength = 256;
     internal const int MaxSelectedTroops = 2_000;
     internal const int MaxSelectedItems = 20_000;
@@ -294,9 +350,14 @@ internal static class FourberieOperationProtocol
             (request.Operation != FourberieOperation.SettleClanGrudge &&
              request.Operation != FourberieOperation.CompleteFightClubMatch &&
              request.Operation != FourberieOperation.StartFightClubMatch &&
+             request.Operation != FourberieOperation.CommitLegacyCallback &&
              request.IntValue > MaxSelectedTroops) ||
             request.Troops.Length > MaxTroopSelections || request.Items.Length > MaxItemSelections ||
-            (request.Operation != FourberieOperation.TransferSafehouseItems && request.Items.Length != 0))
+            request.ObjectIds.Length > MaxObjectSelections || request.Roster.Length > MaxRosterSelections ||
+            (request.Operation != FourberieOperation.TransferSafehouseItems &&
+             request.Operation != FourberieOperation.CommitBanditEvent && request.Items.Length != 0) ||
+            (request.Operation != FourberieOperation.CommitBanditEvent &&
+             (request.ObjectIds.Length != 0 || request.Roster.Length != 0)))
             return false;
 
         int total = 0;
@@ -330,6 +391,24 @@ internal static class FourberieOperationProtocol
             .Select(item => item.ItemId + "\0" + item.ItemModifierId)
             .Distinct(StringComparer.Ordinal)
             .Count() != request.Items.Length)
+            return false;
+
+        if (request.ObjectIds.Any(value => !IsStableId(value, allowEmpty: false)) ||
+            request.ObjectIds.Distinct(StringComparer.Ordinal).Count() != request.ObjectIds.Length)
+            return false;
+
+        long rosterMagnitude = 0;
+        foreach (FourberieRosterSelection selection in request.Roster)
+        {
+            if (selection == null || !IsStableId(selection.TroopId, allowEmpty: false) ||
+                selection.MemberDeltaToActor == 0 && selection.PrisonerDeltaToActor == 0)
+                return false;
+            rosterMagnitude += Math.Abs((long)selection.MemberDeltaToActor) +
+                               Math.Abs((long)selection.PrisonerDeltaToActor);
+            if (rosterMagnitude > MaxSelectedTroops) return false;
+        }
+        if (request.Roster.Select(value => value.TroopId).Distinct(StringComparer.Ordinal).Count() !=
+            request.Roster.Length)
             return false;
 
         int selected = request.Troops.Sum(troop => troop.Count);
@@ -451,6 +530,8 @@ internal static class FourberieOperationProtocol
                 (StealthEventRequiresTarget(request.IntValue)
                     ? !string.IsNullOrEmpty(request.TargetId)
                     : string.IsNullOrEmpty(request.TargetId)),
+            FourberieOperation.CommitBanditEvent => IsBanditEventShapeValid(request),
+            FourberieOperation.CommitLegacyCallback => IsLegacyCallbackShapeValid(request),
             _ => false,
         };
     }
@@ -478,6 +559,12 @@ internal static class FourberieOperationProtocol
                      .ThenBy(value => value.ItemModifierId, StringComparer.Ordinal))
             builder.Append('|').Append(item.ItemId).Append(':').Append(item.ItemModifierId).Append(':')
                 .Append(item.DeltaToSafehouse.ToString(CultureInfo.InvariantCulture));
+        foreach (string objectId in request.ObjectIds.OrderBy(value => value, StringComparer.Ordinal))
+            builder.Append("|object:").Append(objectId);
+        foreach (FourberieRosterSelection selection in request.Roster.OrderBy(value => value.TroopId, StringComparer.Ordinal))
+            builder.Append("|roster:").Append(selection.TroopId).Append(':')
+                .Append(selection.MemberDeltaToActor.ToString(CultureInfo.InvariantCulture)).Append(':')
+                .Append(selection.PrisonerDeltaToActor.ToString(CultureInfo.InvariantCulture));
         return builder.ToString();
     }
 
@@ -526,4 +613,94 @@ internal static class FourberieOperationProtocol
 
     internal static bool StealthEventRequiresTarget(int value) =>
         value == (int)FourberieStealthEvent.LordWounded;
+
+    internal static bool IsBanditEvent(int value) =>
+        Enum.IsDefined(typeof(FourberieBanditEvent), value);
+
+    private static bool IsBanditEventShapeValid(NetworkRequestFourberieOperation request)
+    {
+        if (!IsBanditEvent(request.IntValue))
+            return false;
+
+        var value = (FourberieBanditEvent)request.IntValue;
+        bool settlementRequired = value is FourberieBanditEvent.RepairShips or
+            FourberieBanditEvent.HealWounds or FourberieBanditEvent.ReleaseAllFollowers or
+            FourberieBanditEvent.AcceptTruce or FourberieBanditEvent.BreakTruce or
+            FourberieBanditEvent.BetrayBandits or FourberieBanditEvent.SelectWarDogKingdom or
+            FourberieBanditEvent.AcquireCoveShip or FourberieBanditEvent.DonatePrisoners or
+            FourberieBanditEvent.PrepareRecruitment or FourberieBanditEvent.OpenBanditStash or
+            FourberieBanditEvent.RefreshBlackMarket or FourberieBanditEvent.StartHideoutWait or
+            FourberieBanditEvent.StopHideoutWait or FourberieBanditEvent.DonateLoot;
+        if (settlementRequired != !string.IsNullOrEmpty(request.SettlementId)) return false;
+        return value switch
+        {
+            FourberieBanditEvent.RepairShips or FourberieBanditEvent.HealWounds or
+                FourberieBanditEvent.ReleaseAllFollowers or
+                FourberieBanditEvent.AcceptTruce or FourberieBanditEvent.BreakTruce or
+                FourberieBanditEvent.BetrayBandits =>
+                string.IsNullOrEmpty(request.TargetId) && request.ObjectIds.Length == 0 &&
+                string.IsNullOrEmpty(request.SecondaryTargetId) && request.Troops.Length == 0 &&
+                request.Roster.Length == 0 && request.Items.Length == 0,
+            FourberieBanditEvent.FollowParties =>
+                string.IsNullOrEmpty(request.TargetId) && request.ObjectIds.Length > 0 &&
+                string.IsNullOrEmpty(request.SecondaryTargetId) && request.Troops.Length == 0 &&
+                request.Roster.Length == 0 && request.Items.Length == 0,
+            FourberieBanditEvent.RefuseBanditJoin or FourberieBanditEvent.StopFollower or
+                FourberieBanditEvent.SelectWarDogKingdom or FourberieBanditEvent.AcquireCoveShip =>
+                !string.IsNullOrEmpty(request.TargetId) && request.ObjectIds.Length == 0 &&
+                string.IsNullOrEmpty(request.SecondaryTargetId) && request.Troops.Length == 0 &&
+                request.Roster.Length == 0 && request.Items.Length == 0,
+            FourberieBanditEvent.TransferFollowerShip =>
+                !string.IsNullOrEmpty(request.TargetId) && request.ObjectIds.Length == 0 &&
+                IsShipSelection(request.SecondaryTargetId) && request.Troops.Length == 0 &&
+                request.Roster.Length == 0 && request.Items.Length == 0,
+            FourberieBanditEvent.DonatePrisoners =>
+                string.IsNullOrEmpty(request.TargetId) && request.ObjectIds.Length == 0 &&
+                string.IsNullOrEmpty(request.SecondaryTargetId) && request.Troops.Length > 0 &&
+                request.Roster.Length == 0 && request.Items.Length == 0,
+            FourberieBanditEvent.CommitBanditRoster =>
+                !string.IsNullOrEmpty(request.TargetId) && request.ObjectIds.Length == 0 &&
+                (string.IsNullOrEmpty(request.SecondaryTargetId) || request.SecondaryTargetId == "recruit.all") &&
+                request.Troops.Length == 0 &&
+                request.Roster.Length > 0 && request.Items.Length == 0,
+            FourberieBanditEvent.PrepareRecruitment or FourberieBanditEvent.OpenBanditStash or
+                FourberieBanditEvent.RefreshBlackMarket or FourberieBanditEvent.StartHideoutWait or
+                FourberieBanditEvent.StopHideoutWait =>
+                string.IsNullOrEmpty(request.TargetId) && request.ObjectIds.Length == 0 &&
+                string.IsNullOrEmpty(request.SecondaryTargetId) && request.Troops.Length == 0 &&
+                request.Roster.Length == 0 && request.Items.Length == 0,
+            FourberieBanditEvent.DonateLoot =>
+                string.IsNullOrEmpty(request.TargetId) && request.ObjectIds.Length == 0 &&
+                string.IsNullOrEmpty(request.SecondaryTargetId) && request.Troops.Length == 0 &&
+                request.Roster.Length == 0 && request.Items.Length > 0,
+            _ => false,
+        };
+    }
+
+    private static bool IsShipSelection(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return false;
+        string[] parts = value.Split('.');
+        return parts.Length == 2 && (parts[0] == "actor" || parts[0] == "follower") &&
+               int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out int index) &&
+               index >= 0 && index < 64;
+    }
+
+    internal static bool IsLegacyCallbackToken(int value) => LegacyCallbackTokens.Contains(value);
+
+    private static bool IsLegacyCallbackShapeValid(NetworkRequestFourberieOperation request) =>
+        IsLegacyCallbackToken(request.IntValue) && !string.IsNullOrEmpty(request.SettlementId) &&
+        string.IsNullOrEmpty(request.TargetId) && string.IsNullOrEmpty(request.SecondaryTargetId) &&
+        request.Troops.Length == 0 && request.Items.Length == 0 && request.ObjectIds.Length == 0 &&
+        request.Roster.Length == 0;
+
+    private static readonly HashSet<int> LegacyCallbackTokens = new HashSet<int>
+    {
+        0x060007C1, 0x060007E8, 0x060007EA,
+        0x0600094E, 0x0600096D, 0x0600098E, 0x06000998,
+        0x060009A3, 0x060009B1, 0x060009B6, 0x060009B7,
+        0x060009C0, 0x060009D4, 0x060009E6,
+        0x060009F9, 0x060009FA, 0x060009FE, 0x06000A03,
+        0x06000A11, 0x06000A12, 0x06000A13, 0x06000A15,
+    };
 }

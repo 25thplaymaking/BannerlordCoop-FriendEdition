@@ -52,6 +52,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
     private readonly object snapshotSync = new object();
     private readonly FourberieRequestLedger<NetPeer> requestLedger = new FourberieRequestLedger<NetPeer>(256);
     private readonly Dictionary<long, FourberieOperation> pendingOperations = new Dictionary<long, FourberieOperation>();
+    private readonly Dictionary<long, FourberieBanditEvent> pendingBanditEvents = new Dictionary<long, FourberieBanditEvent>();
     private readonly Dictionary<long, Clan> pendingOperationClans = new Dictionary<long, Clan>();
     private NetworkFourberieContractProposal pendingContractProposal;
     private string shownContractProposalKey;
@@ -120,14 +121,31 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         string secondaryTargetId = string.Empty;
         if (operation.Settlement != null && !objectManager.TryGetId(operation.Settlement, out settlementId))
             return false;
-        if (operation.TargetHero != null && operation.TargetClan != null) return false;
+        int targetKinds = (operation.TargetHero != null ? 1 : 0) +
+                          (operation.TargetClan != null ? 1 : 0) +
+                          (operation.TargetObject != null ? 1 : 0);
+        if (targetKinds > 1) return false;
         if (operation.TargetHero != null && !objectManager.TryGetId(operation.TargetHero, out targetId))
             return false;
         if (operation.TargetClan != null && !objectManager.TryGetId(operation.TargetClan, out targetId))
             return false;
+        if (operation.TargetObject != null && !objectManager.TryGetId(operation.TargetObject, out targetId))
+            return false;
         if (operation.SecondarySettlement != null &&
             !objectManager.TryGetId(operation.SecondarySettlement, out secondaryTargetId))
             return false;
+        if (!string.IsNullOrEmpty(operation.SecondaryId))
+        {
+            if (!string.IsNullOrEmpty(secondaryTargetId)) return false;
+            secondaryTargetId = operation.SecondaryId;
+        }
+
+        var objectIds = new List<string>();
+        foreach (object target in operation.TargetObjects)
+        {
+            if (target == null || !objectManager.TryGetId(target, out string objectId)) return false;
+            objectIds.Add(objectId);
+        }
 
         var troops = new List<FourberieTroopSelection>();
         foreach (FourberieLocalTroopSelection troop in operation.Troops)
@@ -150,6 +168,17 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             items.Add(new FourberieItemSelection(itemId, modifierId, item.DeltaToSafehouse));
         }
 
+        var roster = new List<FourberieRosterSelection>();
+        foreach (FourberieLocalRosterSelection selection in operation.Roster)
+        {
+            if (selection?.Troop == null || !objectManager.TryGetId(selection.Troop, out string troopId))
+                return false;
+            roster.Add(new FourberieRosterSelection(
+                troopId,
+                selection.MemberDeltaToActor,
+                selection.PrisonerDeltaToActor));
+        }
+
         long requestId = Interlocked.Increment(ref nextRequestId);
         var request = new NetworkRequestFourberieOperation(
             config.SessionId,
@@ -161,10 +190,15 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             secondaryTargetId,
             operation.IntValue,
             troops.ToArray(),
-            items.ToArray());
+            items.ToArray(),
+            objectIds.ToArray(),
+            roster.ToArray());
         if (!FourberieOperationProtocol.IsRequestShapeValid(request)) return false;
 
         pendingOperations[requestId] = operation.Operation;
+        if (operation.Operation == FourberieOperation.CommitBanditEvent &&
+            FourberieOperationProtocol.IsBanditEvent(operation.IntValue))
+            pendingBanditEvents[requestId] = (FourberieBanditEvent)operation.IntValue;
         if (operation.TargetClan != null) pendingOperationClans[requestId] = operation.TargetClan;
         network.SendAll(request);
         return true;
@@ -294,6 +328,10 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                             AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.StealthAgentRemovedPostfix)),
                         FourberiePatchKind.StealthAlarm =>
                             AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.StealthAlarmPostfix)),
+                        FourberiePatchKind.BanditRosterOpen =>
+                            AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.BanditRosterOpenPostfix)),
+                        FourberiePatchKind.ClientPresentation =>
+                            AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.ClientPresentationPostfix)),
                         _ => null,
                     };
                     return (Original: pair.Value, Prefix: prefix, Postfix: postfix);
@@ -575,6 +613,24 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.StealthPrisonSuccess:
                 method = nameof(FourberieAuthorityPatches.StealthPrisonSuccessPrefix);
                 break;
+            case FourberiePatchKind.BanditConsequence:
+                method = nameof(FourberieAuthorityPatches.BanditConsequencePrefix);
+                break;
+            case FourberiePatchKind.BanditDonationConsequence:
+                method = nameof(FourberieAuthorityPatches.BanditDonationConsequencePrefix);
+                break;
+            case FourberiePatchKind.BanditRosterOpen:
+                method = nameof(FourberieAuthorityPatches.BanditRosterOpenPrefix);
+                break;
+            case FourberiePatchKind.BanditRosterConsequence:
+                method = nameof(FourberieAuthorityPatches.BanditRosterConsequencePrefix);
+                break;
+            case FourberiePatchKind.BanditPreparation:
+                method = nameof(FourberieAuthorityPatches.BanditPreparationPrefix);
+                break;
+            case FourberiePatchKind.LegacyCallback:
+                method = nameof(FourberieAuthorityPatches.LegacyCallbackPrefix);
+                break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
                 break;
@@ -609,6 +665,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         FourberiePartyCommitSuppression.Reset();
         requestLedger.Reset();
         pendingOperations.Clear();
+        pendingBanditEvents.Clear();
         pendingOperationClans.Clear();
         pendingContractProposal = null;
         shownContractProposalKey = null;
@@ -731,6 +788,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             payload.What == null || !pendingOperations.TryGetValue(payload.What.RequestId, out FourberieOperation operation))
             return;
         pendingOperations.Remove(payload.What.RequestId);
+        pendingBanditEvents.TryGetValue(payload.What.RequestId, out FourberieBanditEvent banditEvent);
+        pendingBanditEvents.Remove(payload.What.RequestId);
         pendingOperationClans.TryGetValue(payload.What.RequestId, out Clan targetClan);
         pendingOperationClans.Remove(payload.What.RequestId);
 
@@ -785,6 +844,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             }
             if (operation == FourberieOperation.CompleteSafehouseReturn)
                 CompleteSafehouseReturnPresentation();
+            if (operation == FourberieOperation.CommitBanditEvent)
+                FourberieAuthorityPatches.CompleteBanditPresentation(assembly, banditEvent);
         }
         else
         {

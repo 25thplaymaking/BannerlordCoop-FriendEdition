@@ -14,6 +14,7 @@ using System.Reflection;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.CharacterDevelopment;
+using TaleWorlds.CampaignSystem.Naval;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Settlements;
@@ -142,8 +143,13 @@ internal sealed class FourberieOperationExecutor
         MobileParty previousCrimeBase = GetStaticField("_crimeBaseParty") as MobileParty;
         bool previousCrimeBaseWasActive = previousCrimeBase?.IsActive == true;
         int previousActorGold = actor.Gold;
+        int previousActorHitPoints = actor.HitPoints;
         Hero previousTransferTarget = null;
         int previousTransferTargetGold = 0;
+        MobileParty banditTargetParty = null;
+        Dictionary<CharacterObject, int> banditTargetCounts = null;
+        Dictionary<CharacterObject, int> banditTargetPrisonCounts = null;
+        ItemRosterElement[] banditStashItems = null;
 
         try
         {
@@ -233,6 +239,26 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.CommitStealthEvent:
                     ApplyStealthEvent(actor, actorParty, request);
                     break;
+                case FourberieOperation.CommitBanditEvent:
+                    actorCounts = CaptureAllCounts(actorParty.MemberRoster);
+                    actorPrisonCounts = CaptureAllCounts(actorParty.PrisonRoster);
+                    actorItems = CaptureAllItems(actorParty.ItemRoster);
+                    banditStashItems = CaptureAllItems(GetStaticField("_stash") as ItemRoster);
+                    if (!string.IsNullOrEmpty(request.TargetId) &&
+                        objectManager.TryGetObject(request.TargetId, out MobileParty resolvedBanditTarget))
+                    {
+                        banditTargetParty = resolvedBanditTarget;
+                        banditTargetCounts = CaptureAllCounts(banditTargetParty.MemberRoster);
+                        banditTargetPrisonCounts = CaptureAllCounts(banditTargetParty.PrisonRoster);
+                    }
+                    ApplyBanditEvent(actor, actorParty, request);
+                    break;
+                case FourberieOperation.CommitLegacyCallback:
+                    actorCounts = CaptureAllCounts(actorParty.MemberRoster);
+                    actorPrisonCounts = CaptureAllCounts(actorParty.PrisonRoster);
+                    actorItems = CaptureAllItems(actorParty.ItemRoster);
+                    ExecuteLegacyCallback(actor, actorParty, request);
+                    break;
                 case FourberieOperation.EnableContractOffers:
                 case FourberieOperation.DisableContractOffers:
                 case FourberieOperation.AbortContract:
@@ -315,6 +341,12 @@ internal sealed class FourberieOperationExecutor
             catch (Exception rollback) { rollbackErrors.Add("actor item roster: " + rollback.Message); }
             try { RestoreItems(previousCrimeBase?.ItemRoster, safehouseItems); }
             catch (Exception rollback) { rollbackErrors.Add("safehouse item roster: " + rollback.Message); }
+            try { RestoreItems(GetStaticField("_stash") as ItemRoster, banditStashItems); }
+            catch (Exception rollback) { rollbackErrors.Add("bandit stash roster: " + rollback.Message); }
+            try { RestoreCounts(banditTargetParty?.MemberRoster, banditTargetCounts); }
+            catch (Exception rollback) { rollbackErrors.Add("bandit member roster: " + rollback.Message); }
+            try { RestoreCounts(banditTargetParty?.PrisonRoster, banditTargetPrisonCounts); }
+            catch (Exception rollback) { rollbackErrors.Add("bandit prisoner roster: " + rollback.Message); }
             try
             {
                 if (previousAgents?.IsActive == true)
@@ -343,6 +375,8 @@ internal sealed class FourberieOperationExecutor
                 rollbackErrors.Add("canonical state: " + stateFailure);
             try { RestoreGold(actor, previousActorGold); }
             catch (Exception rollback) { rollbackErrors.Add("actor gold: " + rollback.Message); }
+            try { actor.HitPoints = previousActorHitPoints; }
+            catch (Exception rollback) { rollbackErrors.Add("actor hit points: " + rollback.Message); }
             if (previousTransferTarget != null)
             {
                 try { RestoreGold(previousTransferTarget, previousTransferTargetGold); }
@@ -589,6 +623,539 @@ internal sealed class FourberieOperationExecutor
 
     private void SetStealthAlert(Settlement settlement) =>
         GetDictionary("_InfiltrationAlertTiming")[settlement.StringId] = CampaignTime.Now;
+
+    private void ApplyBanditEvent(
+        Hero actor,
+        MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        var banditEvent = (FourberieBanditEvent)request.IntValue;
+        Settlement settlement = null;
+        if (!string.IsNullOrEmpty(request.SettlementId) &&
+            !TryResolveCurrentSettlement(actorParty, request.SettlementId, out settlement))
+            throw new InvalidOperationException("the bandit action is not in the controller's current settlement");
+
+        using (new AllowedThread())
+        using (new BarterPlayerContext(actor, actorParty))
+        {
+            switch (banditEvent)
+            {
+                case FourberieBanditEvent.RepairShips:
+                    RequireBanditSettlement(settlement);
+                    RepairActorShips(actor, actorParty);
+                    return;
+                case FourberieBanditEvent.HealWounds:
+                    RequireBanditSettlement(settlement);
+                    HealActor(actor, actorParty);
+                    return;
+                case FourberieBanditEvent.ReleaseAllFollowers:
+                    RequireBanditSettlement(settlement);
+                    ReleaseAllBanditFollowers(actorParty);
+                    return;
+                case FourberieBanditEvent.RefuseBanditJoin:
+                    ApplyRefuseBanditJoin(actor, actorParty, ResolveBanditParty(request.TargetId));
+                    return;
+                case FourberieBanditEvent.FollowParties:
+                    ApplyBanditFollowers(actorParty, request.ObjectIds);
+                    return;
+                case FourberieBanditEvent.StopFollower:
+                    ReleaseBanditFollower(actorParty, ResolveBanditParty(request.TargetId));
+                    return;
+                case FourberieBanditEvent.AcceptTruce:
+                    ApplyBanditTruce(actor, settlement, accept: true, relationPenalty: 0);
+                    return;
+                case FourberieBanditEvent.BreakTruce:
+                    ApplyBanditTruce(actor, settlement, accept: false, relationPenalty: 0);
+                    return;
+                case FourberieBanditEvent.BetrayBandits:
+                    ApplyBanditTruce(actor, settlement, accept: false, relationPenalty: -20);
+                    return;
+                case FourberieBanditEvent.SelectWarDogKingdom:
+                    ApplyWarDog(actor, actorParty, settlement, request.TargetId);
+                    return;
+                case FourberieBanditEvent.AcquireCoveShip:
+                    ApplyCoveShip(actorParty, settlement, request.TargetId);
+                    return;
+                case FourberieBanditEvent.TransferFollowerShip:
+                    TransferFollowerShip(actorParty, ResolveBanditParty(request.TargetId), request.SecondaryTargetId);
+                    return;
+                case FourberieBanditEvent.DonatePrisoners:
+                    DonatePrisoners(actor, actorParty, settlement, request.Troops);
+                    return;
+                case FourberieBanditEvent.CommitBanditRoster:
+                    CommitBanditRoster(
+                        actor,
+                        actorParty,
+                        ResolveBanditParty(request.TargetId),
+                        request.Roster,
+                        request.SecondaryTargetId == "recruit.all");
+                    return;
+                case FourberieBanditEvent.PrepareRecruitment:
+                    PrepareBanditRecruitment(settlement);
+                    return;
+                case FourberieBanditEvent.OpenBanditStash:
+                    OpenBanditStash(settlement);
+                    return;
+                case FourberieBanditEvent.RefreshBlackMarket:
+                    RefreshBlackMarket(settlement);
+                    return;
+                case FourberieBanditEvent.StartHideoutWait:
+                    SetHideoutWait(actorParty, settlement, waiting: true);
+                    return;
+                case FourberieBanditEvent.StopHideoutWait:
+                    SetHideoutWait(actorParty, settlement, waiting: false);
+                    return;
+                case FourberieBanditEvent.DonateLoot:
+                    TransferBanditLoot(actorParty, settlement, request.Items);
+                    return;
+                default:
+                    throw new InvalidOperationException("unknown bandit event");
+            }
+        }
+    }
+
+    private void ExecuteLegacyCallback(
+        Hero actor,
+        MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        if (!FourberieOperationProtocol.IsLegacyCallbackToken(request.IntValue) ||
+            !TryResolveCurrentSettlement(actorParty, request.SettlementId, out _))
+            throw new InvalidOperationException("the legacy Fourberie callback is not valid in the controller's current settlement");
+        MethodBase method = assembly.ManifestModule.ResolveMethod(request.IntValue);
+        if (method == null || method.DeclaringType == null || !method.DeclaringType.Name.Contains("<>c") ||
+            method.DeclaringType.Name.Contains("DisplayClass"))
+            throw new InvalidOperationException("the legacy Fourberie callback owner is not an approved stateless closure");
+        ParameterInfo[] parameters = method.GetParameters();
+        if (parameters.Length > 1 || parameters.Length == 1 && parameters[0].ParameterType.FullName !=
+            "TaleWorlds.CampaignSystem.GameMenus.MenuCallbackArgs")
+            throw new InvalidOperationException("the legacy Fourberie callback signature changed");
+
+        object instance = method.IsStatic ? null :
+            method.DeclaringType.GetField("<>9", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(null) ??
+            Activator.CreateInstance(method.DeclaringType, nonPublic: true);
+        using (new AllowedThread())
+        using (new BarterPlayerContext(actor, actorParty))
+        using (new FourberieLegacyExecutionContext())
+            method.Invoke(instance, parameters.Length == 0 ? Array.Empty<object>() : new object[] { null });
+    }
+
+    private static void RequireBanditSettlement(Settlement settlement)
+    {
+        if (settlement == null || !settlement.IsHideout || settlement.Culture == null ||
+            settlement.MapFaction == null || !settlement.MapFaction.IsBanditFaction)
+            throw new InvalidOperationException("the action requires the controller's current bandit hideout");
+    }
+
+    private void PrepareBanditRecruitment(Settlement settlement)
+    {
+        RequireBanditSettlement(settlement);
+        IDictionary values = GetDictionary("_stringIntDico");
+        if (values.Contains(settlement.StringId)) return;
+        Settlement crimeBase = GetStaticField("_crimeBase") as Settlement;
+        int bonus = crimeBase == settlement ? ReadInt(GetDictionary("_crimeValue"), 560) * 20 : 0;
+        values[settlement.StringId] = 30 + bonus;
+    }
+
+    private void OpenBanditStash(Settlement settlement)
+    {
+        RequireBanditSettlement(settlement);
+        if (GetStaticField("_stash") is not ItemRoster) SetStaticField("_stash", new ItemRoster());
+        GetDictionary("_crimeValue")[554] = 0;
+    }
+
+    private void RefreshBlackMarket(Settlement settlement)
+    {
+        RequireBanditSettlement(settlement);
+        MobileParty trader = settlement.Parties.FirstOrDefault(value => value.IsPartyTradeActive);
+        if (trader == null) throw new InvalidOperationException("the bandit black market is unavailable");
+
+        IDictionary timings = GetDictionary("_townScamTiming");
+        if (timings.Contains(settlement.StringId) && timings[settlement.StringId] is CampaignTime previous &&
+            previous.ElapsedHoursUntilNow <= 24f)
+            return;
+
+        Town nearest = SettlementHelper.FindNearestTownToSettlement(settlement, MobileParty.NavigationType.Default, null);
+        ItemRosterElement[] eligible = nearest?.Settlement?.ItemRoster == null
+            ? Array.Empty<ItemRosterElement>()
+            : Enumerable.Range(0, nearest.Settlement.ItemRoster.Count)
+                .Select(nearest.Settlement.ItemRoster.GetElementCopyAtIndex)
+                .Where(value => value.Amount > 0 && value.EquipmentElement.ItemValue > 100)
+                .ToArray();
+        if (eligible.Length == 0) throw new InvalidOperationException("no eligible black-market stock is available");
+
+        int strength = BanditStrength(settlement.Culture.StringId);
+        int stockCount = 6 + Math.Min(15, strength / 500);
+        int maximumValue = Math.Max(10000, strength * 10);
+        ItemRosterElement[] affordable = eligible.Where(value => value.EquipmentElement.ItemValue < maximumValue).ToArray();
+        if (affordable.Length == 0) throw new InvalidOperationException("no affordable black-market stock is available");
+        trader.ItemRoster.Clear();
+        for (int index = 0; index < stockCount; index++)
+        {
+            ItemRosterElement selected = affordable[MBRandom.RandomInt(affordable.Length)];
+            trader.ItemRoster.AddToCounts(selected.EquipmentElement, 1);
+        }
+
+        int crimeBaseMaximum = Math.Max(2500 + strength / 10, strength * 75 / 100);
+        int ordinaryMaximum = Math.Max(1500 + strength / 10, strength / 2);
+        trader.PartyTradeGold = GetStaticField("_crimeBase") as Settlement == settlement
+            ? crimeBaseMaximum
+            : Math.Min(trader.PartyTradeGold, ordinaryMaximum);
+        timings[settlement.StringId] = CampaignTime.Now;
+        GetDictionary("_crimeValue").Remove(95);
+    }
+
+    private void SetHideoutWait(MobileParty actorParty, Settlement settlement, bool waiting)
+    {
+        RequireBanditSettlement(settlement);
+        IDictionary crime = GetDictionary("_crimeValue");
+        if (!waiting)
+        {
+            crime.Remove(9);
+            actorParty.IsVisible = true;
+            return;
+        }
+
+        foreach (MobileParty follower in BanditFollowers().Cast<object>().OfType<MobileParty>())
+        {
+            follower.IgnoreByOtherPartiesTill(CampaignTime.DaysFromNow(3f));
+            follower.Ai.SetDoNotMakeNewDecisions(true);
+            follower.SetMoveModeHold();
+            follower.SetMovePatrolAroundSettlement(settlement, follower.NavigationCapability, false);
+        }
+        crime[9] = 1;
+        actorParty.IsVisible = false;
+        actorParty.IgnoreByOtherPartiesTill(CampaignTime.HoursFromNow(3f));
+    }
+
+    private void TransferBanditLoot(
+        MobileParty actorParty,
+        Settlement settlement,
+        IEnumerable<FourberieItemSelection> selections)
+    {
+        RequireBanditSettlement(settlement);
+        ItemRoster stash = GetStaticField("_stash") as ItemRoster ??
+            throw new InvalidOperationException("the bandit donation stash is unavailable");
+        foreach ((EquipmentElement equipment, int delta) in ResolveItems(selections))
+        {
+            if (delta <= 0 || ExactItemCount(actorParty.ItemRoster, equipment) < delta)
+                throw new InvalidOperationException("the donated loot changed before the transfer");
+            actorParty.ItemRoster.AddToCounts(equipment, -delta);
+            stash.AddToCounts(equipment, delta);
+        }
+        GetDictionary("_crimeValue")[554] = 0;
+    }
+
+    private static void RepairActorShips(Hero actor, MobileParty actorParty)
+    {
+        int price = 0;
+        foreach (Ship ship in actorParty.Ships)
+        {
+            if (ship == null || ship.HitPoints >= ship.MaxHitPoints) continue;
+            price = checked(price + (int)Campaign.Current.Models.ShipCostModel.GetShipRepairCost(ship, actorParty.Party));
+        }
+        if (price <= 0) throw new InvalidOperationException("the controller has no damaged ships");
+        if (actor.Gold < price) throw new InvalidOperationException("the controller cannot afford the ship repairs");
+
+        foreach (Ship ship in actorParty.Ships)
+        {
+            if (ship == null || ship.HitPoints >= ship.MaxHitPoints) continue;
+            float repaired = ship.MaxHitPoints - ship.HitPoints;
+            SkillLevelingManager.OnShipRepaired(ship, repaired);
+            ship.HitPoints = ship.MaxHitPoints;
+        }
+        GiveGoldAction.ApplyBetweenCharacters(actor, null, price, false);
+    }
+
+    private void HealActor(Hero actor, MobileParty actorParty)
+    {
+        if (actor.IsHealthFull()) throw new InvalidOperationException("the controller is already at full health");
+        Town nearest = SettlementHelper.FindNearestTownToMobileParty(actorParty, MobileParty.NavigationType.Default, null);
+        if (nearest == null) throw new InvalidOperationException("no town is available to price the treatment");
+        int price = 1000 + (int)nearest.Prosperity / 100;
+        Settlement crimeBase = GetStaticField("_crimeBase") as Settlement;
+        IDictionary crime = GetDictionary("_crimeValue");
+        if (crimeBase?.IsTown == true && crime.Contains(3) &&
+            Convert.ToBoolean(RequiredMethod(BehaviorTypeName, "PaymasterCond", 0).Invoke(null, null)))
+            price /= 2;
+        else if (crimeBase?.IsHideout == true && ReadInt(crime, 560) > 2)
+            price /= 2;
+        if (actor.Gold < price) throw new InvalidOperationException("the controller cannot afford treatment");
+
+        int healed = Math.Min((int)actorParty.Party.HealingRateForMemberHeroes,
+            actor.CharacterObject.MaxHitPoints() - actor.HitPoints);
+        if (healed <= 0) throw new InvalidOperationException("the controller cannot recover health right now");
+        GiveGoldAction.ApplyBetweenCharacters(actor, null, price, false);
+        actor.HitPoints += healed;
+        SkillLevelingManager.OnHeroHealedWhileWaiting(actor, healed);
+    }
+
+    private IList BanditFollowers() => GetStaticField("_banditsFollowers") as IList ??
+        throw new InvalidOperationException("Fourberie bandit follower state is unavailable");
+
+    private MobileParty ResolveBanditParty(string partyId)
+    {
+        if (string.IsNullOrEmpty(partyId) || !objectManager.TryGetObject(partyId, out MobileParty party) ||
+            party == null || !party.IsActive || !party.IsBandit || party.MapFaction?.Culture == null)
+            throw new InvalidOperationException("the selected bandit party is unavailable");
+        return party;
+    }
+
+    private void ReleaseAllBanditFollowers(MobileParty actorParty)
+    {
+        IList followers = BanditFollowers();
+        foreach (MobileParty follower in followers.Cast<object>().OfType<MobileParty>().ToArray())
+            ReleaseBanditFollower(actorParty, follower);
+        followers.Clear();
+    }
+
+    private void ApplyBanditFollowers(MobileParty actorParty, IEnumerable<string> partyIds)
+    {
+        IList followers = BanditFollowers();
+        foreach (string partyId in partyIds)
+        {
+            MobileParty party = ResolveBanditParty(partyId);
+            if (followers.Contains(party)) continue;
+            CampaignVec2 position = party.Position;
+            if (position.Distance(actorParty.Position) > 25f || party.MapEvent != null ||
+                party.CurrentSettlement != null || party.IsBanditBossParty || party.LeaderHero != null)
+                throw new InvalidOperationException("the selected bandit party is not eligible to follow the controller");
+            int strengthCost = checked(party.MemberRoster.TotalManCount * 10);
+            if (BanditStrength(party.MapFaction.Culture.StringId) < strengthCost)
+                throw new InvalidOperationException("the selected bandit faction is too weak to provide this follower");
+            followers.Add(party);
+            party.IgnoreByOtherPartiesTill(CampaignTime.DaysFromNow(3f));
+            party.Ai.SetDoNotMakeNewDecisions(true);
+            if (actorParty.CurrentSettlement != null) party.SetMoveModeHold();
+            else
+            {
+                if (!party.HasLandNavigationCapability) party.SetLandNavigationAccess(true);
+                party.SetMoveEscortParty(actorParty, actorParty.NavigationCapability, false);
+            }
+            ApplyBanditDiplomacy(party.MapFaction.Culture.StringId, -strengthCost, false, 0, false, party.MapFaction);
+            actorParty.RecentEventsMorale += party.MemberRoster.TotalManCount / 5f;
+        }
+    }
+
+    private void ReleaseBanditFollower(MobileParty actorParty, MobileParty party)
+    {
+        IList followers = BanditFollowers();
+        if (!followers.Contains(party)) throw new InvalidOperationException("the selected party is not following the controller");
+        followers.Remove(party);
+        party.IgnoreByOtherPartiesTill(CampaignTime.HoursFromNow(1f));
+        party.Ai.SetDoNotMakeNewDecisions(false);
+        party.RecalculateShortTermBehavior();
+        ApplyBanditDiplomacy(
+            party.MapFaction.Culture.StringId,
+            checked(party.MemberRoster.TotalManCount * 5),
+            false,
+            0,
+            false,
+            party.MapFaction);
+    }
+
+    private void ApplyRefuseBanditJoin(Hero actor, MobileParty actorParty, MobileParty party)
+    {
+        if (party.ActualClan?.Culture == null)
+            throw new InvalidOperationException("the encountered bandit faction is unavailable");
+        CampaignVec2 position = party.Position;
+        if (position.Distance(actorParty.Position) > 5f)
+            throw new InvalidOperationException("the bandit party is no longer in encounter range");
+        Settlement nearest = SettlementHelper.FindNearestSettlementToMobileParty(actorParty, MobileParty.NavigationType.Default,
+            value => !value.IsHideout && value.OwnerClan != null && value.OwnerClan != actor.Clan &&
+                     !value.OwnerClan.IsRebelClan && value.OwnerClan.MapFaction?.IsKingdomFaction == true);
+        if (nearest?.OwnerClan?.MapFaction != null)
+            ChangeCrimeRatingAction.Apply(nearest.OwnerClan.MapFaction, 100f, true);
+        ApplyBanditDiplomacy(party.ActualClan.Culture.StringId, 100, true, 10, true, party.MapFaction);
+    }
+
+    private void ApplyBanditTruce(Hero actor, Settlement settlement, bool accept, int relationPenalty)
+    {
+        RequireBanditSettlement(settlement);
+        string cultureId = settlement.Culture.StringId;
+        IDictionary values = GetDictionary("_stringIntDico");
+        string key = "FoTruce" + cultureId;
+        if (accept)
+        {
+            if (!actor.IsKingdomLeader) throw new InvalidOperationException("only a kingdom leader may negotiate this truce");
+            InvokeBanditStance(cultureId, true, true);
+            values[key] = 0;
+            return;
+        }
+        if (relationPenalty != 0) ApplyBanditDiplomacy(cultureId, 0, false, relationPenalty, true, settlement.MapFaction);
+        values.Remove(key);
+        InvokeBanditStance(cultureId, false, relationPenalty == 0);
+    }
+
+    private void ApplyWarDog(Hero actor, MobileParty actorParty, Settlement settlement, string kingdomId)
+    {
+        RequireBanditSettlement(settlement);
+        if (actor.MapFaction?.IsKingdomFaction == true)
+            throw new InvalidOperationException("war-dog service is available only while independent");
+        if (!objectManager.TryGetObject(kingdomId, out Kingdom kingdom) || kingdom == null || kingdom.IsEliminated ||
+            kingdom == actorParty.MapFaction)
+            throw new InvalidOperationException("the selected war-dog kingdom is unavailable");
+        IDictionary values = GetDictionary("_stringIntDico");
+        RemoveWarDog(values, GetDictionary("_crimeValue"), GetDictionary("_campaignTimeDictio"));
+        int award = Campaign.Current.Models.MinorFactionsModel.GetMercenaryAwardFactorToJoinKingdom(actor.Clan, kingdom, false);
+        values["FWarDog" + kingdom.StringId] = award;
+        foreach (IFaction enemy in kingdom.FactionsAtWarWith.Where(value => value?.IsKingdomFaction == true))
+            values["UnleaOn" + enemy.StringId] = 0;
+        GetDictionary("_crimeValue")[100] = 0;
+        GetDictionary("_campaignTimeDictio")[100] = CampaignTime.Now;
+    }
+
+    private static void RemoveWarDog(IDictionary values, IDictionary crime, IDictionary times)
+    {
+        foreach (object key in values.Keys.Cast<object>().Where(value => value?.ToString()?.Contains("FWarDog") == true ||
+                     value?.ToString()?.Contains("UnleaOn") == true).ToArray())
+            values.Remove(key);
+        crime.Remove(100);
+        times.Remove(100);
+    }
+
+    private void ApplyCoveShip(MobileParty actorParty, Settlement settlement, string hullId)
+    {
+        RequireBanditSettlement(settlement);
+        if (!objectManager.TryGetObject(hullId, out ShipHull hull) || hull == null || (int)hull.Type == 2)
+            throw new InvalidOperationException("the selected cove ship is unavailable");
+        IDictionary values = GetDictionary("_stringIntDico");
+        string stockKey = settlement.StringId + "CovShip";
+        int stock = values.Contains(stockKey) ? Convert.ToInt32(values[stockKey]) : 3;
+        int strengthCost = (int)((float)hull.Value / 13f);
+        if (stock <= 0 || BanditStrength(settlement.Culture.StringId) <= strengthCost)
+            throw new InvalidOperationException("the cove cannot provide this ship");
+        ApplyBanditDiplomacy(settlement.Culture.StringId, -strengthCost, false, 0, false, settlement.MapFaction);
+        ChangeShipOwnerAction.ApplyByTransferring(actorParty.Party, new Ship(hull));
+        values[stockKey] = stock - 1;
+    }
+
+    private static void TransferFollowerShip(MobileParty actorParty, MobileParty follower, string selection)
+    {
+        string[] parts = selection.Split('.');
+        bool fromActor = parts[0] == "actor";
+        int index = int.Parse(parts[1], CultureInfo.InvariantCulture);
+        MobileParty source = fromActor ? actorParty : follower;
+        MobileParty destination = fromActor ? follower : actorParty;
+        if (index < 0 || index >= source.Ships.Count) throw new InvalidOperationException("the selected ship changed");
+        Ship ship = source.Ships[index];
+        if (fromActor && actorParty.Ships.Count <= 1 || !fromActor && follower.IsCurrentlyAtSea && follower.Ships.Count <= 1)
+            throw new InvalidOperationException("the source party must retain a navigable ship");
+        if (fromActor && (int)ship.ShipHull.Type == 2)
+            throw new InvalidOperationException("bandit followers cannot use heavy ships");
+        ship.Owner = destination.Party;
+    }
+
+    private void DonatePrisoners(
+        Hero actor,
+        MobileParty actorParty,
+        Settlement settlement,
+        IEnumerable<FourberieTroopSelection> selections)
+    {
+        RequireBanditSettlement(settlement);
+        var resolved = ResolveTroops(selections).ToArray();
+        if (resolved.Sum(value => value.Count) < 5 || resolved.Any(value => value.Troop.IsHero))
+            throw new InvalidOperationException("bandit donations require at least five non-hero prisoners");
+        int strength = 0;
+        foreach ((CharacterObject troop, int count) in resolved)
+        {
+            if (actorParty.PrisonRoster.GetTroopCount(troop) < count)
+                throw new InvalidOperationException("the donated prisoner roster changed");
+            strength = checked(strength + count * Math.Min(60, Math.Max(1, troop.Tier) * 4));
+        }
+        foreach ((CharacterObject troop, int count) in resolved)
+            actorParty.PrisonRoster.AddToCounts(troop, -count, false, 0, 0, true, -1);
+        actor.AddSkillXp(DefaultSkills.Roguery, 100f);
+        ApplyBanditDiplomacy(settlement.Culture.StringId, strength, true, 0, true, settlement.MapFaction);
+        Settlement nearest = SettlementHelper.FindNearestSettlementToSettlement(settlement, MobileParty.NavigationType.Default,
+            value => !value.IsHideout);
+        if (nearest?.OwnerClan?.MapFaction != null && !nearest.OwnerClan.IsRebelClan &&
+            nearest.OwnerClan.MapFaction.Leader != actor)
+            ChangeCrimeRatingAction.Apply(nearest.MapFaction, Math.Min(strength / 20f, 100f), true);
+    }
+
+    private void CommitBanditRoster(
+        Hero actor,
+        MobileParty actorParty,
+        MobileParty banditParty,
+        IEnumerable<FourberieRosterSelection> selections,
+        bool recruitWholeParty)
+    {
+        CampaignVec2 position = banditParty.Position;
+        if (position.Distance(actorParty.Position) > 5f)
+            throw new InvalidOperationException("the bandit roster party is no longer in encounter range");
+        var resolved = selections.Select(value =>
+        {
+            if (!objectManager.TryGetObject(value.TroopId, out CharacterObject troop) || troop == null)
+                throw new InvalidOperationException("a bandit roster troop is unavailable");
+            return (Troop: troop, value.MemberDeltaToActor, value.PrisonerDeltaToActor);
+        }).ToArray();
+        int recruitmentStrengthCost = recruitWholeParty
+            ? checked(banditParty.MemberRoster.TotalManCount * 10)
+            : 0;
+        if (recruitWholeParty)
+        {
+            if (BanditStrength(banditParty.MapFaction.Culture.StringId) < recruitmentStrengthCost)
+                throw new InvalidOperationException("the bandit faction is too weak for this recruitment");
+        }
+        foreach (var value in resolved)
+        {
+            if (value.MemberDeltaToActor > 0 && banditParty.MemberRoster.GetTroopCount(value.Troop) < value.MemberDeltaToActor ||
+                value.MemberDeltaToActor < 0 && actorParty.MemberRoster.GetTroopCount(value.Troop) < -value.MemberDeltaToActor ||
+                value.PrisonerDeltaToActor > 0 && banditParty.PrisonRoster.GetTroopCount(value.Troop) < value.PrisonerDeltaToActor ||
+                value.PrisonerDeltaToActor < 0 && actorParty.PrisonRoster.GetTroopCount(value.Troop) < -value.PrisonerDeltaToActor)
+                throw new InvalidOperationException("the bandit roster changed before the transfer");
+        }
+        foreach (var value in resolved)
+        {
+            TransferRosterCount(banditParty.MemberRoster, actorParty.MemberRoster, value.Troop, value.MemberDeltaToActor);
+            TransferRosterCount(banditParty.PrisonRoster, actorParty.PrisonRoster, value.Troop, value.PrisonerDeltaToActor);
+        }
+        foreach (TroopRosterElement prisoner in banditParty.PrisonRoster.GetTroopRoster().Where(value => value.Character.IsHero).ToArray())
+            RequiredMethod("Fourberie.FourbBanditBehavior", "DoHeroPrisoAfterMath", 2)
+                .Invoke(null, new object[] { banditParty, prisoner.Character });
+        if (recruitWholeParty)
+        {
+            ApplyBanditDiplomacy(
+                banditParty.MapFaction.Culture.StringId,
+                -recruitmentStrengthCost,
+                false,
+                0,
+                false,
+                banditParty.MapFaction);
+        }
+        if (recruitWholeParty || banditParty.MemberRoster.TotalManCount == 0)
+            DestroyPartyAction.Apply(null, banditParty);
+    }
+
+    private static void TransferRosterCount(TroopRoster source, TroopRoster destination, CharacterObject troop, int delta)
+    {
+        if (delta == 0) return;
+        source.AddToCounts(troop, -delta, false, 0, 0, true, -1);
+        destination.AddToCounts(troop, delta, false, 0, 0, true, -1);
+    }
+
+    private int BanditStrength(string cultureId)
+    {
+        IDictionary supported = GetDictionary("_supportedBandits");
+        return supported.Contains(cultureId) ? Convert.ToInt32(supported[cultureId]) : 0;
+    }
+
+    private void ApplyBanditDiplomacy(
+        string cultureId,
+        int strength,
+        bool giveAway,
+        int relation,
+        bool affectRelation,
+        IFaction faction) =>
+        RequiredMethod("Fourberie.FourbBanditBehavior", "BanditsDiploLogic", 8).Invoke(
+            null,
+            new object[] { cultureId, cultureId, strength, giveAway, relation, affectRelation, false, faction });
+
+    private void InvokeBanditStance(string cultureId, bool neutral, bool bypass) =>
+        RequiredMethod("Fourberie.FourbBanditBehavior", "BanditMakeStanceWith", 3).Invoke(
+            null,
+            new object[] { cultureId, neutral, bypass });
 
     private void ApplyInsideMissionOutcome(
         Hero actor,

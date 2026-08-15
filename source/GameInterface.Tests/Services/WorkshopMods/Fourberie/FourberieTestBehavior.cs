@@ -48,6 +48,7 @@ namespace Fourberie
         public static MobileParty _agentsParty;
         public static List<MobileParty> _banditsFollowers = new();
         public static List<TroopRosterElement> _playerTroopsF = new();
+        public static ItemRoster _stash = new();
 
         public static void Reset()
         {
@@ -57,7 +58,7 @@ namespace Fourberie
                 {
                     field.SetValue(null, false);
                 }
-                else if (field.FieldType.IsGenericType)
+                else if (field.FieldType.IsGenericType || field.FieldType == typeof(ItemRoster))
                 {
                     field.SetValue(null, System.Activator.CreateInstance(field.FieldType));
                 }

@@ -1899,7 +1899,6 @@
         "0x06000707",
         "0x06000708",
         "0x06000737",
-        "0x06000738",
         "0x06000739",
         "0x0600073A",
         "0x0600073B",
@@ -1908,15 +1907,10 @@
         "0x0600073E",
         "0x0600073F",
         "0x06000740",
-        "0x06000741",
         "0x06000742",
         "0x06000743",
-        "0x06000744",
-        "0x06000746",
         "0x06000747",
-        "0x06000748",
         "0x06000749",
-        "0x0600074A",
         "0x0600074B",
         "0x0600074D",
         "0x06000750",
@@ -8708,13 +8702,72 @@
       "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
       "metadataTokens": [
         "0x06000013", "0x06000014", "0x06000278", "0x06000291", "0x06000292",
-        "0x0600029A", "0x060002B8", "0x060002B9", "0x060002BA", "0x060002BD"
+        "0x0600029A", "0x060002B8", "0x060002B9", "0x060002BA", "0x060002BD",
+        "0x06000738", "0x0600077C", "0x0600077E", "0x06000780"
       ],
       "disposition": "ClientPresentation",
       "owner": "FourberieAuthorityPatches.ClientPresentationPrefix",
       "capability": "BanditMissionAndMenuPresentation",
       "tests": [
         "FourberieBanditAuthorityTests.ExactBanditPresentationSurface_ExcludesEverySelectionConsequence"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": ["0x06000260", "0x06000286", "0x060002AF", "0x060002B2"],
+      "disposition": "ServerCallback",
+      "owner": "FourberieAuthorityPatches.ServerOnlyPrefix and FourberieOperationExecutor.ApplyBanditEvent",
+      "capability": "BanditInternalConsequences",
+      "tests": [
+        "FourberieBanditAuthorityTests.ExactBanditConsequences_MapToExecutableOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": [
+        "0x06000272", "0x06000280", "0x06000282", "0x06000285", "0x060002C0",
+        "0x06000745", "0x0600074C", "0x0600074E", "0x0600075E", "0x06000766",
+        "0x06000776", "0x06000782", "0x06000791", "0x06000795"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieAuthorityPatches bandit consequence prefixes -> FourberieOperationExecutor.ApplyBanditEvent",
+      "capability": "BanditTransactions",
+      "tests": [
+        "FourberieBanditAuthorityTests.EveryBanditEvent_HasOnlyItsBoundedAuthenticatedShape",
+        "FourberieBanditAuthorityTests.ExactBanditConsequences_MapToExecutableOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": ["0x06000741", "0x06000744", "0x06000746", "0x06000748", "0x0600074A"],
+      "disposition": "ServerCommand",
+      "owner": "FourberieAuthorityPatches.BanditPreparationPrefix -> FourberieOperationExecutor.ApplyBanditEvent",
+      "capability": "BanditPreparedPresentation",
+      "tests": [
+        "FourberieBanditAuthorityTests.EveryBanditEvent_HasOnlyItsBoundedAuthenticatedShape",
+        "FourberieBanditAuthorityTests.ExactBanditConsequences_MapToExecutableOwners"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": [
+        "0x060007C1", "0x060007E8", "0x060007EA",
+        "0x0600094E", "0x0600096D", "0x0600098E", "0x06000998",
+        "0x060009A3", "0x060009B1", "0x060009B6", "0x060009B7",
+        "0x060009C0", "0x060009D4", "0x060009E6",
+        "0x060009F9", "0x060009FA", "0x060009FE", "0x06000A03",
+        "0x06000A11", "0x06000A12", "0x06000A13", "0x06000A15"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieAuthorityPatches.LegacyCallbackPrefix -> FourberieOperationExecutor.ExecuteLegacyCallback",
+      "capability": "PinnedCriminalSubmenuConsequences",
+      "tests": [
+        "FourberieCriminalCallbackAuthorityTests.LegacyCallbackProtocol_AllowsOnlyPinnedStatelessConsequences",
+        "FourberieCriminalCallbackAuthorityTests.Manifest_RoutesEveryPinnedLegacyConsequence"
       ]
     }
   ]

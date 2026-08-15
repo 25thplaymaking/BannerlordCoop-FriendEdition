@@ -92,6 +92,12 @@ internal enum FourberiePatchKind
     StealthAlarm,
     StealthScandalSuccess,
     StealthPrisonSuccess,
+    BanditConsequence,
+    BanditDonationConsequence,
+    BanditRosterOpen,
+    BanditRosterConsequence,
+    BanditPreparation,
+    LegacyCallback,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -858,7 +864,26 @@ internal static class FourberieCompatibilityManifest
         // intentionally excluded until their authenticated operation routes commit on the host.
         AddTokens(FourberiePatchKind.ClientPresentation,
             0x06000013, 0x06000014, 0x06000278, 0x06000291, 0x06000292,
-            0x0600029A, 0x060002B8, 0x060002B9, 0x060002BA, 0x060002BD);
+            0x0600029A, 0x060002B8, 0x060002B9, 0x060002BA, 0x060002BD,
+            0x06000738, 0x0600077C, 0x0600077E, 0x06000780);
+        AddTokens(FourberiePatchKind.ServerOnly,
+            0x06000260, 0x06000286, 0x060002AF, 0x060002B2);
+        AddTokens(FourberiePatchKind.BanditConsequence,
+            0x06000272, 0x060002C0, 0x06000745, 0x0600074C, 0x0600074E,
+            0x0600075E, 0x06000766, 0x06000776, 0x06000782, 0x06000791,
+            0x06000795);
+        AddTokens(FourberiePatchKind.BanditDonationConsequence, 0x06000280);
+        AddTokens(FourberiePatchKind.BanditRosterOpen, 0x06000282);
+        AddTokens(FourberiePatchKind.BanditRosterConsequence, 0x06000285);
+        AddTokens(FourberiePatchKind.BanditPreparation,
+            0x06000741, 0x06000744, 0x06000746, 0x06000748, 0x0600074A);
+        AddTokens(FourberiePatchKind.LegacyCallback,
+            0x060007C1, 0x060007E8, 0x060007EA,
+            0x0600094E, 0x0600096D, 0x0600098E, 0x06000998,
+            0x060009A3, 0x060009B1, 0x060009B6, 0x060009B7,
+            0x060009C0, 0x060009D4, 0x060009E6,
+            0x060009F9, 0x060009FA, 0x060009FE, 0x06000A03,
+            0x06000A11, 0x06000A12, 0x06000A13, 0x06000A15);
         // Exact presentation/mission helpers whose apparent writes are confined to Gauntlet VM,
         // Mission Agent/navigation, encounter-position, score, and transient controller fields.
         AddTokens(FourberiePatchKind.ClientPresentation,

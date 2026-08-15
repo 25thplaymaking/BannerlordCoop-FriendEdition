@@ -16,6 +16,8 @@ using System.Text;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.Inventory;
+using TaleWorlds.CampaignSystem.Encounters;
+using TaleWorlds.CampaignSystem.Naval;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Settlements;
@@ -62,6 +64,23 @@ internal sealed class FourberieLocalItemSelection
     public int DeltaToSafehouse { get; }
 }
 
+internal sealed class FourberieLocalRosterSelection
+{
+    public FourberieLocalRosterSelection(
+        CharacterObject troop,
+        int memberDeltaToActor,
+        int prisonerDeltaToActor)
+    {
+        Troop = troop;
+        MemberDeltaToActor = memberDeltaToActor;
+        PrisonerDeltaToActor = prisonerDeltaToActor;
+    }
+
+    public CharacterObject Troop { get; }
+    public int MemberDeltaToActor { get; }
+    public int PrisonerDeltaToActor { get; }
+}
+
 internal sealed class FourberieLocalOperation
 {
     public FourberieLocalOperation(
@@ -72,7 +91,11 @@ internal sealed class FourberieLocalOperation
         int intValue,
         FourberieLocalTroopSelection[] troops,
         Clan targetClan = null,
-        FourberieLocalItemSelection[] items = null)
+        FourberieLocalItemSelection[] items = null,
+        object targetObject = null,
+        object[] targetObjects = null,
+        string secondaryId = null,
+        FourberieLocalRosterSelection[] roster = null)
     {
         Operation = operation;
         Settlement = settlement;
@@ -82,6 +105,10 @@ internal sealed class FourberieLocalOperation
         Troops = troops ?? Array.Empty<FourberieLocalTroopSelection>();
         TargetClan = targetClan;
         Items = items ?? Array.Empty<FourberieLocalItemSelection>();
+        TargetObject = targetObject;
+        TargetObjects = targetObjects ?? Array.Empty<object>();
+        SecondaryId = secondaryId;
+        Roster = roster ?? Array.Empty<FourberieLocalRosterSelection>();
     }
 
     public FourberieOperation Operation { get; }
@@ -92,6 +119,71 @@ internal sealed class FourberieLocalOperation
     public FourberieLocalTroopSelection[] Troops { get; }
     public Clan TargetClan { get; }
     public FourberieLocalItemSelection[] Items { get; }
+    public object TargetObject { get; }
+    public object[] TargetObjects { get; }
+    public string SecondaryId { get; }
+    public FourberieLocalRosterSelection[] Roster { get; }
+}
+
+internal sealed class FourberiePresentationState
+{
+    private readonly Dictionary<FieldInfo, object> fields;
+
+    private FourberiePresentationState(Dictionary<FieldInfo, object> fields) => this.fields = fields;
+
+    public static FourberiePresentationState Capture(Type behavior = null)
+    {
+        behavior ??= AccessTools.TypeByName("Fourberie.FourberieBehavior");
+        if (behavior == null) return null;
+        var values = new Dictionary<FieldInfo, object>();
+        foreach (FourberieStateFieldSpec spec in FourberieCanonicalState.Fields)
+        {
+            FieldInfo field = AccessTools.Field(behavior, spec.FieldName);
+            if (field == null) continue;
+            values[field] = Clone(field.GetValue(null));
+        }
+        return new FourberiePresentationState(values);
+    }
+
+    public void Restore()
+    {
+        if (fields == null) return;
+        using (new AllowedThread())
+            foreach (var pair in fields) pair.Key.SetValue(null, pair.Value);
+    }
+
+    private static object Clone(object value)
+    {
+        if (value is ItemRoster roster)
+        {
+            var copy = new ItemRoster();
+            for (int index = 0; index < roster.Count; index++)
+                copy.AddToCounts(roster.GetElementCopyAtIndex(index).EquipmentElement,
+                    roster.GetElementCopyAtIndex(index).Amount);
+            return copy;
+        }
+        if (value is IDictionary dictionary)
+        {
+            var copy = Activator.CreateInstance(value.GetType()) as IDictionary;
+            foreach (DictionaryEntry item in dictionary) copy?.Add(item.Key, item.Value);
+            return copy;
+        }
+        if (value is IList list)
+        {
+            var copy = Activator.CreateInstance(value.GetType()) as IList;
+            foreach (object item in list) copy?.Add(item);
+            return copy;
+        }
+        return value;
+    }
+}
+
+internal sealed class FourberieLegacyExecutionContext : IDisposable
+{
+    [ThreadStatic] private static int depth;
+    public static bool Active => depth > 0;
+    public FourberieLegacyExecutionContext() => depth++;
+    public void Dispose() => depth = Math.Max(0, depth - 1);
 }
 
 /// <summary>
@@ -101,19 +193,23 @@ internal sealed class FourberieLocalOperation
 /// </summary>
 internal static class FourberieSafehouseTransferContext
 {
-    [ThreadStatic] private static bool active;
+    private enum StashKind { None, Safehouse, BanditLoot }
+    [ThreadStatic] private static StashKind active;
 
     public static void Begin(ItemRoster stash)
     {
-        active = ModInformation.IsClient && stash != null &&
-                 ReferenceEquals(stash, CurrentCrimeBaseParty()?.ItemRoster);
+        active = StashKind.None;
+        if (!ModInformation.IsClient || stash == null) return;
+        if (ReferenceEquals(stash, CurrentCrimeBaseParty()?.ItemRoster)) active = StashKind.Safehouse;
+        else if (ReferenceEquals(stash, CurrentBanditStash())) active = StashKind.BanditLoot;
     }
 
     public static bool TryHandleDone(InventoryLogic logic, out bool result)
     {
         result = false;
-        if (!active || !ModInformation.IsClient || logic == null) return false;
-        active = false;
+        if (active == StashKind.None || !ModInformation.IsClient || logic == null) return false;
+        StashKind kind = active;
+        active = StashKind.None;
 
         FourberieLocalItemSelection[] items = BuildSelections(
             logic.GetBoughtItems(),
@@ -129,11 +225,13 @@ internal static class FourberieSafehouseTransferContext
         }
 
         bool submitted = FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
-            FourberieOperation.TransferSafehouseItems,
-            CurrentCrimeBase(),
+            kind == StashKind.Safehouse
+                ? FourberieOperation.TransferSafehouseItems
+                : FourberieOperation.CommitBanditEvent,
+            kind == StashKind.Safehouse ? CurrentCrimeBase() : Settlement.CurrentSettlement,
             null,
             null,
-            0,
+            kind == StashKind.Safehouse ? 0 : (int)FourberieBanditEvent.DonateLoot,
             Array.Empty<FourberieLocalTroopSelection>(),
             items: items)) == true;
         if (!submitted) ShowUnavailable();
@@ -141,7 +239,7 @@ internal static class FourberieSafehouseTransferContext
         return true;
     }
 
-    public static void Cancel() => active = false;
+    public static void Cancel() => active = StashKind.None;
 
     internal static FourberieLocalItemSelection[] BuildSelections(
         IEnumerable<(ItemRosterElement, int)> bought,
@@ -171,6 +269,12 @@ internal static class FourberieSafehouseTransferContext
         return behavior == null
             ? null
             : AccessTools.Field(behavior, "_crimeBaseParty")?.GetValue(null) as MobileParty;
+    }
+
+    private static ItemRoster CurrentBanditStash()
+    {
+        Type behavior = CurrentBehaviorType();
+        return behavior == null ? null : AccessTools.Field(behavior, "_stash")?.GetValue(null) as ItemRoster;
     }
 
     private static Type CurrentBehaviorType()
@@ -319,6 +423,9 @@ internal static class FourberieAuthorityPatches
     private static Settlement pendingTerritoryAbandonment;
     private static Settlement banditRecruitmentSettlement;
     private static int banditRecruitmentMaximum;
+    private static MobileParty banditRosterTarget;
+    private static int banditRosterRecruitment;
+    [ThreadStatic] private static int deferredBanditPresentationToken;
     private sealed class FightClubBaseline { public int Fame; }
     private sealed class FightClubAdmission { public bool RandomWeapon; }
     private sealed class StealthMissionState
@@ -326,6 +433,7 @@ internal static class FourberieAuthorityPatches
         public bool AlertSubmitted;
         public readonly HashSet<string> WoundedHeroes = new HashSet<string>(StringComparer.Ordinal);
     }
+
     private static readonly ConditionalWeakTable<object, FightClubBaseline> FightClubBaselines =
         new ConditionalWeakTable<object, FightClubBaseline>();
     private static readonly ConditionalWeakTable<object, FightClubAdmission> FightClubAdmissions =
@@ -335,7 +443,17 @@ internal static class FourberieAuthorityPatches
 
     public static bool ServerOnlyPrefix() => ModInformation.IsServer;
 
-    public static bool ClientPresentationPrefix() => ModInformation.IsClient;
+    public static bool ClientPresentationPrefix(ref FourberiePresentationState __state)
+    {
+        if (!ModInformation.IsClient) return false;
+        __state = FourberiePresentationState.Capture();
+        return true;
+    }
+
+    public static void ClientPresentationPostfix(FourberiePresentationState __state)
+    {
+        if (ModInformation.IsClient) __state?.Restore();
+    }
 
     public static bool ClientOperationPresentationPrefix(MethodBase __originalMethod, object[] __args)
     {
@@ -1337,6 +1455,298 @@ internal static class FourberieAuthorityPatches
         return ModInformation.IsClient;
     }
 
+    public static bool BanditConsequencePrefix(MethodBase __originalMethod, object __instance, object[] __args)
+    {
+        if (!ModInformation.IsClient) return false;
+        int token = __originalMethod?.MetadataToken ?? 0;
+        switch (token)
+        {
+            case 0x06000272:
+                SubmitBandit(FourberieBanditEvent.RepairShips, Settlement.CurrentSettlement);
+                GameMenu.SwitchToMenu("cove_main");
+                return false;
+            case 0x06000745:
+                SubmitBandit(FourberieBanditEvent.HealWounds, Settlement.CurrentSettlement);
+                GameMenu.SwitchToMenu("hideout_fourberie");
+                return false;
+            case 0x0600074C:
+                SubmitBandit(FourberieBanditEvent.ReleaseAllFollowers, Settlement.CurrentSettlement);
+                GameMenu.SwitchToMenu("hideout_fourberie");
+                return false;
+            case 0x0600074E:
+                SubmitBandit(
+                    FourberieBanditEvent.RefuseBanditJoin,
+                    null,
+                    PlayerEncounter.EncounteredMobileParty ?? MobileParty.ConversationParty);
+                PlayerEncounter.LeaveEncounter = true;
+                return false;
+            case 0x0600075E:
+            {
+                MobileParty[] parties = SelectedInquiryIdentifiers<MobileParty>(__args);
+                if (parties.Length > 0)
+                    SubmitBandit(FourberieBanditEvent.FollowParties, null, targets: parties.Cast<object>().ToArray());
+                InformationManager.HideInquiry();
+                return false;
+            }
+            case 0x06000766:
+            {
+                IFaction faction = SelectedInquiryIdentifier<IFaction>(__args);
+                if (faction != null)
+                    SubmitBandit(FourberieBanditEvent.SelectWarDogKingdom, Settlement.CurrentSettlement, faction);
+                InformationManager.HideInquiry();
+                return false;
+            }
+            case 0x06000776:
+            {
+                ShipHull hull = SelectedInquiryIdentifier<ShipHull>(__args);
+                if (hull != null)
+                    SubmitBandit(FourberieBanditEvent.AcquireCoveShip, Settlement.CurrentSettlement, hull);
+                InformationManager.HideInquiry();
+                return false;
+            }
+            case 0x06000782:
+            {
+                MobileParty party = PlayerEncounter.EncounteredMobileParty ?? MobileParty.ConversationParty;
+                if (party != null) SubmitBandit(FourberieBanditEvent.StopFollower, null, party);
+                PlayerEncounter.LeaveEncounter = true;
+                return false;
+            }
+            case 0x06000791:
+                return HandleBanditConnectionSelection(__args);
+            case 0x06000795:
+                return HandleBanditShipSelection(__instance, __args);
+            case 0x060002C0:
+                SubmitBandit(FourberieBanditEvent.AcceptTruce, Settlement.CurrentSettlement);
+                return false;
+            default:
+                return false;
+        }
+    }
+
+    public static bool BanditPreparationPrefix(MethodBase __originalMethod)
+    {
+        int token = __originalMethod?.MetadataToken ?? 0;
+        if (!ModInformation.IsClient) return false;
+        if (deferredBanditPresentationToken == token)
+        {
+            deferredBanditPresentationToken = 0;
+            return true;
+        }
+
+        FourberieBanditEvent? banditEvent = token switch
+        {
+            0x06000741 => FourberieBanditEvent.PrepareRecruitment,
+            0x06000744 => FourberieBanditEvent.OpenBanditStash,
+            0x06000746 => FourberieBanditEvent.RefreshBlackMarket,
+            0x06000748 => FourberieBanditEvent.StartHideoutWait,
+            0x0600074A => FourberieBanditEvent.StopHideoutWait,
+            _ => null,
+        };
+        if (!banditEvent.HasValue || !SubmitBandit(banditEvent.Value, Settlement.CurrentSettlement))
+            FourberieSafehouseTransferContext.ShowUnavailable();
+        return false;
+    }
+
+    public static bool LegacyCallbackPrefix(MethodBase __originalMethod)
+    {
+        if (ModInformation.IsServer) return FourberieLegacyExecutionContext.Active;
+        if (!ModInformation.IsClient) return false;
+        int token = __originalMethod?.MetadataToken ?? 0;
+        Settlement settlement = Settlement.CurrentSettlement;
+        if (!FourberieOperationProtocol.IsLegacyCallbackToken(token) || settlement == null ||
+            FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+                FourberieOperation.CommitLegacyCallback,
+                settlement,
+                null,
+                null,
+                token,
+                Array.Empty<FourberieLocalTroopSelection>())) != true)
+            FourberieSafehouseTransferContext.ShowUnavailable();
+        return false;
+    }
+
+    internal static void CompleteBanditPresentation(Assembly assembly, FourberieBanditEvent banditEvent)
+    {
+        if (!ModInformation.IsClient || assembly == null) return;
+        if (banditEvent == FourberieBanditEvent.StartHideoutWait)
+        {
+            GameMenu.SwitchToMenu("hide_wait_fmenus");
+            return;
+        }
+        if (banditEvent == FourberieBanditEvent.StopHideoutWait)
+        {
+            if (PlayerEncounter.Current != null) PlayerEncounter.Current.IsPlayerWaiting = false;
+            GameMenu.SwitchToMenu("hideout_fourberie");
+            return;
+        }
+
+        int token = banditEvent switch
+        {
+            FourberieBanditEvent.PrepareRecruitment => 0x06000741,
+            FourberieBanditEvent.OpenBanditStash => 0x06000744,
+            FourberieBanditEvent.RefreshBlackMarket => 0x06000746,
+            _ => 0,
+        };
+        if (token == 0) return;
+        try
+        {
+            MethodBase method = assembly.ManifestModule.ResolveMethod(token);
+            deferredBanditPresentationToken = token;
+            method.Invoke(null, new object[] { null });
+        }
+        catch
+        {
+            FourberieSafehouseTransferContext.ShowUnavailable();
+        }
+        finally
+        {
+            deferredBanditPresentationToken = 0;
+        }
+    }
+
+    public static bool BanditDonationConsequencePrefix(
+        TroopRoster leftPrisonRoster,
+        ref bool __result)
+    {
+        if (!ModInformation.IsClient) return false;
+        FourberieLocalTroopSelection[] selected = Selections(leftPrisonRoster);
+        bool submitted = selected.Length > 0 && SubmitBandit(
+            FourberieBanditEvent.DonatePrisoners,
+            Settlement.CurrentSettlement,
+            troops: selected);
+        if (!submitted) FourberieSafehouseTransferContext.ShowUnavailable();
+        FourberiePartyCommitSuppression.Request();
+        __result = submitted;
+        return false;
+    }
+
+    public static bool BanditRosterOpenPrefix(MobileParty conversationParty, ref int __state)
+    {
+        __state = 0;
+        if (!ModInformation.IsClient || conversationParty == null) return false;
+        banditRosterTarget = conversationParty;
+        Type type = AccessTools.TypeByName("Fourberie.FourbBanditBehavior");
+        FieldInfo field = type == null ? null : AccessTools.Field(type, "_recruitedBanditsOnMap");
+        banditRosterRecruitment = field?.GetValue(null) is int value ? value : 0;
+        __state = banditRosterRecruitment;
+        if (__state > 0) field?.SetValue(null, 0);
+        return true;
+    }
+
+    public static void BanditRosterOpenPostfix(int __state)
+    {
+        if (!ModInformation.IsClient || __state <= 0) return;
+        Type type = AccessTools.TypeByName("Fourberie.FourbBanditBehavior");
+        AccessTools.Field(type, "_recruitedBanditsOnMap")?.SetValue(null, __state);
+    }
+
+    public static bool BanditRosterConsequencePrefix(
+        TroopRoster leftMemberRoster,
+        TroopRoster leftPrisonRoster,
+        ref bool __result)
+    {
+        if (!ModInformation.IsClient) return false;
+        MobileParty target = banditRosterTarget;
+        FourberieLocalRosterSelection[] roster = target == null
+            ? Array.Empty<FourberieLocalRosterSelection>()
+            : RosterSelections(target, leftMemberRoster, leftPrisonRoster);
+        bool submitted = target != null && roster.Length > 0 && SubmitBandit(
+            FourberieBanditEvent.CommitBanditRoster,
+            null,
+            target,
+            secondaryId: banditRosterRecruitment > 0 ? "recruit.all" : null,
+            roster: roster);
+        if (!submitted) FourberieSafehouseTransferContext.ShowUnavailable();
+        FourberiePartyCommitSuppression.Request();
+        banditRosterTarget = null;
+        banditRosterRecruitment = 0;
+        __result = submitted;
+        return false;
+    }
+
+    private static bool HandleBanditConnectionSelection(object[] arguments)
+    {
+        string selected = SelectedInquiryIdentifier<string>(arguments);
+        FourberieBanditEvent? banditEvent = selected switch
+        {
+            "breakTruce" => FourberieBanditEvent.BreakTruce,
+            "betray" => FourberieBanditEvent.BetrayBandits,
+            _ => null,
+        };
+        if (!banditEvent.HasValue) return true;
+        SubmitBandit(banditEvent.Value, Settlement.CurrentSettlement);
+        InformationManager.HideInquiry();
+        if (selected == "betray") GameMenu.SwitchToMenu("hideout_place");
+        else
+        {
+            PlayerEncounter.LeaveSettlement();
+            PlayerEncounter.Finish(true);
+        }
+        return false;
+    }
+
+    private static bool HandleBanditShipSelection(object instance, object[] arguments)
+    {
+        Ship ship = SelectedInquiryIdentifier<Ship>(arguments);
+        MobileParty follower = instance == null
+            ? null
+            : AccessTools.Field(instance.GetType(), "partyConv")?.GetValue(instance) as MobileParty;
+        if (ship == null || follower == null) return false;
+        bool fromActor = ReferenceEquals(ship.Owner, MobileParty.MainParty.Party);
+        IList<Ship> ships = fromActor ? MobileParty.MainParty.Ships : follower.Ships;
+        int index = -1;
+        for (int candidate = 0; candidate < ships.Count; candidate++)
+            if (ReferenceEquals(ships[candidate], ship)) { index = candidate; break; }
+        if (index >= 0)
+            SubmitBandit(
+                FourberieBanditEvent.TransferFollowerShip,
+                null,
+                follower,
+                secondaryId: (fromActor ? "actor." : "follower.") + index.ToString(CultureInfo.InvariantCulture));
+        InformationManager.HideInquiry();
+        return false;
+    }
+
+    private static FourberieLocalRosterSelection[] RosterSelections(
+        MobileParty target,
+        TroopRoster finalMembers,
+        TroopRoster finalPrisoners)
+    {
+        var troops = target.MemberRoster.GetTroopRoster().Select(value => value.Character)
+            .Concat(target.PrisonRoster.GetTroopRoster().Select(value => value.Character))
+            .Concat(finalMembers?.GetTroopRoster().Select(value => value.Character) ?? Enumerable.Empty<CharacterObject>())
+            .Concat(finalPrisoners?.GetTroopRoster().Select(value => value.Character) ?? Enumerable.Empty<CharacterObject>())
+            .Where(value => value != null)
+            .Distinct()
+            .ToArray();
+        return troops.Select(troop => new FourberieLocalRosterSelection(
+                troop,
+                target.MemberRoster.GetTroopCount(troop) - (finalMembers?.GetTroopCount(troop) ?? 0),
+                target.PrisonRoster.GetTroopCount(troop) - (finalPrisoners?.GetTroopCount(troop) ?? 0)))
+            .Where(value => value.MemberDeltaToActor != 0 || value.PrisonerDeltaToActor != 0)
+            .ToArray();
+    }
+
+    private static bool SubmitBandit(
+        FourberieBanditEvent banditEvent,
+        Settlement settlement,
+        object target = null,
+        object[] targets = null,
+        string secondaryId = null,
+        FourberieLocalTroopSelection[] troops = null,
+        FourberieLocalRosterSelection[] roster = null) =>
+        FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+            FourberieOperation.CommitBanditEvent,
+            settlement,
+            null,
+            null,
+            (int)banditEvent,
+            troops ?? Array.Empty<FourberieLocalTroopSelection>(),
+            targetObject: target,
+            targetObjects: targets,
+            secondaryId: secondaryId,
+            roster: roster)) == true;
+
     private static void SubmitStealthAlertOnce(object instance)
     {
         StealthMissionState state = StealthMissions.GetOrCreateValue(instance);
@@ -1594,6 +2004,15 @@ internal static class FourberieAuthorityPatches
             .FirstOrDefault(value => value is T);
         return identifier is T selected ? selected : default;
     }
+
+    private static T[] SelectedInquiryIdentifiers<T>(object[] arguments) where T : class =>
+        (arguments != null && arguments.Length > 0
+                ? arguments[0] as IEnumerable<InquiryElement>
+                : null)?
+            .Select(element => element?.Identifier as T)
+            .Where(value => value != null)
+            .Distinct()
+            .ToArray() ?? Array.Empty<T>();
 
     private static IDictionary FourberieRoles()
     {

@@ -1,5 +1,15 @@
 [
   {
+    "version": "2026.08.15.2239",
+    "date": "2026-08-15",
+    "title": "Castle siege menus recover while command state synchronizes",
+    "highlights": [
+      "Leaving a castle siege to allied forces no longer leaves the siege menu unresponsive when the besieger leader has not yet synchronized to the client.",
+      "The lead and order assault actions stay safely disabled until the authoritative siege command state arrives.",
+      "The stable client and the paired dedicated-server release both use the same verified fix."
+    ]
+  },
+  {
     "version": "2026.08.15.2035",
     "date": "2026-08-15",
     "title": "One-click joining reaches the campaign again",

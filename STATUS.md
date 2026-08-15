@@ -4,6 +4,24 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
+> **2026-08-15 castle “leave it to the others” siege-menu correction — LIVE.**
+> Client logs showed Bannerlord repeatedly throwing `NullReferenceException` in
+> `DefaultEncounterModel.GetLeaderOfSiegeEvent` while the siege-strategies menu refreshed its lead
+> or order assault option. The castle state can arrive before its besieger-leader replica, so the
+> native condition dereferenced the missing leader each frame and the menu stopped responding.
+> Source `6f62b0193` gates only those two client-side conditions until the leader synchronizes;
+> server authority is unchanged. The focused siege-disconnect suite passed 17/17, including both
+> conditions, and release workflow `31912497592` passed its full build, test, package, and publish
+> gates. Stable client `2026.08.15.2239` publishes ZIP SHA-256
+> `f5f9f1c52615da632a866bb1c4459343f5bd58904115cccef420bf6ac6ee8f5f`.
+> The `grain.silo` lab runs the matching Serilog-2 server pair: GameInterface
+> `6c06ae33bc060e7cd699cf61ae74188bfe5b14173be47cb5c1f1734b329721a4`, paired core
+> `4959c150b820906a85551b8bc540bc65556c4519f7f79b576e9c4cb198c3c7b7`, receipt
+> `b1019e0d73faeb614f95bf52fab5281c32b636bb5d632109b3d6ed31dd924b4f`. It loaded the
+> existing `friendallmods1` save, verified the release pins, reached `SERVING`, bound UDP 4200,
+> emitted two pulses, and remains at `NRestarts=0`. Byte-verified rollback snapshot:
+> `/home/bishop/bannerlord-coop/server/_mod_backups/pre-6f62b0193-siege-menu-20260815T224157Z`.
+
 > **2026-08-15 Bannerlord v1.4.8 migration — LIVE, SAME SAVE, ZERO OPEN.**
 > The exact 10-module payload, hashes, source build, and fail-closed server pair
 > are reproducible, with War Sails absent. The authority ledger passes **13,729

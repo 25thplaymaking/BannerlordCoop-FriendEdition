@@ -1565,6 +1565,30 @@ internal static class FourberieAuthorityPatches
         return false;
     }
 
+    public static bool ConversationConsequencePrefix(MethodBase __originalMethod)
+    {
+        if (ModInformation.IsServer) return false;
+        if (!ModInformation.IsClient) return false;
+        int token = __originalMethod?.MetadataToken ?? 0;
+        FourberieConversationEvent conversationEvent =
+            FourberieOperationProtocol.ConversationEventForToken(token);
+        Settlement settlement = Settlement.CurrentSettlement;
+        Hero target = conversationEvent == FourberieConversationEvent.ResolveGangLeaderBashing
+            ? null
+            : Hero.OneToOneConversationHero;
+        if (conversationEvent == 0 || settlement == null ||
+            (conversationEvent != FourberieConversationEvent.ResolveGangLeaderBashing && target == null) ||
+            FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+                FourberieOperation.CommitConversationEvent,
+                settlement,
+                target,
+                null,
+                (int)conversationEvent,
+                Array.Empty<FourberieLocalTroopSelection>())) != true)
+            FourberieSafehouseTransferContext.ShowUnavailable();
+        return false;
+    }
+
     internal static void CompleteBanditPresentation(Assembly assembly, FourberieBanditEvent banditEvent)
     {
         if (!ModInformation.IsClient || assembly == null) return;

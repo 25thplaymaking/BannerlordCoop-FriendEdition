@@ -8769,6 +8769,20 @@
         "FourberieCriminalCallbackAuthorityTests.LegacyCallbackProtocol_AllowsOnlyPinnedStatelessConsequences",
         "FourberieCriminalCallbackAuthorityTests.Manifest_RoutesEveryPinnedLegacyConsequence"
       ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": [
+        "0x060007D7", "0x060007DC", "0x060007DE",
+        "0x060007E1", "0x060007E2", "0x060007E3"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieAuthorityPatches.ConversationConsequencePrefix -> FourberieOperationExecutor.ApplyConversationEvent",
+      "capability": "GangLeaderConversationConsequences",
+      "tests": [
+        "FourberieCriminalCallbackAuthorityTests.ConversationConsequences_UseTargetBoundedAuthenticatedTransactions"
+      ]
     }
   ]
 }

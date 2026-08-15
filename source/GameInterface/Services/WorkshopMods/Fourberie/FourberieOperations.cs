@@ -259,6 +259,9 @@ internal sealed class FourberieOperationExecutor
                     actorItems = CaptureAllItems(actorParty.ItemRoster);
                     ExecuteLegacyCallback(actor, actorParty, request);
                     break;
+                case FourberieOperation.CommitConversationEvent:
+                    ApplyConversationEvent(actor, actorParty, request);
+                    break;
                 case FourberieOperation.EnableContractOffers:
                 case FourberieOperation.DisableContractOffers:
                 case FourberieOperation.AbortContract:
@@ -738,6 +741,124 @@ internal sealed class FourberieOperationExecutor
         using (new BarterPlayerContext(actor, actorParty))
         using (new FourberieLegacyExecutionContext())
             method.Invoke(instance, parameters.Length == 0 ? Array.Empty<object>() : new object[] { null });
+    }
+
+    private void ApplyConversationEvent(
+        Hero actor,
+        MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        if (!TryResolveCurrentSettlement(actorParty, request.SettlementId, out Settlement settlement))
+            throw new InvalidOperationException("the Fourberie conversation is not in the controller's current settlement");
+        var conversationEvent = (FourberieConversationEvent)request.IntValue;
+        Hero target = string.IsNullOrEmpty(request.TargetId) ? null : ResolveHero(request.TargetId);
+        if (conversationEvent != FourberieConversationEvent.ResolveGangLeaderBashing &&
+            (target == null || !target.IsAlive || target.CurrentSettlement != settlement))
+            throw new InvalidOperationException("the Fourberie conversation target is stale or outside the current settlement");
+
+        using (new AllowedThread())
+        using (new BarterPlayerContext(actor, actorParty))
+        {
+            switch (conversationEvent)
+            {
+                case FourberieConversationEvent.PromoteGangLeader:
+                    PromoteGangLeader(actor, settlement, target);
+                    return;
+                case FourberieConversationEvent.EstablishPartnership:
+                    EstablishPartnership(actor, settlement, target);
+                    return;
+                case FourberieConversationEvent.AcceptRecommendation:
+                    AcceptRecommendation(actor, target);
+                    return;
+                case FourberieConversationEvent.RejectRivalry:
+                case FourberieConversationEvent.RejectBashing:
+                    RejectGangLeader(actor, target);
+                    return;
+                case FourberieConversationEvent.ResolveGangLeaderBashing:
+                    ResolveGangLeaderBashing();
+                    return;
+                default:
+                    throw new InvalidOperationException("unknown Fourberie conversation event");
+            }
+        }
+    }
+
+    private void PromoteGangLeader(Hero actor, Settlement settlement, Hero target)
+    {
+        if (!target.IsGangLeader || target.GetRelation(actor) <= 45f || target.CurrentSettlement == null)
+            throw new InvalidOperationException("the selected gang leader is not eligible for promotion");
+        if (GetStaticField("_territoryList") is not IList territories ||
+            !territories.Contains(target.CurrentSettlement.StringId) ||
+            GetDictionary("_assignedGl").Contains(target.CurrentSettlement.StringId))
+            throw new InvalidOperationException("the selected gang leader's territory is not eligible");
+        IDictionary assigned = GetDictionary("_assignedGl");
+        assigned[settlement.StringId] = target.StringId;
+        target.AddPower(400f);
+        target.SupporterOf = actor.Clan;
+        if (target.GetRelation(actor) < 40f)
+            CharacterRelationManager.SetHeroRelation(target, actor, 50);
+        foreach (Alley alley in settlement.Alleys) alley.SetOwner(target);
+    }
+
+    private void EstablishPartnership(Hero actor, Settlement settlement, Hero target)
+    {
+        if (!target.IsGangLeader || settlement.Town == null)
+            throw new InvalidOperationException("the partnership target is not a gang leader");
+        AddTraitXp(actor, DefaultTraits.Honor, -20);
+        AddTraitXp(actor, DefaultTraits.Mercy, -20);
+        ChangeRelationAction.ApplyRelationChangeBetweenHeroes(actor, target, 40, true);
+        settlement.Town.Loyalty -= 20f;
+        settlement.Town.Security -= 20f;
+        foreach (Hero notable in settlement.Notables.Where(value => !value.IsGangLeader))
+        {
+            int current = (int)notable.GetRelation(actor);
+            ChangeRelationAction.ApplyRelationChangeBetweenHeroes(actor, notable,
+                current > 0 ? -(current + 5) : -5, true);
+        }
+        ReplaceListMembership("_territoryList", settlement.StringId, present: false);
+        ReplaceListMembership("_partnershipList", settlement.StringId, present: true);
+        ReplaceListMembership("_partnerRecomList", settlement.StringId, present: true);
+    }
+
+    private void AcceptRecommendation(Hero actor, Hero target)
+    {
+        IDictionary crime = GetDictionary("_crimeValue");
+        crime.Remove(90);
+        GetDictionary("_stringHeroIdDico").Remove("recomGl");
+        int relation = (int)Math.Floor(10d / (1d + actor.GetSkillValue(DefaultSkills.Charm) * 0.005d));
+        ChangeRelationAction.ApplyRelationChangeBetweenHeroes(actor, target, relation, true);
+    }
+
+    private static void RejectGangLeader(Hero actor, Hero target)
+    {
+        int current = (int)target.GetRelation(actor);
+        ChangeRelationAction.ApplyRelationChangeBetweenHeroes(actor, target,
+            -(30 + Math.Max(0, current)), true);
+    }
+
+    private void ResolveGangLeaderBashing()
+    {
+        Hero low = ResolveMappedHero("lowPowerGl");
+        Hero high = ResolveMappedHero("highPowerGl");
+        if (low == null || high == null || !low.IsAlive || !high.IsAlive)
+            throw new InvalidOperationException("the gang-leader rivalry context is stale");
+        RequiredMethod("Fourberie.FourberieBehavior", "AftermathGlBash", 2)
+            .Invoke(null, new object[] { low, high });
+    }
+
+    private void AddTraitXp(Hero actor, TraitObject trait, int amount)
+    {
+        MethodInfo traitXp = RequiredMethod("Fourberie.VanillaHelperFourb", "AddPlayerTraitXPAndLogEntry", 4);
+        object note = Enum.ToObject(traitXp.GetParameters()[2].ParameterType, 0);
+        traitXp.Invoke(null, new object[] { trait, amount, note, actor });
+    }
+
+    private void ReplaceListMembership(string fieldName, string value, bool present)
+    {
+        if (GetStaticField(fieldName) is not IList list)
+            throw new InvalidOperationException("Fourberie field " + fieldName + " is not a list");
+        while (list.Contains(value)) list.Remove(value);
+        if (present) list.Add(value);
     }
 
     private static void RequireBanditSettlement(Settlement settlement)

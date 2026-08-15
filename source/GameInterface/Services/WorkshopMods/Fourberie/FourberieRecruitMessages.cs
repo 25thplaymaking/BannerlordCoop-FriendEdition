@@ -77,6 +77,7 @@ internal enum FourberieOperation
     CommitStealthEvent = 65,
     CommitBanditEvent = 66,
     CommitLegacyCallback = 67,
+    CommitConversationEvent = 68,
 }
 
 internal enum FourberieStealthEvent
@@ -121,6 +122,16 @@ internal enum FourberieBanditEvent
     StartHideoutWait = 18,
     StopHideoutWait = 19,
     DonateLoot = 20,
+}
+
+internal enum FourberieConversationEvent
+{
+    PromoteGangLeader = 1,
+    EstablishPartnership = 2,
+    AcceptRecommendation = 3,
+    RejectRivalry = 4,
+    ResolveGangLeaderBashing = 5,
+    RejectBashing = 6,
 }
 
 internal enum FourberieOperationStatus
@@ -532,6 +543,7 @@ internal static class FourberieOperationProtocol
                     : string.IsNullOrEmpty(request.TargetId)),
             FourberieOperation.CommitBanditEvent => IsBanditEventShapeValid(request),
             FourberieOperation.CommitLegacyCallback => IsLegacyCallbackShapeValid(request),
+            FourberieOperation.CommitConversationEvent => IsConversationEventShapeValid(request),
             _ => false,
         };
     }
@@ -688,6 +700,22 @@ internal static class FourberieOperationProtocol
 
     internal static bool IsLegacyCallbackToken(int value) => LegacyCallbackTokens.Contains(value);
 
+    internal static bool IsConversationEventToken(int value) => ConversationEventTokens.ContainsKey(value);
+
+    internal static FourberieConversationEvent ConversationEventForToken(int value) =>
+        ConversationEventTokens.TryGetValue(value, out FourberieConversationEvent result) ? result : 0;
+
+    private static bool IsConversationEventShapeValid(NetworkRequestFourberieOperation request)
+    {
+        if (!Enum.IsDefined(typeof(FourberieConversationEvent), request.IntValue) ||
+            string.IsNullOrEmpty(request.SettlementId) ||
+            !string.IsNullOrEmpty(request.SecondaryTargetId) || request.Troops.Length != 0)
+            return false;
+        return (FourberieConversationEvent)request.IntValue == FourberieConversationEvent.ResolveGangLeaderBashing
+            ? string.IsNullOrEmpty(request.TargetId)
+            : !string.IsNullOrEmpty(request.TargetId);
+    }
+
     private static bool IsLegacyCallbackShapeValid(NetworkRequestFourberieOperation request) =>
         IsLegacyCallbackToken(request.IntValue) && !string.IsNullOrEmpty(request.SettlementId) &&
         string.IsNullOrEmpty(request.TargetId) && string.IsNullOrEmpty(request.SecondaryTargetId) &&
@@ -703,4 +731,15 @@ internal static class FourberieOperationProtocol
         0x060009F9, 0x060009FA, 0x060009FE, 0x06000A03,
         0x06000A11, 0x06000A12, 0x06000A13, 0x06000A15,
     };
+
+    private static readonly IReadOnlyDictionary<int, FourberieConversationEvent> ConversationEventTokens =
+        new Dictionary<int, FourberieConversationEvent>
+        {
+            [0x060007D7] = FourberieConversationEvent.PromoteGangLeader,
+            [0x060007DC] = FourberieConversationEvent.EstablishPartnership,
+            [0x060007DE] = FourberieConversationEvent.AcceptRecommendation,
+            [0x060007E1] = FourberieConversationEvent.RejectRivalry,
+            [0x060007E2] = FourberieConversationEvent.ResolveGangLeaderBashing,
+            [0x060007E3] = FourberieConversationEvent.RejectBashing,
+        };
 }

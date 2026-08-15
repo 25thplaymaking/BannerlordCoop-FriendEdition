@@ -18,6 +18,11 @@ public sealed class FourberieCriminalCallbackAuthorityTests
         0x06000A11, 0x06000A12, 0x06000A13, 0x06000A15,
     };
 
+    private static readonly int[] ConversationTokens =
+    {
+        0x060007D7, 0x060007DC, 0x060007DE, 0x060007E1, 0x060007E2, 0x060007E3,
+    };
+
     [Fact]
     public void LegacyCallbackProtocol_AllowsOnlyPinnedStatelessConsequences()
     {
@@ -33,6 +38,29 @@ public sealed class FourberieCriminalCallbackAuthorityTests
         Assert.All(Tokens, token => Assert.Single(
             FourberieCompatibilityManifest.Methods.Where(spec =>
                 spec.MetadataToken == token && spec.Kind == FourberiePatchKind.LegacyCallback)));
+    }
+
+    [Fact]
+    public void ConversationConsequences_UseTargetBoundedAuthenticatedTransactions()
+    {
+        foreach (int token in ConversationTokens)
+        {
+            FourberieConversationEvent conversationEvent =
+                FourberieOperationProtocol.ConversationEventForToken(token);
+            Assert.True(conversationEvent != 0);
+            string target = conversationEvent == FourberieConversationEvent.ResolveGangLeaderBashing
+                ? string.Empty
+                : "gang-leader";
+            Assert.True(FourberieOperationProtocol.IsRequestShapeValid(
+                ConversationRequest(conversationEvent, target)));
+            Assert.Single(FourberieCompatibilityManifest.Methods.Where(spec =>
+                spec.MetadataToken == token && spec.Kind == FourberiePatchKind.ConversationConsequence));
+        }
+
+        Assert.False(FourberieOperationProtocol.IsRequestShapeValid(
+            ConversationRequest(FourberieConversationEvent.PromoteGangLeader, string.Empty)));
+        Assert.False(FourberieOperationProtocol.IsRequestShapeValid(
+            ConversationRequest(FourberieConversationEvent.ResolveGangLeaderBashing, "forged-target")));
     }
 
     [Fact]
@@ -57,5 +85,13 @@ public sealed class FourberieCriminalCallbackAuthorityTests
         new NetworkRequestFourberieOperation(
             Guid.NewGuid().ToString("N"), 1, 0, FourberieOperation.CommitLegacyCallback,
             settlement, string.Empty, string.Empty, token,
+            Array.Empty<FourberieTroopSelection>(), Array.Empty<FourberieItemSelection>());
+
+    private static NetworkRequestFourberieOperation ConversationRequest(
+        FourberieConversationEvent conversationEvent,
+        string target) =>
+        new NetworkRequestFourberieOperation(
+            Guid.NewGuid().ToString("N"), 1, 0, FourberieOperation.CommitConversationEvent,
+            "settlement-current", target, string.Empty, (int)conversationEvent,
             Array.Empty<FourberieTroopSelection>(), Array.Empty<FourberieItemSelection>());
 }

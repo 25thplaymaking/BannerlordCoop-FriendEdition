@@ -554,6 +554,8 @@ namespace Coop
 
             if (gameStarterObject is CampaignGameStarter campaignGameStarter)
             {
+                if (campaignStatsPublisher == null)
+                    campaignStatsPublisher = CampaignStatsPublisher.CreateIfConfigured();
                 campaignGameStarter.AddBehavior(new PlayerPartyInteractionCampaignBehavior());
                 campaignGameStarter.AddBehavior(new CoopTournamentCampaignBehavior());
                 campaignGameStarter.AddBehavior(new SeparatismCampaignBehavior());
@@ -594,7 +596,6 @@ namespace Coop
             CrashDiagnostics.SetPhase("ending-game");
             if (campaignStatsPublisher != null)
             {
-                Updateables.Remove(campaignStatsPublisher);
                 campaignStatsPublisher.Dispose();
                 campaignStatsPublisher = null;
             }
@@ -656,7 +657,6 @@ namespace Coop
                 }
             }
 
-            SyncCampaignStatsPublisherRole();
             TimeSpan frameTime = TimeSpan.FromSeconds(dt);
             Updateables.UpdateAll(frameTime);
 
@@ -666,24 +666,6 @@ namespace Coop
 #if DEBUG
             TryAutoConnect();
 #endif
-        }
-
-        private void SyncCampaignStatsPublisherRole()
-        {
-            if (ModInformation.IsServer && Campaign.Current != null)
-            {
-                if (campaignStatsPublisher == null)
-                {
-                    campaignStatsPublisher = new CampaignStatsPublisher();
-                    Updateables.Add(campaignStatsPublisher);
-                }
-                return;
-            }
-
-            if (campaignStatsPublisher == null) return;
-            Updateables.Remove(campaignStatsPublisher);
-            campaignStatsPublisher.Dispose();
-            campaignStatsPublisher = null;
         }
 
         private void TryShowCrashReportingConsent(bool isAtMainMenu)

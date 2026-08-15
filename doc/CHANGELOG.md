@@ -2,9 +2,9 @@
 
 ## 2026-08-15 — Portal production-host fallback
 
-- Synchronize the campaign stats publisher from the authoritative runtime host role on application
-  ticks, after `StartAsServer` establishes that role; it no longer depends on the optional launcher
-  `/server` flag or on role timing during `OnGameStart`.
+- Schedule campaign stats through the shared game-thread queue used by both the desktop game loop and
+  TaleWorlds' headless dedicated-host pump. Publication is authorized by the server-only portal
+  credential and no longer depends on launcher flags, role timing, or UI application ticks.
 - Surface publisher configuration and delivery failures in the dedicated-host journal, where an
   operator can diagnose the headless process without relying on a client-side log sink.
 - Added a thin Node 24 host adapter for the Worker-compatible campaign portal, with atomic file-backed

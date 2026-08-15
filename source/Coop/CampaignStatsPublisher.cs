@@ -21,21 +21,28 @@ namespace Coop
     /// Publishes a bounded public projection of the host's save. Values are recalculated from the
     /// authoritative Hero/Clan/Party objects; there is no second leaderboard database to drift.
     /// </summary>
-    internal sealed class CampaignStatsPublisher : IUpdateable, IDisposable
+    internal sealed class CampaignStatsPublisher : IDisposable
     {
         private static readonly ILogger Logger = Log.ForContext<CampaignStatsPublisher>();
         private static readonly TimeSpan PublishInterval = TimeSpan.FromMinutes(1);
         private readonly HttpClient httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         private readonly Uri publishUri;
         private readonly string publishToken;
-        private TimeSpan elapsed = PublishInterval;
+        private readonly Timer timer;
         private int publishActive;
         private bool disposed;
 
-        internal CampaignStatsPublisher()
+        internal static CampaignStatsPublisher CreateIfConfigured()
         {
             string portalUrl = Environment.GetEnvironmentVariable("COOP_PORTAL_URL");
-            publishToken = Environment.GetEnvironmentVariable("COOP_PORTAL_PUBLISH_TOKEN");
+            string token = Environment.GetEnvironmentVariable("COOP_PORTAL_PUBLISH_TOKEN");
+            if (string.IsNullOrWhiteSpace(portalUrl) && string.IsNullOrWhiteSpace(token)) return null;
+            return new CampaignStatsPublisher(portalUrl, token);
+        }
+
+        private CampaignStatsPublisher(string portalUrl, string token)
+        {
+            publishToken = token;
             Uri baseUri;
             if (!string.IsNullOrWhiteSpace(portalUrl) &&
                 Uri.TryCreate(portalUrl.TrimEnd('/') + "/", UriKind.Absolute, out baseUri) &&
@@ -44,17 +51,20 @@ namespace Coop
                 publishUri = new Uri(baseUri, "stats/publish");
 
             Console.WriteLine("[CampaignStats] Publisher initialized (configured={0})", publishUri != null);
+            if (publishUri != null)
+                timer = new Timer(QueuePublish, null, TimeSpan.Zero, PublishInterval);
         }
 
-        public int Priority { get { return 0; } }
-
-        public void Update(TimeSpan frameTime)
+        private void QueuePublish(object state)
         {
-            if (disposed || publishUri == null || Campaign.Current == null) return;
-            elapsed += frameTime;
-            if (elapsed < PublishInterval || Interlocked.CompareExchange(ref publishActive, 1, 0) != 0)
-                return;
-            elapsed = TimeSpan.Zero;
+            if (disposed) return;
+            GameThread.EnqueueSafe(PublishOnGameThread, "CampaignStatsPublisher.Publish");
+        }
+
+        private void PublishOnGameThread()
+        {
+            if (disposed || Campaign.Current == null ||
+                Interlocked.CompareExchange(ref publishActive, 1, 0) != 0) return;
 
             StatsSnapshot snapshot;
             try { snapshot = BuildSnapshot(); }
@@ -147,6 +157,7 @@ namespace Coop
         public void Dispose()
         {
             disposed = true;
+            timer?.Dispose();
             httpClient.Dispose();
         }
 

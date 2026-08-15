@@ -21,6 +21,18 @@ public enum AuthorityRequestPhase
     ClientRejected,
     ClientTimedOut,
     ClientUnresolved,
+    ServerRejected,
+    ServerAdmitted,
+    MutationCommitted,
+    StatePublished,
+    ReplySent,
+    ReplicaApplied,
+    Completed,
+    ClientCancelled,
+    ReplySendFailed,
+    ReplicaApplyFailed,
+    PublicationFailed,
+    ExecutionFailed,
 }
 
 /// <summary>A bounded diagnostic record for one authority request.</summary>
@@ -85,6 +97,20 @@ public sealed class AuthorityRequestLifecycle
 
     public void ServerValidated(string requestId) => Record(requestId, AuthorityRequestPhase.ServerValidated, null);
 
+    public void ServerAdmitted(string requestId) => Record(requestId, AuthorityRequestPhase.ServerAdmitted, null);
+
+    public void ServerRejected(string requestId, string outcome) =>
+        Record(requestId, AuthorityRequestPhase.ServerRejected, outcome);
+
+    public void MutationCommitted(string requestId, string outcome = null) =>
+        Record(requestId, AuthorityRequestPhase.MutationCommitted, outcome);
+
+    public void StatePublished(string requestId, string outcome = null) =>
+        Record(requestId, AuthorityRequestPhase.StatePublished, outcome);
+
+    public void ReplySent(string requestId, string outcome = null) =>
+        Record(requestId, AuthorityRequestPhase.ReplySent, outcome);
+
     public void ServerResolved(string requestId, string outcome) =>
         Record(requestId, AuthorityRequestPhase.ServerResolved, outcome);
 
@@ -93,6 +119,27 @@ public sealed class AuthorityRequestLifecycle
 
     public void ClientApplied(string requestId, string outcome) =>
         Record(requestId, AuthorityRequestPhase.ClientApplied, outcome);
+
+    public void ReplicaApplied(string requestId, string outcome = null) =>
+        Record(requestId, AuthorityRequestPhase.ReplicaApplied, outcome);
+
+    public void ClientCompleted(string requestId, string outcome = null) =>
+        Record(requestId, AuthorityRequestPhase.Completed, outcome);
+
+    public void ClientCancelled(string requestId, string outcome) =>
+        Record(requestId, AuthorityRequestPhase.ClientCancelled, outcome);
+
+    public void ReplySendFailed(string requestId, string outcome) =>
+        Record(requestId, AuthorityRequestPhase.ReplySendFailed, outcome);
+
+    public void ReplicaApplyFailed(string requestId, string outcome) =>
+        Record(requestId, AuthorityRequestPhase.ReplicaApplyFailed, outcome);
+
+    public void PublicationFailed(string requestId, string outcome) =>
+        Record(requestId, AuthorityRequestPhase.PublicationFailed, outcome);
+
+    public void ExecutionFailed(string requestId, string outcome) =>
+        Record(requestId, AuthorityRequestPhase.ExecutionFailed, outcome);
 
     public void ClientRejected(string requestId, string outcome) =>
         Record(requestId, AuthorityRequestPhase.ClientRejected, outcome);
@@ -183,7 +230,51 @@ public sealed class AuthorityRequestLifecycle
         phase == AuthorityRequestPhase.ClientApplied ||
         phase == AuthorityRequestPhase.ClientRejected ||
         phase == AuthorityRequestPhase.ClientTimedOut ||
-        phase == AuthorityRequestPhase.ClientUnresolved;
+        phase == AuthorityRequestPhase.ClientUnresolved ||
+        phase == AuthorityRequestPhase.ReplySent ||
+        phase == AuthorityRequestPhase.Completed ||
+        phase == AuthorityRequestPhase.ClientCancelled ||
+        phase == AuthorityRequestPhase.ReplySendFailed ||
+        phase == AuthorityRequestPhase.ReplicaApplyFailed ||
+        phase == AuthorityRequestPhase.PublicationFailed ||
+        phase == AuthorityRequestPhase.ExecutionFailed;
+
+    internal static bool CanTransition(AuthorityRequestPhase current, AuthorityRequestPhase next)
+    {
+        if (current == next || IsTerminal(current)) return false;
+
+        switch (current)
+        {
+            case AuthorityRequestPhase.ClientRequested:
+                return next == AuthorityRequestPhase.ClientSent || IsTerminal(next);
+            case AuthorityRequestPhase.ClientSent:
+                return next == AuthorityRequestPhase.ClientReplyReceived || IsTerminal(next);
+            case AuthorityRequestPhase.ClientReplyReceived:
+                return next == AuthorityRequestPhase.ReplicaApplied ||
+                    next == AuthorityRequestPhase.ClientApplied || IsTerminal(next);
+            case AuthorityRequestPhase.ReplicaApplied:
+                return next == AuthorityRequestPhase.Completed || IsTerminal(next);
+            case AuthorityRequestPhase.ServerReceived:
+                return next == AuthorityRequestPhase.ServerValidated ||
+                    next == AuthorityRequestPhase.ServerAdmitted ||
+                    next == AuthorityRequestPhase.ServerRejected || IsTerminal(next);
+            case AuthorityRequestPhase.ServerValidated:
+                return next == AuthorityRequestPhase.ServerAdmitted ||
+                    next == AuthorityRequestPhase.ServerRejected ||
+                    next == AuthorityRequestPhase.ServerResolved || IsTerminal(next);
+            case AuthorityRequestPhase.ServerAdmitted:
+                return next == AuthorityRequestPhase.MutationCommitted ||
+                    next == AuthorityRequestPhase.ServerRejected || IsTerminal(next);
+            case AuthorityRequestPhase.MutationCommitted:
+                return next == AuthorityRequestPhase.StatePublished || IsTerminal(next);
+            case AuthorityRequestPhase.StatePublished:
+                return next == AuthorityRequestPhase.ReplySent || IsTerminal(next);
+            case AuthorityRequestPhase.ServerRejected:
+                return next == AuthorityRequestPhase.ReplySent || IsTerminal(next);
+            default:
+                return false;
+        }
+    }
 
     private void Write(AuthorityRequestPhase phase, string requestId, string outcome, DateTime startedUtc)
     {
@@ -219,7 +310,7 @@ public sealed class AuthorityRequestLifecycle
             lock (sync)
             {
                 startedUtc = StartedUtc;
-                if (IsTerminal) return false;
+                if (!AuthorityRequestLifecycle.CanTransition(Phase, phase)) return false;
 
                 Phase = phase;
                 Outcome = outcome;

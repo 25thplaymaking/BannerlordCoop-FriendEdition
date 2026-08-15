@@ -61,4 +61,40 @@ public class AuthorityRequestLifecycleTests
         Assert.False(lifecycle.TryGetSnapshot("request-4", out _));
         Assert.True(lifecycle.TryGetSnapshot("request-5", out _));
     }
+
+    [Fact]
+    public void ReplySent_CannotPrecedeServerStatePublication()
+    {
+        var lifecycle = new AuthorityRequestLifecycle("map-event.create");
+
+        lifecycle.BeginServer("request-6");
+        lifecycle.ServerAdmitted("request-6");
+        lifecycle.ReplySent("request-6", "Accepted");
+
+        Assert.True(lifecycle.TryGetSnapshot("request-6", out var snapshot));
+        Assert.Equal(AuthorityRequestPhase.ServerAdmitted, snapshot.Phase);
+        Assert.False(snapshot.IsTerminal);
+    }
+
+    [Fact]
+    public void AcceptedClientRequest_CompletesOnlyAfterReplicaApplication()
+    {
+        var lifecycle = new AuthorityRequestLifecycle("map-event.create");
+
+        lifecycle.BeginClient("request-7");
+        lifecycle.ClientSent("request-7");
+        lifecycle.ClientReplyReceived("request-7", "Accepted");
+        lifecycle.ClientCompleted("request-7", "Accepted");
+
+        Assert.True(lifecycle.TryGetSnapshot("request-7", out var beforeApply));
+        Assert.Equal(AuthorityRequestPhase.ClientReplyReceived, beforeApply.Phase);
+        Assert.False(beforeApply.IsTerminal);
+
+        lifecycle.ReplicaApplied("request-7", "Revision:9");
+        lifecycle.ClientCompleted("request-7", "Accepted");
+
+        Assert.True(lifecycle.TryGetSnapshot("request-7", out var completed));
+        Assert.Equal(AuthorityRequestPhase.Completed, completed.Phase);
+        Assert.True(completed.IsTerminal);
+    }
 }

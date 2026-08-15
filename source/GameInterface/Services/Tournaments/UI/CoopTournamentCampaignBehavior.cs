@@ -131,7 +131,7 @@ public sealed class CoopTournamentCampaignBehavior : CampaignBehaviorBase
         {
             args.IsEnabled = false;
             args.Tooltip = new TextObject(
-                "{=coop_tournament_unsupported}Cooperative tournaments support only the standard Fight Tournament in Bannerlord v1.4.7.");
+                "{=coop_tournament_unsupported}Cooperative tournaments support only the standard Fight Tournament in Bannerlord v1.4.8.");
             return true;
         }
 

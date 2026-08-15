@@ -170,7 +170,7 @@ internal sealed partial class TournamentSessionHandler : IHandler
         if (nativeGame.GetType() != typeof(FightTournamentGame))
         {
             SendRejection(peer, townId,
-                "Cooperative tournaments support only the standard Fight Tournament in Bannerlord v1.4.7.");
+                "Cooperative tournaments support only the standard Fight Tournament in Bannerlord v1.4.8.");
             return false;
         }
         if (hasSession)

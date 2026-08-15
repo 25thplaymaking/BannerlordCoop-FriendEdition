@@ -5,7 +5,9 @@ patch all known + reported bugs (reference PRs/issues), land everything on ONE P
 merge + deploy to grain.silo (build server DLLs, re-pair `DedicatedServer.Core`, observe
 uptime, confirm launcher push), then a full launcher frontend/feature sweep + logo.
 
-Fork is pinned to game **1.4.7** — do NOT adopt upstream's 1.4.8 bump.
+Historical execution constraint: this completed update stayed on game **1.4.7**
+and did not adopt upstream's 1.4.8 bump. Future work is governed by the
+[Bannerlord v1.4.8 migration guide](bannerlord-1.4.8-migration.md).
 
 PR: https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/pull/14
 Branch: `25vid/fix-kingdom-tab-diplomacy-managers` (base: `development`)

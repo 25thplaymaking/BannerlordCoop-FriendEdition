@@ -1,5 +1,31 @@
 # Friend Edition Changelog
 
+## 2026-08-15 — Bannerlord v1.4.8 migration baseline (development; release held)
+
+Friend Edition now identifies Bannerlord `v1.4.8` as its source/build and Steam
+Workshop compatibility target, matching upstream Bannerlord Coop PR #2919. The
+repository also carries a dedicated `v1.4.8` runbook and phased plan covering the
+ten-module contract, exact binary/authority gates, dedicated-server pairing,
+same-save canary, and rollback. War Sails remains disabled and out of scope; RBM
+remains retired.
+
+The migration is also the completion boundary for existing mod-function piping.
+The runbook reconciles the 419-route metadata and 495-route strict
+Fourberie results, requires zero blocked/unclassified gameplay routes, and adds
+explicit completion slices for Diplomacy's exact ledger, Player Settlement's
+non-empty construction graph, Fourberie models/menus/missions, all 723 Improved
+Garrisons candidates, and the changed DismembermentPlus payload.
+
+This milestone does not change any pinned Workshop payload or claim that a
+`v1.4.8` Friend Edition client/server release has been built, rendered, deployed,
+or proven on the live save. DismembermentPlus's new `v1.4.8` Workshop payload
+requires an isolated re-audit, while Fourberie `v1.4.7.6` is explicitly deferred
+to a separately reversible follow-on. Mod release/implementation names such as
+`Bannerlord.Diplomacy.1.4.7`, Fourberie `v1.4.7.5`, and the BUTR `1.4.7`
+implementation DLLs remain exact binary identifiers rather than base-game pins.
+Stable stays held until the runbook's official-binary, frozen-suite, module,
+package, rendered, same-save, and rollback gates pass.
+
 ## 2026-08-11 — Separatism authority closure (development; stable held)
 
 Separatism now has exact authority closure for all 57 required candidates. The recovered

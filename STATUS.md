@@ -4,6 +4,26 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
+> **2026-08-15 Bannerlord v1.4.8 migration baseline — PLANNED, NOT RELEASED OR
+> DEPLOYED.** Upstream Bannerlord Coop PR #2919 moved its `GameVersion` to
+> `v1.4.8` and passed build, unit, and all eight E2E jobs. Friend Edition now
+> carries the matching source/Workshop target plus a repository-specific
+> [migration guide](docs/bannerlord-1.4.8-migration.md) and
+> [phased plan](docs/superpowers/plans/2026-08-15-bannerlord-1.4.8-migration.md).
+> War Sails remains disabled and out of scope; RBM remains retired. No Workshop
+> payload, suite receipt, server overlay, dedicated core, stable feed, live file,
+> or save has changed. DismembermentPlus's explicit `v1.4.8` payload must be
+> re-audited in isolation; Fourberie `v1.4.7.6` is a later independently
+> reversible increment. Promotion remains blocked on actual `v1.4.8` binary
+> inventory/API proof, exact mod authority and package gates, rendered multi-client
+> acceptance, same-save canary, and a byte-verified `v1.4.7` rollback snapshot.
+> The migration is also the functional-completion gate: the conflicting
+> Fourberie 419-route metadata and 495-route strict results must be regenerated
+> into one zero-open ledger, Diplomacy's exact ledger must close, Player
+> Settlement's non-empty construction graph must be routed, and every active
+> mod option must have a tested authority owner rather than a hidden or
+> fail-closed placeholder.
+
 > **2026-08-14 battle upkeep + siege result/village defense correction — SHIPPED from source
 > `1974e2994`.** Merged PR #17. Required workflow `31833738722` passed build, unit tests, and
 > all eight E2E shards after full-diff review found no remaining Critical or Important issues.
@@ -440,9 +460,10 @@ rolls back canonical Fourberie state and created parties on failure, and returns
      replacements, 59 server-command methods, 88 framework-lifecycle methods, and 9 unreachable
      Homesteads/Bellum Civile add-on methods.
      The strict gameplay gate also rejects campaign mutation, canonical Fourberie-state writes, and
-     authority-sensitive calls mislabeled as client presentation. That gate currently passes 971 and
-     rejects 894: 821 unclassified methods plus 73 unsafe presentation classifications.
-  - **OPEN:** 894 exact UI/mission/lifecycle routes remain, including roughly 300 menu/dialog helpers
+     authority-sensitive calls mislabeled as client presentation. Against the checked-in audit it
+     currently rejects 495 unique routes: 419 unclassified methods plus 76 unsafe presentation
+     classifications.
+  - **OPEN:** 495 exact UI/mission/lifecycle routes remain, including roughly 300 menu/dialog helpers
     that reach shared state and therefore require live command or mission-authority owners. This strict
     count, not the lower metadata-only count, is the completion baseline for subsequent increments.
 
@@ -531,8 +552,8 @@ rolls back canonical Fourberie state and created parties on failure, and returns
 ### P6 — Upstream nightly sync — LIVE DEPLOYED (2026-08-12)
 - [x] Audited upstream nightly PRs after the Friend Edition base and selectively backported
       nine final reviewed bugfixes: #2968, #2913, #2905, #2897, #2898, #2899, #2884,
-      #2855, and #2768. Bannerlord remains pinned to `v1.4.7`; upstream project/module
-      identity changes were not imported.
+      #2855, and #2768. That deployed batch remained pinned to `v1.4.7`; upstream
+      project/module identity changes were not imported into it.
 - [x] Added or imported regressions for party-screen inventory reset, trade-gold coalescing,
       troop-roster XP normalization, player-garrison protection, local settlement visibility,
       escort following, chat behavior/settings, invalid map-event parties, and clan-party
@@ -548,9 +569,9 @@ rolls back canonical Fourberie state and created parties on failure, and returns
 - [x] Matching Serilog 2.x server build deployed in place without changing the save identity.
       `friendallmods1` loaded successfully; release-pin verification, the complete deployment
       ledger, UDP 4200, and repeated server pulses are the live acceptance gates.
-- Deferred for separate reconciliation: #2931/#2912 overlap settlement authority work;
+- Deferred from that historical batch for separate reconciliation: #2931/#2912 overlap settlement authority work;
   #2941/#2773/#2863 overlap existing Friend Edition backports; #2867 overlaps custom auto-resolve;
-  feature/content PRs and upstream 1.4.8/nightly-identity changes remain out of scope.
+  feature/content PRs and upstream 1.4.8/nightly-identity changes were out of scope for that batch.
 
 ### P5 — Serilog hardening
 - [ ] Audit every bundled assembly; pin each to the Serilog its runtime needs

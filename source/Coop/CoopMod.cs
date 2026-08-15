@@ -472,6 +472,7 @@ namespace Coop
             Coop = new CoopartiveMultiplayerExperience(isServer, CrashDiagnostics.SetPhase);
 
             Updateables.Add(GameThread.Instance);
+            campaignStatsPublisher = CampaignStatsPublisher.CreateIfConfigured();
 
 #if DEBUG
             if (isAutoConnect)
@@ -554,8 +555,6 @@ namespace Coop
 
             if (gameStarterObject is CampaignGameStarter campaignGameStarter)
             {
-                if (campaignStatsPublisher == null)
-                    campaignStatsPublisher = CampaignStatsPublisher.CreateIfConfigured();
                 campaignGameStarter.AddBehavior(new PlayerPartyInteractionCampaignBehavior());
                 campaignGameStarter.AddBehavior(new CoopTournamentCampaignBehavior());
                 campaignGameStarter.AddBehavior(new SeparatismCampaignBehavior());
@@ -594,11 +593,6 @@ namespace Coop
         public override void OnGameEnd(Game game)
         {
             CrashDiagnostics.SetPhase("ending-game");
-            if (campaignStatsPublisher != null)
-            {
-                campaignStatsPublisher.Dispose();
-                campaignStatsPublisher = null;
-            }
             base.OnGameEnd(game);
 
             if (Coop.Running)
@@ -610,6 +604,8 @@ namespace Coop
         protected override void OnSubModuleUnloaded()
         {
             CrashDiagnostics.SetPhase("module-unloading");
+            campaignStatsPublisher?.Dispose();
+            campaignStatsPublisher = null;
 #if DEBUG
             liveTestControlServer?.Dispose();
             liveTestControlServer = null;

@@ -12,6 +12,46 @@ and did not adopt upstream's 1.4.8 bump. Future work is governed by the
 PR: https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/pull/14
 Branch: `25vid/fix-kingdom-tab-diplomacy-managers` (base: `development`)
 
+## Phase P — Auburn large battle + settlement ownership client crash — SHIPPED (2026-08-15)
+
+PR: https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/pull/18
+Branch: `25vid/fix-client-crashes-and-sync-floods` (base: `development`)
+
+- **Auburn:** the latest log ends abruptly while the client is mission host for a 3,375-vs-1,663 battle,
+  after 1,603 reinforcement events and 1,744 troop fieldings. The candidate ports approved upstream PR
+  #2997 and preserves Friend Edition's additive wire compatibility: the server sends one battle-size and
+  allocation generation across both side feeds; clients reject mixed generations, apportion the native
+  allocation exactly across owners, reserve player initial slots, and reconcile only unspent quotas after a
+  late ownership refresh.
+- **Settlement/Kingdom crash:** the wife's dump resolves against exact `1974e2994` assemblies to
+  `IssueManager.OnSettlementOwnerChanged`, called by the replicated settlement ownership dispatcher after
+  Morenia Castle changed hands. Clients now skip that server-owned issue mutation listener only. Server issue
+  processing, ownership replication, UI listeners, and the remaining campaign-event dispatch stay intact.
+- **Chipmunk/log flood:** the no-op AutoSync property-set guard implicated by the client logs is already on
+  `development` as `1ea627d1e`; this candidate inherits it. The older upstream tracking PR #2758 remains a
+  conflicting draft and is not imported wholesale.
+- **Upstream nightly easy win:** upstream PR #3019 is included with a stricter null-safe guard. A player can
+  promote a companion only when the conversation companion belongs to that player's own clan; another player's
+  companion (or unresolved clan context) is rejected before vanilla performs the promotion. Regression coverage
+  locks the same-clan, cross-clan, and unresolved-context cases.
+- **Verification:** affected projects build with zero errors. Direct xUnit execution passes 116 focused battle
+  E2Es, 2 issue-role tests, and 5 companion-promotion guard tests. `dotnet test` itself aborts before execution
+  because this machine's known vstest loopback transport cannot connect to testhost. Required workflow
+  `31868128258` passed the build, full unit/integration suite, and all eight E2E shards. PR #18 merged as
+  `d7d548fde`.
+- **Release:** workflow `31868351622` published stable and nightly client `2026.08.15.0604`; both feeds resolve
+  to independently verified ZIP SHA-256 `4d123ee90fe9558ab03a167d3a7d2cf1e5164434404f06a10aa3044accdd83dd`
+  and embed the exact merge with client Serilog 4.2. The matching Serilog-2.12 server pair uses core SHA-256
+  `dc2f41e565e2a7ab26a833404d0117baf4c6d36b7537c0f58617a553a5fd9205` and receipt SHA-256
+  `453e279242f9949127e65071752b7940c60591dfd6895940ea5969bb96710e63`.
+- **Same-save production proof:** the complete stopped save inventory was copied and hash-verified at
+  `/home/bishop/bannerlord-coop/server/_mod_backups/pre-d7d548fde-20260815T060833Z`. The configured
+  `friendallmods1` save (`af84317ae22fc001f70c697483061480130552c3f8e407bbcceebbe33e5a3128`)
+  and JSON sidecar (`dcce5fe63f27410f598bc1649bbfc2c40ce9b94abb8746ca97bf6d4d59682d9f`) still
+  match that backup byte-for-byte.
+  The host loaded Summer 9, 1104, verified the release pins and deployment ledger, reached `SERVING` on UDP
+  4200, emitted three observed pulses, and remained active with `NRestarts=0` and no fatal startup marker.
+
 ## Phase O — battle upkeep + siege result/village defense correction — SHIPPED (2026-08-14)
 
 - `Disabled` battle economy is party-scoped: a party currently in a battle pays no party wages and

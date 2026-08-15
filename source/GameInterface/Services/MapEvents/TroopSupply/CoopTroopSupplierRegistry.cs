@@ -15,8 +15,8 @@ public static class CoopTroopSupplierRegistry
 {
     private static readonly object Gate = new object();
     private static readonly Dictionary<string, CoopTroopSupplier> Suppliers = new Dictionary<string, CoopTroopSupplier>();
-    private static readonly Dictionary<string, (PartyReserve[] Reserve, int SideTotal, int PlayerParties)> Pending =
-        new Dictionary<string, (PartyReserve[], int, int)>();
+    private static readonly Dictionary<string, (PartyReserve[] Reserve, int SideTotal, int PlayerParties, long AllocationRevision, int BattleSize)> Pending =
+        new Dictionary<string, (PartyReserve[], int, int, long, int)>();
     private static readonly HashSet<string> AwaitingRefresh = new HashSet<string>();
 
     private static string Key(string mapEventId, BattleSideEnum side) => mapEventId + "|" + (int)side;
@@ -31,7 +31,8 @@ public static class CoopTroopSupplierRegistry
 
             if (Pending.TryGetValue(key, out var buffered))
             {
-                supplier.SetReserve(buffered.Reserve, buffered.SideTotal, buffered.PlayerParties);
+                supplier.SetReserve(buffered.Reserve, buffered.SideTotal, buffered.PlayerParties,
+                    buffered.BattleSize, buffered.AllocationRevision);
                 Pending.Remove(key);
             }
 
@@ -69,16 +70,18 @@ public static class CoopTroopSupplierRegistry
     /// <param name="sideTotalTroops">Every troop on this side across all owners; 0 means the server did not
     /// send one, in which case the supplier keeps sizing from what it owns.</param>
     public static IReadOnlyList<(string PartyId, int Supplied)> Feed(string mapEventId, BattleSideEnum side,
-        PartyReserve[] reserve, int sideTotalTroops = 0, int playerOwnedPartyCount = 0)
+        PartyReserve[] reserve, int sideTotalTroops = 0, int playerOwnedPartyCount = 0,
+        long allocationRevision = 0, int battleSize = 0)
     {
         lock (Gate)
         {
             var key = Key(mapEventId, side);
             AwaitingRefresh.Remove(key);
             if (Suppliers.TryGetValue(key, out var supplier))
-                return supplier.SetReserve(reserve, sideTotalTroops, playerOwnedPartyCount);
+                return supplier.SetReserve(reserve, sideTotalTroops, playerOwnedPartyCount, battleSize,
+                    allocationRevision);
 
-            Pending[key] = (reserve, sideTotalTroops, playerOwnedPartyCount); // latest wins
+            Pending[key] = (reserve, sideTotalTroops, playerOwnedPartyCount, allocationRevision, battleSize);
             return Array.Empty<(string, int)>();
         }
     }

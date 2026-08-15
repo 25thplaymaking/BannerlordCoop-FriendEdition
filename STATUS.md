@@ -22,6 +22,33 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > `676a42faef9a6a58afb2966c89e17bdfd30558dd4a7349c6c5fac85a78a083ff`.
 > Isolated-save boot and rendered multi-client checks remain promotion gates.
 > No stable feed, production server, or save changed.
+>
+> **2026-08-15 Auburn/settlement client crash correction — SHIPPED from source `d7d548fde`.**
+> Auburn's `CalradiaCoop-Logs-2026-08-15_06-29-56.zip` ended without a managed exception while this
+> client hosted a 5,038-troop battle and processed 1,603 reinforcement events. PR #18 ports the
+> approved upstream large-battle allocation correction (#2997): the server now supplies one authoritative
+> battle size and two-side allocation generation, clients apply only matching generations, player-owned
+> parties retain a guaranteed initial slot, and late ownership refreshes reconcile only unspent lifetime
+> quota. Friend Edition's additive reserve protocol remains compatible with older omitted fields.
+> `shareable.zip` contained the wife's actual dump; exact-build symbols resolve the null dereference to
+> `IssueManager.OnSettlementOwnerChanged` during the Morenia Castle ownership replay just before the
+> Kingdom screen crash. Clients now skip only that server-authoritative issue listener while the ownership
+> event still reaches UI and other replicated listeners; the server retains vanilla behavior. The safe upstream
+> nightly win #3019 also blocks promoting another player's companion and fails closed on unresolved clan
+> context; its five regressions pass. Larger upstream #2876/#2904 changes overlap Friend Edition's custom
+> clan/occupancy authority and remain deferred, while #3006 is specific to the incompatible `CoopNightly`
+> module identity. Required workflow `31868128258` passed the build, full unit/integration suite, and all eight
+> E2E shards. Focused direct-xUnit proof remains 116 battle E2Es, two issue-role tests, and five companion
+> guards; standard vstest remains unavailable locally because this machine's testhost loopback fails.
+> Workflow `31868351622` published stable and nightly client `2026.08.15.0604`; both independently download
+> as ZIP SHA-256 `4d123ee90fe9558ab03a167d3a7d2cf1e5164434404f06a10aa3044accdd83dd`, embed the exact merge,
+> and use client Serilog 4.2. The paired Serilog-2.12 server uses core SHA-256
+> `dc2f41e565e2a7ab26a833404d0117baf4c6d36b7537c0f58617a553a5fd9205` and receipt SHA-256
+> `453e279242f9949127e65071752b7940c60591dfd6895940ea5969bb96710e63`. It loaded the unchanged
+> `friendallmods1` files byte-for-byte (save `af84317ae22fc001f70c697483061480130552c3f8e407bbcceebbe33e5a3128`,
+> sidecar `dcce5fe63f27410f598bc1649bbfc2c40ce9b94abb8746ca97bf6d4d59682d9f`), reached `SERVING` on UDP
+> 4200 as Summer 9, 1104, emitted three observed pulses, and remained at `NRestarts=0`. Byte-verified
+> rollback snapshot: `/home/bishop/bannerlord-coop/server/_mod_backups/pre-d7d548fde-20260815T060833Z`.
 
 > **2026-08-14 battle upkeep + siege result/village defense correction — SHIPPED from source
 > `1974e2994`.** Merged PR #17. Required workflow `31833738722` passed build, unit tests, and

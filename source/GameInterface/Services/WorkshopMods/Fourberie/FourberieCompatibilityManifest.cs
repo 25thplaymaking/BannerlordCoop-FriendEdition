@@ -281,6 +281,7 @@ internal static class FourberieCompatibilityManifest
         }
 
         var methods = new Dictionary<FourberieMethodSpec, MethodInfo>();
+        var originals = new Dictionary<MethodInfo, FourberieMethodSpec>();
         foreach (var spec in Methods)
         {
             MethodInfo method;
@@ -300,7 +301,14 @@ internal static class FourberieCompatibilityManifest
                 return false;
             }
 
+            if (originals.TryGetValue(method, out var existing))
+            {
+                failure = $"duplicate audited Fourberie method {existing.Key} and {spec.Key}";
+                return false;
+            }
+
             methods.Add(spec, method);
+            originals.Add(method, spec);
         }
 
         resolved = methods;
@@ -941,7 +949,7 @@ internal static class FourberieCompatibilityManifest
             0x0600042C, 0x0600042D, 0x0600042F, 0x06000431, 0x06000434, 0x0600043A,
             0x06000437, 0x060008AC, 0x060008B9);
         AddTokens(FourberiePatchKind.ClientPresentation,
-            0x060003F2, 0x060003F7, 0x060003F9, 0x06000400, 0x06000401, 0x06000403,
+            0x060003F7, 0x060003F9, 0x06000400, 0x06000401, 0x06000403,
             0x06000405, 0x06000408, 0x0600040A, 0x0600040D, 0x06000410, 0x06000413,
             0x06000414, 0x06000415, 0x06000416, 0x06000419, 0x0600041A, 0x0600041C,
             0x0600041D, 0x0600041F, 0x06000420, 0x06000426, 0x06000428, 0x0600042A,

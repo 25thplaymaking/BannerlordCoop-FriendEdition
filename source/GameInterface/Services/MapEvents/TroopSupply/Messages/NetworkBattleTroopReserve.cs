@@ -63,8 +63,19 @@ public class NetworkBattleTroopReserve : IEvent
     [ProtoMember(6)]
     public readonly int PlayerOwnedPartyCount;
 
+    /// <summary>
+    /// Identifies the complete two-side snapshot this message belongs to. Both side messages in one refresh
+    /// carry the same value, so a client never reconciles one side from each of two consecutive refreshes.
+    /// </summary>
+    [ProtoMember(7)]
+    public readonly long AllocationRevision;
+
+    /// <summary>The server's battle-size setting for this battle, shared by every mission owner.</summary>
+    [ProtoMember(8)]
+    public readonly int BattleSize;
+
     public NetworkBattleTroopReserve(string mapEventId, int side, PartyReserve[] parties, bool flushRequested = false,
-        int sideTotalTroops = 0, int playerOwnedPartyCount = 0)
+        int sideTotalTroops = 0, int playerOwnedPartyCount = 0, long allocationRevision = 0, int battleSize = 0)
     {
         MapEventId = mapEventId;
         Side = side;
@@ -72,5 +83,7 @@ public class NetworkBattleTroopReserve : IEvent
         FlushRequested = flushRequested;
         SideTotalTroops = sideTotalTroops;
         PlayerOwnedPartyCount = playerOwnedPartyCount;
+        AllocationRevision = allocationRevision;
+        BattleSize = battleSize;
     }
 }

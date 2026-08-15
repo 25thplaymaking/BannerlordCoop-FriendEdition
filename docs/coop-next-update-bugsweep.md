@@ -10,6 +10,26 @@ Fork is pinned to game **1.4.7** — do NOT adopt upstream's 1.4.8 bump.
 PR: https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/pull/14
 Branch: `25vid/fix-kingdom-tab-diplomacy-managers` (base: `development`)
 
+## Phase P — Auburn large battle + settlement ownership client crash — VERIFIED DRAFT (2026-08-15)
+
+- **Auburn:** the latest log ends abruptly while the client is mission host for a 3,375-vs-1,663 battle,
+  after 1,603 reinforcement events and 1,744 troop fieldings. The candidate ports approved upstream PR
+  #2997 and preserves Friend Edition's additive wire compatibility: the server sends one battle-size and
+  allocation generation across both side feeds; clients reject mixed generations, apportion the native
+  allocation exactly across owners, reserve player initial slots, and reconcile only unspent quotas after a
+  late ownership refresh.
+- **Settlement/Kingdom crash:** the wife's dump resolves against exact `1974e2994` assemblies to
+  `IssueManager.OnSettlementOwnerChanged`, called by the replicated settlement ownership dispatcher after
+  Morenia Castle changed hands. Clients now skip that server-owned issue mutation listener only. Server issue
+  processing, ownership replication, UI listeners, and the remaining campaign-event dispatch stay intact.
+- **Chipmunk/log flood:** the no-op AutoSync property-set guard implicated by the client logs is already on
+  `development` as `1ea627d1e`; this candidate inherits it. The older upstream tracking PR #2758 remains a
+  conflicting draft and is not imported wholesale.
+- **Verification:** affected projects build with zero errors. Direct xUnit execution passes 116 focused battle
+  E2Es and 2 issue-role tests. `dotnet test` itself aborts before execution because this machine's known vstest
+  loopback transport cannot connect to testhost. This phase is not merged, packaged, or deployed; live
+  submission requires Bryce's explicit approval.
+
 ## Phase O — battle upkeep + siege result/village defense correction — SHIPPED (2026-08-14)
 
 - `Disabled` battle economy is party-scoped: a party currently in a battle pays no party wages and

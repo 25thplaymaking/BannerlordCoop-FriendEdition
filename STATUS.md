@@ -4,6 +4,22 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
+> **2026-08-15 Auburn/settlement client crash correction — VERIFIED DRAFT, NOT DEPLOYED.**
+> Auburn's `CalradiaCoop-Logs-2026-08-15_06-29-56.zip` ended without a managed exception while this
+> client hosted a 5,038-troop battle and processed 1,603 reinforcement events. The candidate ports the
+> approved upstream large-battle allocation correction (#2997): the server now supplies one authoritative
+> battle size and two-side allocation generation, clients apply only matching generations, player-owned
+> parties retain a guaranteed initial slot, and late ownership refreshes reconcile only unspent lifetime
+> quota. Friend Edition's additive reserve protocol remains compatible with older omitted fields.
+> `shareable.zip` contained the wife's actual dump; exact-build symbols resolve the null dereference to
+> `IssueManager.OnSettlementOwnerChanged` during the Morenia Castle ownership replay just before the
+> Kingdom screen crash. Clients now skip only that server-authoritative issue listener while the ownership
+> event still reaches UI and other replicated listeners; the server retains vanilla behavior. The E2E
+> dependency graph builds with zero errors, 116 focused battle E2Es pass, and both issue-role regressions
+> pass through the direct xUnit runner. The normal vstest transport remains unusable on this machine because
+> its testhost cannot connect over loopback. No client package was published, no live files were changed,
+> and the production server was not restarted; promotion requires Bryce's explicit approval.
+
 > **2026-08-14 battle upkeep + siege result/village defense correction — SHIPPED from source
 > `1974e2994`.** Merged PR #17. Required workflow `31833738722` passed build, unit tests, and
 > all eight E2E shards after full-diff review found no remaining Critical or Important issues.

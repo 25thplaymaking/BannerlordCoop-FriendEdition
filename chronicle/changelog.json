@@ -1,5 +1,16 @@
 [
   {
+    "version": "2026.08.15.2035",
+    "date": "2026-08-15",
+    "title": "One-click joining reaches the campaign again",
+    "highlights": [
+      "Launching from Calradia Co-op now proceeds from the main menu into the live campaign instead of leaving Join apparently frozen.",
+      "Fourberie's workshop consequence guard is installed only after the campaign exists, while its other 581 co-op authority guards remain active during startup.",
+      "A duplicate Fourberie guard entry that stopped the handshake has been removed and is now rejected by an automated manifest check.",
+      "Live verification reached the map on the existing friendallmods1 campaign with all ten Friend Edition modules and the server reporting the player online."
+    ]
+  },
+  {
     "version": "2026.08.15.1930",
     "date": "2026-08-15",
     "title": "Bannerlord 1.4.8 is live",

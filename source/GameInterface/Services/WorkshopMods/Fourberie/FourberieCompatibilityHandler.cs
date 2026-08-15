@@ -286,6 +286,14 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                             AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.FightClubAdmissionPostfix)),
                         FourberiePatchKind.DominanceCondition =>
                             AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.DominanceConditionPostfix)),
+                        FourberiePatchKind.StealthHit =>
+                            AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.StealthHitPostfix)),
+                        FourberiePatchKind.StealthAnswer =>
+                            AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.StealthAnswerPostfix)),
+                        FourberiePatchKind.StealthAgentRemoved =>
+                            AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.StealthAgentRemovedPostfix)),
+                        FourberiePatchKind.StealthAlarm =>
+                            AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.StealthAlarmPostfix)),
                         _ => null,
                     };
                     return (Original: pair.Value, Prefix: prefix, Postfix: postfix);
@@ -530,6 +538,42 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                 break;
             case FourberiePatchKind.DominanceCondition:
                 method = nameof(FourberieAuthorityPatches.DominanceConditionPrefix);
+                break;
+            case FourberiePatchKind.StealthMissionLocal:
+                method = nameof(FourberieAuthorityPatches.StealthMissionLocalPrefix);
+                break;
+            case FourberiePatchKind.StealthHit:
+                method = nameof(FourberieAuthorityPatches.StealthHitPrefix);
+                break;
+            case FourberiePatchKind.StealthMissionEnd:
+                method = nameof(FourberieAuthorityPatches.StealthMissionEndPrefix);
+                break;
+            case FourberiePatchKind.StealthMilitiaPayment:
+                method = nameof(FourberieAuthorityPatches.StealthMilitiaPaymentPrefix);
+                break;
+            case FourberiePatchKind.StealthMilitiaChoice:
+                method = nameof(FourberieAuthorityPatches.StealthMilitiaChoicePrefix);
+                break;
+            case FourberiePatchKind.StealthAbortContract:
+                method = nameof(FourberieAuthorityPatches.StealthAbortContractPrefix);
+                break;
+            case FourberiePatchKind.StealthAlertConsequence:
+                method = nameof(FourberieAuthorityPatches.StealthAlertConsequencePrefix);
+                break;
+            case FourberiePatchKind.StealthAnswer:
+                method = nameof(FourberieAuthorityPatches.StealthAnswerPrefix);
+                break;
+            case FourberiePatchKind.StealthAgentRemoved:
+                method = nameof(FourberieAuthorityPatches.StealthAgentRemovedPrefix);
+                break;
+            case FourberiePatchKind.StealthAlarm:
+                method = nameof(FourberieAuthorityPatches.StealthAlarmPrefix);
+                break;
+            case FourberiePatchKind.StealthScandalSuccess:
+                method = nameof(FourberieAuthorityPatches.StealthScandalSuccessPrefix);
+                break;
+            case FourberiePatchKind.StealthPrisonSuccess:
+                method = nameof(FourberieAuthorityPatches.StealthPrisonSuccessPrefix);
                 break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);

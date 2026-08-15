@@ -321,10 +321,17 @@ internal static class FourberieAuthorityPatches
     private static int banditRecruitmentMaximum;
     private sealed class FightClubBaseline { public int Fame; }
     private sealed class FightClubAdmission { public bool RandomWeapon; }
+    private sealed class StealthMissionState
+    {
+        public bool AlertSubmitted;
+        public readonly HashSet<string> WoundedHeroes = new HashSet<string>(StringComparer.Ordinal);
+    }
     private static readonly ConditionalWeakTable<object, FightClubBaseline> FightClubBaselines =
         new ConditionalWeakTable<object, FightClubBaseline>();
     private static readonly ConditionalWeakTable<object, FightClubAdmission> FightClubAdmissions =
         new ConditionalWeakTable<object, FightClubAdmission>();
+    private static readonly ConditionalWeakTable<object, StealthMissionState> StealthMissions =
+        new ConditionalWeakTable<object, StealthMissionState>();
 
     public static bool ServerOnlyPrefix() => ModInformation.IsServer;
 
@@ -1189,6 +1196,164 @@ internal static class FourberieAuthorityPatches
     {
         if (ModInformation.IsClient && !__result)
             SubmitBusiness(FourberieOperation.ClearDominanceConversation, 0);
+    }
+
+    public static bool StealthMissionLocalPrefix() => ModInformation.IsClient;
+
+    public static bool StealthHitPrefix() => ModInformation.IsClient;
+
+    public static void StealthHitPostfix(object __instance, Agent victim)
+    {
+        if (!ModInformation.IsClient || __instance == null || victim?.Character is not CharacterObject character ||
+            character.HeroObject is not Hero hero)
+            return;
+
+        FieldInfo victimsField = AccessTools.Field(__instance.GetType(), "_lordsHallVictims");
+        if (victimsField?.GetValue(__instance) is not IEnumerable victims ||
+            !victims.Cast<object>().Any(candidate => ReferenceEquals(candidate, hero)))
+            return;
+
+        StealthMissionState state = StealthMissions.GetOrCreateValue(__instance);
+        if (state.WoundedHeroes.Add(hero.StringId))
+            SubmitStealth(FourberieStealthEvent.LordWounded, hero);
+    }
+
+    public static bool StealthMissionEndPrefix(object __instance)
+    {
+        if (!ModInformation.IsClient) return false;
+        FourberieStealthEvent outcome = Agent.Main?.KillCount >= 1
+            ? FourberieStealthEvent.FinishMissionAlerted
+            : FourberieStealthEvent.FinishMission;
+        SubmitStealth(outcome);
+        if (__instance != null) StealthMissions.Remove(__instance);
+        return true;
+    }
+
+    public static bool StealthMilitiaPaymentPrefix(int option)
+    {
+        if (ModInformation.IsClient)
+        {
+            if (option == 1) SubmitStealth(FourberieStealthEvent.MilitiaFullPayment);
+            else if (option == 2) SubmitStealth(FourberieStealthEvent.MilitiaHalfPayment);
+        }
+        return false;
+    }
+
+    public static bool StealthMilitiaChoicePrefix(int option)
+    {
+        if (!ModInformation.IsClient) return false;
+        if (option != 1) return true;
+        if (!SubmitStealth(FourberieStealthEvent.GreedyMilitiaImmediate))
+        {
+            FourberieSafehouseTransferContext.ShowUnavailable();
+            return false;
+        }
+        Campaign.Current?.GameMenuManager?.SetNextMenu("village_greedysuccess");
+        try { Mission.Current?.EndMission(); }
+        catch { /* the authoritative consequence has already been submitted */ }
+        return false;
+    }
+
+    public static bool StealthAbortContractPrefix()
+    {
+        if (!ModInformation.IsClient) return false;
+        if (!SubmitStealth(FourberieStealthEvent.AbortContractForRansom))
+        {
+            FourberieSafehouseTransferContext.ShowUnavailable();
+            return false;
+        }
+
+        try { Mission.Current?.EndMission(); }
+        catch { /* the server transaction remains authoritative if local teardown already began */ }
+        GameMenu.SwitchToMenu("town_TimeToLeave");
+        return false;
+    }
+
+    public static bool StealthAlertConsequencePrefix()
+    {
+        if (ModInformation.IsClient) SubmitStealth(FourberieStealthEvent.AlertRaised);
+        return ModInformation.IsClient;
+    }
+
+    public static bool StealthAnswerPrefix() => ModInformation.IsClient;
+
+    public static void StealthAnswerPostfix(object __instance)
+    {
+        if (!ModInformation.IsClient || __instance == null) return;
+        if (AccessTools.Field(__instance.GetType(), "_dialogCheckOk")?.GetValue(__instance) is bool valid && !valid)
+            SubmitStealth(FourberieStealthEvent.AlertRaised);
+    }
+
+    public static bool StealthAgentRemovedPrefix() => ModInformation.IsClient;
+
+    public static void StealthAgentRemovedPostfix(
+        object __instance,
+        Agent affectedAgent,
+        Agent affectorAgent)
+    {
+        if (!ModInformation.IsClient || __instance == null || affectedAgent == null) return;
+        string location = CampaignMission.Current?.Location?.StringId ?? string.Empty;
+        if (affectedAgent.IsMainAgent)
+        {
+            FourberieStealthEvent failure = location switch
+            {
+                "lordshall" => FourberieStealthEvent.FailedLordHall,
+                "prison" => FourberieStealthEvent.FailedPrison,
+                "center" => FourberieStealthEvent.FailedTownCenter,
+                _ => FourberieStealthEvent.FailedVillage,
+            };
+            SubmitStealth(failure);
+            return;
+        }
+
+        if (affectorAgent?.IsMainAgent != true) return;
+        if (location == "lordshall") SubmitStealthAlertOnce(__instance);
+        if (location != "village_center" ||
+            !ReferenceEquals(AccessTools.Field(__instance.GetType(), "_militiaLeader")?.GetValue(__instance), affectedAgent))
+            return;
+        int report = ReadIntField(__instance.GetType(), __instance, "_reportval");
+        if (report == 2) SubmitStealth(FourberieStealthEvent.GreedyMilitiaAccepted);
+        else if (report == 3) SubmitStealth(FourberieStealthEvent.GreedyMilitiaRefused);
+    }
+
+    public static bool StealthAlarmPrefix() => ModInformation.IsClient;
+
+    public static void StealthAlarmPostfix(object __instance)
+    {
+        if (!ModInformation.IsClient || __instance == null) return;
+        if (AccessTools.Field(__instance.GetType(), "_isGuardsAlarm")?.GetValue(__instance) is bool alarmed && alarmed)
+            SubmitStealthAlertOnce(__instance);
+    }
+
+    public static bool StealthScandalSuccessPrefix()
+    {
+        if (ModInformation.IsClient) SubmitStealth(FourberieStealthEvent.ScandalRecovered);
+        return ModInformation.IsClient;
+    }
+
+    public static bool StealthPrisonSuccessPrefix()
+    {
+        if (ModInformation.IsClient) SubmitStealth(FourberieStealthEvent.PrisonBreakCompleted);
+        return ModInformation.IsClient;
+    }
+
+    private static void SubmitStealthAlertOnce(object instance)
+    {
+        StealthMissionState state = StealthMissions.GetOrCreateValue(instance);
+        if (state.AlertSubmitted) return;
+        state.AlertSubmitted = SubmitStealth(FourberieStealthEvent.AlertRaised);
+    }
+
+    private static bool SubmitStealth(FourberieStealthEvent stealthEvent, Hero target = null)
+    {
+        Settlement settlement = Settlement.CurrentSettlement;
+        return settlement != null && FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+            FourberieOperation.CommitStealthEvent,
+            settlement,
+            target,
+            null,
+            (int)stealthEvent,
+            Array.Empty<FourberieLocalTroopSelection>())) == true;
     }
 
     private static int ReadCrimeValue(int key)

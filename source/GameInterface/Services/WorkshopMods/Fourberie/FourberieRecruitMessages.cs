@@ -73,6 +73,27 @@ internal enum FourberieOperation
     RefreshFightClubMenu = 62,
     EnsureSchemeRoomDefaults = 63,
     ClearDominanceConversation = 64,
+    CommitStealthEvent = 65,
+}
+
+internal enum FourberieStealthEvent
+{
+    AlertRaised = 1,
+    MilitiaFullPayment = 2,
+    MilitiaHalfPayment = 3,
+    AbortContractForRansom = 4,
+    LordWounded = 5,
+    FinishMission = 6,
+    ScandalRecovered = 7,
+    PrisonBreakCompleted = 8,
+    GreedyMilitiaAccepted = 9,
+    GreedyMilitiaRefused = 10,
+    FailedLordHall = 11,
+    FailedPrison = 12,
+    FailedTownCenter = 13,
+    FailedVillage = 14,
+    FinishMissionAlerted = 15,
+    GreedyMilitiaImmediate = 16,
 }
 
 internal enum FourberieOperationStatus
@@ -423,6 +444,13 @@ internal static class FourberieOperationProtocol
                 request.IntValue == 0 && request.Troops.Length == 0,
             FourberieOperation.EnsureSchemeRoomDefaults or FourberieOperation.ClearDominanceConversation =>
                 EmptyContext(request) && request.IntValue == 0,
+            FourberieOperation.CommitStealthEvent =>
+                !string.IsNullOrEmpty(request.SettlementId) &&
+                string.IsNullOrEmpty(request.SecondaryTargetId) && request.Troops.Length == 0 &&
+                IsStealthEvent(request.IntValue) &&
+                (StealthEventRequiresTarget(request.IntValue)
+                    ? !string.IsNullOrEmpty(request.TargetId)
+                    : string.IsNullOrEmpty(request.TargetId)),
             _ => false,
         };
     }
@@ -492,4 +520,10 @@ internal static class FourberieOperationProtocol
 
     private static bool IsCorruptionLevel(int value) =>
         value == 1 || value == 2 || value == 3 || value == 10;
+
+    internal static bool IsStealthEvent(int value) =>
+        Enum.IsDefined(typeof(FourberieStealthEvent), value);
+
+    internal static bool StealthEventRequiresTarget(int value) =>
+        value == (int)FourberieStealthEvent.LordWounded;
 }

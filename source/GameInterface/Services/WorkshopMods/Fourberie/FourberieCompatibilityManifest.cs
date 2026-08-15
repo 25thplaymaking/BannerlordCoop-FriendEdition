@@ -80,6 +80,18 @@ internal enum FourberiePatchKind
     AlleyClear,
     SchemeRoomOpen,
     DominanceCondition,
+    StealthMissionLocal,
+    StealthHit,
+    StealthMissionEnd,
+    StealthMilitiaPayment,
+    StealthMilitiaChoice,
+    StealthAbortContract,
+    StealthAlertConsequence,
+    StealthAnswer,
+    StealthAgentRemoved,
+    StealthAlarm,
+    StealthScandalSuccess,
+    StealthPrisonSuccess,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -741,6 +753,18 @@ internal static class FourberieCompatibilityManifest
         AddTokens(FourberiePatchKind.AlleyClear, 0x060005FF);
         AddTokens(FourberiePatchKind.SchemeRoomOpen, 0x060007B7, 0x060007B8, 0x060007B9);
         AddTokens(FourberiePatchKind.DominanceCondition, 0x06000314);
+        AddTokens(FourberiePatchKind.StealthMissionLocal, 0x06000504, 0x06000528);
+        AddTokens(FourberiePatchKind.StealthHit, 0x060004FD);
+        AddTokens(FourberiePatchKind.StealthMissionEnd, 0x06000503);
+        AddTokens(FourberiePatchKind.StealthMilitiaPayment, 0x0600050C);
+        AddTokens(FourberiePatchKind.StealthMilitiaChoice, 0x0600050D);
+        AddTokens(FourberiePatchKind.StealthAbortContract, 0x0600050F);
+        AddTokens(FourberiePatchKind.StealthAlertConsequence, 0x06000510);
+        AddTokens(FourberiePatchKind.StealthAnswer, 0x06000511);
+        AddTokens(FourberiePatchKind.StealthAgentRemoved, 0x0600052A);
+        AddTokens(FourberiePatchKind.StealthAlarm, 0x0600052E);
+        AddTokens(FourberiePatchKind.StealthScandalSuccess, 0x0600092A);
+        AddTokens(FourberiePatchKind.StealthPrisonSuccess, 0x0600092D);
         AddReturning("Fourberie.FourbFightClubController", "OnEndMissionRequest",
             "TaleWorlds.Library.InquiryData", FourberiePatchKind.FightClubOutcome, "System.Boolean&");
         Add("Fourberie.FourbFightClubBehavior", "PitFightFameLoss",
@@ -806,7 +830,7 @@ internal static class FourberieCompatibilityManifest
             0x06000471, 0x06000472, 0x060004F9, 0x060004FA, 0x060004FB, 0x060004FC,
             0x060004FE, 0x060004FF, 0x06000500, 0x06000501, 0x06000502, 0x06000505,
             0x06000506, 0x06000507, 0x06000508, 0x06000509, 0x0600050A, 0x0600050B,
-            0x0600050D, 0x0600050E, 0x06000513, 0x06000514, 0x06000515, 0x06000516,
+            0x0600050E, 0x06000513, 0x06000514, 0x06000515, 0x06000516,
             0x06000517, 0x06000518, 0x06000519, 0x0600051A, 0x0600051B, 0x0600051C,
             0x0600051D, 0x0600051E, 0x0600051F, 0x06000520, 0x06000521, 0x06000522,
             0x06000524, 0x06000525, 0x06000527, 0x0600052B, 0x0600052C, 0x0600052F,

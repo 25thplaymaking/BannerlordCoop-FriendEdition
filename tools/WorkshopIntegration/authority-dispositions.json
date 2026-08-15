@@ -8489,7 +8489,7 @@
         "0x06000471", "0x06000472", "0x060004F9", "0x060004FA", "0x060004FB", "0x060004FC",
         "0x060004FE", "0x060004FF", "0x06000500", "0x06000501", "0x06000502", "0x06000505",
         "0x06000506", "0x06000507", "0x06000508", "0x06000509", "0x0600050A", "0x0600050B",
-        "0x0600050D", "0x0600050E", "0x06000513", "0x06000514", "0x06000515", "0x06000516",
+        "0x0600050E", "0x06000513", "0x06000514", "0x06000515", "0x06000516",
         "0x06000517", "0x06000518", "0x06000519", "0x0600051A", "0x0600051B", "0x0600051C",
         "0x0600051D", "0x0600051E", "0x0600051F", "0x06000520", "0x06000521", "0x06000522",
         "0x06000524", "0x06000525", "0x06000527", "0x0600052B", "0x0600052C", "0x0600052F",
@@ -8675,6 +8675,32 @@
       "capability": "FightClubLifecycle",
       "tests": [
         "FourberieFightClubOutcomeTests.LifecycleProtocol_PinsAdmissionEnrollmentPatronStableAndRecruitment"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": ["0x06000504", "0x06000528"],
+      "disposition": "ClientPresentation",
+      "owner": "FourberieAuthorityPatches.StealthMissionLocalPrefix",
+      "capability": "StealthMissionLocalSimulation",
+      "tests": [
+        "FourberieStealthAuthorityTests.ExactStealthSurface_SeparatesLocalSimulationFromHostConsequences"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": [
+        "0x060004FD", "0x06000503", "0x0600050C", "0x0600050D", "0x0600050F", "0x06000510",
+        "0x06000511", "0x0600052A", "0x0600052E", "0x0600092A", "0x0600092D"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "FourberieOperationExecutor.ApplyStealthEvent",
+      "capability": "StealthMissionConsequences",
+      "tests": [
+        "FourberieStealthAuthorityTests.EveryStealthEvent_HasOneBoundedAuthenticatedRequestShape",
+        "FourberieStealthAuthorityTests.ExactStealthSurface_SeparatesLocalSimulationFromHostConsequences"
       ]
     }
   ]

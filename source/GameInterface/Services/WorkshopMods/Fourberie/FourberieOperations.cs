@@ -99,6 +99,8 @@ internal sealed class FourberieOperationExecutor
     private readonly Assembly assembly;
     private readonly IObjectManager objectManager;
     private readonly Dictionary<string, GrudgeQuote> grudgeQuotes = new Dictionary<string, GrudgeQuote>(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<string>> stealthVictims =
+        new Dictionary<string, List<string>>(StringComparer.Ordinal);
 
     public FourberieOperationExecutor(Assembly assembly, IObjectManager objectManager)
     {
@@ -228,6 +230,9 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.ClearDominanceConversation:
                     ApplyPresentationState(request.Operation);
                     break;
+                case FourberieOperation.CommitStealthEvent:
+                    ApplyStealthEvent(actor, actorParty, request);
+                    break;
                 case FourberieOperation.EnableContractOffers:
                 case FourberieOperation.DisableContractOffers:
                 case FourberieOperation.AbortContract:
@@ -354,7 +359,11 @@ internal sealed class FourberieOperationExecutor
         }
     }
 
-    public void Reset() => grudgeQuotes.Clear();
+    public void Reset()
+    {
+        grudgeQuotes.Clear();
+        stealthVictims.Clear();
+    }
 
     private void ApplyPresentationState(FourberieOperation operation)
     {
@@ -373,6 +382,213 @@ internal sealed class FourberieOperationExecutor
 
         throw new InvalidOperationException("operation is not a presentation-state transaction");
     }
+
+    private void ApplyStealthEvent(
+        Hero actor,
+        MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        if (!TryResolveCurrentSettlement(actorParty, request.SettlementId, out Settlement settlement))
+            throw new InvalidOperationException("the stealth event is not in the controller's current settlement");
+
+        var stealthEvent = (FourberieStealthEvent)request.IntValue;
+        IDictionary crime = GetDictionary("_crimeValue");
+        IDictionary heroes = GetDictionary("_stringHeroIdDico");
+        string actorId = actor.StringId;
+
+        using (new AllowedThread())
+        using (new BarterPlayerContext(actor, actorParty))
+        {
+            switch (stealthEvent)
+            {
+                case FourberieStealthEvent.AlertRaised:
+                    SetStealthAlert(settlement);
+                    return;
+                case FourberieStealthEvent.MilitiaFullPayment:
+                case FourberieStealthEvent.MilitiaHalfPayment:
+                    if (settlement.Village == null)
+                        throw new InvalidOperationException("militia payment requires the current village");
+                    int payment = 3900 + (int)settlement.Village.Hearth;
+                    if (stealthEvent == FourberieStealthEvent.MilitiaHalfPayment) payment /= 2;
+                    GiveGoldAction.ApplyBetweenCharacters(actor, null, payment, false);
+                    return;
+                case FourberieStealthEvent.AbortContractForRansom:
+                    ApplyStealthContractAbort(actor, settlement, crime, heroes);
+                    return;
+                case FourberieStealthEvent.LordWounded:
+                    ApplyStealthLordWounded(actor, settlement, request.TargetId, crime, actorId);
+                    return;
+                case FourberieStealthEvent.FinishMission:
+                    ResolveStealthVictims(actorId);
+                    return;
+                case FourberieStealthEvent.FinishMissionAlerted:
+                    SetStealthAlert(settlement);
+                    ResolveStealthVictims(actorId);
+                    return;
+                case FourberieStealthEvent.ScandalRecovered:
+                    SetStealthAlert(settlement);
+                    crime[116] = 0;
+                    return;
+                case FourberieStealthEvent.PrisonBreakCompleted:
+                    SetStealthAlert(settlement);
+                    crime[113] = 0;
+                    crime[98] = 1;
+                    actor.AddSkillXp(DefaultSkills.Roguery, 1000f);
+                    actor.AddSkillXp(DefaultSkills.Athletics, 1000f);
+                    return;
+                case FourberieStealthEvent.GreedyMilitiaAccepted:
+                    RequiredMethod(BehaviorTypeName, "AftermathGreedy", 1).Invoke(null, new object[] { 2 });
+                    return;
+                case FourberieStealthEvent.GreedyMilitiaRefused:
+                    RequiredMethod(BehaviorTypeName, "AftermathGreedy", 1).Invoke(null, new object[] { 3 });
+                    return;
+                case FourberieStealthEvent.GreedyMilitiaImmediate:
+                    RequiredMethod(BehaviorTypeName, "AftermathGreedy", 1).Invoke(null, new object[] { 1 });
+                    return;
+                case FourberieStealthEvent.FailedLordHall:
+                case FourberieStealthEvent.FailedPrison:
+                case FourberieStealthEvent.FailedTownCenter:
+                case FourberieStealthEvent.FailedVillage:
+                    ApplyStealthFailure(actor, settlement, stealthEvent, crime, actorId);
+                    return;
+                default:
+                    throw new InvalidOperationException("unknown stealth event");
+            }
+        }
+    }
+
+    private void ApplyStealthContractAbort(Hero actor, Settlement settlement, IDictionary crime, IDictionary heroes)
+    {
+        if (!crime.Contains(201) || heroes?["contractTarget"] is not string targetId ||
+            !objectManager.TryGetObject(targetId, out Hero target) || target == null ||
+            heroes["contractGiver"] is not string giverId ||
+            !objectManager.TryGetObject(giverId, out Hero giver) || giver == null || !giver.IsAlive)
+            throw new InvalidOperationException("the negotiated stealth contract is no longer active");
+
+        float reward = Convert.ToInt32(crime[201]);
+        reward *= target.GetTraitLevel(DefaultTraits.Generosity) switch
+        {
+            < 0 => 0.9f,
+            0 => 1.1f,
+            1 => 1.2f,
+            2 => 1.3f,
+            _ => 1f,
+        };
+        GiveGoldAction.ApplyBetweenCharacters(null, actor, Math.Max(0, (int)reward), false);
+        RequiredMethod("Fourberie.FourbContractBehavior", "ContractAborted", 2)
+            .Invoke(null, new object[] { true, 10 });
+        SetStealthAlert(settlement);
+    }
+
+    private void ApplyStealthLordWounded(
+        Hero actor,
+        Settlement settlement,
+        string targetId,
+        IDictionary crime,
+        string actorId)
+    {
+        if (!objectManager.TryGetObject(targetId, out Hero target) || target == null || target.Clan == null ||
+            target.CurrentSettlement != settlement ||
+            !target.CanDie((KillCharacterAction.KillCharacterActionDetail)1))
+            throw new InvalidOperationException("the reported stealth target is not an eligible lord in this settlement");
+
+        if (!stealthVictims.TryGetValue(actorId, out List<string> victims))
+        {
+            victims = new List<string>();
+            stealthVictims.Add(actorId, victims);
+        }
+        if (victims.Contains(targetId, StringComparer.Ordinal)) return;
+
+        RequiredMethod("Fourberie.FourbContractBehavior", "ContractComplete", 2)
+            .Invoke(null, new object[] { target.Clan, 0 });
+        actor.AddSkillXp(DefaultSkills.Roguery, 2000f);
+        crime[1150] = 1;
+        SetStealthAlert(settlement);
+        victims.Add(targetId);
+    }
+
+    private void ResolveStealthVictims(string actorId)
+    {
+        if (!stealthVictims.TryGetValue(actorId, out List<string> victims)) return;
+        for (int index = 0; index < victims.Count; index++)
+        {
+            if (!objectManager.TryGetObject(victims[index], out Hero target) || target == null || !target.IsAlive)
+                continue;
+            if (index > 0 && MBRandom.RandomInt(6) == 0) continue;
+            target.AddDeathMark(null, (KillCharacterAction.KillCharacterActionDetail)1);
+            KillCharacterAction.ApplyByMurder(target, null, true);
+        }
+        stealthVictims.Remove(actorId);
+    }
+
+    private void ApplyStealthFailure(
+        Hero actor,
+        Settlement settlement,
+        FourberieStealthEvent stealthEvent,
+        IDictionary crime,
+        string actorId)
+    {
+        if (stealthEvent != FourberieStealthEvent.FailedVillage)
+        {
+            float severity = 100f;
+            float crimeRating = 50f;
+            int relation = -20;
+            int grudge = 10;
+            if (stealthEvent == FourberieStealthEvent.FailedLordHall)
+            {
+                severity *= 2f;
+                relation *= 3;
+                crimeRating *= 3f;
+                grudge = 50;
+            }
+            else if (stealthEvent == FourberieStealthEvent.FailedPrison)
+            {
+                relation *= 2;
+                crimeRating *= 2f;
+                grudge = 25;
+            }
+
+            if (settlement.OwnerClan != null)
+                InvokeClanGrudge(settlement.OwnerClan, grudge);
+
+            if (stealthVictims.TryGetValue(actorId, out List<string> victims))
+            {
+                severity += 25f * victims.Count;
+                relation -= 5 * victims.Count;
+                crimeRating += 20f * victims.Count;
+                foreach (string victimId in victims)
+                {
+                    if (!objectManager.TryGetObject(victimId, out Hero victim) || victim == null) continue;
+                    if (victim.Clan != null) InvokeClanGrudge(victim.Clan, 120);
+                    InvokePlayerConsequences(victim, true, 200f, -50, 70f);
+                }
+            }
+
+            if (settlement.Owner != null)
+                InvokePlayerConsequences(settlement.Owner, false, severity, relation, crimeRating);
+        }
+
+        SetStealthAlert(settlement);
+        crime[98] = 2;
+    }
+
+    private void InvokeClanGrudge(Clan clan, int impact) =>
+        RequiredMethod(BehaviorTypeName, "ClanGrudgeChange", 3).Invoke(
+            null,
+            new object[] { clan.StringId, impact, clan.EncyclopediaLinkWithName.ToString() });
+
+    private void InvokePlayerConsequences(
+        Hero target,
+        bool murder,
+        float severity,
+        int relation,
+        float crimeRating) =>
+        RequiredMethod(BehaviorTypeName, "PlayerActionsConsequences", 6).Invoke(
+            null,
+            new object[] { target, "Stealth", murder, severity, relation, crimeRating });
+
+    private void SetStealthAlert(Settlement settlement) =>
+        GetDictionary("_InfiltrationAlertTiming")[settlement.StringId] = CampaignTime.Now;
 
     private void ApplyInsideMissionOutcome(
         Hero actor,

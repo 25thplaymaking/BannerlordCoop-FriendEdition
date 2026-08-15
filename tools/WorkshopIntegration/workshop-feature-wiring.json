@@ -166,10 +166,10 @@
         {
           "id": "stealth-and-inside-mission-outcomes",
           "playerFunction": "Run stealth, prison, assassination, pickpocket, robbery, brawl, alley, larceny, and safehouse missions while committing gold, crime, relation, death, contract, and grudge outcomes on the server.",
-          "status": "ImplementationRequired",
-          "owner": "FourberieMissionOutcomeHandler",
+          "status": "VerifiedWired",
+          "owner": "FourberieOperationExecutor authenticated inside-mission and stealth transactions",
           "routes": ["mission admission", "mission-local simulation", "authenticated outcome command", "server consequence transaction", "teardown"],
-          "tests": ["FourberieMissionOutcomeTests"]
+          "tests": ["FourberieMissionOutcomeTests.ExactAftermathCallback_MapsToOneTypedServerOperation", "FourberieStealthAuthorityTests.EveryStealthEvent_HasOneBoundedAuthenticatedRequestShape", "FourberieStealthAuthorityTests.ExactStealthSurface_SeparatesLocalSimulationFromHostConsequences"]
         },
         {
           "id": "fight-club",

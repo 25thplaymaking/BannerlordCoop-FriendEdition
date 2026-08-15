@@ -99,6 +99,7 @@ internal enum FourberiePatchKind
     BanditPreparation,
     LegacyCallback,
     ConversationConsequence,
+    MissionLocal,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -761,6 +762,13 @@ internal static class FourberieCompatibilityManifest
         AddTokens(FourberiePatchKind.SchemeRoomOpen, 0x060007B7, 0x060007B8, 0x060007B9);
         AddTokens(FourberiePatchKind.ConversationConsequence,
             0x060007D7, 0x060007DC, 0x060007DE, 0x060007E1, 0x060007E2, 0x060007E3);
+        AddTokens(FourberiePatchKind.MissionLocal,
+            0x060003E2, 0x06000464, 0x0600046A, 0x060008C8,
+            0x06000487, 0x0600048C, 0x060004CC, 0x060004DD);
+        AddTokens(FourberiePatchKind.ClientPresentation,
+            0x06000342, 0x0600035F, 0x060003C2, 0x060003CF,
+            0x06000624, 0x06000625, 0x060004C7,
+            0x060007B2, 0x060007BD, 0x060007BE);
         AddTokens(FourberiePatchKind.DominanceCondition, 0x06000314);
         AddTokens(FourberiePatchKind.StealthMissionLocal, 0x06000504, 0x06000528);
         AddTokens(FourberiePatchKind.StealthHit, 0x060004FD);

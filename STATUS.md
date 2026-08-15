@@ -4,6 +4,24 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
+> **2026-08-15 Bannerlord v1.4.8 migration — FINALIZATION REVIEW COMPLETE;
+> OFFLINE CANDIDATE HELD.** The exact 10-module payload, hashes, source build,
+> and server pair remain reproducible, with War Sails absent. The latest
+> Fourberie pass assigned the remaining mission-local plumbing, rollback-protected
+> menu/model presentation, and 14 source-owned internal helpers. The regenerated
+> ledger is now **13,682 classified of 13,729 required, 47 unclassified, zero
+> blocked**; the feature ledger remains **28 of 30 release-ready**. The remaining
+> two families are `banditry-and-submenus` and `criminal-ui-and-models`.
+> A stricter transitive gameplay check correctly remains red because 272
+> Fourberie presentation/callback records still require executable owner proof;
+> the smaller 47 count must not be presented as functional closure. The focused
+> test assembly builds with zero errors, but this workstation's VSTest host failed
+> to connect within 90 seconds, so no new runtime-test pass is claimed for this
+> increment. The exact callback list and completion order are recorded in the
+> migration guide and PR. The repository-prescribed in-process xUnit runner
+> passes the focused finalization class 3/3 (the normal VSTest host still cannot
+> connect on this workstation). No stable feed, production server, or save changed.
+>
 > **2026-08-15 Bannerlord v1.4.8 migration — OFFLINE CANDIDATE ASSEMBLED, NOT
 > RELEASED OR DEPLOYED.** Friend Edition now carries the `v1.4.8`
 > source/Workshop target plus a repository-specific
@@ -460,10 +478,11 @@ rolls back canonical Fourberie state and created parties on failure, and returns
   14. `OnMissionBehaviorInitialize` currently preserves the mod's required peer-local setup, but its
      mission callbacks remain open until their authoritative/controller ownership is proven end to end.
   15. The `v1.4.8` migration regenerated this surface from Fourberie `v1.4.7.6`.
-     The joined exact ledger now records 420 unclassified Fourberie candidates and zero blocked;
-     it supersedes this milestone's stale 419 metadata/495 presentation-filter split.
-  - **OPEN:** 420 exact UI/mission/lifecycle routes remain. They require live command or
-    mission-authority owners; the shrink-only exact-token ratchet is the current completion baseline.
+     The finalization review now records 47 unclassified Fourberie candidates and zero blocked;
+     the stricter transitive gameplay gate rejects 272 records and supersedes the stale
+     419/420 metadata and 495 presentation-filter snapshots.
+  - **OPEN:** 47 exact consequence methods and 272 transitive gameplay records remain. They require
+    executable command or mission-authority owners; the exact-token ratchet is not release proof.
 
 ### Playable session (DONE 2026-08-10)
 - [x] Map-nav NRE fixed and narrowed (`MapNavigationReadinessPatches` suppresses only the transient

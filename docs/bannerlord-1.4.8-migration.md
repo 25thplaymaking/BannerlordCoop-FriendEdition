@@ -21,6 +21,42 @@ Changing `<GameVersion>` and the Workshop tag makes a source build identify as
 requires the binary, authority, packaging, same-save, and rendered-client gates
 in this guide.
 
+### Finalization review — 2026-08-15
+
+The last bounded review reconciled the branch, draft PR, exact Fourberie
+`v1.4.7.6` DLL/decompilation, generated authority evidence, feature ledger,
+payload receipts, and dedicated-server pair. It did not infer completion from a
+green compile or from classifications alone.
+
+- Exact authority totals are now 13,682 classified of 13,729 required, 47
+  unclassified, zero blocked. This supersedes the earlier 420-open snapshot.
+- The 47 remaining methods are concrete consequences, not an abstract backlog:
+  four developer console mutations; guard bribe, assassination/pickpocket,
+  recruit, prison/escape/heal, dominance/move-in, fortune/rivalry/gather/promote,
+  safehouse encounter, caravan/tribute/extortion/riot/larceny/sabotage, and
+  workshop-conversion callbacks.
+- The stricter gameplay validator reports 272 Fourberie records because it also
+  rejects presentation methods whose transitive IL reaches authority-sensitive
+  callbacks. This is the release number that matters until every such callback
+  has an executable host owner and focused test.
+- No generic closure serializer or client-trusted callback replay was added.
+  Those approaches would reduce the audit count while allowing forged costs,
+  targets, or campaign outcomes. Completion must use exact, bounded commands
+  with host-side recomputation, following the already-finished Fourberie
+  enterprise, safehouse, fight-club, stealth, bandit-operation, and gang-dialogue
+  patterns.
+- Production/test code builds with zero errors and the repository-prescribed
+  in-process xUnit runner passes `FourberieFinalizationTests` 3/3. The normal
+  VSTest host still cannot connect on this workstation, matching the documented
+  loopback limitation; CI remains the gate of record once the draft is ready.
+- Minimum completion order: (1) mission results and safehouse encounter, (2)
+  recruit/gather/fortune/workshop selections, (3) dominance and kingdom-choice
+  prompts, (4) caravan/tribute/extortion/riot/sabotage outcomes, then (5) remove
+  the Fourberie ratchet and pass release authority validation.
+
+The candidate therefore remains a draft and must not be promoted. This is an
+evidence-backed hold, not a claim that the remaining features are safely wired.
+
 ### Verified offline candidate — 2026-08-15
 
 The migration inputs and client payload have now been assembled and verified
@@ -54,16 +90,17 @@ offline. The machine-readable source of truth is
   `8b93ba231e9f822bf0a77b4c3688544b713ca0c1e45f78e0d1a8b634fbdf6c2f`.
   This proves binary pairing, not a successful server boot.
 - The regenerated authority ledger contains 41,050 methods and 13,729 required
-  candidates: 13,309 classified, 420 unclassified, and zero blocked. Every exact
+  candidates: 13,682 classified, 47 unclassified, and zero blocked. Every exact
   candidate for DismembermentPlus, Diplomacy, Improved Garrisons, Player
   Settlement, Separatism, and Unblockable Thrust passes its current structural
-  validator. All 420 open routes are Fourberie mission/menu/behavior/VM work.
+  validator. The strict Fourberie gameplay proof remains red on 272 records,
+  including the 47 still-unclassified consequence methods.
 - `Modules/NavalDLC` is absent and War Sails remains disabled in the staged
   configuration and payload.
 
 This is an offline migration candidate, not a release. The paired Friend
 Edition server has not booted on an isolated save or passed rendered multi-client
-acceptance, or touched the live server/save. The 420 Fourberie routes and
+acceptance, or touched the live server/save. The remaining Fourberie routes and
 Player Settlement's deliberately blocked non-empty construction path remain
 functional-completion work even though the `v1.4.8` compilation and package
 compatibility checks pass.
@@ -160,11 +197,11 @@ added back incidentally.
 ## Function-piping completion gate
 
 Compatibility is not the finish line. The regenerated exact-payload ledger now
-provides one result: 41,050 methods, 13,729 authority candidates, 13,309
-classified, 420 unclassified, and zero blocked. The earlier 419-route metadata
-and 495-route strict reports are superseded; their disagreement came from stale
-Fourberie payload/token data and a separate presentation filter. All 420 current
-open candidates are in Fourberie. Stable requires zero active `Blocked`, `Unsupported`,
+provides one result: 41,050 methods, 13,729 authority candidates, 13,682
+classified, 47 unclassified, and zero blocked. The transitive gameplay gate
+still rejects 272 Fourberie records. The earlier 419/420-route metadata and
+495-route strict reports are superseded; their disagreement came from stale
+payload/token data and different presentation filters. Stable requires zero active `Blocked`, `Unsupported`,
 `GuardedFeatureBlocked`, `NotAllowed`, placeholder, unsafe-presentation, or
 unclassified dispositions.
 
@@ -180,7 +217,7 @@ two-client convergence tests exist.
 | Harmony, ButterLib, UIExtenderEx, MCM | Framework lifecycle and client/server split exist | Re-inventory exact binaries; prove one Harmony owner, headless UI isolation, teardown, server-owned settings, and every loader/method-shape gate. Framework helpers do not receive fake server commands. |
 | Improved Garrisons | All 723 candidates are recorded closed and management routes exist | Re-run the exact gate and exercise all 29 management/template/mobile-party families, background ticks, sidecar import, hostile encounters, rollback, restart, and late join. Fix any route that only passes structurally but fails the visible option. |
 | DismembermentPlus | All 17 candidates close against `v2.0.8.8`; its public shape remains 286 methods/19 types | Render and re-prove the accepted-blow cosmetic route, dedupe, mounted deaths, ragdolls, teardown, and absence of damage replay on the new game build. |
-| Fourberie | Forty-seven operation families are routed; the exact `v1.4.7.6` ledger has 420 open routes | Close all UI/mission/lifecycle routes, including menu/dialog helpers that reach shared state, every mission callback and consequence, all fourteen model outcomes, canonical writes, persistence, and save/restart. Zero-open is required even if an option was previously hidden. |
+| Fourberie | Core operation families are routed; 47 methods remain unclassified and 272 records fail the transitive gameplay gate | Close the exact mission/result, selection, prompt, scenario, and workshop-conversion owners; then prove persistence and save/restart. Zero-open is required even if an option was previously hidden. |
 | Diplomacy | Donate/fief/messenger/peace/war/alliance/pact operations and server callbacks are routed | Close the complete exact ledger; prove all 66 settings, four managers, sixteen UI types, agreement/exhaustion/cooldown callbacks, Kingdom UI lifecycle, persistence, and the single-owner boundary where Separatism owns rebellion mutation. |
 | Unblockable Thrust | All four candidates are closed | Re-run exact-shape proof and the foot/mounted, shield, parry, chamber, remote-agent, malformed-config, and accepted-blow integration matrix. |
 | Player Settlement | Exact runtime and empty-state lifecycle load; non-empty construction is blocked | Implement server-owned build/rebuild/overwrite and the complete dynamic settlement/town/village/building graph. Prove stable IDs, payment rollback, placement rules, ordered registration, persistence, restart, late join, map visuals, armies, sieges, capture, and safe disable/migration rules. |
@@ -227,7 +264,8 @@ This isolates a base-game regression from a mod binary regression.
 1. Regenerate the function inventory and authority evidence from the exact
    frozen ten-module payload set.
 2. Join every manifest method to one disposition, named owner, route, and test;
-   use the regenerated 420-route Fourberie result as the only current ratchet.
+   use the regenerated 47-route Fourberie result as the current metadata ratchet
+   and the 272-record transitive gate as the functional release boundary.
 3. Reject stale owner/test references and any classification whose transitive IL
    still reaches shared mutation from a client-presentation path.
 4. Complete the mod slices in dependency order: framework lifecycle, Improved
@@ -276,7 +314,7 @@ Adopt Fourberie `v1.4.7.6` manifest `1598945672157391038` as an explicit second
 payload increment. Regenerate its full function inventory, dispositions,
 persisted-schema proof, behavior/model contracts, Harmony isolation, commands,
 menus, missions, and same-save gates from the new bytes. This migration is not
-complete while any of the exact ledger's 420 open routes or a strict-gate
+complete while any of the exact ledger's 47 open routes or a strict-gate
 rejection remains.
 
 ### 6. Regenerate release-owned artifacts

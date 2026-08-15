@@ -634,6 +634,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.ConversationConsequence:
                 method = nameof(FourberieAuthorityPatches.ConversationConsequencePrefix);
                 break;
+            case FourberiePatchKind.MissionLocal:
+                method = nameof(FourberieAuthorityPatches.MissionLocalPrefix);
+                break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
                 break;

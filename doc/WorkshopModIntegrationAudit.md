@@ -54,9 +54,11 @@ The 2 stable GameInterface failures are `WorkshopCompatibilityManifestTests.Prot
 Beyond that pair, the Workshop test suites are otherwise green and non-flaky as of this pass. A prior investigation of the same suites found genuine run-to-run instability (failure counts varying 6→8→7 in GameInterface's WorkshopMods namespace and 1→0→2, always inside `CombatModCompatibilityTests`, in E2E's) traced to a real HarmonyLib defect: `Harmony.GetPatchInfo` persists patches by serializing them into `HarmonySharedState` and re-deserializing on every read, and that round trip has been observed, under GC pressure from a busy test process, to intermittently reconstruct the wrong `MethodInfo` for a patch's `PatchMethod` — confirmed by hash mismatch against the original object, not merely reference inequality. Every Workshop module's Harmony isolation guard (ImprovedGarrisons, Fourberie, Diplomacy, Player Settlement, the shared Frameworks cohort, and Missions' CombatModCompatibilityGuard) now retries its patch-info read via a shared `HarmonyPatchInfoStabilizer` before failing closed, plus a module initializer disabling HarmonyLib's legacy BinaryFormatter serialization path. Verified stable at the time: 20/20 consecutive runs of the GameInterface namespace and 5/5 of the E2E namespace, identical failure counts every time — measured on the pre-merge suites (233/63), and re-confirmed at 3/3 each on the merged counts above. Note the BinaryFormatter initializer is a test-only mitigation: HarmonyLib reads that AppContext switch only in its net5.0-and-newer builds, and the net472 `0Harmony.dll` the game loads has no such path, so the stabilizer's retry budget is the sole production mitigation and is sized accordingly.
 
 The exact Fourberie `v1.4.7.6` payload is now installed, fingerprinted, and in
-the `v1.4.8` candidate. Publication remains blocked by its 420 open authority
-routes plus the rendered/same-save release gates; acquiring the newer bytes did
-not make the still-unadapted mission/menu behavior safe for co-op.
+the `v1.4.8` candidate. The 2026-08-15 finalization review supersedes the former
+420-open snapshot: the basic audit now has 47 unclassified methods, while the
+stricter transitive gameplay gate rejects 272 Fourberie records. Publication
+remains blocked by those executable-owner proofs plus rendered/same-save gates;
+acquiring newer bytes did not make unadapted consequences safe for co-op.
 
 ## Evidence and scope
 

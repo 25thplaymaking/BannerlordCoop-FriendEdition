@@ -183,17 +183,17 @@
           "id": "banditry-and-submenus",
           "playerFunction": "Run bandit diplomacy, war-dog, fleet/horde, robbery, extortion, tribute, caravan ambush, sabotage, riot, and insurance outcomes.",
           "status": "ImplementationRequired",
-          "owner": "FourberieBanditryOutcomeHandler",
-          "routes": ["bandit encounter result", "submenu consequence command", "party/quest/stance transaction"],
-          "tests": ["FourberieBanditryOutcomeTests"]
+          "owner": "FourberieOperationExecutor.ApplyBanditEvent (completed operations; scenario consequences remain open)",
+          "routes": ["authenticated bandit operation", "canonical snapshot", "open scenario consequence routes"],
+          "tests": ["FourberieBanditAuthorityTests.ExactBanditConsequences_MapToExecutableOwners"]
         },
         {
           "id": "criminal-ui-and-models",
           "playerFunction": "Render the Criminal VM, menus, hints, filters, scores, and Fourberie models without allowing refresh/filter code to replace canonical state.",
           "status": "ImplementationRequired",
-          "owner": "FourberiePresentationAuthority",
-          "routes": ["canonical snapshot", "presentation snapshot/restore", "model composition"],
-          "tests": ["FourberiePresentationAuthorityTests"]
+          "owner": "FourberieAuthorityPatches.ClientPresentationPrefix/ClientPresentationPostfix (remaining selection consequences open)",
+          "routes": ["canonical snapshot", "presentation snapshot/restore", "open selection consequence routes"],
+          "tests": ["FourberiePresentationAuthorityTests.ExactCanonicalPresentationCallbacks_HaveTypedRoutes"]
         }
       ]
     },

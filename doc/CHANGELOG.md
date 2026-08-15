@@ -1,5 +1,23 @@
 # Friend Edition Changelog
 
+## 2026-08-15 — Fourberie finalization review (draft PR; release still held)
+
+The final bounded `v1.4.8` review classified Fourberie's remaining local mission
+plumbing, rollback-protected menu/model presentation, and 14 internal helpers
+already reached through source-derived Coop transactions. The exact authority
+ledger moved from 13,309/13,729 with 420 unclassified to 13,682/13,729 with 47
+unclassified and zero blocked. Focused structural coverage was added for these
+classifications, production/test code builds with zero errors, and the focused
+in-process xUnit class passes 3/3.
+
+This is not a functional-completion claim. The transitive gameplay validator
+still rejects 272 Fourberie records and the feature ledger remains 28/30; the
+remaining consequence callbacks require bounded host commands and focused
+tests. A proposed generic callback/closure bridge was rejected because it would
+trust client-captured costs and outcomes. The exact remaining families and
+execution order are now recorded in `docs/bannerlord-1.4.8-migration.md`. War
+Sails remains absent, and no package was published or server/save changed.
+
 ## 2026-08-15 — Bannerlord v1.4.8 offline migration candidate (release held)
 
 Friend Edition now identifies Bannerlord `v1.4.8` as its source/build and Steam

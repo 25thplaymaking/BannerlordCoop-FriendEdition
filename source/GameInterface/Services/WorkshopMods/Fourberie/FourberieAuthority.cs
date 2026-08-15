@@ -443,6 +443,8 @@ internal static class FourberieAuthorityPatches
 
     public static bool ServerOnlyPrefix() => ModInformation.IsServer;
 
+    public static bool MissionLocalPrefix() => ModInformation.IsClient;
+
     public static bool ClientPresentationPrefix(ref FourberiePresentationState __state)
     {
         if (!ModInformation.IsClient) return false;

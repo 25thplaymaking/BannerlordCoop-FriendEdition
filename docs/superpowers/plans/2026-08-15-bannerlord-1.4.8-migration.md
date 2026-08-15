@@ -16,9 +16,12 @@ reintroducing RBM, losing campaign state, weakening exact-binary/authority
 controls, or mixing game/mod upgrades into one unverifiable cut.
 
 Current milestone: exact official/Workshop inputs acquired, client candidate
-packaged, and structural gates green. The candidate is intentionally held for
-420 Fourberie routes, Player Settlement construction, server pairing, and
-rendered/same-save acceptance. See the runbook's verified evidence section.
+packaged, and offline server pair built. The finalization review reduced the
+basic Fourberie audit to 47 unclassified methods, but the transitive gameplay
+gate still rejects 272 records and the feature ledger remains 28/30. The
+candidate is intentionally held for those exact consequence owners, rendered
+and same-save acceptance, and live promotion. See the runbook's finalization
+review for the bounded completion order.
 
 ## Baseline decisions
 
@@ -144,7 +147,8 @@ success count is inferred from an older payload or a weaker validator.
   version `v1.4.7.6`.
 - [x] Reconcile the new assembly hashes, metadata tokens, persisted fields,
   dependencies, and Harmony targets before carrying any prior disposition.
-- [ ] Close every strict-gate rejection, including the roughly 300 menu/dialog
+- [ ] Close every strict-gate rejection (272 in the current transitive gate,
+  including 47 unclassified consequence methods), including menu/dialog
   helpers that transitively reach shared state.
 - [ ] Assign explicit authority/controller ownership to all mission callbacks,
   end-of-mission consequences, fourteen model outcomes, canonical writes,
@@ -185,8 +189,8 @@ candidate, missing target, unsupported role, or unresolved save-shape change.
   release-paired `DedicatedServer.Core.dll` locations.
 - [x] Run Workshop builder validate-only, dry-run, fixture tests, dependency
   closure, and source re-hash.
-- [ ] Pass zero-open release authority validation (currently held by 420 exact
-  Fourberie routes).
+- [ ] Pass zero-open release authority validation (currently held by 47
+  unclassified and 272 transitive Fourberie gameplay records).
 - [ ] Build the client archive and server pair; verify every staged hash, receipt,
   load order, module role, and excluded duplicate.
 - [x] Confirm no War Sails module or DLL entered the client payload or acquired

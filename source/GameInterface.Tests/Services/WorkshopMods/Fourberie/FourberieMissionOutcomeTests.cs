@@ -73,6 +73,18 @@ public sealed class FourberieMissionOutcomeTests
     }
 
     [Fact]
+    public void ExactAlleyDecision_UsesAuthenticatedCoopAlleyRoutes()
+    {
+        Assert.Contains(FourberieCompatibilityManifest.Methods, spec =>
+            spec.MetadataToken == 0x060005FD && spec.Kind == FourberiePatchKind.AlleyAcquisition);
+        Assert.Contains(FourberieCompatibilityManifest.Methods, spec =>
+            spec.MetadataToken == 0x060005FF && spec.Kind == FourberiePatchKind.AlleyClear);
+        Assert.DoesNotContain(FourberieCompatibilityManifest.Methods, spec =>
+            (spec.MetadataToken == 0x060005FD || spec.MetadataToken == 0x060005FF) &&
+            spec.Kind == FourberiePatchKind.ClientPresentation);
+    }
+
+    [Fact]
     public void ExactMissionSurface_IsClientLocalAndExcludesPersistentAftermaths()
     {
         FourberieMethodSpec[] local = FourberieCompatibilityManifest.Methods

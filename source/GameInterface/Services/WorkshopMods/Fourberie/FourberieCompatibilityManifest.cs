@@ -76,6 +76,8 @@ internal enum FourberiePatchKind
     FightClubStableRecruitment,
     FightClubMenuRefresh,
     FightClubPatronPayment,
+    AlleyAcquisition,
+    AlleyClear,
     MissionInitialization,
     SeparatismLoyaltyComposition,
 
@@ -733,6 +735,8 @@ internal static class FourberieCompatibilityManifest
             FourberiePatchKind.InsideMissionOutcome, "System.Boolean");
         Add("Fourberie.InsideMissionsHelper", "AfterMathsEncounterAlley",
             FourberiePatchKind.InsideMissionOutcome, "System.Boolean");
+        AddTokens(FourberiePatchKind.AlleyAcquisition, 0x060005FD);
+        AddTokens(FourberiePatchKind.AlleyClear, 0x060005FF);
         AddReturning("Fourberie.FourbFightClubController", "OnEndMissionRequest",
             "TaleWorlds.Library.InquiryData", FourberiePatchKind.FightClubOutcome, "System.Boolean&");
         Add("Fourberie.FourbFightClubBehavior", "PitFightFameLoss",

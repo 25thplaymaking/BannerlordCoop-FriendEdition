@@ -1,6 +1,8 @@
 using Common;
+using Common.Messaging;
 using Common.Util;
 using GameInterface.Configuration;
+using GameInterface.Services.Alleys.Messages;
 using HarmonyLib;
 using System;
 using System.Collections;
@@ -20,6 +22,7 @@ using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.ObjectSystem;
 
 namespace GameInterface.Services.WorkshopMods.Fourberie;
 
@@ -1137,6 +1140,40 @@ internal static class FourberieAuthorityPatches
         if (settlement != null)
             SubmitSettlement(FourberieOperation.RefreshFightClubMenu, settlement);
         return true;
+    }
+
+    public static bool AlleyAcquisitionPrefix(object[] __args)
+    {
+        if (!ModInformation.IsClient) return false;
+
+        Alley alley = CampaignMission.Current?.LastVisitedAlley;
+        CharacterObject selected = SelectedInquiryIdentifier<CharacterObject>(__args);
+        Hero owner = Hero.MainHero;
+        Hero overseer = selected?.HeroObject;
+        CharacterObject gangster = MBObjectManager.Instance?.GetObject<CharacterObject>("gangster_1");
+        if (alley == null || owner == null || overseer == null || gangster == null)
+        {
+            FourberieSafehouseTransferContext.ShowUnavailable();
+            return false;
+        }
+
+        TroopRoster garrison = TroopRoster.CreateDummyTroopRoster();
+        garrison.AddToCounts(selected, 1, false, 0, 0, true, -1);
+        garrison.AddToCounts(gangster, 5, false, 0, 0, true, -1);
+        InformationManager.HideInquiry();
+        MessageBroker.Instance.Publish(alley, new AlleyAcquiredRequested(alley, owner, overseer, garrison));
+        return false;
+    }
+
+    public static bool AlleyClearPrefix()
+    {
+        if (ModInformation.IsClient)
+        {
+            Alley alley = CampaignMission.Current?.LastVisitedAlley;
+            if (alley != null) MessageBroker.Instance.Publish(alley, new AlleyClearedRequested(alley));
+            else FourberieSafehouseTransferContext.ShowUnavailable();
+        }
+        return false;
     }
 
     private static int ReadCrimeValue(int key)

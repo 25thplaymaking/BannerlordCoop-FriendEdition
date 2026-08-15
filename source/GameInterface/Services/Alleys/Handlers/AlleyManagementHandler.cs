@@ -6,12 +6,14 @@ using GameInterface.Services.Alleys.Interfaces;
 using GameInterface.Services.Alleys.Messages;
 using GameInterface.Services.Heroes.Extensions;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.Players;
 using GameInterface.Services.TroopRosters.Data;
 using Serilog;
 using System;
 using System.Collections.Generic;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
+using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
 
 namespace GameInterface.Services.Alleys.Handlers;
@@ -33,27 +35,32 @@ internal class AlleyManagementHandler : IHandler
     private readonly INetwork network;
     private readonly ISessionAlleyPlayerDataInterface sessionInterface;
     private readonly IAlleyCampaignBehaviorInterface behaviorInterface;
+    private readonly IPlayerManager playerManager;
 
     public AlleyManagementHandler(
         IMessageBroker messageBroker,
         IObjectManager objectManager,
         INetwork network,
         ISessionAlleyPlayerDataInterface sessionInterface,
-        IAlleyCampaignBehaviorInterface behaviorInterface)
+        IAlleyCampaignBehaviorInterface behaviorInterface,
+        IPlayerManager playerManager)
     {
         this.messageBroker = messageBroker;
         this.objectManager = objectManager;
         this.network = network;
         this.sessionInterface = sessionInterface;
         this.behaviorInterface = behaviorInterface;
+        this.playerManager = playerManager;
 
         messageBroker.Subscribe<AlleyAcquiredRequested>(Handle_AlleyAcquiredRequested);
+        messageBroker.Subscribe<AlleyClearedRequested>(Handle_AlleyClearedRequested);
         messageBroker.Subscribe<AbandonAlleyRequested>(Handle_AbandonAlleyRequested);
         messageBroker.Subscribe<ChangeAlleyOverseerRequested>(Handle_ChangeAlleyOverseerRequested);
         messageBroker.Subscribe<SetAlleyGarrisonRequested>(Handle_SetAlleyGarrisonRequested);
         messageBroker.Subscribe<RecruitAlleyTroopsRequested>(Handle_RecruitAlleyTroopsRequested);
 
         messageBroker.Subscribe<RequestAcquireAlley>(Handle_RequestAcquireAlley);
+        messageBroker.Subscribe<RequestClearAlley>(Handle_RequestClearAlley);
         messageBroker.Subscribe<RequestAbandonAlley>(Handle_RequestAbandonAlley);
         messageBroker.Subscribe<RequestChangeAlleyOverseer>(Handle_RequestChangeAlleyOverseer);
         messageBroker.Subscribe<RequestSetAlleyGarrison>(Handle_RequestSetAlleyGarrison);
@@ -66,12 +73,14 @@ internal class AlleyManagementHandler : IHandler
     public void Dispose()
     {
         messageBroker.Unsubscribe<AlleyAcquiredRequested>(Handle_AlleyAcquiredRequested);
+        messageBroker.Unsubscribe<AlleyClearedRequested>(Handle_AlleyClearedRequested);
         messageBroker.Unsubscribe<AbandonAlleyRequested>(Handle_AbandonAlleyRequested);
         messageBroker.Unsubscribe<ChangeAlleyOverseerRequested>(Handle_ChangeAlleyOverseerRequested);
         messageBroker.Unsubscribe<SetAlleyGarrisonRequested>(Handle_SetAlleyGarrisonRequested);
         messageBroker.Unsubscribe<RecruitAlleyTroopsRequested>(Handle_RecruitAlleyTroopsRequested);
 
         messageBroker.Unsubscribe<RequestAcquireAlley>(Handle_RequestAcquireAlley);
+        messageBroker.Unsubscribe<RequestClearAlley>(Handle_RequestClearAlley);
         messageBroker.Unsubscribe<RequestAbandonAlley>(Handle_RequestAbandonAlley);
         messageBroker.Unsubscribe<RequestChangeAlleyOverseer>(Handle_RequestChangeAlleyOverseer);
         messageBroker.Unsubscribe<RequestSetAlleyGarrison>(Handle_RequestSetAlleyGarrison);
@@ -91,6 +100,13 @@ internal class AlleyManagementHandler : IHandler
         if (!objectManager.TryGetIdWithLogging(payload.What.Overseer, out var overseerId)) return;
 
         network.SendAll(new RequestAcquireAlley(alleyId, ownerId, overseerId, AlleyGarrisonData.ToData(payload.What.Garrison, objectManager)));
+    }
+
+    private void Handle_AlleyClearedRequested(MessagePayload<AlleyClearedRequested> payload)
+    {
+        if (ModInformation.IsServer) return;
+        if (objectManager.TryGetIdWithLogging(payload.What.Alley, out var alleyId))
+            network.SendAll(new RequestClearAlley(alleyId));
     }
 
     private void Handle_AbandonAlleyRequested(MessagePayload<AbandonAlleyRequested> payload)
@@ -134,6 +150,14 @@ internal class AlleyManagementHandler : IHandler
     {
         if (ModInformation.IsClient) return;
 
+        if (payload.Who is not LiteNetLib.NetPeer peer ||
+            !playerManager.TryGetPlayer(peer, out var player) ||
+            !string.Equals(player.HeroId, payload.What.OwnerId, StringComparison.Ordinal))
+        {
+            Logger.Warning("Rejected unauthenticated alley acquisition request");
+            return;
+        }
+
         var data = payload.What;
         GameThread.RunSafe(() =>
         {
@@ -141,7 +165,39 @@ internal class AlleyManagementHandler : IHandler
             if (!objectManager.TryGetObjectWithLogging<Hero>(data.OwnerId, out var owner)) return;
             if (!objectManager.TryGetObjectWithLogging<Hero>(data.OverseerId, out var overseer)) return;
 
+            if (!objectManager.TryGetObjectWithLogging<MobileParty>(player.MobilePartyId, out var party) ||
+                party.CurrentSettlement != alley.Settlement || owner.PartyBelongedTo != party ||
+                owner.Clan == null || overseer.Clan != owner.Clan || overseer == owner ||
+                alley.Owner?.IsGangLeader != true || alley.Settlement == null)
+            {
+                Logger.Warning("Rejected alley acquisition outside the authenticated player's current settlement");
+                return;
+            }
+
             var garrison = data.Garrison ?? Array.Empty<TroopRosterElementData>();
+            int minimum = Campaign.Current?.Models?.AlleyModel?.MinimumTroopCountInPlayerOwnedAlley ?? 5;
+            int total = 0;
+            int overseers = 0;
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var element in garrison)
+            {
+                if (string.IsNullOrWhiteSpace(element.CharacterId) ||
+                    !ids.Add(element.CharacterId) || element.Number <= 0 || element.Number > 50 ||
+                    element.WoundedNumber < 0 || element.WoundedNumber > element.Number || element.Xp < 0 ||
+                    !objectManager.TryGetObject<CharacterObject>(element.CharacterId, out var character) ||
+                    character == null || (character.IsHero && character.HeroObject != overseer))
+                {
+                    Logger.Warning("Rejected malformed alley acquisition garrison");
+                    return;
+                }
+                total = checked(total + element.Number);
+                if (character.HeroObject == overseer) overseers += element.Number;
+            }
+            if (overseers != 1 || total < minimum + 1 || total > 50)
+            {
+                Logger.Warning("Rejected alley acquisition garrison outside the allowed size or overseer shape");
+                return;
+            }
 
             // The take-over is authoritative: the alley is owned by the acquiring player (owner) and
             // run by the chosen clan member (overseer). The garrison + overseer are stored, the overseer
@@ -155,6 +211,25 @@ internal class AlleyManagementHandler : IHandler
 
             if (sessionInterface.TryGetManagementData(data.AlleyId, out var stored))
                 BroadcastManagementUpdate(data.AlleyId, stored);
+        });
+    }
+
+    private void Handle_RequestClearAlley(MessagePayload<RequestClearAlley> payload)
+    {
+        if (ModInformation.IsClient || payload.Who is not LiteNetLib.NetPeer peer ||
+            !playerManager.TryGetPlayer(peer, out var player))
+            return;
+
+        GameThread.RunSafe(() =>
+        {
+            if (!objectManager.TryGetObjectWithLogging<Alley>(payload.What.AlleyId, out var alley) ||
+                !objectManager.TryGetObjectWithLogging<MobileParty>(player.MobilePartyId, out var party) ||
+                party.CurrentSettlement != alley.Settlement || alley.Owner?.IsGangLeader != true)
+                return;
+
+            alley.SetOwner(null);
+            sessionInterface.RemoveManagementData(payload.What.AlleyId);
+            network.SendAll(new NetworkAlleyManagementRemoved(payload.What.AlleyId));
         });
     }
 

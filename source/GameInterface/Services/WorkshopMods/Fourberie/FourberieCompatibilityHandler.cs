@@ -517,6 +517,12 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             case FourberiePatchKind.FightClubPatronPayment:
                 method = nameof(FourberieAuthorityPatches.FightClubPatronPaymentPrefix);
                 break;
+            case FourberiePatchKind.AlleyAcquisition:
+                method = nameof(FourberieAuthorityPatches.AlleyAcquisitionPrefix);
+                break;
+            case FourberiePatchKind.AlleyClear:
+                method = nameof(FourberieAuthorityPatches.AlleyClearPrefix);
+                break;
             case FourberiePatchKind.MissionInitialization:
                 method = nameof(FourberieAuthorityPatches.MissionInitializationPrefix);
                 break;

@@ -8520,6 +8520,17 @@
     {
       "moduleId": "Fourberie",
       "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": ["0x060005FD"],
+      "disposition": "ServerCommand",
+      "owner": "FourberieAuthorityPatches.AlleyAcquisitionPrefix -> AlleyManagementHandler",
+      "capability": "AlleyAcquisition",
+      "tests": [
+        "FourberieMissionOutcomeTests.ExactAlleyDecision_UsesAuthenticatedCoopAlleyRoutes"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
       "metadataTokens": ["0x0600042E"],
       "disposition": "ServerCommand",
       "owner": "FourberieFightClubAuthority",

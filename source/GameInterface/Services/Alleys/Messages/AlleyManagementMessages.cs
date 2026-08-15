@@ -82,6 +82,13 @@ public readonly struct AlleyAcquiredRequested : IEvent
     }
 }
 
+/// <summary>Player won a local alley fight and chose to leave the defeated alley empty.</summary>
+public readonly struct AlleyClearedRequested : IEvent
+{
+    public readonly Alley Alley;
+    public AlleyClearedRequested(Alley alley) { Alley = alley; }
+}
+
 // --- Networked client -> server requests ---
 
 [ProtoContract(SkipConstructor = true)]
@@ -102,6 +109,14 @@ public readonly struct RequestAcquireAlley : ICommand
         OverseerId = overseerId;
         Garrison = garrison;
     }
+}
+
+[ProtoContract(SkipConstructor = true)]
+public readonly struct RequestClearAlley : ICommand
+{
+    [ProtoMember(1)]
+    public readonly string AlleyId;
+    public RequestClearAlley(string alleyId) { AlleyId = alleyId; }
 }
 
 [ProtoContract(SkipConstructor = true)]

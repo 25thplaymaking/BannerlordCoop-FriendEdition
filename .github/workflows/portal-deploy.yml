@@ -19,11 +19,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      PORTAL_GITHUB_TOKEN: ${{ secrets.PORTAL_GITHUB_TOKEN }}
-      PORTAL_PUBLISH_TOKEN: ${{ secrets.PORTAL_PUBLISH_TOKEN }}
     defaults:
       run:
         working-directory: services/coop-portal
@@ -40,45 +35,53 @@ jobs:
       - run: npm run types -- --check
       - run: npm run check
       - run: npm test
-      - run: npx wrangler deploy --dry-run
 
       - name: Verify deployment credentials
         shell: bash
+        env:
+          PORTAL_SERVER_HOST: ${{ secrets.PORTAL_SERVER_HOST }}
+          PORTAL_SERVER_USER: ${{ secrets.PORTAL_SERVER_USER }}
+          PORTAL_SERVER_SSH_KEY: ${{ secrets.PORTAL_SERVER_SSH_KEY }}
+          PORTAL_SERVER_HOST_KEY: ${{ secrets.PORTAL_SERVER_HOST_KEY }}
         run: |
           set -eu
-          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'CLOUDFLARE_API_TOKEN is not configured' >&2; exit 1; }
-          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'CLOUDFLARE_ACCOUNT_ID is not configured' >&2; exit 1; }
-          test -n "$PORTAL_GITHUB_TOKEN" || { echo 'PORTAL_GITHUB_TOKEN is not configured' >&2; exit 1; }
-          test -n "$PORTAL_PUBLISH_TOKEN" || { echo 'PORTAL_PUBLISH_TOKEN is not configured' >&2; exit 1; }
+          test -n "$PORTAL_SERVER_HOST"
+          test -n "$PORTAL_SERVER_USER"
+          test -n "$PORTAL_SERVER_SSH_KEY"
+          test -n "$PORTAL_SERVER_HOST_KEY"
 
-      - name: Deploy code and provision KV
-        run: npx wrangler deploy
-
-      - name: Install Worker secrets without logging values
+      - name: Deploy portal service
         shell: bash
+        env:
+          PORTAL_SERVER_HOST: ${{ secrets.PORTAL_SERVER_HOST }}
+          PORTAL_SERVER_USER: ${{ secrets.PORTAL_SERVER_USER }}
+          PORTAL_SERVER_SSH_KEY: ${{ secrets.PORTAL_SERVER_SSH_KEY }}
+          PORTAL_SERVER_HOST_KEY: ${{ secrets.PORTAL_SERVER_HOST_KEY }}
         run: |
           set -eu
-          node -e "require('fs').writeFileSync(process.env.RUNNER_TEMP + '/portal-secrets.json', JSON.stringify({GITHUB_TOKEN:process.env.PORTAL_GITHUB_TOKEN,PUBLISH_TOKEN:process.env.PORTAL_PUBLISH_TOKEN}))"
-          npx wrangler secret bulk "$RUNNER_TEMP/portal-secrets.json"
-          rm -f "$RUNNER_TEMP/portal-secrets.json"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$PORTAL_SERVER_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$PORTAL_SERVER_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+          tar --exclude=node_modules --exclude=.wrangler -czf "$RUNNER_TEMP/portal.tgz" .
+          scp "$RUNNER_TEMP/portal.tgz" "$PORTAL_SERVER_USER@$PORTAL_SERVER_HOST:bannerlord-coop/portal/releases/$GITHUB_SHA.tgz"
+          ssh "$PORTAL_SERVER_USER@$PORTAL_SERVER_HOST" \
+            "set -eu; release=\$HOME/bannerlord-coop/portal/releases/$GITHUB_SHA; mkdir -p \"\$release\"; tar -xzf \$HOME/bannerlord-coop/portal/releases/$GITHUB_SHA.tgz -C \"\$release\"; ln -sfn \"\$release\" \$HOME/bannerlord-coop/portal/current; systemctl --user restart calradia-coop-portal.service; curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:4211/health"
 
       - name: Publish portal discovery document
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          PORTAL_URL: https://calradia-coop.frontir.solutions
         run: |
           set -eu
-          output=$(npx wrangler deploy 2>&1)
-          printf '%s\n' "$output"
-          portal_url=$(printf '%s\n' "$output" | grep -Eo 'https://[^[:space:]]+\.workers\.dev' | tail -1)
-          test -n "$portal_url"
           mkdir -p "$RUNNER_TEMP/portal-release"
-          printf '{"portalUrl":"%s","source":"%s"}\n' "$portal_url" "$GITHUB_SHA" \
+          printf '{"portalUrl":"%s","source":"%s"}\n' "$PORTAL_URL" "$GITHUB_SHA" \
             > "$RUNNER_TEMP/portal-release/portal.json"
           if ! gh release view portal-config >/dev/null 2>&1; then
             gh release create portal-config --title 'Calradia Co-op portal discovery' \
               --notes 'Rolling launcher discovery document for the campaign portal.'
           fi
           gh release upload portal-config "$RUNNER_TEMP/portal-release/portal.json" --clobber
-          printf 'Portal: %s\n' "$portal_url" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Portal: %s\n' "$PORTAL_URL" >> "$GITHUB_STEP_SUMMARY"

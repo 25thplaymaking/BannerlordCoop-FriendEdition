@@ -169,7 +169,7 @@ public sealed class ArmoryUpdateCoordinatorTests
     }
 
     [Fact]
-    public void CompletedPreparation_EnablesLaunchButtonAfterOperation()
+    public void CompletedPreparation_WithoutMatchingGameVersion_KeepsLaunchBlocked()
     {
         RunOnSta(() =>
         {
@@ -189,8 +189,8 @@ public sealed class ArmoryUpdateCoordinatorTests
 
             window.CompletePreparation(current);
 
-            Assert.True(window.JoinButton.IsEnabled);
-            Assert.Equal("MARCH TO WAR", window.JoinButton.Content);
+            Assert.False(window.JoinButton.IsEnabled);
+            Assert.Equal("SELECT BANNERLORD 1.4.8", window.JoinButton.Content);
             window.Close();
         });
     }

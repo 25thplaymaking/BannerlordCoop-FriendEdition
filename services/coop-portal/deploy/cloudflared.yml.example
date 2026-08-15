@@ -1,0 +1,6 @@
+tunnel: __TUNNEL_ID__
+credentials-file: __TUNNEL_CREDENTIAL_FILE__
+ingress:
+  - hostname: calradia-coop.frontir.solutions
+    service: http://127.0.0.1:4211
+  - service: http_status:404

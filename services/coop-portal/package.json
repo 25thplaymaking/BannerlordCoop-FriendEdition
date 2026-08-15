@@ -6,6 +6,7 @@
     "check": "tsc --noEmit",
     "test": "vitest run",
     "types": "wrangler types --env-file .dev.vars.example --include-runtime false",
+    "start": "node --experimental-strip-types src/server.ts",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {

@@ -1,5 +1,6 @@
 ﻿using Common.Messaging;
 using ProtoBuf;
+using System.Globalization;
 
 namespace GameInterface.Services.MapEvents.Messages.Start;
 
@@ -9,6 +10,7 @@ namespace GameInterface.Services.MapEvents.Messages.Start;
 /// by <see cref="RequestId"/>) or times out.
 /// </summary>
 [ProtoContract(SkipConstructor = true)]
+[AuthorityRoute("map-event.create", AuthorityRouteKind.Command)]
 internal readonly struct NetworkRequestCreateMapEvent : ICommand
 {
     /// <summary>Correlation id used to match the response back to the blocked request.</summary>
@@ -37,6 +39,14 @@ internal readonly struct NetworkRequestCreateMapEvent : ICommand
     public readonly bool ForceHideoutSendTroops;
     [ProtoMember(12)]
     public readonly string ExpectedMapEventId;
+    [ProtoMember(13)]
+    public readonly int ProtocolVersion;
+    [ProtoMember(14)]
+    public readonly string SessionId;
+    [ProtoMember(15)]
+    public readonly long AuthorityRequestId;
+    [ProtoMember(16)]
+    public readonly long ExpectedRevision;
 
     public NetworkRequestCreateMapEvent(
         string requestId,
@@ -57,6 +67,24 @@ internal readonly struct NetworkRequestCreateMapEvent : ICommand
         ForceBlockadeSallyOutAttack = flags.ForceBlockadeSallyOutAttack;
         ForceHideoutSendTroops = flags.ForceHideoutSendTroops;
         ExpectedMapEventId = expectedMapEventId;
+        ProtocolVersion = 0;
+        SessionId = null;
+        AuthorityRequestId = 0;
+        ExpectedRevision = 0;
+    }
+
+    public NetworkRequestCreateMapEvent(
+        AuthorityRequestHeader header,
+        string attackerId,
+        string defenderId,
+        BattleCreationFlags flags,
+        string expectedMapEventId)
+        : this(header.RequestId.ToString(CultureInfo.InvariantCulture), attackerId, defenderId, flags, expectedMapEventId)
+    {
+        ProtocolVersion = header.ProtocolVersion;
+        SessionId = header.SessionId;
+        AuthorityRequestId = header.RequestId;
+        ExpectedRevision = header.ExpectedRevision;
     }
 
     public BattleCreationFlags Flags => new BattleCreationFlags(
@@ -68,4 +96,10 @@ internal readonly struct NetworkRequestCreateMapEvent : ICommand
         ForceBlockadeAttack,
         ForceBlockadeSallyOutAttack,
         ForceHideoutSendTroops);
+
+    public AuthorityRequestHeader Header => new AuthorityRequestHeader(
+        ProtocolVersion,
+        SessionId,
+        AuthorityRequestId,
+        ExpectedRevision);
 }

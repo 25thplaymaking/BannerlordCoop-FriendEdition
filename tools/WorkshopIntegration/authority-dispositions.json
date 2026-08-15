@@ -8520,6 +8520,56 @@
     {
       "moduleId": "Fourberie",
       "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": [
+        "0x060001A2", "0x060002C2", "0x060002C3", "0x060002CB", "0x0600033C",
+        "0x0600033E", "0x060003EB", "0x0600046D", "0x06000474", "0x06000475",
+        "0x0600047A", "0x0600047C", "0x0600047E", "0x06000482", "0x06000485",
+        "0x06000499", "0x060004C6", "0x06000512", "0x06000523", "0x06000526",
+        "0x06000529", "0x0600052D"
+      ],
+      "disposition": "ClientPresentation",
+      "owner": "FourberieAuthorityPatches.ClientPresentationPrefix",
+      "capability": "PresentationAndMissionLocal",
+      "tests": [
+        "FourberiePresentationAuthorityTests.ExactVmAndMissionHelpers_AreClientOnlyAndNotServerCommands"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": ["0x06000269", "0x060002FA"],
+      "disposition": "ClientPresentation",
+      "owner": "FourberieAuthorityPatches.ClientPresentationPrefix",
+      "capability": "MenuPresentation",
+      "tests": [
+        "FourberiePresentationAuthorityTests.ExistingMenuAndMutationGuards_HaveOneExactOwner"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": ["0x0600030F"],
+      "disposition": "ServerCallback",
+      "owner": "FourberieAuthorityPatches.ServerTickPrefix/ServerTickPostfix",
+      "capability": "HideoutLifecycle",
+      "tests": [
+        "FourberiePresentationAuthorityTests.ExistingMenuAndMutationGuards_HaveOneExactOwner"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": ["0x0600039E"],
+      "disposition": "ServerCommand",
+      "owner": "FourberieAuthorityPatches.EnslavePrisonersConsequencePrefix -> FourberieOperationExecutor",
+      "capability": "PrisonerEnslavement",
+      "tests": [
+        "FourberieAuthorityTests.EnslavePrisonersConsequence_RoutesSelectionAndOwnsPartyCommit"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
       "metadataTokens": ["0x060005FD"],
       "disposition": "ServerCommand",
       "owner": "FourberieAuthorityPatches.AlleyAcquisitionPrefix -> AlleyManagementHandler",

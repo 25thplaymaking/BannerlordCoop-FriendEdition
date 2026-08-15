@@ -825,6 +825,13 @@ internal static class FourberieCompatibilityManifest
             // is likewise excluded until its existing Coop alley-acquisition route has run.
             0x060005EB, 0x060005EC, 0x060005EE, 0x060005F0, 0x060005F2, 0x060005F4,
             0x060005F6, 0x060005F8, 0x060005FA, 0x06000601, 0x06000A6E);
+        // Exact presentation/mission helpers whose apparent writes are confined to Gauntlet VM,
+        // Mission Agent/navigation, encounter-position, score, and transient controller fields.
+        AddTokens(FourberiePatchKind.ClientPresentation,
+            0x060001A2, 0x060002C2, 0x060002C3, 0x060002CB, 0x0600033C, 0x0600033E,
+            0x060003EB, 0x0600046D, 0x06000474, 0x06000475, 0x0600047A, 0x0600047C,
+            0x0600047E, 0x06000482, 0x06000485, 0x06000499, 0x060004C6, 0x06000512,
+            0x06000523, 0x06000526, 0x06000529, 0x0600052D);
         AddTokens(FourberiePatchKind.FightClubMissionLocal,
             0x0600042C, 0x0600042D, 0x0600042F, 0x06000431, 0x06000434, 0x0600043A,
             0x06000437, 0x060008AC, 0x060008B9);

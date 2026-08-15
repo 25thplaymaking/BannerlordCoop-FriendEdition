@@ -74,6 +74,60 @@ public sealed class FourberieManifestTests
         }
     }
 
+    [Fact]
+    public void MainMenuPatchPlan_DefersOnlyCampaignDependentFourberieType()
+    {
+        FourberieMethodSpec deferred = Assert.Single(
+            FourberieCompatibilityManifest.Methods,
+            spec => FourberieCompatibilityManifest.RequiresCampaignAtPatchTime(spec));
+
+        Assert.Equal(FourberieCompatibilityManifest.CampaignReadyWorkshopConsequenceToken,
+            deferred.MetadataToken);
+        Assert.Equal(FourberiePatchKind.CriminalConsequence, deferred.Kind);
+        Assert.All(
+            FourberieCompatibilityManifest.Methods.Where(spec => !ReferenceEquals(spec, deferred)),
+            spec => Assert.False(FourberieCompatibilityManifest.RequiresCampaignAtPatchTime(spec)));
+    }
+
+    [Fact]
+    public void CompatibilityManifest_ContainsOneGuardPerOriginalMethod()
+    {
+        string inventoryPath = FindRepositoryFile("doc", "generated", "workshop-function-inventory.json");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(inventoryPath));
+        JsonElement[] methods = Assert.Single(
+                document.RootElement.GetProperty("assemblies").EnumerateArray(),
+                candidate => candidate.GetProperty("moduleId").GetString() == "Fourberie" &&
+                             candidate.GetProperty("sha256").GetString() ==
+                             FourberieCompatibilityManifest.SupportedSha256.ToLowerInvariant())
+            .GetProperty("methods")
+            .EnumerateArray()
+            .ToArray();
+
+        string ResolveToken(FourberieMethodSpec spec)
+        {
+            if (spec.MetadataToken.HasValue) return $"0x{spec.MetadataToken.Value:X8}";
+
+            string requestedShape =
+                $"{spec.TypeName}::{spec.MethodName}({string.Join(",", spec.ParameterTypeNames)}):{spec.ReturnTypeName}";
+            JsonElement method = Assert.Single(methods, candidate =>
+                $"{candidate.GetProperty("declaringType").GetString()}::" +
+                $"{candidate.GetProperty("name").GetString()}(" +
+                string.Join(",", candidate.GetProperty("parameterTypes").EnumerateArray()
+                    .Select(parameter => NormalizeInventoryTypeName(parameter.GetString()))) +
+                $"):{NormalizeInventoryTypeName(candidate.GetProperty("returnType").GetString())}" == requestedShape);
+            return method.GetProperty("metadataToken").GetString()!;
+        }
+
+        var duplicates = FourberieCompatibilityManifest.Methods
+            .GroupBy(ResolveToken, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => $"{group.Key}: {string.Join("; ", group.Select(spec => spec.Key))}")
+            .ToArray();
+
+        Assert.True(duplicates.Length == 0,
+            "Each Fourberie original may have only one audited guard: " + string.Join(" | ", duplicates));
+    }
+
     private static string NormalizeInventoryTypeName(string? typeName) =>
         (typeName ?? string.Empty).Replace('<', '[').Replace('>', ']');
 

@@ -208,6 +208,8 @@ internal sealed class FourberieMethodSpec
 /// </summary>
 internal static class FourberieCompatibilityManifest
 {
+    internal const int CampaignReadyWorkshopConsequenceToken = 0x060005DB;
+
     public const string AssemblyName = "Fourberie";
     public const string ModuleId = "Fourberie";
     public const string WorkshopId = "2875710877";
@@ -244,6 +246,9 @@ internal static class FourberieCompatibilityManifest
 
     public static readonly IReadOnlyList<FourberieMethodSpec> Methods = BuildMethods();
 
+    internal static bool RequiresCampaignAtPatchTime(FourberieMethodSpec spec) =>
+        spec?.MetadataToken == CampaignReadyWorkshopConsequenceToken;
+
     public static bool TryValidate(
         Assembly assembly,
         out IReadOnlyDictionary<FourberieMethodSpec, MethodInfo> resolved,
@@ -276,6 +281,7 @@ internal static class FourberieCompatibilityManifest
         }
 
         var methods = new Dictionary<FourberieMethodSpec, MethodInfo>();
+        var originals = new Dictionary<MethodInfo, FourberieMethodSpec>();
         foreach (var spec in Methods)
         {
             MethodInfo method;
@@ -295,7 +301,14 @@ internal static class FourberieCompatibilityManifest
                 return false;
             }
 
+            if (originals.TryGetValue(method, out var existing))
+            {
+                failure = $"duplicate audited Fourberie method {existing.Key} and {spec.Key}";
+                return false;
+            }
+
             methods.Add(spec, method);
+            originals.Add(method, spec);
         }
 
         resolved = methods;
@@ -777,7 +790,7 @@ internal static class FourberieCompatibilityManifest
         AddTokens(FourberiePatchKind.CriminalConsequence,
             0x0600032E, 0x06000810, 0x06000824, 0x06000825,
             0x0600084D, 0x06000850, 0x06000866, 0x0600086E, 0x06000877,
-            0x06000A3D, 0x06000A3F, 0x06000A41, 0x060005DB, 0x06000A52,
+            0x06000A3D, 0x06000A3F, 0x06000A41, CampaignReadyWorkshopConsequenceToken, 0x06000A52,
             0x0600031A, 0x0600046E, 0x0600055B, 0x06000563, 0x060005A2, 0x060005B5,
             0x0600095B, 0x06000991, 0x060009BB, 0x060009F4,
             0x0600082E, 0x0600082F, 0x06000830, 0x06000831, 0x06000833, 0x06000835);
@@ -936,7 +949,7 @@ internal static class FourberieCompatibilityManifest
             0x0600042C, 0x0600042D, 0x0600042F, 0x06000431, 0x06000434, 0x0600043A,
             0x06000437, 0x060008AC, 0x060008B9);
         AddTokens(FourberiePatchKind.ClientPresentation,
-            0x060003F2, 0x060003F7, 0x060003F9, 0x06000400, 0x06000401, 0x06000403,
+            0x060003F7, 0x060003F9, 0x06000400, 0x06000401, 0x06000403,
             0x06000405, 0x06000408, 0x0600040A, 0x0600040D, 0x06000410, 0x06000413,
             0x06000414, 0x06000415, 0x06000416, 0x06000419, 0x0600041A, 0x0600041C,
             0x0600041D, 0x0600041F, 0x06000420, 0x06000426, 0x06000428, 0x0600042A,

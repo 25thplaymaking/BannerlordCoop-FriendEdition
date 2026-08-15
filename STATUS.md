@@ -13,7 +13,7 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > 57, ImprovedGarrisons 723, Fourberie 1,865, Diplomacy 4,121, and
 > PlayerSettlement 625 records. All former Fourberie 47/272 gaps now terminate
 > in bounded, authenticated host operations. The full in-process xUnit run
-> passes 1,758 tests with zero failures/errors (11 existing regeneration skips).
+> passes 1,760 tests with zero failures/errors (11 existing regeneration skips).
 > The final 851-file ZIP hashes to
 > `d6821bc28d0e3d24f36dd95a29f6ac62c60a0130e4178471a3955291fe6e683a`;
 > the paired server core hashes to
@@ -30,6 +30,21 @@ Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 > base-campaign behavior; the optional presentation-only `BirthAndDeath` module
 > and `NavalDLC` are disabled. Rendered multi-client play remains the final
 > player-facing smoke check, not an open implementation or deployment defect.
+>
+> **2026-08-15 Fourberie main-menu join correction — LIVE CLIENT VERIFIED.**
+> The v1.4.8 compatibility expansion attempted to patch Fourberie's
+> `HelperSubTerritory.OnManageWorkshopDone` while `Campaign.Current` was still null. That initialized
+> Fourberie's campaign-dependent helper type at the main menu and aborted both launcher auto-join and
+> manual Join before a packet reached the server. The adapter now installs 581 startup-safe guards at
+> the main menu, installs the one workshop consequence guard after campaign creation, and then proves
+> the complete 582-method inventory. A second live run exposed and removed one duplicate manifest entry
+> for `PitLocationCharactersAreReadyToSpawn`; manifest validation and a pinned-inventory regression now
+> reject any future duplicate original before Harmony patching. Build `fe6c11e8e` auto-joined the live
+> host, passed module validation, received and loaded the preserved 46,116,312-byte campaign save,
+> installed the deferred guard, passed the 11,334-object registry audit, entered `MapState`, and was
+> reported by the server as `on map` with sustained campaign traffic. Focused Fourberie tests pass
+> 398/398; the full GameInterface suite passes 1,760 total with 11 intentional regeneration skips;
+> Workshop authority remains 30/30 feature families with zero open routes.
 >
 > **2026-08-15 Auburn/settlement client crash correction — SHIPPED from source `d7d548fde`.**
 > Auburn's `CalradiaCoop-Logs-2026-08-15_06-29-56.zip` ended without a managed exception while this
@@ -552,7 +567,8 @@ rolls back canonical Fourberie state and created parties on failure, and returns
 - [x] **Nightly test composition repaired (2026-08-11).** The shared Coop.Tests client/server
       container now registers the same real Workshop capability registry supplied by the production
       GameInterface module; all 614 Coop.Tests cases build their containers again (613 pass, 1 skipped).
-- [ ] Live test (still open): confirm the launched game auto-joins grain.silo end-to-end with mods.
+- [x] Live test: the launched game auto-joins grain.silo end-to-end with mods, loads the preserved
+      campaign, installs all compatibility guards, reaches `MapState`, and appears server-side as `on map`.
 
 ### Dedicated server release integrity — LIVE VERIFIED (2026-08-11)
 - [x] ButterLib and dedicated-loader transforms pin exact inputs and exact method signatures/counts.

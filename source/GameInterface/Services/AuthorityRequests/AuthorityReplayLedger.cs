@@ -1,0 +1,157 @@
+using LiteNetLib;
+using System;
+using System.Collections.Generic;
+
+namespace GameInterface.Services.AuthorityRequests;
+
+internal enum AuthorityReplayDecision
+{
+    New,
+    InFlight,
+    Completed,
+    Conflict,
+}
+
+internal readonly struct AuthorityReplayInspection<TResult>
+{
+    public AuthorityReplayInspection(AuthorityReplayDecision decision, TResult result)
+    {
+        Decision = decision;
+        Result = result;
+    }
+
+    public AuthorityReplayDecision Decision { get; }
+    public TResult Result { get; }
+}
+
+/// <summary>Bounded, per-peer idempotency store for one typed authority route.</summary>
+internal sealed class AuthorityReplayLedger<TResult>
+{
+    private readonly int capacityPerPeer;
+    private readonly Dictionary<ReplayKey, Entry> entries = new Dictionary<ReplayKey, Entry>();
+    private long sequence;
+
+    public AuthorityReplayLedger(int capacityPerPeer = 256)
+    {
+        if (capacityPerPeer < 1) throw new ArgumentOutOfRangeException(nameof(capacityPerPeer));
+        this.capacityPerPeer = capacityPerPeer;
+    }
+
+    public AuthorityReplayInspection<TResult> Inspect(
+        NetPeer peer,
+        string sessionId,
+        string routeId,
+        long requestId,
+        string commandKey)
+    {
+        var key = new ReplayKey(peer, sessionId, routeId, requestId);
+        if (!entries.TryGetValue(key, out var entry))
+        {
+            entries[key] = new Entry(commandKey, ++sequence);
+            Trim(peer, sessionId, routeId);
+            return new AuthorityReplayInspection<TResult>(AuthorityReplayDecision.New, default);
+        }
+
+        entry.LastAccess = ++sequence;
+        if (!string.Equals(entry.CommandKey, commandKey, StringComparison.Ordinal))
+            return new AuthorityReplayInspection<TResult>(AuthorityReplayDecision.Conflict, default);
+
+        return new AuthorityReplayInspection<TResult>(
+            entry.Completed ? AuthorityReplayDecision.Completed : AuthorityReplayDecision.InFlight,
+            entry.Result);
+    }
+
+    public void Complete(NetPeer peer, string sessionId, string routeId, long requestId, TResult result)
+    {
+        var key = new ReplayKey(peer, sessionId, routeId, requestId);
+        if (!entries.TryGetValue(key, out var entry)) return;
+
+        entry.Result = result;
+        entry.Completed = true;
+        entry.LastAccess = ++sequence;
+    }
+
+    public void Clear(NetPeer peer)
+    {
+        if (peer == null) return;
+        var remove = new List<ReplayKey>();
+        foreach (var entry in entries)
+            if (ReferenceEquals(entry.Key.Peer, peer)) remove.Add(entry.Key);
+        foreach (var key in remove) entries.Remove(key);
+    }
+
+    public void Clear()
+    {
+        entries.Clear();
+    }
+
+    private void Trim(NetPeer peer, string sessionId, string routeId)
+    {
+        int count = 0;
+        foreach (var entry in entries)
+        {
+            if (ReferenceEquals(entry.Key.Peer, peer) &&
+                string.Equals(entry.Key.SessionId, sessionId, StringComparison.Ordinal) &&
+                string.Equals(entry.Key.RouteId, routeId, StringComparison.Ordinal)) count++;
+        }
+
+        while (count > capacityPerPeer)
+        {
+            ReplayKey oldest = default;
+            long oldestAccess = long.MaxValue;
+            foreach (var entry in entries)
+            {
+                if (!ReferenceEquals(entry.Key.Peer, peer) ||
+                    !string.Equals(entry.Key.SessionId, sessionId, StringComparison.Ordinal) ||
+                    !string.Equals(entry.Key.RouteId, routeId, StringComparison.Ordinal) ||
+                    !entry.Value.Completed || entry.Value.LastAccess >= oldestAccess) continue;
+
+                oldest = entry.Key;
+                oldestAccess = entry.Value.LastAccess;
+            }
+
+            if (oldestAccess == long.MaxValue) return;
+            entries.Remove(oldest);
+            count--;
+        }
+    }
+
+    private readonly struct ReplayKey : IEquatable<ReplayKey>
+    {
+        public ReplayKey(NetPeer peer, string sessionId, string routeId, long requestId)
+        {
+            Peer = peer;
+            SessionId = sessionId;
+            RouteId = routeId;
+            RequestId = requestId;
+        }
+
+        public NetPeer Peer { get; }
+        public string SessionId { get; }
+        public string RouteId { get; }
+        public long RequestId { get; }
+
+        public bool Equals(ReplayKey other) => ReferenceEquals(Peer, other.Peer) &&
+            RequestId == other.RequestId &&
+            string.Equals(SessionId, other.SessionId, StringComparison.Ordinal) &&
+            string.Equals(RouteId, other.RouteId, StringComparison.Ordinal);
+
+        public override bool Equals(object obj) => obj is ReplayKey other && Equals(other);
+        public override int GetHashCode() => (Peer?.GetHashCode() ?? 0) ^ RequestId.GetHashCode() ^
+            (SessionId?.GetHashCode() ?? 0) ^ (RouteId?.GetHashCode() ?? 0);
+    }
+
+    private sealed class Entry
+    {
+        public Entry(string commandKey, long lastAccess)
+        {
+            CommandKey = commandKey;
+            LastAccess = lastAccess;
+        }
+
+        public string CommandKey { get; }
+        public TResult Result { get; set; }
+        public bool Completed { get; set; }
+        public long LastAccess { get; set; }
+    }
+}

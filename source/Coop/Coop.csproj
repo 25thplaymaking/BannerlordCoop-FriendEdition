@@ -208,7 +208,6 @@
   <ItemGroup>
     <Compile Include="AssemblyHellscape.cs" />
     <Compile Include="BootPatches.cs" />
-    <Compile Include="CampaignStatsPublisher.cs" />
     <Compile Include="CoopMod.cs" />
     <Compile Include="CrashReporting\CrashDiagnostics.cs" />
     <Compile Include="LiveTesting\LiveTestControlServer.cs" />

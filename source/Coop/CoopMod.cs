@@ -73,7 +73,6 @@ namespace Coop
         private bool startupModuleWarningReady;
         private bool automaticCrashReportsRequested;
         private DateTime nextWatchdogRetryUtc;
-        private CampaignStatsPublisher campaignStatsPublisher;
 
 #if DEBUG
         private LiveTestControlServer liveTestControlServer;
@@ -554,11 +553,6 @@ namespace Coop
 
             if (gameStarterObject is CampaignGameStarter campaignGameStarter)
             {
-                if (!ModInformation.IsClient && campaignStatsPublisher == null)
-                {
-                    campaignStatsPublisher = new CampaignStatsPublisher();
-                    Updateables.Add(campaignStatsPublisher);
-                }
                 campaignGameStarter.AddBehavior(new PlayerPartyInteractionCampaignBehavior());
                 campaignGameStarter.AddBehavior(new CoopTournamentCampaignBehavior());
                 campaignGameStarter.AddBehavior(new SeparatismCampaignBehavior());
@@ -597,12 +591,6 @@ namespace Coop
         public override void OnGameEnd(Game game)
         {
             CrashDiagnostics.SetPhase("ending-game");
-            if (campaignStatsPublisher != null)
-            {
-                Updateables.Remove(campaignStatsPublisher);
-                campaignStatsPublisher.Dispose();
-                campaignStatsPublisher = null;
-            }
             base.OnGameEnd(game);
 
             if (Coop.Running)

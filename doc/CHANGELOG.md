@@ -2,8 +2,12 @@
 
 ## 2026-08-15 — Portal production-host fallback
 
-- Register the campaign stats publisher from the authoritative dedicated-host role instead of the
-  optional launcher `/server` flag, so the production dedicated process publishes its live roster.
+- Schedule campaign stats through the shared game-thread queue used by both the desktop game loop and
+  TaleWorlds' headless dedicated-host pump, with ownership in the server experience that the dedicated
+  driver actually creates. Publication is authorized by the server-only portal credential and no longer
+  depends on the presentation DLL, launcher flags, role timing, UI ticks, or UI campaign callbacks.
+- Surface publisher configuration and delivery failures in the dedicated-host journal, where an
+  operator can diagnose the headless process without relying on a client-side log sink.
 - Added a thin Node 24 host adapter for the Worker-compatible campaign portal, with atomic file-backed
   stats/deduplication state and the same bounded report rate limit.
 - Replaced the unavailable Workers/KV credential path with an immutable SSH deployment to the existing

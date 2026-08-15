@@ -42,6 +42,8 @@ namespace Coop
                 baseUri.Scheme == Uri.UriSchemeHttps &&
                 !string.IsNullOrWhiteSpace(publishToken))
                 publishUri = new Uri(baseUri, "stats/publish");
+
+            Console.WriteLine("[CampaignStats] Publisher initialized (configured={0})", publishUri != null);
         }
 
         public int Priority { get { return 0; } }
@@ -60,6 +62,7 @@ namespace Coop
             {
                 Interlocked.Exchange(ref publishActive, 0);
                 Logger.Warning(ex, "Could not build the campaign stats snapshot");
+                Console.Error.WriteLine("[CampaignStats] Could not build snapshot: {0}", ex);
                 return;
             }
 
@@ -124,11 +127,20 @@ namespace Coop
                     using (HttpResponseMessage response = await httpClient.SendAsync(request).ConfigureAwait(false))
                     {
                         if (!response.IsSuccessStatusCode)
+                        {
                             Logger.Warning("Campaign stats portal returned HTTP {StatusCode}", (int)response.StatusCode);
+                            Console.Error.WriteLine(
+                                "[CampaignStats] Portal returned HTTP {0}",
+                                (int)response.StatusCode);
+                        }
                     }
                 }
             }
-            catch (Exception ex) { Logger.Warning(ex, "Could not publish campaign stats"); }
+            catch (Exception ex)
+            {
+                Logger.Warning(ex, "Could not publish campaign stats");
+                Console.Error.WriteLine("[CampaignStats] Could not publish snapshot: {0}", ex);
+            }
             finally { Interlocked.Exchange(ref publishActive, 0); }
         }
 

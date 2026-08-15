@@ -7767,7 +7767,7 @@
         "0x06000235"
       ],
       "disposition": "ClientPresentation",
-      "owner": "Placement and info UI; construction routes fail closed via PlayerSettlementAuthority",
+      "owner": "PlayerSettlementAuthorityPatches.ClientPresentationPrefix placement and information UI",
       "capability": "ClientPresentation",
       "tests": [
         "PlayerSettlementCompatibilityTests"
@@ -8035,7 +8035,7 @@
         "0x0600036D"
       ],
       "disposition": "CoopOwnerReplacement",
-      "owner": "PlayerSettlementCompatibilityHandler + PlayerSettlementAuthority: empty-state-only admission; construction/rebuild fail closed (4b731ead5)",
+      "owner": "PlayerSettlementCompatibilityHandler exact per-method role routing and PlayerSettlementAuthorityPatches",
       "capability": "CanonicalState",
       "tests": [
         "PlayerSettlementCompatibilityTests"
@@ -8077,7 +8077,7 @@
         "0x06000133"
       ],
       "disposition": "FrameworkLifecycle",
-      "owner": "Module lifecycle/save schema/logging; dedicated lifecycle admits empty state only",
+      "owner": "PlayerSettlementCompatibilityHandler validated host XML registration and role lifecycle",
       "capability": "",
       "tests": [
         "PlayerSettlementCompatibilityTests"

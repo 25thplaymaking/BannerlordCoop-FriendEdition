@@ -19,7 +19,7 @@ internal readonly struct NetworkRequestPlayerSettlementState : ICommand
 [ProtoContract]
 internal enum PlayerSettlementFeatureStatus
 {
-    [ProtoEnum] GuardedFeatureBlocked = 1,
+    [ProtoEnum] Enabled = 2,
 }
 
 [ProtoContract]
@@ -33,9 +33,9 @@ internal enum PlayerSettlementObjectKind
 }
 
 /// <summary>
-/// Canonical description of generated settlement XML. It is intentionally informational in this
-/// adapter version: clients validate it, but non-empty state is rejected rather than loaded after
-/// MBObjectManager's registration phase. That is the fail-closed boundary for existing saves.
+/// Canonical description of generated settlement XML. The host loads it before registry
+/// enumeration; clients validate this metadata against the settlement objects created by the
+/// normal Coop registry stream.
 /// </summary>
 [ProtoContract(SkipConstructor = true)]
 internal sealed class PlayerSettlementStateEntry
@@ -178,7 +178,7 @@ internal static class PlayerSettlementStateCodec
             return false;
         }
         if (state.Revision < 0 ||
-            state.FeatureStatus != PlayerSettlementFeatureStatus.GuardedFeatureBlocked ||
+            state.FeatureStatus != PlayerSettlementFeatureStatus.Enabled ||
             !IsSha256(state.StateFingerprint))
         {
             failure = "invalid revision, feature status, or state fingerprint";

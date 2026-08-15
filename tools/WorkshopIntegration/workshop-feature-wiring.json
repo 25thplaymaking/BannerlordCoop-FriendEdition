@@ -1,0 +1,318 @@
+{
+  "schemaVersion": 1,
+  "targetGameVersion": "v1.4.8",
+  "purpose": "Action-level release ledger for every module in the Friend Edition managed Workshop suite. A method-level authority disposition is necessary but is not sufficient to mark a player function wired.",
+  "allowedReleaseStatuses": ["VerifiedFramework", "VerifiedPresentation", "VerifiedWired"],
+  "modules": [
+    {
+      "moduleId": "Bannerlord.Harmony",
+      "version": "v2.4.2.248",
+      "role": "client-and-server-framework",
+      "featureFamilies": [
+        {
+          "id": "patch-runtime",
+          "playerFunction": "Provide the single Harmony runtime, owner-scoped patching, and deterministic unpatch isolation.",
+          "status": "VerifiedFramework",
+          "owner": "WorkshopModuleCatalog and module-specific HarmonyIsolation guards",
+          "routes": ["Workshop suite receipt", "exact patch-owner inventories"],
+          "tests": ["WorkshopSuiteReceiptTests.Receipt_RequiresPinnedIdsVersionsAndAggregateDigest", "FourberieHarmonyIsolationTests.AdapterGuardAssertion_RequiresExactOwnerAndMethodInventory"]
+        }
+      ]
+    },
+    {
+      "moduleId": "Bannerlord.ButterLib",
+      "version": "v2.11.1",
+      "role": "split-client-server-framework",
+      "featureFamilies": [
+        {
+          "id": "framework-lifecycle",
+          "playerFunction": "Run ButterLib DI, delayed lifecycle, save/object extensions, and exception support without loading client UI on the dedicated host.",
+          "status": "VerifiedFramework",
+          "owner": "CoopServerModKit exact ButterLib patcher and Workshop role manifest",
+          "routes": ["client creator binary", "headless server transform", "role-specific activation"],
+          "tests": ["WorkshopIntegration.Run-Tests", "WorkshopModuleContractTests.GameInterfaceModule_DeclaresEveryCampaignGameplayModule"]
+        }
+      ]
+    },
+    {
+      "moduleId": "Bannerlord.UIExtenderEx",
+      "version": "v2.13.3",
+      "role": "client-presentation",
+      "featureFamilies": [
+        {
+          "id": "ui-extension-lifecycle",
+          "playerFunction": "Register and tear down UI extensions, mixins, prefab/widget/brush factories, and movie resources on clients only.",
+          "status": "VerifiedPresentation",
+          "owner": "Workshop role manifest and client UI extension lifecycle",
+          "routes": ["client activation", "server exclusion", "campaign teardown"],
+          "tests": ["WorkshopManifestValidatorTests.CatalogActivationPolicy_IsAcceptedOnBothRoles", "DiplomacyCompatibilityTests.DiplomacyUiLifecycle_SeparatesSnapshotGatedAndPermanentlyRetiredExtensions"]
+        }
+      ]
+    },
+    {
+      "moduleId": "Bannerlord.MBOptionScreen",
+      "version": "v5.12.2",
+      "role": "client-presentation-with-server-configuration",
+      "featureFamilies": [
+        {
+          "id": "settings-ui",
+          "playerFunction": "Render MCM settings on clients while gameplay settings are supplied by the authoritative host snapshot.",
+          "status": "VerifiedPresentation",
+          "owner": "Workshop host configuration snapshot and per-mod canonical settings bridges",
+          "routes": ["client settings UI", "server canonical configuration", "configuration fingerprint"],
+          "tests": ["DiplomacyCompatibilityTests.MutableLocalMcm_CannotOwnKingdomDecisionFormula", "ImprovedGarrisonsCompatibilityTests.ClientConfigLoad_IsReplacedWithInMemoryDefaultsAndNoOriginalFileCall"]
+        }
+      ]
+    },
+    {
+      "moduleId": "ImprovedGarrisons",
+      "version": "v4.2.0.7",
+      "role": "client-ui-server-gameplay",
+      "featureFamilies": [
+        {
+          "id": "management",
+          "playerFunction": "Open settlement management and change recruitment, training, guard, transfer, recruiter, and mobile-party settings.",
+          "status": "VerifiedWired",
+          "owner": "ImprovedGarrisonsCompatibilityHandler authenticated management transaction",
+          "routes": ["NetworkRequestImprovedGarrisonsOperation", "NetworkImprovedGarrisonsOperationResult", "canonical snapshot"],
+          "tests": ["ImprovedGarrisonsManagementOperationTests.CompleteManagementSurface_HasNoDeniedOperations", "ImprovedGarrisonsManagementOperationTests.ManagementOperation_RoundTripsAuthenticatedConcurrencyAndStableSelections"]
+        },
+        {
+          "id": "rosters-and-templates",
+          "playerFunction": "Select troop templates, transfer troops, return recruiters, and preserve stable troop/party identity.",
+          "status": "VerifiedWired",
+          "owner": "ImprovedGarrisonsCompatibilityHandler roster and template transaction",
+          "routes": ["stable troop selections", "canonical template replacement", "recruiter return"],
+          "tests": ["ImprovedGarrisonsManagementOperationTests.CanonicalTemplateReplacement_UsesStableTroopIdsAndCounts", "ImprovedGarrisonsManagementOperationTests.CanonicalRecruiterReturn_DisablesAutoSpawnBeforeOrderingThePartyHome"]
+        },
+        {
+          "id": "automation-callbacks",
+          "playerFunction": "Execute recruit, upgrade, capture, owner-change, party lifecycle, finance, food, and persistence callbacks only on the server.",
+          "status": "VerifiedWired",
+          "owner": "ImprovedGarrisonsCompatibilityHandler server callback funnel",
+          "routes": ["server campaign callbacks", "deduplicated tick", "changed snapshot publication"],
+          "tests": ["ImprovedGarrisonsCompatibilityTests.RecruitUpgradeCaptureAndSaveLifecycle_IsPinnedToServerAuthority", "ImprovedGarrisonsCompatibilityTests.CompletedServerTick_PublishesThroughRuntime"]
+        },
+        {
+          "id": "building-reserve",
+          "playerFunction": "Reserve settlement gold for construction through an authenticated, affordable server mutation.",
+          "status": "VerifiedWired",
+          "owner": "ImprovedGarrisonsCompatibilityHandler building-reserve transaction",
+          "routes": ["building reserve request", "server affordability quote", "canonical result"],
+          "tests": ["ImprovedGarrisonsManagementOperationTests.BuildingReserveOperation_RequiresOnlyAPositiveServerCheckedAmount", "ImprovedGarrisonsManagementOperationTests.BuildingReserveAuthority_DerivesTheExactAffordableState"]
+        }
+      ]
+    },
+    {
+      "moduleId": "DismembermentPlus",
+      "version": "v2.0.8.8",
+      "role": "replicated-client-presentation",
+      "featureFamilies": [
+        {
+          "id": "accepted-blow-dismemberment",
+          "playerFunction": "Choose and render a limb loss once from an accepted authoritative blow without replaying damage.",
+          "status": "VerifiedWired",
+          "owner": "DismembermentPresentationHandler and DismembermentAuthorityPatch",
+          "routes": ["victim-authority event", "canonical seed", "deduplicated cosmetic replication"],
+          "tests": ["DismembermentPresentationTests.Event_RoundTripsTheExactSelectedOutcomeWithoutASecondDamageCommand", "DismembermentPresentationTests.Ledger_AppliesOnceAndRejectsDuplicateStaleAndConflictingSequence"]
+        },
+        {
+          "id": "mission-lifecycle-and-slow-motion",
+          "playerFunction": "Initialize creator mission presentation on compatible clients and keep local slow motion disabled in Coop.",
+          "status": "VerifiedPresentation",
+          "owner": "DismembermentMissionInitializerPatch and DismembermentSlowMotionPatch",
+          "routes": ["mission initializer", "Coop slow-motion suppression"],
+          "tests": ["CombatModAuthorityPolicyTests.DismembermentPresentation_InitializesOnEveryCompatibleClient", "CombatModAuthorityPolicyTests.DismembermentPresentation_RemainsClientOnlyOutsideCoop"]
+        }
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "version": "v1.4.7.6",
+      "role": "client-ui-and-missions-server-campaign",
+      "featureFamilies": [
+        {
+          "id": "criminal-enterprises-and-schemes",
+          "playerFunction": "Create, upgrade, downgrade, and reset criminal businesses and both scheme slots, victims, bonuses, stance, and lifecycle.",
+          "status": "VerifiedWired",
+          "owner": "FourberieOperationExecutor enterprise and scheme transactions",
+          "routes": ["NetworkRequestFourberieOperation", "NetworkFourberieOperationResult", "canonical state snapshot"],
+          "tests": ["FourberieAuthorityTests.EnterpriseMutationPrefixes_SubmitTypedClientIntentAndNeverRunOriginal", "FourberieSchemeAuthorityTests.StartAndOutcome_ConsumeServerResourcesAndCreateOneCanonicalResult"]
+        },
+        {
+          "id": "safehouse",
+          "playerFunction": "Establish, migrate, select, abandon, wait at, return to, trade from, and transfer items through a safehouse.",
+          "status": "VerifiedWired",
+          "owner": "FourberieOperationExecutor safehouse transactions",
+          "routes": ["safehouse establishment", "territory/base selection", "trader/wait/return", "stash item delta"],
+          "tests": ["FourberieSafehouseEstablishmentAuthorityTests.FirstBaseCommit_InitializesSafehouseAndClearsOnlyBaseUpgrades", "FourberieSafehouseItemTransferTests.AuthorityAvailability_RejectsEitherSourceOverdrawBeforeMutation", "FourberieSafehouseTraderAuthorityTests.Commit_UpdatesOnlyTraderStateUsingThePinnedPlan"]
+        },
+        {
+          "id": "agents-roles-and-prisoners",
+          "playerFunction": "Enlist agents, recruit bandits, enslave prisoners, assign criminal roles, and create/refill/disband the agent party.",
+          "status": "VerifiedWired",
+          "owner": "FourberieOperationExecutor troop, role, and agent-party transactions",
+          "routes": ["stable troop selections", "role assignment", "agent-party lifecycle"],
+          "tests": ["FourberieAuthorityTests.OperationProtocol_AcceptsBoundedStableSelectionsAndRejectsMalformedShapes", "FourberieAuthorityTests.RoleAuthority_AssignsAndRemovesOnlyPinnedRoles", "FourberieAuthorityTests.AgentPartyAuthority_CapsCreationAndRefillAtTwenty"]
+        },
+        {
+          "id": "contracts-grudges-and-territory",
+          "playerFunction": "Offer, accept, decline, abort, and complete contracts; settle grudges; and manage criminal territory.",
+          "status": "VerifiedWired",
+          "owner": "FourberieOperationExecutor contract, grudge, and territory transactions",
+          "routes": ["contract proposal lifecycle", "grudge quote/commit", "territory removal and main base"],
+          "tests": ["FourberieContractAuthorityTests.ProposalCommit_AndAcceptPreserveCompleteCanonicalContract", "FourberieTerritoryAuthorityTests.MainBaseCommit_ResetsRolesAndReplacesTimestampWithoutTouchingOtherState"]
+        },
+        {
+          "id": "stealth-and-inside-mission-outcomes",
+          "playerFunction": "Run stealth, prison, assassination, pickpocket, robbery, brawl, alley, larceny, and safehouse missions while committing gold, crime, relation, death, contract, and grudge outcomes on the server.",
+          "status": "ImplementationRequired",
+          "owner": "FourberieMissionOutcomeHandler",
+          "routes": ["mission admission", "mission-local simulation", "authenticated outcome command", "server consequence transaction", "teardown"],
+          "tests": ["FourberieMissionOutcomeTests"]
+        },
+        {
+          "id": "fight-club",
+          "playerFunction": "Enroll, train, fight, select patrons, record career performance, and receive authoritative fame, relation, XP, and payouts.",
+          "status": "ImplementationRequired",
+          "owner": "FourberieFightClubOutcomeHandler",
+          "routes": ["fight admission", "mission rounds", "patron trial", "career result transaction"],
+          "tests": ["FourberieFightClubOutcomeTests"]
+        },
+        {
+          "id": "banditry-and-submenus",
+          "playerFunction": "Run bandit diplomacy, war-dog, fleet/horde, robbery, extortion, tribute, caravan ambush, sabotage, riot, and insurance outcomes.",
+          "status": "ImplementationRequired",
+          "owner": "FourberieBanditryOutcomeHandler",
+          "routes": ["bandit encounter result", "submenu consequence command", "party/quest/stance transaction"],
+          "tests": ["FourberieBanditryOutcomeTests"]
+        },
+        {
+          "id": "criminal-ui-and-models",
+          "playerFunction": "Render the Criminal VM, menus, hints, filters, scores, and Fourberie models without allowing refresh/filter code to replace canonical state.",
+          "status": "ImplementationRequired",
+          "owner": "FourberiePresentationAuthority",
+          "routes": ["canonical snapshot", "presentation snapshot/restore", "model composition"],
+          "tests": ["FourberiePresentationAuthorityTests"]
+        }
+      ]
+    },
+    {
+      "moduleId": "Bannerlord.Diplomacy",
+      "version": "v1.4.7",
+      "role": "client-ui-server-gameplay",
+      "featureFamilies": [
+        {
+          "id": "player-operations",
+          "playerFunction": "Donate gold/influence/fiefs, send messengers, declare war, make peace, form/leave alliances and pacts, and choose keep-fief outcomes.",
+          "status": "VerifiedWired",
+          "owner": "DiplomacyOperationHandler authenticated operation transaction",
+          "routes": ["NetworkRequestDiplomacyOperation", "operation result", "keep-fief prompt/result"],
+          "tests": ["DiplomacyOperationTests.GameplayOperationCatalog_CoversEveryAuditedPlayerAction", "DiplomacyOperationTests.Protocol_RequiresTheExactShapeForEachOperation"]
+        },
+        {
+          "id": "messenger-travel",
+          "playerFunction": "Persist and advance messenger travel, arrival costs, accidents, and controller ownership on the server.",
+          "status": "VerifiedWired",
+          "owner": "DiplomacyMessengerAuthorityStore",
+          "routes": ["server messenger queue", "restart persistence", "arrival acknowledgement"],
+          "tests": ["DiplomacyOperationTests.MessengerAuthorityStore_PreservesTravelAcrossRestartAndRejectsWrongController", "DiplomacyOperationTests.MessengerAuthorityStore_MarksOneAuthoritativeAccidentUntilAcknowledged"]
+        },
+        {
+          "id": "campaign-managers-and-callbacks",
+          "playerFunction": "Own war exhaustion, agreements, cooldowns, rebel factions, AI diplomacy, settlement-owner changes, and save callbacks on the server.",
+          "status": "VerifiedWired",
+          "owner": "DiplomacyCompatibilityHandler server callback and canonical manager snapshot",
+          "routes": ["server callback funnel", "manager initialization", "revisioned state snapshot"],
+          "tests": ["DiplomacyCompatibilityTests.AutomatedDiplomacyMutations_AreServerCallbacks", "DiplomacyCompatibilityTests.ServerCapture_PreparesEveryRequiredManagerBeforeShapeValidation"]
+        },
+        {
+          "id": "kingdom-ui",
+          "playerFunction": "Enable Diplomacy kingdom UI only after the exact implementation, host settings, and all manager snapshots are ready; tolerate screen teardown safely.",
+          "status": "VerifiedPresentation",
+          "owner": "DiplomacyUiExtensionLifecycle and DiplomacyCompatibilityHandler",
+          "routes": ["snapshot readiness barrier", "extension group enable/rollback", "stale ViewModel guard"],
+          "tests": ["DiplomacyCompatibilityTests.DiplomacyUiLifecycle_FailsClosedUntilEveryGatedExtensionEnables", "DiplomacyCompatibilityTests.KingdomStanceRefreshCallback_SkipsAStaleMixinViewModel"]
+        },
+        {
+          "id": "separatism-collision",
+          "playerFunction": "Prevent Diplomacy civil-war/rebellion paths from racing Friend Edition Separatism ownership.",
+          "status": "VerifiedWired",
+          "owner": "DiplomacyCompatibilityPolicy rebellion collision catalog",
+          "routes": ["civil-war suppression", "single rebellion owner"],
+          "tests": ["DiplomacyCompatibilityTests.DiplomacyCivilWar_IsBlockedOnBothPeers_WhenFriendSeparatismIsEnabled", "DiplomacyCompatibilityTests.EveryAuditedRebellionEntryPoint_IsInCollisionCatalog"]
+        }
+      ]
+    },
+    {
+      "moduleId": "UnblockableThrust",
+      "version": "v1.1.3.1",
+      "role": "authoritative-combat-rule",
+      "featureFamilies": [
+        {
+          "id": "crush-through",
+          "playerFunction": "Apply the configured thrust crush-through rule exactly once across foot, mounted, shield, parry, chamber, and inapplicable collisions.",
+          "status": "VerifiedWired",
+          "owner": "UnblockableThrustAuthorityPatch.ResolveCrushThrough",
+          "routes": ["accepted collision authority", "pure thrust flag", "no parallel damage"],
+          "tests": ["CombatModAuthorityPolicyTests.UnblockableThrust_AuditedDefaultsCoverFootMountedShieldParryAndChamber", "CombatModAuthorityPolicyTests.UnblockableThrust_LeavesUnauditedOrInapplicableCollisionsUnchanged"]
+        }
+      ]
+    },
+    {
+      "moduleId": "PlayerSettlement",
+      "version": "v7.5.0",
+      "role": "client-placement-server-object-graph",
+      "featureFamilies": [
+        {
+          "id": "placement-ui",
+          "playerFunction": "Choose settlement type, culture, name, template, map position, gate, rotation, scale, deep edits, and optional port position on the client.",
+          "status": "ImplementationRequired",
+          "owner": "PlayerSettlementPlacementIntentPatch",
+          "routes": ["creator placement UI", "validated placement intent", "War Sails fields prohibited for v1.4.8 scope"],
+          "tests": ["PlayerSettlementPlacementIntentTests"]
+        },
+        {
+          "id": "town-castle-village-build",
+          "playerFunction": "Build towns, castles, standalone villages, and bound villages with stable IDs, owner/culture, components, buildings, economy, garrison, militia, notables, and recruitment hooks.",
+          "status": "ImplementationRequired",
+          "owner": "PlayerSettlementConstructionHandler",
+          "routes": ["authenticated construction command", "deterministic template/ID", "atomic object graph registration", "canonical result"],
+          "tests": ["PlayerSettlementConstructionTests"]
+        },
+        {
+          "id": "rebuild-and-overwrite",
+          "playerFunction": "Rebuild generated settlements and overwrite existing settlement visuals/components without changing identity or duplicating objects.",
+          "status": "ImplementationRequired",
+          "owner": "PlayerSettlementConstructionHandler",
+          "routes": ["rebuild command", "overwrite command", "identity-preserving component replacement", "rollback"],
+          "tests": ["PlayerSettlementRebuildTests"]
+        },
+        {
+          "id": "completion-and-daily-lifecycle",
+          "playerFunction": "Advance construction timers, mark completion, publish visual readiness, and integrate owner/AI/army/siege behavior on the server.",
+          "status": "VerifiedWired",
+          "owner": "PlayerSettlementAuthorityPatches server lifecycle and creator completion event",
+          "routes": ["server-only DailyTick", "server-only NotifyComplete", "creator settlement-build-complete event"],
+          "tests": ["PlayerSettlementCompatibilityTests.LifecycleAndPersistence_RunOnlyOnServer", "PlayerSettlementCompatibilityTests.LifecyclePrefixes_LoadValidatedXmlOnlyOnTheHost"]
+        },
+        {
+          "id": "persistence-and-late-join",
+          "playerFunction": "Load, save, restart, and late-join a non-empty generated settlement graph from exact XML/component metadata without a forced save reload.",
+          "status": "VerifiedWired",
+          "owner": "PlayerSettlementObjectGraphRegistry",
+          "routes": ["validated host XML registration before registry enumeration", "server metadata persistence", "revisioned graph snapshot", "client stable-ID graph barrier"],
+          "tests": ["PlayerSettlementCompatibilityTests.NonEmptyLateJoin_RequiresEveryGeneratedSettlementInTheReplicatedRegistry", "PlayerSettlementCompatibilityTests.EmptyLateJoinSnapshot_ProtobufRoundTripsAndValidates"]
+        },
+        {
+          "id": "fixes-sidecar",
+          "playerFunction": "Retain deterministic null/AI/siege fixes without letting the sidecar install overlapping Harmony patches.",
+          "status": "VerifiedWired",
+          "owner": "PlayerSettlementHarmonyIsolation and Coop settlement/army/siege owners",
+          "routes": ["sidecar purge", "exact Coop replacement inventory"],
+          "tests": ["PlayerSettlementCompatibilityTests.HarmonyIsolation_RemovesOptionalOwnerPatchAndLeavesNoInventory", "PlayerSettlementCompatibilityTests.HarmonyIsolation_RequiresExactDedicatedGuardInventoryAndRejectsOverlap"]
+        }
+      ]
+    }
+  ]
+}

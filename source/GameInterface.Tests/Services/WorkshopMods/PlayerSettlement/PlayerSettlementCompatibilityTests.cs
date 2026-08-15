@@ -3,6 +3,7 @@ using GameInterface.Services.WorkshopMods.PlayerSettlement;
 using HarmonyLib;
 using ProtoBuf;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -204,6 +205,9 @@ public sealed class PlayerSettlementCompatibilityTests : IDisposable
     {
         ModInformation.IsServer = isServer;
         Assert.Equal(expected, PlayerSettlementAuthorityPatches.ServerPersistencePrefix());
+        Assert.Equal(expected, PlayerSettlementAuthorityPatches.ServerLifecyclePrefix());
+        Assert.Equal(!isServer, PlayerSettlementAuthorityPatches.ClientPresentationPrefix());
+        Assert.True(PlayerSettlementAuthorityPatches.RoleLifecyclePrefix());
     }
 
     [Fact]
@@ -259,19 +263,22 @@ public sealed class PlayerSettlementCompatibilityTests : IDisposable
     }
 
     [Theory]
-    [InlineData(true, 1, 1)]
-    [InlineData(false, 0, 0)]
-    public void LifecyclePrefixes_ReplaceOriginalPathsWithoutCreatingOrRegisteringObjectsLocally(
+    [InlineData(true, 1, 1, true)]
+    [InlineData(false, 1, 0, false)]
+    public void LifecyclePrefixes_LoadValidatedXmlOnlyOnTheHost(
         bool isServer,
         int expectedBootstrapCalls,
-        int expectedValidationCalls)
+        int expectedValidationCalls,
+        bool expectedOriginalRegistration)
     {
         ModInformation.IsServer = isServer;
         var runtime = new RecordingRuntime();
         PlayerSettlementPatchRuntime.Current = runtime;
 
         Assert.False(PlayerSettlementAuthorityPatches.BootstrapPersistenceBehaviorPrefix(new object()));
-        Assert.False(PlayerSettlementAuthorityPatches.GuardedObjectRegistrationPrefix(__0: true));
+        Assert.Equal(
+            expectedOriginalRegistration,
+            PlayerSettlementAuthorityPatches.GuardedObjectRegistrationPrefix(__0: true));
         Assert.Equal(expectedBootstrapCalls, runtime.BootstrapCalls);
         Assert.Equal(expectedValidationCalls, runtime.ValidationCalls);
     }
@@ -366,6 +373,25 @@ public sealed class PlayerSettlementCompatibilityTests : IDisposable
             localIsClient: false));
     }
 
+    [Fact]
+    public void NonEmptyLateJoin_RequiresEveryGeneratedSettlementInTheReplicatedRegistry()
+    {
+        var town = Entry(PlayerSettlementObjectKind.Town, 0, "player_settlement_town_a", string.Empty);
+        var village = Entry(
+            PlayerSettlementObjectKind.BoundVillage,
+            0,
+            "player_settlement_village_a",
+            town.StringId);
+        var registered = new HashSet<string>(StringComparer.Ordinal) { town.StringId, village.StringId };
+
+        Assert.True(PlayerSettlementObjectGraphRegistry.TryVerify(
+            new[] { town, village }, registered.Contains, out var failure), failure);
+        registered.Remove(village.StringId);
+        Assert.False(PlayerSettlementObjectGraphRegistry.TryVerify(
+            new[] { town, village }, registered.Contains, out failure));
+        Assert.Contains(village.StringId, failure);
+    }
+
     [Theory]
     [InlineData(true, false, true)]
     [InlineData(true, true, false)]
@@ -403,7 +429,7 @@ public sealed class PlayerSettlementCompatibilityTests : IDisposable
         var copy = Serializer.Deserialize<NetworkPlayerSettlementState>(stream);
 
         Assert.Equal(9, copy.Revision);
-        Assert.Equal(PlayerSettlementFeatureStatus.GuardedFeatureBlocked, copy.FeatureStatus);
+        Assert.Equal(PlayerSettlementFeatureStatus.Enabled, copy.FeatureStatus);
         // protobuf-net omits an empty repeated field, so an empty snapshot legitimately
         // deserializes with null Entries — the exact zeroed-receiver shape TryValidate
         // normalizes with its `Entries ?? Array.Empty` before validating.
@@ -417,7 +443,7 @@ public sealed class PlayerSettlementCompatibilityTests : IDisposable
         new NetworkPlayerSettlementState(
             PlayerSettlementCompatibilityManifest.AdapterVersion,
             revision,
-            PlayerSettlementFeatureStatus.GuardedFeatureBlocked,
+            PlayerSettlementFeatureStatus.Enabled,
             PlayerSettlementStateCodec.ComputeHash(entries),
             entries);
 
@@ -441,8 +467,8 @@ public sealed class PlayerSettlementCompatibilityTests : IDisposable
         public int BootstrapCalls { get; private set; }
         public int ValidationCalls { get; private set; }
         public void NotifyFeatureBlocked(string method) => Notifications++;
-        public void AddPersistenceBehavior(object campaignGameStarter) => BootstrapCalls++;
-        public void ValidateEmptyObjectRegistration(bool isSavedCampaign) => ValidationCalls++;
+        public void AddBehavior(object campaignGameStarter) => BootstrapCalls++;
+        public void ValidateObjectRegistration(bool isSavedCampaign) => ValidationCalls++;
     }
 
     private sealed class ShapeProbe

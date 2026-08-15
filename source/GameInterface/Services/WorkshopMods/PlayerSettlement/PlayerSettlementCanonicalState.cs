@@ -230,6 +230,38 @@ internal static class PlayerSettlementCanonicalState
 }
 
 /// <summary>
+/// Final late-join barrier between validated host metadata and Coop's replicated settlement
+/// registry. A snapshot is accepted only after every generated stable ID resolves locally.
+/// </summary>
+internal static class PlayerSettlementObjectGraphRegistry
+{
+    internal static bool TryVerify(
+        IEnumerable<PlayerSettlementStateEntry> entries,
+        Func<string, bool> isRegistered,
+        out string failure)
+    {
+        if (isRegistered == null)
+        {
+            failure = "settlement registry lookup is unavailable";
+            return false;
+        }
+
+        foreach (PlayerSettlementStateEntry entry in entries ?? Array.Empty<PlayerSettlementStateEntry>())
+        {
+            if (entry == null || string.IsNullOrEmpty(entry.StringId) || !isRegistered(entry.StringId))
+            {
+                failure =
+                    $"generated settlement {entry?.StringId ?? "<missing>"} was absent from the replicated object registry";
+                return false;
+            }
+        }
+
+        failure = null;
+        return true;
+    }
+}
+
+/// <summary>
 /// Pure admission boundary used after metadata capture and before either object registration or
 /// network publication. Keeping this separate makes the no-mutation/fail-closed behavior directly
 /// testable without loading the optional Workshop assembly.

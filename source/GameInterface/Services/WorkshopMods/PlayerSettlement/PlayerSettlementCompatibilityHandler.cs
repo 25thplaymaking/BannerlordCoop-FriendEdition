@@ -3,6 +3,7 @@ using Common.Logging;
 using Common.Messaging;
 using Common.Network;
 using GameInterface.Registry.Messages;
+using GameInterface.Services.ObjectManager;
 using HarmonyLib;
 using LiteNetLib;
 using Serilog;
@@ -13,15 +14,16 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Library;
 
 namespace GameInterface.Services.WorkshopMods.PlayerSettlement;
 
 /// <summary>
-/// Fail-closed Player Settlement 7.5.0 boundary. The module remains separately packaged for its
-/// assets and save type definitions, but construction/rebuild/overwrite is feature-blocked until a
-/// controller-scoped transaction can register and roll back the complete generated object graph on
-/// every peer. Empty-state campaigns and late joiners receive a revisioned readiness snapshot.
+/// Exact-binary Player Settlement 7.5.0 boundary. Generated XML is loaded only by the host before
+/// Coop registry enumeration; clients receive the resulting object graph through the normal
+/// registries and verify it against a revisioned metadata snapshot. Player placement commits remain
+/// separately guarded until their controller-scoped transaction is installed.
 /// </summary>
 internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSettlementPatchRuntime
 {
@@ -31,6 +33,7 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
 
     private readonly IMessageBroker messageBroker;
     private readonly INetwork network;
+    private readonly IObjectManager objectManager;
     private readonly Harmony adapterHarmony;
     private readonly HashSet<string> notifiedMethods = new HashSet<string>(StringComparer.Ordinal);
     private readonly PlayerSettlementRevisionGate revisionGate = new PlayerSettlementRevisionGate();
@@ -43,16 +46,17 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
     private string lastServerFingerprint;
     private long serverRevision;
     private bool compatible;
-    private bool limitationNoticeShown;
     private bool objectRegistrationValidated;
 
     public PlayerSettlementCompatibilityHandler(
         IMessageBroker messageBroker,
         INetwork network,
+        IObjectManager objectManager,
         Harmony harmony)
     {
         this.messageBroker = messageBroker;
         this.network = network;
+        this.objectManager = objectManager;
         if (harmony == null) throw new ArgumentNullException(nameof(harmony));
         adapterHarmony = new Harmony(PlayerSettlementHarmonyIsolation.AdapterHarmonyOwner);
 
@@ -85,23 +89,23 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             InformationManager.DisplayMessage(new InformationMessage(message));
     }
 
-    public void AddPersistenceBehavior(object campaignGameStarter)
+    public void AddBehavior(object campaignGameStarter)
     {
-        if (!ModInformation.IsServer || campaignGameStarter is not CampaignGameStarter starter)
+        if (campaignGameStarter is not CampaignGameStarter starter)
             throw new InvalidOperationException(
-                "Player Settlement persistence behavior bootstrap received an invalid host starter");
+                "Player Settlement behavior bootstrap received an invalid campaign starter");
 
         var behavior = Activator.CreateInstance(behaviorType) as CampaignBehaviorBase;
         if (behavior == null)
             throw new InvalidOperationException(
                 "Player Settlement persistence behavior could not be constructed");
 
-        // AddBehavior invokes RegisterEvents; that method is separately patched to return without
-        // registering ticks, menus, MainHero/MainParty callbacks, or compatibility behaviors.
+        // RegisterEvents runs on both roles. Every subscribed callback has an exact role prefix:
+        // clients keep placement/menu presentation and the host keeps persistence/completion.
         starter.AddBehavior(behavior);
     }
 
-    public void ValidateEmptyObjectRegistration(bool isSavedCampaign)
+    public void ValidateObjectRegistration(bool isSavedCampaign)
     {
         if (!ModInformation.IsServer)
             throw new InvalidOperationException(
@@ -164,15 +168,20 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             var fallbackLegacyInfo = legacyInfoType
                 .GetProperty("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
                 ?.GetValue(null);
-            PlayerSettlementUnavailableStoreAdmission.RequireEmpty(
-                fallbackMetadataCaptured,
-                fallbackMetadataEntries,
-                fallbackMetadataFailure,
-                fallbackLegacyInfo != null && LegacyInfoHasGeneratedObjects(fallbackLegacyInfo),
-                LegacyConfigDirectoryExists());
+            if (!fallbackMetadataCaptured)
+                throw new InvalidOperationException(
+                    "Player Settlement failed closed during unavailable early-store admission: " +
+                    (fallbackMetadataFailure ?? "metadata capture failed"));
+            if (fallbackLegacyInfo != null && LegacyInfoHasGeneratedObjects(fallbackLegacyInfo))
+                throw new InvalidOperationException(
+                    "Player Settlement failed closed during unavailable early-store admission: in-process legacy metadata contains generated settlements");
+            if (LegacyConfigDirectoryExists())
+                throw new InvalidOperationException(
+                    "Player Settlement failed closed during unavailable early-store admission: legacy external settlement metadata exists for this campaign");
 
-            Logger.Warning(
-                "Player Settlement early save store is unavailable on the dedicated host; admitted the campaign after proving embedded, in-process, and legacy generated settlement state is empty");
+            Logger.Information(
+                "Player Settlement early save store is unavailable on the dedicated host; admitting {Count} already-captured v3 generated objects for authoritative XML registration",
+                fallbackMetadataEntries.Length);
             objectRegistrationValidated = true;
             return;
         }
@@ -193,11 +202,10 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             out var metadataEntries,
             out _,
             out var metadataFailure);
-        PlayerSettlementStateAdmission.RequireEmpty(
-            metadataCaptured,
-            metadataEntries,
-            metadataFailure,
-            "object registration");
+        if (!metadataCaptured)
+            throw new InvalidOperationException(
+                "Player Settlement failed closed during object registration: " +
+                (metadataFailure ?? "metadata capture failed"));
 
         var hasLegacyInfo = ReadStoreValue(
             store,
@@ -219,6 +227,9 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         // graph, legacy, and non-empty check above has completed successfully, so a rejected save
         // leaves the behavior's original metadata field untouched.
         metadataField.SetValue(behavior, metadata);
+        Logger.Information(
+            "Player Settlement admitted {Count} validated generated objects for authoritative XML registration",
+            metadataEntries.Length);
         objectRegistrationValidated = true;
     }
 
@@ -338,6 +349,18 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
                 return AccessTools.Method(
                     typeof(PlayerSettlementAuthorityPatches),
                     nameof(PlayerSettlementAuthorityPatches.ServerPersistencePrefix));
+            case PlayerSettlementPatchKind.ServerLifecycle:
+                return AccessTools.Method(
+                    typeof(PlayerSettlementAuthorityPatches),
+                    nameof(PlayerSettlementAuthorityPatches.ServerLifecyclePrefix));
+            case PlayerSettlementPatchKind.RoleLifecycle:
+                return AccessTools.Method(
+                    typeof(PlayerSettlementAuthorityPatches),
+                    nameof(PlayerSettlementAuthorityPatches.RoleLifecyclePrefix));
+            case PlayerSettlementPatchKind.ClientPresentation:
+                return AccessTools.Method(
+                    typeof(PlayerSettlementAuthorityPatches),
+                    nameof(PlayerSettlementAuthorityPatches.ClientPresentationPrefix));
             default:
                 return AccessTools.Method(
                     typeof(PlayerSettlementAuthorityPatches),
@@ -352,7 +375,6 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         revisionGate.Reset();
         if (ModInformation.IsClient)
         {
-            ShowLimitationNotice();
             network.SendAll(new NetworkRequestPlayerSettlementState());
             return;
         }
@@ -409,7 +431,7 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         PlayerSettlementStateEntry[] entries;
         try
         {
-            entries = AssertEmptyStateOrThrow("snapshot publication");
+            entries = CaptureStateOrThrow("snapshot publication");
         }
         catch (Exception exception)
         {
@@ -429,7 +451,7 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         var state = new NetworkPlayerSettlementState(
             PlayerSettlementCompatibilityManifest.AdapterVersion,
             nextRevision,
-            PlayerSettlementFeatureStatus.GuardedFeatureBlocked,
+            PlayerSettlementFeatureStatus.Enabled,
             fingerprint,
             entries);
         if (!PlayerSettlementStateCodec.TryValidate(state, out var failure))
@@ -522,22 +544,21 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             campaignId));
     }
 
-    internal PlayerSettlementStateEntry[] AssertEmptyStateOrThrow(string phase)
+    internal PlayerSettlementStateEntry[] CaptureStateOrThrow(string phase)
     {
         var captured = PlayerSettlementCanonicalState.TryCapture(
             assembly,
             out var entries,
             out _,
             out var failure);
-        try
+        if (!captured)
         {
-            return PlayerSettlementStateAdmission.RequireEmpty(captured, entries, failure, phase);
+            var message =
+                $"Player Settlement failed closed during {phase}: metadata capture failed ({failure ?? "unknown failure"}).";
+            Logger.Fatal(message);
+            throw new InvalidOperationException(message);
         }
-        catch (InvalidOperationException exception)
-        {
-            Logger.Fatal(exception.Message);
-            throw;
-        }
+        return entries ?? Array.Empty<PlayerSettlementStateEntry>();
     }
 
     internal bool ApplySnapshot(NetworkPlayerSettlementState state, out string rejection)
@@ -566,12 +587,12 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             return false;
         }
 
-        if ((state.Entries?.Length ?? 0) != 0)
+        if (!PlayerSettlementObjectGraphRegistry.TryVerify(
+                state.Entries,
+                id => objectManager.TryGetObject(id, out Settlement settlement) && settlement != null,
+                out rejection))
         {
-            const string message =
-                "Player Settlement objects were found in the host save, but this guarded build cannot safely register their generated object/component graph for a late joiner. The snapshot was rejected without mutating client state.";
-            Logger.Fatal(message);
-            rejection = message;
+            Logger.Fatal(rejection);
             return false;
         }
 
@@ -580,7 +601,6 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             rejection = "snapshot revision changed before it could be committed";
             return false;
         }
-        ShowLimitationNotice();
         rejection = null;
         return true;
     }
@@ -602,14 +622,6 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             failure);
         throw new InvalidOperationException(
             "The Coop session cannot continue without authoritative Player Settlement state: " + failure);
-    }
-
-    private void ShowLimitationNotice()
-    {
-        if (limitationNoticeShown || !ModInformation.IsClient) return;
-        limitationNoticeShown = true;
-        InformationManager.DisplayMessage(new InformationMessage(
-            "Player Settlement 7.5.0 safety is active. Existing empty-state campaigns can load, but build, rebuild, overwrite, delete/edit, and save-reload actions are disabled until their generated object graph is server-authoritative."));
     }
 
     private static Assembly FindAssembly(string name) =>

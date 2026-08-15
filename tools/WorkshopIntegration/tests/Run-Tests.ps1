@@ -453,6 +453,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Authority inspector regression tests failed.' 
 if ($LASTEXITCODE -ne 0) { throw 'Authority audit generator regression tests failed.' }
 & (Join-Path $PSScriptRoot 'Validate-AuthorityAudit.ps1') -SelfTest
 if ($LASTEXITCODE -ne 0) { throw 'Authority audit validator self-tests failed.' }
+& (Join-Path $PSScriptRoot 'Validate-FeatureWiring.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Workshop feature-wiring validation failed.' }
 
 # Real-audit gameplay authority gate (2026-08-14): six modules are fully classified and must
 # stay that way. Fourberie carries a reviewed open-route set (un-adapted stealth/fight-club/

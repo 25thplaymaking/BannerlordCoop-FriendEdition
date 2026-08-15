@@ -12,6 +12,9 @@ internal enum PlayerSettlementPatchKind
     BootstrapPersistenceBehavior,
     GuardedObjectRegistration,
     ServerPersistence,
+    ServerLifecycle,
+    RoleLifecycle,
+    ClientPresentation,
     BlockedPlayerAction,
     BlockedSharedMutation,
     BlockedSaveMutation,
@@ -54,7 +57,7 @@ internal sealed class PlayerSettlementMethodSpec
 /// </summary>
 internal static class PlayerSettlementCompatibilityManifest
 {
-    internal const string AdapterVersion = "1";
+    internal const string AdapterVersion = "2";
     internal const string ModuleVersion = "v7.5.0";
     internal const string AssemblyName = "PlayerSettlement";
     internal const string FixesAssemblyName = "PlayerSettlementFixes";
@@ -84,9 +87,10 @@ internal static class PlayerSettlementCompatibilityManifest
             Spec("BannerlordPlayerSettlement.Main", "OnSubModuleLoad", false, "System.Void",
                 PlayerSettlementPatchKind.BlockedSharedMutation),
             Spec("BannerlordPlayerSettlement.Main", "OnBeforeInitialModuleScreenSetAsRoot", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedSharedMutation),
-            // Keep only the authoritative host's serialized payload alive. RegisterEvents is
-            // separately denied, so adding the behavior cannot start its ticks or menus.
+                "System.Void", PlayerSettlementPatchKind.ClientPresentation),
+            // Add the behavior on both roles. Its event handlers are independently role-routed
+            // below: clients own placement/menu presentation while the host owns persistence,
+            // construction completion, and campaign mutation.
             Spec("BannerlordPlayerSettlement.Main", "AddBehaviors", false, "System.Void",
                 PlayerSettlementPatchKind.BootstrapPersistenceBehavior,
                 "TaleWorlds.CampaignSystem.CampaignGameStarter"),
@@ -96,7 +100,7 @@ internal static class PlayerSettlementCompatibilityManifest
                 PlayerSettlementPatchKind.BlockedSaveMutation, "System.String[]"),
 
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "RegisterEvents", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedSharedMutation),
+                "System.Void", PlayerSettlementPatchKind.RoleLifecycle),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "SyncData", false,
                 "System.Void", PlayerSettlementPatchKind.ServerPersistence,
                 "TaleWorlds.CampaignSystem.IDataStore"),
@@ -104,29 +108,29 @@ internal static class PlayerSettlementCompatibilityManifest
                 "System.Void", PlayerSettlementPatchKind.ServerPersistence,
                 "TaleWorlds.CampaignSystem.IDataStore"),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "OnLoad", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedSharedMutation),
+                "System.Void", PlayerSettlementPatchKind.RoleLifecycle),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "DailyTick", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedSharedMutation),
+                "System.Void", PlayerSettlementPatchKind.ServerLifecycle),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "Tick", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedSharedMutation, "System.Single"),
+                "System.Void", PlayerSettlementPatchKind.ClientPresentation, "System.Single"),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "OnBeforeTick", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedPlayerAction,
+                "System.Void", PlayerSettlementPatchKind.ClientPresentation,
                 "SandBox.View.Map.MapCameraView+InputInformation&"),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "SetupGameMenus", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedPlayerAction,
+                "System.Void", PlayerSettlementPatchKind.ClientPresentation,
                 "TaleWorlds.CampaignSystem.CampaignGameStarter"),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "StartPortPlacement", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedPlayerAction),
+                "System.Void", PlayerSettlementPatchKind.ClientPresentation),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "StartGatePlacement", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedPlayerAction),
+                "System.Void", PlayerSettlementPatchKind.ClientPresentation),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "ApplyNow", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedPlayerAction),
+                "System.Void", PlayerSettlementPatchKind.ClientPresentation),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "Reset", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedPlayerAction),
+                "System.Void", PlayerSettlementPatchKind.ClientPresentation),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "RefreshVisualSelection", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedPlayerAction),
+                "System.Void", PlayerSettlementPatchKind.ClientPresentation),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "NotifyComplete", false,
-                "System.Void", PlayerSettlementPatchKind.BlockedSharedMutation,
+                "System.Void", PlayerSettlementPatchKind.ServerLifecycle,
                 "BannerlordPlayerSettlement.Saves.ISettlementItem"),
             Spec("BannerlordPlayerSettlement.Behaviours.PlayerSettlementBehaviour", "Overwrite", false,
                 "System.Void", PlayerSettlementPatchKind.BlockedPlayerAction,

@@ -78,6 +78,11 @@ internal enum FourberieOperation
     CommitBanditEvent = 66,
     CommitLegacyCallback = 67,
     CommitConversationEvent = 68,
+    CommitCampaignConsequence = 69,
+    RecruitMinorTroops = 70,
+    LeaveKingdom = 71,
+    CommitGuardKills = 72,
+    CommitSafehouseEncounter = 73,
 }
 
 internal enum FourberieStealthEvent
@@ -132,6 +137,15 @@ internal enum FourberieConversationEvent
     RejectRivalry = 4,
     ResolveGangLeaderBashing = 5,
     RejectBashing = 6,
+}
+
+internal enum FourberieCampaignConsequence
+{
+    StartAssassination = 1,
+    RanAway = 2,
+    HealWound = 3,
+    SafehouseCompanionRelation = 4,
+    BribeGuard = 5,
 }
 
 internal enum FourberieOperationStatus
@@ -544,6 +558,20 @@ internal static class FourberieOperationProtocol
             FourberieOperation.CommitBanditEvent => IsBanditEventShapeValid(request),
             FourberieOperation.CommitLegacyCallback => IsLegacyCallbackShapeValid(request),
             FourberieOperation.CommitConversationEvent => IsConversationEventShapeValid(request),
+            FourberieOperation.CommitCampaignConsequence => IsCampaignConsequenceShapeValid(request),
+            FourberieOperation.RecruitMinorTroops =>
+                !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
+                request.IntValue == 0 && request.Troops.Length > 0 && selected <= 30,
+            FourberieOperation.LeaveKingdom =>
+                string.IsNullOrEmpty(request.SettlementId) && string.IsNullOrEmpty(request.TargetId) &&
+                (request.SecondaryTargetId == "keep" || request.SecondaryTargetId == "dontkeep") &&
+                request.IntValue == 0 && request.Troops.Length == 0,
+            FourberieOperation.CommitGuardKills =>
+                !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
+                request.IntValue <= MaxSelectedTroops && request.Troops.Length == 0,
+            FourberieOperation.CommitSafehouseEncounter =>
+                !string.IsNullOrEmpty(request.SettlementId) && EmptyTargets(request) &&
+                request.IntValue >= 2 && request.IntValue <= 5 && request.Troops.Length == 0,
             _ => false,
         };
     }
@@ -714,6 +742,20 @@ internal static class FourberieOperationProtocol
         return (FourberieConversationEvent)request.IntValue == FourberieConversationEvent.ResolveGangLeaderBashing
             ? string.IsNullOrEmpty(request.TargetId)
             : !string.IsNullOrEmpty(request.TargetId);
+    }
+
+    private static bool IsCampaignConsequenceShapeValid(NetworkRequestFourberieOperation request)
+    {
+        if (!Enum.IsDefined(typeof(FourberieCampaignConsequence), request.IntValue) ||
+            !string.IsNullOrEmpty(request.SecondaryTargetId) || request.Troops.Length != 0 ||
+            request.Items.Length != 0 || request.ObjectIds.Length != 0 || request.Roster.Length != 0)
+            return false;
+        var consequence = (FourberieCampaignConsequence)request.IntValue;
+        if (consequence == FourberieCampaignConsequence.SafehouseCompanionRelation)
+            return !string.IsNullOrEmpty(request.TargetId);
+        if (consequence == FourberieCampaignConsequence.BribeGuard)
+            return !string.IsNullOrEmpty(request.SettlementId) && string.IsNullOrEmpty(request.TargetId);
+        return string.IsNullOrEmpty(request.TargetId);
     }
 
     private static bool IsLegacyCallbackShapeValid(NetworkRequestFourberieOperation request) =>

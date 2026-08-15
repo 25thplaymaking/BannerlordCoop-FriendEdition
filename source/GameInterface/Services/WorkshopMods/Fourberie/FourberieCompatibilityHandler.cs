@@ -332,6 +332,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                             AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.BanditRosterOpenPostfix)),
                         FourberiePatchKind.ClientPresentation =>
                             AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.ClientPresentationPostfix)),
+                        FourberiePatchKind.CampaignConsequence =>
+                            AccessTools.Method(typeof(FourberieAuthorityPatches), nameof(FourberieAuthorityPatches.CampaignConsequencePostfix)),
                         _ => null,
                     };
                     return (Original: pair.Value, Prefix: prefix, Postfix: postfix);
@@ -633,6 +635,21 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                 break;
             case FourberiePatchKind.ConversationConsequence:
                 method = nameof(FourberieAuthorityPatches.ConversationConsequencePrefix);
+                break;
+            case FourberiePatchKind.CampaignConsequence:
+                method = nameof(FourberieAuthorityPatches.CampaignConsequencePrefix);
+                break;
+            case FourberiePatchKind.MinorRecruitmentConsequence:
+                method = nameof(FourberieAuthorityPatches.MinorRecruitmentConsequencePrefix);
+                break;
+            case FourberiePatchKind.KingdomLeaveConsequence:
+                method = nameof(FourberieAuthorityPatches.KingdomLeaveConsequencePrefix);
+                break;
+            case FourberiePatchKind.GuardKillConsequence:
+                method = nameof(FourberieAuthorityPatches.GuardKillConsequencePrefix);
+                break;
+            case FourberiePatchKind.SafehouseEncounterConsequence:
+                method = nameof(FourberieAuthorityPatches.SafehouseEncounterConsequencePrefix);
                 break;
             case FourberiePatchKind.MissionLocal:
                 method = nameof(FourberieAuthorityPatches.MissionLocalPrefix);

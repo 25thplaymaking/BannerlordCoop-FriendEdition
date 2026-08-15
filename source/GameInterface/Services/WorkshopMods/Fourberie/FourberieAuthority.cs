@@ -1591,6 +1591,147 @@ internal static class FourberieAuthorityPatches
         return false;
     }
 
+    public static bool CampaignConsequencePrefix(
+        MethodBase __originalMethod,
+        object[] __args,
+        ref FourberiePresentationState __state)
+    {
+        if (!ModInformation.IsClient) return false;
+        FourberieCampaignConsequence consequence = (__originalMethod?.MetadataToken ?? 0) switch
+        {
+            0x060002DF => FourberieCampaignConsequence.BribeGuard,
+            0x06000462 => FourberieCampaignConsequence.StartAssassination,
+            0x0600032F => FourberieCampaignConsequence.RanAway,
+            0x06000336 => FourberieCampaignConsequence.HealWound,
+            0x060004BB => FourberieCampaignConsequence.SafehouseCompanionRelation,
+            _ => 0,
+        };
+        Hero target = consequence == FourberieCampaignConsequence.SafehouseCompanionRelation
+            ? __args?.OfType<Hero>().FirstOrDefault()
+            : null;
+        if (consequence == 0 ||
+            consequence == FourberieCampaignConsequence.SafehouseCompanionRelation && target == null ||
+            FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+                FourberieOperation.CommitCampaignConsequence,
+                Settlement.CurrentSettlement,
+                target,
+                null,
+                (int)consequence,
+                Array.Empty<FourberieLocalTroopSelection>())) != true)
+        {
+            FourberieSafehouseTransferContext.ShowUnavailable();
+            return false;
+        }
+
+        if (consequence == FourberieCampaignConsequence.StartAssassination)
+        {
+            // Preserve Fourberie's local ConversationEndOneShot mission setup, then roll back its
+            // speculative _crimeValue write in the postfix. The host owns that write.
+            __state = FourberiePresentationState.Capture();
+            return true;
+        }
+        if (consequence == FourberieCampaignConsequence.RanAway)
+        {
+            if (PlayerEncounter.Current != null)
+            {
+                if (PlayerEncounter.InsideSettlement) PlayerEncounter.LeaveSettlement();
+                PlayerEncounter.Finish(true);
+            }
+        }
+        if (consequence == FourberieCampaignConsequence.BribeGuard)
+        {
+            Campaign.Current.IsMainHeroDisguised = true;
+            GameMenu.SwitchToMenu("town");
+            if (PlayerEncounter.LocationEncounter != null)
+                PlayerEncounter.LocationEncounter.IsInsideOfASettlement = true;
+        }
+        return false;
+    }
+
+    public static void CampaignConsequencePostfix(FourberiePresentationState __state) => __state?.Restore();
+
+    public static bool MinorRecruitmentConsequencePrefix(TroopRoster leftMemberRoster, ref bool __result)
+    {
+        __result = false;
+        if (!ModInformation.IsClient || leftMemberRoster == null) return false;
+        Type type = AccessTools.TypeByName("Fourberie.FourbRecruitableBehavior");
+        TroopRoster original = AccessTools.Field(type, "_dummyTroopRooster")?.GetValue(null) as TroopRoster;
+        if (original == null) return false;
+        FourberieLocalTroopSelection[] selected = original.GetTroopRoster()
+            .Select(value => new FourberieLocalTroopSelection(
+                value.Character,
+                Math.Max(0, value.Number - leftMemberRoster.GetTroopCount(value.Character))))
+            .Where(value => value.Count > 0)
+            .ToArray();
+        if (selected.Length == 0)
+        {
+            __result = true;
+            return false;
+        }
+        __result = FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+            FourberieOperation.RecruitMinorTroops,
+            Settlement.CurrentSettlement,
+            null,
+            null,
+            0,
+            selected)) == true;
+        if (!__result) FourberieSafehouseTransferContext.ShowUnavailable();
+        return false;
+    }
+
+    public static bool KingdomLeaveConsequencePrefix(object[] __args)
+    {
+        if (!ModInformation.IsClient) return false;
+        string choice = __args?.OfType<IEnumerable<InquiryElement>>()
+            .SelectMany(value => value)
+            .Select(value => value.Identifier as string)
+            .FirstOrDefault(value => value == "keep" || value == "dontkeep");
+        if (choice == null || FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+                FourberieOperation.LeaveKingdom,
+                null,
+                null,
+                null,
+                0,
+                Array.Empty<FourberieLocalTroopSelection>(),
+                secondaryId: choice)) != true)
+            FourberieSafehouseTransferContext.ShowUnavailable();
+        return false;
+    }
+
+    public static bool GuardKillConsequencePrefix(int score)
+    {
+        if (!ModInformation.IsClient) return false;
+        if (score < 0 || FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+                FourberieOperation.CommitGuardKills,
+                Settlement.CurrentSettlement,
+                null,
+                null,
+                score,
+                Array.Empty<FourberieLocalTroopSelection>())) != true)
+            FourberieSafehouseTransferContext.ShowUnavailable();
+        return false;
+    }
+
+    public static bool SafehouseEncounterConsequencePrefix(object __instance, bool hasPlayerwonf)
+    {
+        if (!ModInformation.IsClient || __instance == null) return false;
+        int encounterType = Convert.ToInt32(
+            AccessTools.Field(__instance.GetType(), "_safeHouseEncounterType")?.GetValue(__instance) ?? 0);
+        Settlement crimeBase = FourberieSafehouseTransferContext.CurrentCrimeBase();
+        int encoded = encounterType * 2 + (hasPlayerwonf ? 1 : 0);
+        if ((encounterType != 1 && encounterType != 2) || crimeBase == null ||
+            FourberiePatchRuntime.Current?.TrySubmit(new FourberieLocalOperation(
+                FourberieOperation.CommitSafehouseEncounter,
+                crimeBase,
+                null,
+                null,
+                encoded,
+                Array.Empty<FourberieLocalTroopSelection>())) != true)
+            FourberieSafehouseTransferContext.ShowUnavailable();
+        if (PlayerEncounter.Current != null) PlayerEncounter.Finish(true);
+        return false;
+    }
+
     internal static void CompleteBanditPresentation(Assembly assembly, FourberieBanditEvent banditEvent)
     {
         if (!ModInformation.IsClient || assembly == null) return;

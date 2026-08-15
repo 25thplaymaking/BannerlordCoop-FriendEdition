@@ -262,6 +262,22 @@ internal sealed class FourberieOperationExecutor
                 case FourberieOperation.CommitConversationEvent:
                     ApplyConversationEvent(actor, actorParty, request);
                     break;
+                case FourberieOperation.CommitCampaignConsequence:
+                    ApplyCampaignConsequence(actor, actorParty, request);
+                    break;
+                case FourberieOperation.RecruitMinorTroops:
+                    actorCounts = CaptureAllCounts(actorParty.MemberRoster);
+                    ApplyMinorRecruitment(actor, actorParty, request);
+                    break;
+                case FourberieOperation.LeaveKingdom:
+                    ApplyKingdomLeave(actor, request.SecondaryTargetId);
+                    break;
+                case FourberieOperation.CommitGuardKills:
+                    ApplyGuardKills(actor, actorParty, request);
+                    break;
+                case FourberieOperation.CommitSafehouseEncounter:
+                    ApplySafehouseEncounter(actorParty, request);
+                    break;
                 case FourberieOperation.EnableContractOffers:
                 case FourberieOperation.DisableContractOffers:
                 case FourberieOperation.AbortContract:
@@ -781,6 +797,203 @@ internal sealed class FourberieOperationExecutor
                     throw new InvalidOperationException("unknown Fourberie conversation event");
             }
         }
+    }
+
+    private void ApplyCampaignConsequence(
+        Hero actor,
+        MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        var consequence = (FourberieCampaignConsequence)request.IntValue;
+        Hero target = string.IsNullOrEmpty(request.TargetId) ? null : ResolveHero(request.TargetId);
+        using (new AllowedThread())
+        using (new BarterPlayerContext(actor, actorParty))
+        {
+            switch (consequence)
+            {
+                case FourberieCampaignConsequence.StartAssassination:
+                    GetDictionary("_crimeValue")[104] = 30;
+                    return;
+                case FourberieCampaignConsequence.RanAway:
+                    GetDictionary("_crimeValue").Remove(104);
+                    GetDictionary("_crimeValue").Remove(512);
+                    AddTraitXp(actor, DefaultTraits.Honor, -5);
+                    AddTraitXp(actor, DefaultTraits.Valor, -10);
+                    return;
+                case FourberieCampaignConsequence.HealWound:
+                    ApplyHealWound(actor, actorParty);
+                    return;
+                case FourberieCampaignConsequence.SafehouseCompanionRelation:
+                    if (target == null || !target.IsPlayerCompanion || target.Clan != actor.Clan)
+                        throw new InvalidOperationException("the safehouse companion is no longer eligible");
+                    if (target.GetRelation(actor) <= 55f && MBRandom.RandomInt(0, 11) > 5)
+                        ChangeRelationAction.ApplyRelationChangeBetweenHeroes(actor, target, 1, true);
+                    return;
+                case FourberieCampaignConsequence.BribeGuard:
+                    if (!TryResolveCurrentSettlement(actorParty, request.SettlementId, out Settlement settlement) ||
+                        settlement.Town == null)
+                        throw new InvalidOperationException("the bribed settlement is no longer current");
+                    int price = (int)settlement.Town.Prosperity;
+                    if (actor.Gold < price) throw new InvalidOperationException("not enough gold to bribe the guard");
+                    GiveGoldAction.ApplyBetweenCharacters(actor, null, price, false);
+                    Campaign.Current.IsMainHeroDisguised = true;
+                    return;
+                default:
+                    throw new InvalidOperationException("unknown Fourberie campaign consequence");
+            }
+        }
+    }
+
+    private void ApplyMinorRecruitment(
+        Hero actor,
+        MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        if (!TryResolveCurrentSettlement(actorParty, request.SettlementId, out Settlement settlement) ||
+            settlement.Town == null || settlement.Culture == null)
+            throw new InvalidOperationException("the minor recruitment town is no longer current");
+        var allowedIds = new HashSet<string>(StringComparer.Ordinal);
+        Type helper = assembly.GetType("Fourberie.ListHelper", true, false);
+        if (AccessTools.Field(helper, "_troopList")?.GetValue(null) is IEnumerable list)
+        {
+            foreach (object entry in list)
+            {
+                PropertyInfo first = entry.GetType().GetProperty("Item1");
+                PropertyInfo second = entry.GetType().GetProperty("Item2");
+                if (string.Equals(first?.GetValue(entry) as string, settlement.Culture.StringId, StringComparison.Ordinal) &&
+                    second?.GetValue(entry) is string id)
+                    allowedIds.Add(id);
+            }
+        }
+        int count = 0;
+        var selected = new List<(CharacterObject Troop, int Count)>();
+        foreach (FourberieTroopSelection selection in request.Troops)
+        {
+            if (!allowedIds.Contains(selection.TroopId) ||
+                !objectManager.TryGetObject(selection.TroopId, out CharacterObject troop) || troop == null)
+                throw new InvalidOperationException("the selected minor-faction troop is not eligible here");
+            count = checked(count + selection.Count);
+            selected.Add((troop, selection.Count));
+        }
+        if (count > 30 || actorParty.MemberRoster.TotalManCount + count > actorParty.Party.PartySizeLimit)
+            throw new InvalidOperationException("the selected recruits exceed the party limit");
+        CharacterObject baseline = CharacterObject.All.FirstOrDefault(value =>
+            value.Occupation == Occupation.Villager && value.Level == 21);
+        if (baseline == null) throw new InvalidOperationException("the recruitment cost baseline is unavailable");
+        int unitCost = (int)(Campaign.Current.Models.PartyWageModel
+            .GetTroopRecruitmentCost(baseline, actor, false).ResultNumber + settlement.Town.Prosperity / 111f);
+        int price = checked(count * unitCost);
+        if (actor.Gold < price) throw new InvalidOperationException("not enough gold for the selected recruits");
+        using (new AllowedThread())
+        using (new BarterPlayerContext(actor, actorParty))
+        {
+            GiveGoldAction.ApplyBetweenCharacters(actor, null, price, false);
+            foreach ((CharacterObject troop, int amount) in selected)
+                actorParty.MemberRoster.AddToCounts(troop, amount, false, 0, 0, true, -1);
+            Type recruitable = assembly.GetType("Fourberie.FourbRecruitableBehavior", true, false);
+            if (AccessTools.Field(recruitable, "_recruitTiming")?.GetValue(null) is IDictionary timing)
+                timing[settlement] = CampaignTime.Now;
+            else throw new InvalidOperationException("the minor recruitment cooldown is unavailable");
+        }
+    }
+
+    private static void ApplyKingdomLeave(Hero actor, string choice)
+    {
+        Clan clan = actor.Clan;
+        if (clan?.Kingdom == null || clan.Leader != actor)
+            throw new InvalidOperationException("the controller no longer leads a kingdom clan");
+        using (new AllowedThread())
+        {
+            if (choice == "keep")
+                ChangeKingdomAction.ApplyByLeaveWithRebellionAgainstKingdom(clan, true);
+            else if (choice == "dontkeep")
+                ChangeKingdomAction.ApplyByLeaveKingdom(clan, true);
+            else throw new InvalidOperationException("the kingdom leave choice is invalid");
+        }
+    }
+
+    private void ApplyGuardKills(
+        Hero actor,
+        MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        if (!TryResolveCurrentSettlement(actorParty, request.SettlementId, out Settlement settlement))
+            throw new InvalidOperationException("the guard-kill settlement is no longer current");
+        IDictionary crime = GetDictionary("_crimeValue");
+        IDictionary heroes = GetDictionary("_stringHeroIdDico");
+        Hero giver = ResolveMappedHero("jobKillGuard");
+        if (giver == null || !giver.IsAlive)
+        {
+            heroes.Remove("jobKillGuard");
+            crime.Remove(101);
+            return;
+        }
+        if (giver.CurrentSettlement != settlement)
+            throw new InvalidOperationException("the guard-kill job giver is no longer in this settlement");
+        int required = ReadInt(crime, 101);
+        if (request.IntValue < required) return;
+        using (new AllowedThread())
+        using (new BarterPlayerContext(actor, actorParty))
+        {
+            ChangeRelationAction.ApplyRelationChangeBetweenHeroes(actor, giver, required, true);
+            GiveGoldAction.ApplyBetweenCharacters(null, actor, MBRandom.RandomInt(required * 100, required * 100 + 200), false);
+            actor.AddSkillXp(DefaultSkills.Roguery, required * 100f);
+            RequiredMethod(BehaviorTypeName, "XpFornoMercyNoHonorinParty", 3)
+                .Invoke(null, new object[] { 0f, actorParty.MemberRoster, true });
+            giver.AddPower(5f);
+            heroes.Remove("jobKillGuard");
+            crime.Remove(101);
+        }
+    }
+
+    private void ApplySafehouseEncounter(
+        MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        if (!objectManager.TryGetObject(request.SettlementId, out Settlement crimeBase) ||
+            crimeBase == null || crimeBase != GetStaticField("_crimeBase"))
+            throw new InvalidOperationException("the safehouse encounter base is stale");
+        int encounterType = request.IntValue / 2;
+        bool playerWon = request.IntValue % 2 == 1;
+        using (new AllowedThread())
+        {
+            if (GetStaticField("_FourbParty") is MobileParty encounterParty)
+            {
+                if (encounterParty.IsActive) DestroyPartyAction.Apply(null, encounterParty);
+                SetStaticField("_FourbParty", null);
+            }
+            if (!playerWon && encounterType == 1)
+            {
+                int escaped = ReadInt(GetDictionary("_crimeValue"), 1500) / 2;
+                RequiredMethod(BehaviorTypeName, "PrisonersVirtualLogic", 2)
+                    .Invoke(null, new object[] { 0, escaped });
+            }
+            else if (!playerWon && encounterType == 2)
+                RequiredMethod(BehaviorTypeName, "HideoutDeactivated", 1)
+                    .Invoke(null, new object[] { crimeBase });
+        }
+    }
+
+    private void ApplyHealWound(Hero actor, MobileParty actorParty)
+    {
+        if (actor.IsHealthFull()) return;
+        Town nearest = SettlementHelper.FindNearestTownToMobileParty(
+            actorParty, MobileParty.NavigationType.Default, null);
+        if (nearest == null) throw new InvalidOperationException("no town is available for Fourberie healing");
+        int price = 1000 + (int)nearest.Prosperity / 100;
+        Settlement crimeBase = GetStaticField("_crimeBase") as Settlement;
+        IDictionary crime = GetDictionary("_crimeValue");
+        if (crimeBase?.IsTown == true && crime.Contains(3) &&
+            Convert.ToBoolean(RequiredMethod(BehaviorTypeName, "PaymasterCond", 0).Invoke(null, null)) ||
+            crimeBase?.IsHideout == true && ReadInt(crime, 560) > 2)
+            price /= 2;
+        if (actor.Gold < price) throw new InvalidOperationException("not enough gold for Fourberie healing");
+        GiveGoldAction.ApplyBetweenCharacters(actor, null, price, false);
+        int healed = Math.Min(
+            (int)actorParty.Party.HealingRateForMemberHeroes,
+            actor.CharacterObject.MaxHitPoints() - actor.HitPoints);
+        actor.HitPoints += healed;
+        SkillLevelingManager.OnHeroHealedWhileWaiting(actor, healed);
     }
 
     private void PromoteGangLeader(Hero actor, Settlement settlement, Hero target)

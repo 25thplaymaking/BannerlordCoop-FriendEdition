@@ -8827,6 +8827,92 @@
       "tests": [
         "FourberieFinalizationTests.SourceOwnedHelpers_AreReachedOnlyThroughExistingAuthoritativeTransactions"
       ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": ["0x060002C8", "0x060002C9", "0x060002CA", "0x060002CC"],
+      "disposition": "ServerCallback",
+      "owner": "FourberieAuthorityPatches.ServerOnlyPrefix",
+      "capability": "AuthoritativeFourberieConsoleCommands",
+      "tests": [
+        "FourberieFinalizationTests.CampaignMutatingConsoleCommands_AreHostOnly"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": ["0x060002DF", "0x06000462", "0x0600032F", "0x06000336", "0x060004BB"],
+      "disposition": "ServerCommand",
+      "owner": "FourberieAuthorityPatches.CampaignConsequencePrefix -> FourberieOperationExecutor.ApplyCampaignConsequence",
+      "capability": "FourberieCampaignConsequences",
+      "tests": [
+        "FourberieCampaignConsequenceTests.ExactCallbacks_UseTypedHostConsequences",
+        "FourberieCampaignConsequenceTests.Protocol_BindsOnlyCompanionRelationToATarget"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": ["0x060007BB", "0x060008EF"],
+      "disposition": "CoopOwnerReplacement",
+      "owner": "FourberieAuthorityPatches.ClientPresentationPrefix/ClientPresentationPostfix over typed campaign consequence and replicated VM children",
+      "capability": "FourberieConsequencePresentationWrappers",
+      "tests": [
+        "FourberieFinalizationTests.RemainingMenuBuildersAndConditions_AreRollbackProtectedPresentation",
+        "FourberieCampaignConsequenceTests.ExactCallbacks_UseTypedHostConsequences"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": ["0x06000621"],
+      "disposition": "ServerCommand",
+      "owner": "FourberieAuthorityPatches.MinorRecruitmentConsequencePrefix -> FourberieOperationExecutor.ApplyMinorRecruitment",
+      "capability": "FourberieMinorFactionRecruitment",
+      "tests": [
+        "FourberieCampaignConsequenceTests.MinorRecruitment_IsBoundedTypedRosterCommand"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": ["0x06000375"],
+      "disposition": "ServerCommand",
+      "owner": "FourberieAuthorityPatches.KingdomLeaveConsequencePrefix -> FourberieOperationExecutor.ApplyKingdomLeave",
+      "capability": "FourberieKingdomLeaveChoice",
+      "tests": [
+        "FourberieCampaignConsequenceTests.KingdomLeave_AcceptsOnlyTaleWorldsChoices"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": ["0x06000313"],
+      "disposition": "ServerCommand",
+      "owner": "FourberieAuthorityPatches.GuardKillConsequencePrefix -> FourberieOperationExecutor.ApplyGuardKills",
+      "capability": "FourberieGuardKillJob",
+      "tests": [
+        "FourberieCampaignConsequenceTests.GuardKills_AreSettlementBoundAndHostScored"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": ["0x060004A3"],
+      "disposition": "ServerCommand",
+      "owner": "FourberieAuthorityPatches.SafehouseEncounterConsequencePrefix -> FourberieOperationExecutor.ApplySafehouseEncounter",
+      "capability": "FourberieSafehouseEncounterOutcome",
+      "tests": ["FourberieCampaignConsequenceTests.SafehouseEncounter_UsesBoundedMissionResult"]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": ["0x060004A2"],
+      "disposition": "CoopOwnerReplacement",
+      "owner": "FourberieAuthorityPatches.MissionLocalPrefix -> FourberieAuthorityPatches.SafehouseEncounterConsequencePrefix",
+      "capability": "FourberieSafehouseMissionFinalize",
+      "tests": ["FourberieCampaignConsequenceTests.SafehouseEncounter_UsesBoundedMissionResult"]
     }
   ]
 }

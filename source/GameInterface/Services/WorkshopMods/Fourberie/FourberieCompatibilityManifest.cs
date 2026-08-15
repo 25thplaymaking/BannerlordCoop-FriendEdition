@@ -99,6 +99,11 @@ internal enum FourberiePatchKind
     BanditPreparation,
     LegacyCallback,
     ConversationConsequence,
+    CampaignConsequence,
+    MinorRecruitmentConsequence,
+    KingdomLeaveConsequence,
+    GuardKillConsequence,
+    SafehouseEncounterConsequence,
     MissionLocal,
     MissionInitialization,
     SeparatismLoyaltyComposition,
@@ -762,13 +767,20 @@ internal static class FourberieCompatibilityManifest
         AddTokens(FourberiePatchKind.SchemeRoomOpen, 0x060007B7, 0x060007B8, 0x060007B9);
         AddTokens(FourberiePatchKind.ConversationConsequence,
             0x060007D7, 0x060007DC, 0x060007DE, 0x060007E1, 0x060007E2, 0x060007E3);
+        AddTokens(FourberiePatchKind.CampaignConsequence,
+            0x060002DF, 0x06000462, 0x0600032F, 0x06000336, 0x060004BB);
+        AddTokens(FourberiePatchKind.MinorRecruitmentConsequence, 0x06000621);
+        AddTokens(FourberiePatchKind.KingdomLeaveConsequence, 0x06000375);
+        AddTokens(FourberiePatchKind.GuardKillConsequence, 0x06000313);
+        AddTokens(FourberiePatchKind.SafehouseEncounterConsequence, 0x060004A3);
         AddTokens(FourberiePatchKind.MissionLocal,
-            0x060003E2, 0x06000464, 0x0600046A, 0x060008C8,
+            0x060003E2, 0x06000464, 0x0600046A, 0x060008C8, 0x060004A2,
             0x06000487, 0x0600048C, 0x060004CC, 0x060004DD);
         AddTokens(FourberiePatchKind.ClientPresentation,
             0x06000342, 0x0600035F, 0x060003C2, 0x060003CF,
             0x06000624, 0x06000625, 0x060004C7,
-            0x060007B2, 0x060007BD, 0x060007BE);
+            0x060007B2, 0x060007BB, 0x060007BD, 0x060007BE,
+            0x060008EF);
         AddTokens(FourberiePatchKind.DominanceCondition, 0x06000314);
         AddTokens(FourberiePatchKind.StealthMissionLocal, 0x06000504, 0x06000528);
         AddTokens(FourberiePatchKind.StealthHit, 0x060004FD);
@@ -878,7 +890,10 @@ internal static class FourberieCompatibilityManifest
             0x0600029A, 0x060002B8, 0x060002B9, 0x060002BA, 0x060002BD,
             0x06000738, 0x0600077C, 0x0600077E, 0x06000780);
         AddTokens(FourberiePatchKind.ServerOnly,
-            0x06000260, 0x06000286, 0x060002AF, 0x060002B2);
+            0x06000260, 0x06000286, 0x060002AF, 0x060002B2,
+            // Fourberie's developer/cheat console commands mutate canonical campaign state and
+            // therefore exist only on the authoritative campaign host.
+            0x060002C8, 0x060002C9, 0x060002CA, 0x060002CC);
         AddTokens(FourberiePatchKind.BanditConsequence,
             0x06000272, 0x060002C0, 0x06000745, 0x0600074C, 0x0600074E,
             0x0600075E, 0x06000766, 0x06000776, 0x06000782, 0x06000791,

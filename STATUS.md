@@ -4,7 +4,7 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
-> **2026-08-15 Auburn/settlement client crash correction — VERIFIED DRAFT, NOT DEPLOYED.**
+> **2026-08-15 Auburn/settlement client crash correction — VERIFIED DRAFT PR #18, NOT DEPLOYED.**
 > Auburn's `CalradiaCoop-Logs-2026-08-15_06-29-56.zip` ended without a managed exception while this
 > client hosted a 5,038-troop battle and processed 1,603 reinforcement events. The candidate ports the
 > approved upstream large-battle allocation correction (#2997): the server now supplies one authoritative

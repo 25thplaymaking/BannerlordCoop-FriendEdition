@@ -12,6 +12,9 @@ Branch: `25vid/fix-kingdom-tab-diplomacy-managers` (base: `development`)
 
 ## Phase P — Auburn large battle + settlement ownership client crash — VERIFIED DRAFT (2026-08-15)
 
+Draft PR: https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/pull/18
+Branch: `25vid/fix-client-crashes-and-sync-floods` (base: `development`)
+
 - **Auburn:** the latest log ends abruptly while the client is mission host for a 3,375-vs-1,663 battle,
   after 1,603 reinforcement events and 1,744 troop fieldings. The candidate ports approved upstream PR
   #2997 and preserves Friend Edition's additive wire compatibility: the server sends one battle-size and

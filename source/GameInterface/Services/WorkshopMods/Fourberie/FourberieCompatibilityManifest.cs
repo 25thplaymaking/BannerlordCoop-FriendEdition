@@ -814,7 +814,13 @@ internal static class FourberieCompatibilityManifest
             0x0600091E, 0x0600091F, 0x06000920, 0x06000921, 0x06000922, 0x06000923,
             0x06000924, 0x06000925, 0x06000926, 0x06000927, 0x06000928, 0x06000929,
             0x0600092B, 0x0600092C, 0x0600092E, 0x0600092F, 0x06000931, 0x06000933,
-            0x06000935, 0x06000936, 0x06000937, 0x0600093A, 0x0600093C, 0x0600093D);
+            0x06000935, 0x06000936, 0x06000937, 0x0600093A, 0x0600093C, 0x0600093D,
+            // InsideMissionsHelper's setup and teardown operate on the controlling client's
+            // Mission/Agent graph. The eight AfterMaths callbacks are intentionally not here:
+            // they are replaced by the authenticated outcome operations above. Alley ownership
+            // is likewise excluded until its existing Coop alley-acquisition route has run.
+            0x060005EB, 0x060005EC, 0x060005EE, 0x060005F0, 0x060005F2, 0x060005F4,
+            0x060005F6, 0x060005F8, 0x060005FA, 0x06000601, 0x06000A6E);
         AddTokens(FourberiePatchKind.FightClubMissionLocal,
             0x0600042C, 0x0600042D, 0x0600042F, 0x06000431, 0x06000434, 0x0600043A,
             0x06000437, 0x060008AC, 0x060008B9);

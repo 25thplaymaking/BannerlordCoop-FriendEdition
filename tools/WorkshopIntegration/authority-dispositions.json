@@ -8505,6 +8505,21 @@
     {
       "moduleId": "Fourberie",
       "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
+      "metadataTokens": [
+        "0x060005EB", "0x060005EC", "0x060005EE", "0x060005F0", "0x060005F2",
+        "0x060005F4", "0x060005F6", "0x060005F8", "0x060005FA", "0x06000601",
+        "0x06000A6E"
+      ],
+      "disposition": "ClientPresentation",
+      "owner": "FourberieAuthorityPatches.ClientPresentationPrefix",
+      "capability": "InsideMissionLocalSimulation",
+      "tests": [
+        "FourberieMissionOutcomeTests.ExactMissionSurface_IsClientLocalAndExcludesPersistentAftermaths"
+      ]
+    },
+    {
+      "moduleId": "Fourberie",
+      "assemblySha256": "29f6644bcca8d5a3834ee51c72ec75d94214beb76cb1fdcbc2027da0eb544e92",
       "metadataTokens": ["0x0600042E"],
       "disposition": "ServerCommand",
       "owner": "FourberieFightClubAuthority",

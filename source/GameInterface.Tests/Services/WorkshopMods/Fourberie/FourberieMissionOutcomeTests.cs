@@ -83,6 +83,13 @@ public sealed class FourberieMissionOutcomeTests
         Assert.DoesNotContain(local, spec => spec.MetadataToken is
             0x060005ED or 0x060005EF or 0x060005F1 or 0x060005F3 or
             0x060005F5 or 0x060005F7 or 0x060005F9 or 0x060005FB);
+        int[] insideMissionLocal =
+        {
+            0x060005EB, 0x060005EC, 0x060005EE, 0x060005F0, 0x060005F2, 0x060005F4,
+            0x060005F6, 0x060005F8, 0x060005FA, 0x06000601, 0x06000A6E,
+        };
+        Assert.All(insideMissionLocal, token => Assert.Contains(local, spec => spec.MetadataToken == token));
+        Assert.DoesNotContain(local, spec => spec.MetadataToken == 0x060005FD);
     }
 
     private static NetworkRequestFourberieOperation Request(

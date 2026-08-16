@@ -380,7 +380,7 @@ source/GameInterface/Services/MapEvents/
 │   │   ├── BattleStarted.cs                  // IEvent  (server-side, from StartPartyEncounter prefix)
 │   │   ├── NetworkStartBattle.cs             // ICommand (broadcast → clients replicate the encounter)
 │   │   ├── AttackMissionAttempted.cs / NetworkAttackMissionAttempted.cs / NetworkStartAttackMission.cs  // mission launch
-│   │   └── StartBattleAttempted.cs / NetworkRequestStartBattle.cs
+│   │   └── StartBattleAttempted.cs
 │   ├── Leave/
 │   │   ├── MapEventFinalizeAttempted.cs      // IEvent  (client-side, from FinalizeEventAux prefix)
 │   │   ├── NetworkMapEventFinalizeAttempted.cs   // ICommand (client → server: finalize authoritatively)

@@ -89,21 +89,6 @@ public class NetworkPlayerPartyInteractionSerializationTest
     }
 
     [Fact]
-    public void SubmitOption_RoundTrip_PreservesFields()
-    {
-        var original = new NetworkSubmitPlayerPartyInteractionOption(
-            "session-1",
-            PlayerPartyInteractionOption.TravelTogether,
-            "party-1");
-
-        var result = RoundTrip(original);
-
-        Assert.Equal(original.SessionId, result.SessionId);
-        Assert.Equal(original.Option, result.Option);
-        Assert.Equal(original.PartyId, result.PartyId);
-    }
-
-    [Fact]
     public void Ended_RoundTrip_PreservesFields()
     {
         var original = new NetworkPlayerPartyInteractionEnded(

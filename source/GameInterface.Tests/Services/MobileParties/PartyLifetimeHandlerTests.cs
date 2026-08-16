@@ -99,42 +99,12 @@ public class PartyLifetimeHandlerTests
     }
 
     [Fact]
-    public void Handle_DestroyPartyRequested_ResolvableParties_SendsRequest()
+    public void Handle_DestroyPartyRequested_ResolvableParties_FailsClosed()
     {
         var destroyer = ObjectHelper.SkipConstructor<PartyBase>();
         var defeated = ObjectHelper.SkipConstructor<MobileParty>();
         SetupId(destroyer, "destroyer-1");
         SetupId(defeated, "defeated-1");
-
-        handler.Handle_DestroyPartyRequested(RequestPayload(destroyer, defeated));
-
-        var sent = Assert.IsType<NetworkRequestDestroyParty>(sentMessage!);
-        Assert.Equal("destroyer-1", sent.DestroyerPartyId);
-        Assert.Equal("defeated-1", sent.DefeatedPartyId);
-        network.Verify(n => n.SendAll(It.IsAny<IMessage>()), Times.Once);
-    }
-
-    [Fact]
-    public void Handle_DestroyPartyRequested_UnresolvableDestroyer_DoesNotSend()
-    {
-        var destroyer = ObjectHelper.SkipConstructor<PartyBase>();
-        var defeated = ObjectHelper.SkipConstructor<MobileParty>();
-        SetupId(defeated, "defeated-1");
-        SetupNoId(destroyer);
-
-        handler.Handle_DestroyPartyRequested(RequestPayload(destroyer, defeated));
-
-        Assert.Null(sentMessage);
-        network.Verify(n => n.SendAll(It.IsAny<IMessage>()), Times.Never);
-    }
-
-    [Fact]
-    public void Handle_DestroyPartyRequested_UnresolvableDefeated_DoesNotSend()
-    {
-        var destroyer = ObjectHelper.SkipConstructor<PartyBase>();
-        var defeated = ObjectHelper.SkipConstructor<MobileParty>();
-        SetupId(destroyer, "destroyer-1");
-        SetupNoId(defeated);
 
         handler.Handle_DestroyPartyRequested(RequestPayload(destroyer, defeated));
 

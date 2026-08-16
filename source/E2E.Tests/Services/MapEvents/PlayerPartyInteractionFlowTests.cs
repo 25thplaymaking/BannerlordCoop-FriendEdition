@@ -276,10 +276,9 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
         client1.NetworkSentMessages.Clear();
         SubmitDialogOption(client1, initiatorInitialState, PlayerPartyInteractionOption.TradeProposal);
 
-        var submittedOption = client1.NetworkSentMessages.GetMessages<NetworkSubmitPlayerPartyInteractionOption>().Single();
-        Assert.Equal(sessionId, submittedOption.SessionId);
-        Assert.Equal(initiatorPartyId, submittedOption.PartyId);
-        Assert.Equal(PlayerPartyInteractionOption.TradeProposal, submittedOption.Option);
+        var submittedOption = client1.NetworkSentMessages.GetMessages<RequestPlayerPartyInteractionOption>().Single();
+        Assert.Equal(sessionId, submittedOption.InteractionSessionId);
+        Assert.Equal((int)PlayerPartyInteractionOption.TradeProposal, submittedOption.Option);
 
         var proposalStates = Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionState>().ToArray();
         Assert.Contains(proposalStates, s =>
@@ -381,24 +380,6 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
     }
 
     [Fact]
-    public void OptionSubmit_SpoofedResponderPartyId_DoesNotActAsResponder()
-    {
-        var (client1, _, initiatorPartyId, responderPartyId) = CreateTwoPlayerParties();
-        RequestInteraction(client1, initiatorPartyId, responderPartyId);
-        var sessionId = Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionStarted>().Single().SessionId;
-        SubmitOption(client1, sessionId, initiatorPartyId, PlayerPartyInteractionOption.TradeProposal);
-
-        Server.NetworkSentMessages.Clear();
-        client1.Call(() => client1.Resolve<INetwork>().SendAll(new NetworkSubmitPlayerPartyInteractionOption(
-            sessionId,
-            PlayerPartyInteractionOption.AcceptProposal,
-            responderPartyId)));
-
-        Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionState>());
-        Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionEnded>());
-    }
-
-    [Fact]
     public void OfferServices_WithNoEnabledServiceOptions_ShowsDisabledOptionsAndCanEndInteraction()
     {
         var (client1, _, initiatorPartyId, responderPartyId) = CreateTwoPlayerParties();
@@ -431,7 +412,7 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
         client1.NetworkSentMessages.Clear();
         OpenServiceOptions(client1, initialState);
 
-        Assert.Empty(client1.NetworkSentMessages.GetMessages<NetworkSubmitPlayerPartyInteractionOption>());
+        Assert.Empty(client1.NetworkSentMessages.GetMessages<RequestPlayerPartyInteractionOption>());
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionState>());
         client1.Call(() =>
         {
@@ -475,7 +456,7 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
         client1.NetworkSentMessages.Clear();
         OpenServiceOptions(client1, initialState);
 
-        Assert.Empty(client1.NetworkSentMessages.GetMessages<NetworkSubmitPlayerPartyInteractionOption>());
+        Assert.Empty(client1.NetworkSentMessages.GetMessages<RequestPlayerPartyInteractionOption>());
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionState>());
         client1.Call(() =>
         {
@@ -1649,7 +1630,7 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
         Server.NetworkSentMessages.Clear();
         client1.NetworkSentMessages.Clear();
         OpenServiceOptions(client1, initialState);
-        Assert.Empty(client1.NetworkSentMessages.GetMessages<NetworkSubmitPlayerPartyInteractionOption>());
+        Assert.Empty(client1.NetworkSentMessages.GetMessages<RequestPlayerPartyInteractionOption>());
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionState>());
 
         SubmitDialogOption(client1, initialState, PlayerPartyInteractionOption.TradeProposal);
@@ -4292,7 +4273,9 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
         IReadOnlyList<MethodBase>? disabledMethods = null)
     {
         client.Call(() =>
-            client.Resolve<INetwork>().SendAll(new NetworkSubmitPlayerPartyInteractionOption(sessionId, option, partyId)),
+            client.Resolve<IMessageBroker>().Publish(
+                this,
+                new PlayerPartyInteractionOptionSelected(sessionId, partyId, option)),
             disabledMethods);
     }
 

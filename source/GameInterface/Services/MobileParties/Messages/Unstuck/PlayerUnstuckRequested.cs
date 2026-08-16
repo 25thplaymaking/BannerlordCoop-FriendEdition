@@ -5,7 +5,7 @@ namespace GameInterface.Services.MobileParties.Messages.Unstuck;
 
 /// <summary>
 /// The local player asked to be forced out of stuck map states (coop.debug.mobileparty.unstuck).
-/// Forwarded to the server as <see cref="NetworkRequestPlayerUnstuck"/>.
+/// The handler fails closed until a server-verifiable stuck-state proof exists.
 /// </summary>
 internal readonly struct PlayerUnstuckRequested : IEvent
 {

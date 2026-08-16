@@ -12,7 +12,7 @@ public class UnstuckCommand
 {
     // coop.debug.mobileparty.unstuck
     /// <summary>
-    /// Requests a server-authoritative unstuck of the local player party. Client only.
+    /// Reports that unstuck is unavailable until the server can verify the stuck state. Client only.
     /// </summary>
     [CommandLineArgumentFunction("unstuck", "coop")]
     public static string Unstuck(List<string> args)
@@ -25,7 +25,6 @@ public class UnstuckCommand
 
         MessageBroker.Instance.Publish(mainParty, new PlayerUnstuckRequested(mainParty));
 
-        return "Unstuck request sent to the server. Captivity, map event, army, siege camp, and " +
-               "settlement exits apply on the server; the local encounter and menu state clear when its reply arrives.";
+        return "Unstuck is unavailable until the server can verify a non-exploitable stuck state.";
     }
 }

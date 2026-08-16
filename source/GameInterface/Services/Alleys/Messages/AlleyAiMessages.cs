@@ -1,5 +1,4 @@
 ﻿using Common.Messaging;
-using GameInterface.Services.TroopRosters.Data;
 using ProtoBuf;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Roster;
@@ -23,7 +22,6 @@ public readonly struct AlleyDailyTickSettlementTriggered : IEvent
         Settlement = settlement;
     }
 }
-
 /// <summary>A hero was killed; apply the alley-side consequences (overseer death, gang-leader alleys freed).</summary>
 public readonly struct AlleyHeroKilledTriggered : IEvent
 {
@@ -86,24 +84,5 @@ public readonly struct NetworkAlleyUnderAttack : ICommand
         AttackerAlleyId = attackerAlleyId;
         DueDate = dueDate;
         ShowNotification = showNotification;
-    }
-}
-
-// --- Networked request (owning client to server): the client resolved a defense fight ---
-
-[ProtoContract(SkipConstructor = true)]
-public readonly struct RequestAlleyDefenseResolved : ICommand
-{
-    [ProtoMember(1)]
-    public readonly string AlleyId;
-    [ProtoMember(2)]
-    public readonly bool Won;
-    [ProtoMember(3)]
-    public readonly TroopRosterElementData[] Garrison;
-    public RequestAlleyDefenseResolved(string alleyId, bool won, TroopRosterElementData[] garrison)
-    {
-        AlleyId = alleyId;
-        Won = won;
-        Garrison = garrison;
     }
 }

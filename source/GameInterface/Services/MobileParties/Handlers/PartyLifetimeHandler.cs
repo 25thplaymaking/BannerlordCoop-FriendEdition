@@ -133,42 +133,6 @@ internal class PartyLifetimeHandler : IHandler
 
     }
 
-    internal void Handle_NetworkRequestDestroyParty(MessagePayload<NetworkRequestDestroyParty> payload)
-    {
-        // Only the server applies the destroy authoritatively; clients receive the resulting
-        // NetworkApplyDestroyParty broadcast instead.
-        if (!ModInformation.IsServer)
-            return;
-
-        var message = payload.What;
-
-        // Resolve and apply on the game thread with patches LIVE (no AllowedThread): the request
-        // arrives on the network (poller) thread, and the party can be destroyed or unregistered
-        // between resolving it and the queued action draining, so resolve it at drain time. The
-        // server's DestroyPartyActionPatch.PrefixApply then publishes DestroyPartyApplied, and
-        // Handle_PartyDestroyed replicates the destruction to every client.
-        GameThread.Run(() =>
-        {
-            try
-            {
-                if (!objectManager.TryGetObjectWithLogging<PartyBase>(message.DestroyerPartyId, out var destroyerParty))
-                    return;
-
-                if (!objectManager.TryGetObjectWithLogging<MobileParty>(message.DefeatedPartyId, out var defeatedParty))
-                    return;
-
-                if (!defeatedParty.IsActive)
-                    return;
-
-                DestroyPartyAction.Apply(destroyerParty, defeatedParty);
-            }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, "[Server] Failed to apply requested destroy for party {DefeatedPartyId}", message.DefeatedPartyId);
-            }
-        });
-    }
-
     private void Handle_PartyDisbanded(MessagePayload<PartyDisbanded> payload)
     {
         var party = payload.What.DisbandedParty;

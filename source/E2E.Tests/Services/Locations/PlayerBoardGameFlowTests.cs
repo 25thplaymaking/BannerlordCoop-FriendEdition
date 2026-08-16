@@ -41,8 +41,6 @@ public sealed class PlayerBoardGameFlowTests : MapEventTestBase
         }, MapEventDisabledMethods);
 
         Server.NetworkSentMessages.Clear();
-        initiatorClient.Call(() => initiatorClient.Resolve<INetwork>().SendAll(
-            new NetworkRequestPlayerBoardGame("BoardGameReceiver", boardGameType: 4)));
         receiverClient.Call(() => receiverClient.Resolve<INetwork>().SendAll(
             new NetworkRespondPlayerBoardGameChallenge("forged", accepted: true)));
         initiatorClient.Call(() => initiatorClient.Resolve<INetwork>().SendAll(

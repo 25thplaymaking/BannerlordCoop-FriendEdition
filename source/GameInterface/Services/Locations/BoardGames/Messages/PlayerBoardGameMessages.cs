@@ -4,21 +4,6 @@ using ProtoBuf;
 namespace GameInterface.Services.Locations.BoardGames.Messages;
 
 [ProtoContract(SkipConstructor = true)]
-internal readonly struct NetworkRequestPlayerBoardGame : ICommand
-{
-    [ProtoMember(1)]
-    public readonly string TargetControllerId;
-    [ProtoMember(2)]
-    public readonly int BoardGameType;
-
-    public NetworkRequestPlayerBoardGame(string targetControllerId, int boardGameType)
-    {
-        TargetControllerId = targetControllerId;
-        BoardGameType = boardGameType;
-    }
-}
-
-[ProtoContract(SkipConstructor = true)]
 internal readonly struct NetworkPlayerBoardGameChallenge : ICommand
 {
     [ProtoMember(1)]

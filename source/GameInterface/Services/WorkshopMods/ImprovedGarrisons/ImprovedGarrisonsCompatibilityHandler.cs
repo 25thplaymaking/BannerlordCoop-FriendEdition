@@ -4,6 +4,8 @@ using Common.Messaging;
 using Common.Network;
 using Common.Util;
 using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
+using GameInterface.Services.CampaignService.Messages;
 using GameInterface.Registry.Messages;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
@@ -36,6 +38,10 @@ internal enum ImprovedGarrisonsReplayDecision
     New,
     Replay,
     Conflict,
+}
+
+internal readonly struct ImprovedGarrisonsSnapshotIntent
+{
 }
 
 internal sealed class ImprovedGarrisonsRequestLedger<TKey>
@@ -160,6 +166,7 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
     private readonly IPlayerManager playerManager;
     private readonly IModConfigAuthority configAuthority;
     private readonly IWorkshopCapabilityRegistry capabilityRegistry;
+    private readonly IAuthorityRouteHandle<ImprovedGarrisonsSnapshotIntent, NetworkImprovedGarrisonsStateQueryResult> snapshotRoute;
     private readonly Harmony harmony;
     private readonly HashSet<string> deniedNotifications = new HashSet<string>(StringComparer.Ordinal);
     private readonly Dictionary<string, string> pendingPartyScreens =
@@ -176,6 +183,7 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
     private string lastAppliedHash;
     private bool compatible;
     private bool stateReady;
+    private bool objectsRegistered;
 
     public ImprovedGarrisonsCompatibilityHandler(
         IMessageBroker messageBroker,
@@ -184,7 +192,8 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
         IPlayerManager playerManager,
         IModConfigAuthority configAuthority,
         IWorkshopCapabilityRegistry capabilityRegistry,
-        Harmony _)
+        Harmony harmonyDependency,
+        IAuthorityRequestRouter authorityRequestRouter)
     {
         this.messageBroker = messageBroker;
         this.network = network;
@@ -197,22 +206,45 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
         compatible = TryInstall();
         if (compatible) ImprovedGarrisonsPatchRuntime.Current = this;
 
+        snapshotRoute = authorityRequestRouter.Register(
+            AuthorityRoute<ImprovedGarrisonsSnapshotIntent, NetworkRequestImprovedGarrisonsState,
+                NetworkImprovedGarrisonsStateQueryResult>.Define(
+                "workshop.improved-garrisons.snapshot", AuthorityRouteKind.BootstrapQuery,
+                CreateSnapshotHeader,
+                (_, header) => new NetworkRequestImprovedGarrisonsState(header),
+                request => request.Header,
+                result => result.Header,
+                request => request.Header.TryValidate(out _) ? null : "invalid-improved-garrisons-snapshot-query",
+                request => "snapshot:" + request.Header.SessionId + ":" + request.Header.ExpectedRevision,
+                ValidateSnapshotHeader,
+                ExecuteSnapshotQuery,
+                CreateSnapshotTerminal,
+                ProbeSnapshotApplied,
+                _ => { },
+                PresentSnapshotTerminal,
+                configAuthority.IsTrustedServer,
+                AuthorityTimeoutPolicy.BootstrapQuery,
+                requireAuthenticatedPlayer: false));
+
         messageBroker.Subscribe<AllGameObjectsRegistered>(Handle_AllGameObjectsRegistered);
-        messageBroker.Subscribe<NetworkRequestImprovedGarrisonsState>(Handle_StateRequest);
         messageBroker.Subscribe<NetworkRequestImprovedGarrisonsSettingChange>(Handle_SettingRequest);
         messageBroker.Subscribe<NetworkRequestImprovedGarrisonsOperation>(Handle_OperationRequest);
         messageBroker.Subscribe<NetworkImprovedGarrisonsOperationResult>(Handle_OperationResult);
         messageBroker.Subscribe<NetworkImprovedGarrisonsState>(Handle_State);
+        messageBroker.Subscribe<NetworkImprovedGarrisonsStateQueryResult>(Handle_StateQueryResult);
+        messageBroker.Subscribe<HostModConfigAccepted>(HandleHostModConfigAccepted);
     }
 
     public void Dispose()
     {
         messageBroker.Unsubscribe<AllGameObjectsRegistered>(Handle_AllGameObjectsRegistered);
-        messageBroker.Unsubscribe<NetworkRequestImprovedGarrisonsState>(Handle_StateRequest);
         messageBroker.Unsubscribe<NetworkRequestImprovedGarrisonsSettingChange>(Handle_SettingRequest);
         messageBroker.Unsubscribe<NetworkRequestImprovedGarrisonsOperation>(Handle_OperationRequest);
         messageBroker.Unsubscribe<NetworkImprovedGarrisonsOperationResult>(Handle_OperationResult);
         messageBroker.Unsubscribe<NetworkImprovedGarrisonsState>(Handle_State);
+        messageBroker.Unsubscribe<NetworkImprovedGarrisonsStateQueryResult>(Handle_StateQueryResult);
+        messageBroker.Unsubscribe<HostModConfigAccepted>(HandleHostModConfigAccepted);
+        snapshotRoute.Dispose();
         if (ReferenceEquals(ImprovedGarrisonsPatchRuntime.Current, this)) ImprovedGarrisonsPatchRuntime.Current = null;
         pendingPartyScreens.Clear();
     }
@@ -865,11 +897,73 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
         nextRequestId = 0;
         lastPublishedHash = null;
         lastAppliedHash = null;
+        objectsRegistered = true;
         stateReady = !ModInformation.IsClient;
         if (ModInformation.IsClient)
-            network.SendAll(new NetworkRequestImprovedGarrisonsState());
+            StartSnapshotBootstrap();
         else
             PublishStateIfChanged();
+    }
+
+    private void HandleHostModConfigAccepted(MessagePayload<HostModConfigAccepted> payload)
+    {
+        if (payload?.What.Snapshot == null || !configAuthority.IsCurrent(payload.What.Snapshot)) return;
+        StartSnapshotBootstrap();
+    }
+
+    private void StartSnapshotBootstrap()
+    {
+        if (!compatible || !objectsRegistered || !ModInformation.IsClient || stateReady ||
+            !configAuthority.TryGetCurrent(out _)) return;
+        snapshotRoute.Submit(default);
+    }
+
+    private AuthorityRequestHeader CreateSnapshotHeader(long requestId)
+    {
+        if (!configAuthority.TryGetCurrent(out var config)) return default;
+        return new AuthorityRequestHeader(config.ProtocolVersion, config.SessionId, requestId, config.Revision);
+    }
+
+    private AuthorityHeaderValidation ValidateSnapshotHeader(AuthorityRequestHeader header)
+    {
+        if (!compatible || !stateReady || !configAuthority.TryGetCurrent(out var config))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "improved-garrisons-snapshot-unavailable");
+        if (header.ProtocolVersion != config.ProtocolVersion || !string.Equals(header.SessionId, config.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-config-session");
+        return header.ExpectedRevision == config.Revision
+            ? AuthorityHeaderValidation.Valid
+            : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-config-revision");
+    }
+
+    private AuthorityServerReply<NetworkImprovedGarrisonsStateQueryResult> ExecuteSnapshotQuery(
+        AuthorityServerContext context, NetworkRequestImprovedGarrisonsState _)
+    {
+        if (!TryCaptureState(out var snapshot, out var failure))
+        {
+            Logger.Warning("Improved Garrisons snapshot query is unavailable: {Failure}", failure);
+            return new AuthorityServerReply<NetworkImprovedGarrisonsStateQueryResult>(
+                CreateSnapshotTerminal(context.Header, AuthorityResultStatus.Unavailable,
+                    "improved-garrisons-snapshot-unavailable"), false);
+        }
+        return new AuthorityServerReply<NetworkImprovedGarrisonsStateQueryResult>(
+            new NetworkImprovedGarrisonsStateQueryResult(context.Header, AuthorityResultStatus.Accepted, snapshot, null), true);
+    }
+
+    private static NetworkImprovedGarrisonsStateQueryResult CreateSnapshotTerminal(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reasonCode) =>
+        new NetworkImprovedGarrisonsStateQueryResult(header, status, null, reasonCode);
+
+    private AuthorityCommitProbeResult ProbeSnapshotApplied(NetworkImprovedGarrisonsStateQueryResult result) =>
+        stateReady && result.Snapshot != null && revision == result.Header.CommittedRevision
+            ? AuthorityCommitProbeResult.Applied
+            : AuthorityCommitProbeResult.Pending;
+
+    private void PresentSnapshotTerminal(AuthorityClientOutcome<NetworkImprovedGarrisonsStateQueryResult> outcome)
+    {
+        if (outcome.Completion == AuthorityClientCompletion.Applied) return;
+        stateReady = false;
+        Logger.Warning("Improved Garrisons snapshot bootstrap ended without readiness. Completion={Completion} Reason={Reason}",
+            outcome.Completion, outcome.ReasonCode);
     }
 
     private void Handle_StateRequest(MessagePayload<NetworkRequestImprovedGarrisonsState> payload)
@@ -990,6 +1084,28 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
                 }
             },
             context: nameof(ImprovedGarrisonsCompatibilityHandler));
+    }
+
+    private void Handle_StateQueryResult(MessagePayload<NetworkImprovedGarrisonsStateQueryResult> payload)
+    {
+        if (!compatible || !ModInformation.IsClient || payload?.Who is not NetPeer serverPeer ||
+            !configAuthority.IsTrustedServer(serverPeer) || payload.What.Header.Status != AuthorityResultStatus.Accepted ||
+            payload.What.Snapshot == null)
+            return;
+
+        GameThread.RunSafe(() =>
+        {
+            if (TryApplyState(payload.What.Snapshot, out var failure))
+            {
+                stateReady = true;
+                TryOpenPendingPartyScreens();
+                return;
+            }
+            stateReady = false;
+            Logger.Fatal("Disconnecting from the Coop server because Improved Garrisons state could not be accepted: {Failure}",
+                failure);
+            serverPeer.Disconnect();
+        }, context: nameof(ImprovedGarrisonsCompatibilityHandler));
     }
 
     private void ApplySettingRequest(NetPeer peer, NetworkRequestImprovedGarrisonsSettingChange request)
@@ -1745,6 +1861,32 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
     private void SendState(NetPeer peer)
     {
         PublishStateIfChanged(peer);
+    }
+
+    private bool TryCaptureState(out NetworkImprovedGarrisonsState snapshot, out string failure)
+    {
+        snapshot = null;
+        failure = null;
+        if (!stateReady || !ImprovedGarrisonsCanonicalState.TryBuild(
+                assembly, objectManager, out var values, out var hash, out failure))
+        {
+            failure = stateReady ? "could not capture Improved Garrisons server state: " + failure
+                : "authoritative state is not ready";
+            return false;
+        }
+
+        bool changed = lastPublishedHash != null &&
+            !string.Equals(lastPublishedHash, hash, StringComparison.OrdinalIgnoreCase);
+        long publishedRevision = changed ? revision + 1 : revision;
+        snapshot = new NetworkImprovedGarrisonsState(
+            ImprovedGarrisonsCompatibilityManifest.AdapterVersion, publishedRevision, hash, values);
+        if (!IsSnapshotShapeValid(snapshot, out failure))
+        {
+            failure = "captured Improved Garrisons server state was invalid: " + failure;
+            return false;
+        }
+        failure = null;
+        return true;
     }
 
     private void PublishStateIfChanged(NetPeer peer = null)

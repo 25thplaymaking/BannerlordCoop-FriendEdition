@@ -3,7 +3,9 @@ using Common.Messaging;
 using Common.Network;
 using GameInterface.Services.Entity;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Tournaments.Data;
+using GameInterface.Services.Tournaments.Handlers;
 using GameInterface.Services.Tournaments.Messages;
 using System;
 using System.Collections.Concurrent;
@@ -151,7 +153,7 @@ internal sealed class TournamentUIController : ITournamentUIController, IHandler
            !IsActiveLocalContestant(snapshot);
 
     public void RequestJoin(string townId, string sessionId, long expectedRevision)
-        => network.SendAll(new NetworkRequestJoinTournament(townId, sessionId, expectedRevision));
+        => TournamentSessionHandler.SubmitJoin(townId, sessionId, expectedRevision);
 
     public void RequestStart(string townId)
     {
@@ -294,9 +296,14 @@ internal sealed class TournamentUIController : ITournamentUIController, IHandler
 
     private void SendLeavePreparation(TournamentSessionSnapshot snapshot)
     {
-        network.SendAll(new NetworkRequestLeaveTournamentPreparation(
+        TournamentSessionHandler.SubmitLeavePreparation(
             snapshot.SessionId,
-            snapshot.Revision));
+            snapshot.Revision,
+            outcome =>
+            {
+                if (outcome.Completion != AuthorityClientCompletion.Applied)
+                    pendingPreparationLeaves.TryRemove(snapshot.SessionId, out _);
+            });
     }
 
     internal void RetryPendingActiveLeave(TournamentSessionSnapshot snapshot)

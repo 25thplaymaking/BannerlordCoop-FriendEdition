@@ -25,6 +25,7 @@ namespace GameInterface.Services.Tournaments.Handlers;
 internal sealed class TournamentStateSyncHandler : IHandler
 {
     private static readonly ILogger Logger = LogManager.GetLogger<TournamentStateSyncHandler>();
+    internal static TournamentStateSyncHandler Instance { get; private set; }
 
     private readonly IMessageBroker messageBroker;
     private readonly INetwork network;
@@ -52,6 +53,7 @@ internal sealed class TournamentStateSyncHandler : IHandler
         this.sessionRegistry = sessionRegistry;
         this.relayNetworks = relayNetworks?.ToArray() ?? Array.Empty<IRelayNetwork>();
         this.configAuthority = configAuthority;
+        Instance = this;
 
         stateRoute = authorityRequestRouter.Register(
             AuthorityRoute<TournamentStateIntent, NetworkRequestTournamentState,
@@ -95,6 +97,7 @@ internal sealed class TournamentStateSyncHandler : IHandler
         messageBroker.Unsubscribe<TournamentNativeStateChanged>(Handle_NativeStateChanged);
         messageBroker.Unsubscribe<HostModConfigAccepted>(Handle_HostModConfigAccepted);
         stateRoute.Dispose();
+        if (ReferenceEquals(Instance, this)) Instance = null;
     }
 
     private void Handle_CampaignReady(MessagePayload<CampaignReady> payload)
@@ -119,6 +122,11 @@ internal sealed class TournamentStateSyncHandler : IHandler
     {
         if (!ModInformation.IsClient || !configAuthority.TryGetCurrent(out _)) return;
         stateRoute.Submit(default);
+    }
+
+    internal static void RequestCanonicalResync()
+    {
+        Instance?.StartStateBootstrap();
     }
 
     private AuthorityRequestHeader CreateStateHeader(long requestId)

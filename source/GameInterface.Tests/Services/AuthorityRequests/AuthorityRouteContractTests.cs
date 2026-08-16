@@ -84,6 +84,38 @@ public sealed class AuthorityRouteContractTests
     }
 
     [Fact]
+    public void TournamentJoinRequest_DeclaresRouteAndSeparatesConfigFromFeatureRevision()
+    {
+        var attribute = (AuthorityRouteAttribute)Attribute.GetCustomAttribute(
+            typeof(NetworkRequestJoinTournament), typeof(AuthorityRouteAttribute));
+        var header = new AuthorityRequestHeader(1, "0123456789abcdef0123456789abcdef", 29, 5);
+        var request = new NetworkRequestJoinTournament(header, "town-a", "tournament-a", 17);
+
+        Assert.NotNull(attribute);
+        Assert.Equal("tournament.join", attribute.RouteId);
+        Assert.Equal(AuthorityRouteKind.Command, attribute.Kind);
+        Assert.Equal(5, request.Header.ExpectedRevision);
+        Assert.Equal(17, request.ExpectedRevision);
+        Assert.Equal(29, request.Header.RequestId);
+    }
+
+    [Fact]
+    public void TournamentLeavePreparationRequest_DeclaresRouteAndRetainsExactHeader()
+    {
+        var attribute = (AuthorityRouteAttribute)Attribute.GetCustomAttribute(
+            typeof(NetworkRequestLeaveTournamentPreparation), typeof(AuthorityRouteAttribute));
+        var header = new AuthorityRequestHeader(1, "0123456789abcdef0123456789abcdef", 30, 6);
+        var request = new NetworkRequestLeaveTournamentPreparation(header, "tournament-a", 18);
+
+        Assert.NotNull(attribute);
+        Assert.Equal("tournament.leave-preparation", attribute.RouteId);
+        Assert.Equal(AuthorityRouteKind.Command, attribute.Kind);
+        Assert.Equal(header.SessionId, request.Header.SessionId);
+        Assert.Equal(header.RequestId, request.Header.RequestId);
+        Assert.Equal(18, request.ExpectedRevision);
+    }
+
+    [Fact]
     public void Router_RefusesARouteWhoseTypedMessageDoesNotDeclareTheSameIdentity()
     {
         using var broker = new MessageBroker();

@@ -1,4 +1,5 @@
 using Common.Messaging;
+using GameInterface.Configuration;
 using GameInterface.Services.Tournaments.Data;
 using ProtoBuf;
 
@@ -19,6 +20,7 @@ public readonly struct NetworkTournamentRequestRejected : ICommand
     }
 }
 
+[AuthorityRoute("tournament.join", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 public readonly struct NetworkRequestJoinTournament : ICommand
 {
@@ -28,15 +30,27 @@ public readonly struct NetworkRequestJoinTournament : ICommand
     public readonly string SessionId;
     [ProtoMember(3)]
     public readonly long ExpectedRevision;
+    [ProtoMember(4)] public readonly int ProtocolVersion;
+    [ProtoMember(5)] public readonly string ConfigSessionId;
+    [ProtoMember(6)] public readonly long AuthorityRequestId;
+    [ProtoMember(7)] public readonly long ConfigRevision;
 
-    public NetworkRequestJoinTournament(string townId, string sessionId, long expectedRevision)
+    public NetworkRequestJoinTournament(AuthorityRequestHeader header, string townId, string sessionId, long expectedRevision)
     {
         TownId = townId;
         SessionId = sessionId;
         ExpectedRevision = expectedRevision;
+        ProtocolVersion = header.ProtocolVersion;
+        ConfigSessionId = header.SessionId;
+        AuthorityRequestId = header.RequestId;
+        ConfigRevision = header.ExpectedRevision;
     }
+
+    public AuthorityRequestHeader Header =>
+        new AuthorityRequestHeader(ProtocolVersion, ConfigSessionId, AuthorityRequestId, ConfigRevision);
 }
 
+[AuthorityRoute("tournament.leave-preparation", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 public readonly struct NetworkRequestLeaveTournamentPreparation : ICommand
 {
@@ -44,12 +58,77 @@ public readonly struct NetworkRequestLeaveTournamentPreparation : ICommand
     public readonly string SessionId;
     [ProtoMember(2)]
     public readonly long ExpectedRevision;
+    [ProtoMember(3)] public readonly int ProtocolVersion;
+    [ProtoMember(4)] public readonly string ConfigSessionId;
+    [ProtoMember(5)] public readonly long AuthorityRequestId;
+    [ProtoMember(6)] public readonly long ConfigRevision;
 
-    public NetworkRequestLeaveTournamentPreparation(string sessionId, long expectedRevision)
+    public NetworkRequestLeaveTournamentPreparation(AuthorityRequestHeader header, string sessionId, long expectedRevision)
     {
         SessionId = sessionId;
         ExpectedRevision = expectedRevision;
+        ProtocolVersion = header.ProtocolVersion;
+        ConfigSessionId = header.SessionId;
+        AuthorityRequestId = header.RequestId;
+        ConfigRevision = header.ExpectedRevision;
     }
+
+    public AuthorityRequestHeader Header =>
+        new AuthorityRequestHeader(ProtocolVersion, ConfigSessionId, AuthorityRequestId, ConfigRevision);
+}
+
+[ProtoContract(SkipConstructor = true)]
+public readonly struct NetworkTournamentJoinResult : IEvent
+{
+    [ProtoMember(1)] public readonly TournamentSessionSnapshot Snapshot;
+    [ProtoMember(2)] public readonly string SessionId;
+    [ProtoMember(3)] public readonly long AuthorityRequestId;
+    [ProtoMember(4)] public readonly AuthorityResultStatus Status;
+    [ProtoMember(5)] public readonly long CommittedRevision;
+    [ProtoMember(6)] public readonly string ReasonCode;
+
+    public NetworkTournamentJoinResult(AuthorityRequestHeader request, AuthorityResultStatus status,
+        TournamentSessionSnapshot snapshot, string reasonCode)
+    {
+        Snapshot = snapshot;
+        SessionId = request.SessionId;
+        AuthorityRequestId = request.RequestId;
+        Status = status;
+        CommittedRevision = request.ExpectedRevision;
+        ReasonCode = reasonCode;
+    }
+
+    public AuthorityResultHeader Header =>
+        new AuthorityResultHeader(SessionId, AuthorityRequestId, Status, CommittedRevision, ReasonCode);
+}
+
+[ProtoContract(SkipConstructor = true)]
+public readonly struct NetworkTournamentLeavePreparationResult : IEvent
+{
+    [ProtoMember(1)] public readonly TournamentSessionSnapshot Snapshot;
+    [ProtoMember(2)] public readonly string RemovedSessionId;
+    [ProtoMember(3)] public readonly string RemovedTownId;
+    [ProtoMember(4)] public readonly string SessionId;
+    [ProtoMember(5)] public readonly long AuthorityRequestId;
+    [ProtoMember(6)] public readonly AuthorityResultStatus Status;
+    [ProtoMember(7)] public readonly long CommittedRevision;
+    [ProtoMember(8)] public readonly string ReasonCode;
+
+    public NetworkTournamentLeavePreparationResult(AuthorityRequestHeader request, AuthorityResultStatus status,
+        TournamentSessionSnapshot snapshot, string removedSessionId, string removedTownId, string reasonCode)
+    {
+        Snapshot = snapshot;
+        RemovedSessionId = removedSessionId;
+        RemovedTownId = removedTownId;
+        SessionId = request.SessionId;
+        AuthorityRequestId = request.RequestId;
+        Status = status;
+        CommittedRevision = request.ExpectedRevision;
+        ReasonCode = reasonCode;
+    }
+
+    public AuthorityResultHeader Header =>
+        new AuthorityResultHeader(SessionId, AuthorityRequestId, Status, CommittedRevision, ReasonCode);
 }
 
 [ProtoContract(SkipConstructor = true)]

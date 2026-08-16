@@ -576,7 +576,7 @@ internal class BattleFinalizeHandler : IHandler
 
     private void Handle_NetworkRaidBattleTransition(MessagePayload<NetworkRaidBattleTransition> payload)
     {
-        if (ModInformation.IsServer) return;
+        if (ModInformation.IsServer || !configAuthority.IsTrustedServer(payload.Who)) return;
 
         var message = payload.What;
 

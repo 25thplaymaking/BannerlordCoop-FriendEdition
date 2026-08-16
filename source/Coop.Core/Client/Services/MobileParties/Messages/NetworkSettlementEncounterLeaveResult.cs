@@ -1,4 +1,5 @@
-﻿using Common.Messaging;
+using Common.Messaging;
+using GameInterface.Services.AuthorityRequests;
 using ProtoBuf;
 
 namespace Coop.Core.Client.Services.MobileParties.Messages;
@@ -7,11 +8,10 @@ internal enum SettlementEncounterLeaveOutcome
 {
     Applied,
     Suppressed,
+    AlreadyOutside,
 }
 
-/// <summary>
-/// Reports whether the server applied or suppressed a settlement encounter leave.
-/// </summary>
+/// <summary>Correlated authoritative result for ending the requester's settlement encounter.</summary>
 [ProtoContract(SkipConstructor = true)]
 internal class NetworkSettlementEncounterLeaveResult : ICommand
 {
@@ -21,11 +21,22 @@ internal class NetworkSettlementEncounterLeaveResult : ICommand
     [ProtoMember(2)]
     public readonly SettlementEncounterLeaveOutcome Outcome;
 
+    [ProtoMember(3)]
+    public readonly string SettlementId;
+
+    [ProtoMember(4)]
+    public readonly AuthorityResultHeader Header;
+
     public NetworkSettlementEncounterLeaveResult(
         string partyId,
-        SettlementEncounterLeaveOutcome outcome)
+        string settlementId,
+        SettlementEncounterLeaveOutcome outcome,
+        AuthorityResultHeader header)
     {
         PartyId = partyId;
+        SettlementId = settlementId;
         Outcome = outcome;
+        Header = header;
     }
+
 }

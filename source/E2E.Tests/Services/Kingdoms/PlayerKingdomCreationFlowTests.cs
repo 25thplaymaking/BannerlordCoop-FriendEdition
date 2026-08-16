@@ -1,5 +1,6 @@
 ﻿using Common;
 using Common.Network.Messages;
+using Common.Messaging;
 using Common.Util;
 using Coop.Core.Client.Services.Kingdoms.Handlers;
 using Coop.Core.Client.Services.MobileParties.Messages;
@@ -9,6 +10,8 @@ using Coop.Core.Server.Services.Stances.Messages;
 using E2E.Tests.Environment;
 using E2E.Tests.Environment.Instance;
 using E2E.Tests.Util;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Clans.Messages;
 using GameInterface.Services.Entity;
 using GameInterface.Services.GameDebug.Messages;
@@ -1999,7 +2002,7 @@ public class PlayerKingdomCreationFlowTests : IDisposable
 
         Assert.Contains(
             client.NetworkSentMessages.GetMessages<NetworkRequestStartSettlementEncounter>(),
-            message => message.PartyId == player.PartyId && message.SettlementId == settlementId);
+            message => message.SettlementId == settlementId && message.Header.RequestId > 0);
 
         client.Call(() =>
         {
@@ -2057,9 +2060,7 @@ public class PlayerKingdomCreationFlowTests : IDisposable
             this,
             new NetworkPlayerKingdomCreated(ControllerId, kingdomId, KingdomName, player.ClanId, player.PartyId, settlementId));
 
-        Assert.DoesNotContain(
-            client.NetworkSentMessages.GetMessages<NetworkRequestEndSettlementEncounter>(),
-            message => message.PartyId == player.PartyId);
+        Assert.Empty(client.NetworkSentMessages.GetMessages<NetworkRequestEndSettlementEncounter>());
         Assert.DoesNotContain(
             Server.NetworkSentMessages.GetMessages<NetworkPartyLeaveSettlement>(),
             message => message.PartyId == player.PartyId);
@@ -2151,8 +2152,8 @@ public class PlayerKingdomCreationFlowTests : IDisposable
 
         var leaveRequest = Assert.Single(
             client.NetworkSentMessages.GetMessages<NetworkRequestEndSettlementEncounter>(),
-            message => message.PartyId == player.PartyId);
-        Assert.Equal(player.PartyId, leaveRequest.PartyId);
+            message => message.SettlementId == settlementId);
+        Assert.Equal(settlementId, leaveRequest.SettlementId);
         var leaveResult = Assert.Single(
             client.InternalMessages.GetMessages<NetworkSettlementEncounterLeaveResult>(),
             message => message.PartyId == player.PartyId);
@@ -2181,7 +2182,8 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         Server.SimulateMessage(
             client.NetPeer,
             new NetworkRequestCreateKingdom(ControllerId, KingdomName, player.CultureId, player.PartyId, settlementId));
-        Server.SimulateMessage(client.NetPeer, new NetworkRequestEndSettlementEncounter(player.PartyId));
+        Server.SimulateMessage(client.NetPeer,
+            new NetworkRequestEndSettlementEncounter(settlementId, CreateAuthorityHeader(client)));
         Server.SimulateMessage(this, new PartyLeaveSettlementAttempted(GetObject<MobileParty>(Server, player.PartyId)));
 
         var leaveResult = Assert.Single(
@@ -2238,7 +2240,9 @@ public class PlayerKingdomCreationFlowTests : IDisposable
             this,
             new NetworkSettlementEncounterLeaveResult(
                 player.PartyId,
-                SettlementEncounterLeaveOutcome.Suppressed));
+                settlementId,
+                SettlementEncounterLeaveOutcome.Suppressed,
+                default));
 
         client.Call(() =>
         {
@@ -2799,6 +2803,12 @@ public class PlayerKingdomCreationFlowTests : IDisposable
         Assert.Contains(clan, kingdom.Clans);
         Assert.Empty(kingdom.UnresolvedDecisions);
         _ = kingdom.ActivePolicies.Count;
+    }
+
+    private static AuthorityRequestHeader CreateAuthorityHeader(EnvironmentInstance client)
+    {
+        Assert.True(client.Resolve<IModConfigAuthority>().TryGetCurrent(out var snapshot));
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, 1, snapshot.Revision);
     }
 
     private record PlayerContext(

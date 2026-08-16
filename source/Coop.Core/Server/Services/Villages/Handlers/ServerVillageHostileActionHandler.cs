@@ -317,9 +317,8 @@ internal class ServerVillageHostileActionHandler : IHandler
             {
                 stage = "raid-eviction-publish";
                 publicationAttempted = true;
-                network.Send(occupant.Peer, new NetworkSettlementEncounterLeaveResult(
-                    occupant.PartyId,
-                    SettlementEncounterLeaveOutcome.Applied));
+                // Raid eviction is server-originated replication, not a client authority result.
+                network.Send(occupant.Peer, new NetworkPartyLeaveSettlement(occupant.PartyId));
             }
             catch (Exception exception)
             {

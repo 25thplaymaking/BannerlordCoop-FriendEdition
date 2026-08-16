@@ -1,10 +1,12 @@
 ﻿using Common.Util;
 using Coop.Core.Client.Services.MobileParties.Messages;
+using Common.Messaging;
 using Coop.Core.Server.Services.MobileParties.Messages;
 using Coop.IntegrationTests.Environment;
 using Coop.IntegrationTests.Environment.Instance;
 using Coop.IntegrationTests.Kingdoms;
 using GameInterface.Services.GameDebug.Messages;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Kingdoms;
 using GameInterface.Services.MobileParties.Messages.Behavior;
 using GameInterface.Services.Players;
@@ -66,6 +68,7 @@ namespace Coop.IntegrationTests.MobileParties
             var client1 = TestEnvironment.Clients.First();
             var party = ObjectHelper.SkipConstructor<MobileParty>();
             var settlement = ObjectHelper.SkipConstructor<Settlement>();
+            party._currentSettlement = settlement;
             TestEnvironment.RegisterObjectInNetwork(party, "party1");
             TestEnvironment.RegisterObjectInNetwork(settlement, "settlement1");
             var message = new StartSettlementEncounterAttempted(party, settlement);
@@ -87,6 +90,7 @@ namespace Coop.IntegrationTests.MobileParties
             var client1 = TestEnvironment.Clients.First();
             var party = ObjectHelper.SkipConstructor<MobileParty>();
             var settlement = ObjectHelper.SkipConstructor<Settlement>();
+            party._currentSettlement = settlement;
             TestEnvironment.RegisterObjectInNetwork(party, "party1");
             TestEnvironment.RegisterObjectInNetwork(settlement, "settlement1");
             var router = client1.Resolve<TestNetworkRouter>();
@@ -117,12 +121,12 @@ namespace Coop.IntegrationTests.MobileParties
             {
                 client1.SimulateMessage(this, new EndSettlementEncounterAttempted(party));
                 client1.SimulateMessage(this, new StartSettlementEncounterAttempted(party, settlement));
-                client1.SimulateMessage(
-                    TestEnvironment.Server.NetPeer,
-                    new NetworkSettlementEncounterLeaveResult(
-                        "party1",
-                        SettlementEncounterLeaveOutcome.Suppressed));
             });
+
+            GameThreadTestRunner.Run(() => client1.SimulateMessage(
+                TestEnvironment.Server.NetPeer,
+                EndResult(client1, "party1", "settlement1", SettlementEncounterLeaveOutcome.Suppressed,
+                    AuthorityResultStatus.Rejected, "leave-suppressed")));
 
             Assert.Equal(1, client1.NetworkSentMessages.GetMessageCount<NetworkRequestEndSettlementEncounter>());
             Assert.Equal(1, client1.NetworkSentMessages.GetMessageCount<NetworkRequestStartSettlementEncounter>());
@@ -130,8 +134,7 @@ namespace Coop.IntegrationTests.MobileParties
             GameThreadTestRunner.Run(() =>
                 client1.SimulateMessage(
                     TestEnvironment.Server.NetPeer,
-                    new NetworkStartSettlementEncounter(
-                        new NetworkRequestStartSettlementEncounter("party1", "settlement1"))));
+                    StartResult(client1, "party1", "settlement1")));
 
             client1.Resolve<Mock<ISettlementInterface>>()
                 .Verify(s => s.StartSettlementEncounter(party, settlement), Times.Once);
@@ -142,7 +145,11 @@ namespace Coop.IntegrationTests.MobileParties
         {
             var client1 = TestEnvironment.Clients.First();
             var party = ObjectHelper.SkipConstructor<MobileParty>();
+            var settlement = ObjectHelper.SkipConstructor<Settlement>();
+            party._currentSettlement = settlement;
+            party._currentSettlement = settlement;
             TestEnvironment.RegisterObjectInNetwork(party, "party1");
+            TestEnvironment.RegisterObjectInNetwork(settlement, "settlement1");
             TestEnvironment.Server.Resolve<IKingdomCreationSettlementTracker>()
                 .Track("party1", "settlement1");
 
@@ -169,6 +176,7 @@ namespace Coop.IntegrationTests.MobileParties
             var client1 = TestEnvironment.Clients.First();
             var party = ObjectHelper.SkipConstructor<MobileParty>();
             var settlement = ObjectHelper.SkipConstructor<Settlement>();
+            party._currentSettlement = settlement;
             TestEnvironment.RegisterObjectInNetwork(party, "party1");
             TestEnvironment.RegisterObjectInNetwork(settlement, "settlement1");
             client1.Resolve<TestNetworkRouter>().IsMessageRoutingEnabled = false;
@@ -179,8 +187,7 @@ namespace Coop.IntegrationTests.MobileParties
                 client1.SimulateMessage(this, new EndSettlementEncounterAttempted(party));
                 client1.SimulateMessage(
                     TestEnvironment.Server.NetPeer,
-                    new NetworkStartSettlementEncounter(
-                        new NetworkRequestStartSettlementEncounter("party1", "settlement1")));
+                    StartResult(client1, "party1", "settlement1"));
             });
 
             client1.Resolve<Mock<ISettlementInterface>>()
@@ -189,9 +196,8 @@ namespace Coop.IntegrationTests.MobileParties
             GameThreadTestRunner.Run(() =>
                 client1.SimulateMessage(
                     TestEnvironment.Server.NetPeer,
-                    new NetworkSettlementEncounterLeaveResult(
-                        "party1",
-                        SettlementEncounterLeaveOutcome.Suppressed)));
+                    EndResult(client1, "party1", "settlement1", SettlementEncounterLeaveOutcome.Suppressed,
+                        AuthorityResultStatus.Rejected, "leave-suppressed")));
 
             client1.Resolve<Mock<ISettlementInterface>>()
                 .Verify(s => s.StartSettlementEncounter(party, settlement), Times.Once);
@@ -203,6 +209,7 @@ namespace Coop.IntegrationTests.MobileParties
             var client1 = TestEnvironment.Clients.First();
             var party = ObjectHelper.SkipConstructor<MobileParty>();
             var settlement = ObjectHelper.SkipConstructor<Settlement>();
+            party._currentSettlement = settlement;
             TestEnvironment.RegisterObjectInNetwork(party, "party1");
             TestEnvironment.RegisterObjectInNetwork(settlement, "settlement1");
             client1.Resolve<TestNetworkRouter>().IsMessageRoutingEnabled = false;
@@ -218,24 +225,20 @@ namespace Coop.IntegrationTests.MobileParties
             GameThreadTestRunner.Run(() =>
                 client1.SimulateMessage(
                     TestEnvironment.Server.NetPeer,
-                    new NetworkStartSettlementEncounter(
-                        new NetworkRequestStartSettlementEncounter("party1", "settlement1"))));
+                    StartResult(client1, "party1", "settlement1")));
             Assert.Equal(0, StartCallCount());
 
             GameThreadTestRunner.Run(() =>
                 client1.SimulateMessage(
                     TestEnvironment.Server.NetPeer,
-                    new NetworkSettlementEncounterLeaveResult(
-                        "party1",
-                        SettlementEncounterLeaveOutcome.Applied)));
+                    EndResult(client1, "party1", "settlement1", SettlementEncounterLeaveOutcome.Applied)));
             Assert.Equal(0, StartCallCount());
 
             GameThreadTestRunner.Run(() =>
                 client1.SimulateMessage(
                     TestEnvironment.Server.NetPeer,
-                    new NetworkSettlementEncounterLeaveResult(
-                        "party1",
-                        SettlementEncounterLeaveOutcome.Suppressed)));
+                    EndResult(client1, "party1", "settlement1", SettlementEncounterLeaveOutcome.Suppressed,
+                        AuthorityResultStatus.Rejected, "leave-suppressed")));
 
             Assert.Equal(0, StartCallCount());
 
@@ -260,8 +263,8 @@ namespace Coop.IntegrationTests.MobileParties
             GameThreadTestRunner.Run(() =>
                 client1.SimulateMessage(
                     TestEnvironment.Server.NetPeer,
-                    new NetworkSettlementEncounterRejected(
-                        new NetworkRequestStartSettlementEncounter("party1", "settlement1"))));
+                    StartResult(client1, "party1", "settlement1", AuthorityResultStatus.Rejected,
+                        "distance-rejected")));
 
             GameThreadTestRunner.Run(() =>
                 client1.SimulateMessage(this, new StartSettlementEncounterAttempted(party, settlement)));
@@ -290,8 +293,7 @@ namespace Coop.IntegrationTests.MobileParties
             GameThreadTestRunner.Run(() =>
                 client1.SimulateMessage(
                     TestEnvironment.Server.NetPeer,
-                    new NetworkStartSettlementEncounter(
-                        new NetworkRequestStartSettlementEncounter("party1", "settlement2"))));
+                    StartResult(client1, "party1", "settlement2")));
             GameThreadTestRunner.Run(() =>
                 client1.SimulateMessage(
                     this,
@@ -320,14 +322,10 @@ namespace Coop.IntegrationTests.MobileParties
 
             TestEnvironment.Server.Resolve<Mock<ISettlementInterface>>()
                 .Verify(s => s.PartyEnterSettlement(It.IsAny<MobileParty>(), It.IsAny<Settlement>()), Times.Never);
-            Assert.Equal(
-                1,
-                TestEnvironment.Server.NetworkSentMessages.GetMessageCount<NetworkSettlementEncounterRejected>());
-            var informationMessage = Assert.Single(
-                TestEnvironment.Server.NetworkSentMessages.GetMessages<SendInformationMessage>());
-            Assert.Equal(
-                "Unable to enter the settlement: your party is already in a map event.",
-                informationMessage.Text);
+            Assert.Contains(
+                TestEnvironment.Server.NetworkSentMessages.GetMessages<NetworkStartSettlementEncounter>(),
+                result => result.Header.Status == AuthorityResultStatus.Rejected &&
+                          result.Header.ReasonCode == "already-in-map-event");
             Assert.Equal(0, TestEnvironment.Server.NetworkSentMessages.GetMessageCount<NetworkPartyEnterSettlement>());
         }
 
@@ -351,14 +349,10 @@ namespace Coop.IntegrationTests.MobileParties
 
             TestEnvironment.Server.Resolve<Mock<ISettlementInterface>>()
                 .Verify(s => s.PartyEnterSettlement(It.IsAny<MobileParty>(), It.IsAny<Settlement>()), Times.Never);
-            Assert.Equal(
-                1,
-                TestEnvironment.Server.NetworkSentMessages.GetMessageCount<NetworkSettlementEncounterRejected>());
-            var informationMessage = Assert.Single(
-                TestEnvironment.Server.NetworkSentMessages.GetMessages<SendInformationMessage>());
-            Assert.Equal(
-                "Unable to enter the settlement: your party is already inside another settlement.",
-                informationMessage.Text);
+            Assert.Contains(
+                TestEnvironment.Server.NetworkSentMessages.GetMessages<NetworkStartSettlementEncounter>(),
+                result => result.Header.Status == AuthorityResultStatus.Rejected &&
+                          result.Header.ReasonCode == "already-in-another-settlement");
             Assert.Equal(0, TestEnvironment.Server.NetworkSentMessages.GetMessageCount<NetworkPartyEnterSettlement>());
         }
 
@@ -422,9 +416,10 @@ namespace Coop.IntegrationTests.MobileParties
                     new StartSettlementEncounterAttempted(secondParty, hideout)));
 
             Assert.Null(secondParty.CurrentSettlement);
-            Assert.Equal(
-                1,
-                TestEnvironment.Server.NetworkSentMessages.GetMessageCount<NetworkSettlementEncounterRejected>());
+            Assert.Contains(
+                TestEnvironment.Server.NetworkSentMessages.GetMessages<NetworkStartSettlementEncounter>(),
+                result => result.Header.Status == AuthorityResultStatus.Rejected &&
+                          result.Header.ReasonCode == "hideout-occupied");
 
             GameThreadTestRunner.Run(() =>
                 firstClient.SimulateMessage(this, new EndSettlementEncounterAttempted(firstParty)));
@@ -479,7 +474,13 @@ namespace Coop.IntegrationTests.MobileParties
             var client1 = TestEnvironment.Clients.First();
 
             var party = ObjectHelper.SkipConstructor<MobileParty>();
+            var settlement = ObjectHelper.SkipConstructor<Settlement>();
+            party._currentSettlement = settlement;
             RegisterPartyForClient(client1, party, "party1");
+            TestEnvironment.RegisterObjectInNetwork(settlement, "settlement1");
+            TestEnvironment.Server.Resolve<Mock<ISettlementInterface>>()
+                .Setup(service => service.PartyLeaveSettlement(party))
+                .Callback(() => party._currentSettlement = null);
 
             // Act
             GameThreadTestRunner.Run(() =>
@@ -491,6 +492,39 @@ namespace Coop.IntegrationTests.MobileParties
                 client.Resolve<Mock<ISettlementInterface>>()
                     .Verify(s => s.PartyLeaveSettlement(party), Times.Once);
             }
+        }
+
+        private static NetworkStartSettlementEncounter StartResult(
+            EnvironmentInstance client,
+            string partyId,
+            string settlementId,
+            AuthorityResultStatus status = AuthorityResultStatus.Accepted,
+            string reason = null)
+        {
+            var request = client.NetworkSentMessages.GetMessages<NetworkRequestStartSettlementEncounter>().Last();
+            return new NetworkStartSettlementEncounter(
+                partyId,
+                settlementId,
+                SettlementEncounterStartMode.EnteredSettlement,
+                new AuthorityResultHeader(request.Header.SessionId, request.Header.RequestId, status,
+                    request.Header.ExpectedRevision, reason));
+        }
+
+        private static NetworkSettlementEncounterLeaveResult EndResult(
+            EnvironmentInstance client,
+            string partyId,
+            string settlementId,
+            SettlementEncounterLeaveOutcome outcome,
+            AuthorityResultStatus status = AuthorityResultStatus.Accepted,
+            string reason = null)
+        {
+            var request = client.NetworkSentMessages.GetMessages<NetworkRequestEndSettlementEncounter>().Last();
+            return new NetworkSettlementEncounterLeaveResult(
+                partyId,
+                settlementId,
+                outcome,
+                new AuthorityResultHeader(request.Header.SessionId, request.Header.RequestId, status,
+                    request.Header.ExpectedRevision, reason));
         }
 
         private void RegisterPartyForClient(

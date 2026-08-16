@@ -4,13 +4,17 @@ using Common.Network;
 using Common.Tests.Utils;
 using Coop.Core.Client.Services.BattleRetreat.Handlers;
 using Coop.Core.Client.Services.BattleRetreat.Messages;
+using Coop.Core.Client.Services.MobileParties.Handlers;
+using Coop.Core.Client.Services.MobileParties.Messages;
 using Coop.Core.Client.Services.SiegeEvents.Handlers;
 using Coop.Core.Client.Services.SiegeEvents.Messages;
 using Coop.Core.Server.Services.BattleRetreat.Messages;
+using Coop.Core.Server.Services.MobileParties.Messages;
 using Coop.Core.Server.Services.SiegeEvents.Messages;
 using GameInterface.Configuration;
 using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.Settlements.Interfaces;
 using GameInterface.Services.SiegeEvents.Interfaces;
 using GameInterface.Services.UI.Interfaces;
 using Moq;
@@ -30,6 +34,46 @@ public sealed class BattleSiegeAuthorityRouteEvidenceTests
         AuthorityResultStatus.Accepted,
         RequestHeader.ExpectedRevision,
         null);
+
+    [Fact]
+    public void SettlementEncounterRoutes_DerivePartyAndRequireExactCorrelatedState()
+    {
+        var router = new CapturingAuthorityRouter();
+        using var broker = new TestMessageBroker();
+        using var handler = new ClientSettlementExitEnterHandler(
+            broker,
+            Mock.Of<IObjectManager>(),
+            Mock.Of<ISettlementInterface>(),
+            Mock.Of<IModConfigAuthority>(),
+            router);
+
+        object startRoute = router.Get("settlement.encounter.start");
+        object endRoute = router.Get("settlement.encounter.end");
+        Assert.Equal(AuthorityRouteKind.Command, Property<AuthorityRouteKind>(startRoute, "Kind"));
+        Assert.Equal(AuthorityRouteKind.Command, Property<AuthorityRouteKind>(endRoute, "Kind"));
+        Assert.False(Property<bool>(startRoute, "FailClosedOnApplyFailure"));
+        Assert.False(Property<bool>(endRoute, "FailClosedOnApplyFailure"));
+        Assert.Null(typeof(NetworkRequestStartSettlementEncounter).GetProperty("PartyId"));
+        Assert.Null(typeof(NetworkRequestStartSettlementEncounter).GetField("PartyId"));
+        Assert.Null(typeof(NetworkRequestEndSettlementEncounter).GetProperty("PartyId"));
+        Assert.Null(typeof(NetworkRequestEndSettlementEncounter).GetField("PartyId"));
+
+        var startRequest = new NetworkRequestStartSettlementEncounter("town-a", RequestHeader);
+        Assert.True(IsExpected(startRoute, startRequest,
+            new NetworkStartSettlementEncounter("party-a", "town-a",
+                SettlementEncounterStartMode.EnteredSettlement, AcceptedHeader)));
+        Assert.False(IsExpected(startRoute, startRequest,
+            new NetworkStartSettlementEncounter("party-a", "town-b",
+                SettlementEncounterStartMode.EnteredSettlement, AcceptedHeader)));
+
+        var endRequest = new NetworkRequestEndSettlementEncounter("town-a", RequestHeader);
+        Assert.True(IsExpected(endRoute, endRequest,
+            new NetworkSettlementEncounterLeaveResult("party-a", "town-a",
+                SettlementEncounterLeaveOutcome.Applied, AcceptedHeader)));
+        Assert.False(IsExpected(endRoute, endRequest,
+            new NetworkSettlementEncounterLeaveResult("party-a", "town-b",
+                SettlementEncounterLeaveOutcome.Applied, AcceptedHeader)));
+    }
 
     [Fact]
     public void BattleRetreatRoutes_AreTypedFailClosedAndRequireExactDomainProof()

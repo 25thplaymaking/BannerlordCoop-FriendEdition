@@ -11,6 +11,7 @@ using E2E.Tests.Environment.Instance;
 using E2E.Tests.Services.MapEvents;
 using E2E.Tests.Util;
 using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.GameDebug.Messages;
 using GameInterface.Services.SiegeEvents.Interfaces;
 using GameInterface.Services.Villages.Interfaces;
@@ -71,16 +72,14 @@ public class SiegeEntryValidationFlowTests : MapEventTestBase
 
         client.Call(() => client.Resolve<INetwork>().SendAll(
             new NetworkRequestStartSettlementEncounter(
-                context.PartyId,
-                context.SettlementId)));
+                context.SettlementId,
+                CreateAuthorityHeader(client))));
 
-        Assert.Single(
-            Server.NetworkSentMessages.GetMessages<NetworkSettlementEncounterRejected>());
-        AssertInformationMessage(
-            client,
-            "Unable to enter the settlement: your party is too far from the settlement.");
-        Assert.Empty(
-            Server.NetworkSentMessages.GetMessages<NetworkStartSettlementEncounter>());
+        var rejected = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkStartSettlementEncounter>(),
+            result => result.Header.Status == AuthorityResultStatus.Rejected);
+        Assert.Equal("too-far", rejected.Header.ReasonCode);
+        Assert.DoesNotContain(Server.NetworkSentMessages.GetMessages<NetworkStartSettlementEncounter>(),
+            result => result.Header.Status == AuthorityResultStatus.Accepted);
         Assert.Empty(
             Server.NetworkSentMessages.GetMessages<NetworkPartyEnterSettlement>());
         Server.Call(() =>
@@ -103,7 +102,7 @@ public class SiegeEntryValidationFlowTests : MapEventTestBase
     }
 
     [Fact]
-    public void SettlementEncounterRequest_ForPartyControlledByAnotherPeer_IsRejected()
+    public void SettlementEncounterRequest_DerivesPartyFromAuthenticatedPeer()
     {
         var owner = Clients.First();
         var requester = Clients.Skip(1).First();
@@ -112,16 +111,14 @@ public class SiegeEntryValidationFlowTests : MapEventTestBase
 
         requester.Call(() => requester.Resolve<INetwork>().SendAll(
             new NetworkRequestStartSettlementEncounter(
-                context.PartyId,
-                context.SettlementId)));
+                context.SettlementId,
+                CreateAuthorityHeader(requester))));
 
-        Assert.Single(
-            Server.NetworkSentMessages.GetMessages<NetworkSettlementEncounterRejected>());
-        AssertInformationMessage(
-            requester,
-            "Unable to enter the settlement: your party is not controlled by you.");
-        Assert.Empty(
-            Server.NetworkSentMessages.GetMessages<NetworkStartSettlementEncounter>());
+        var result = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkStartSettlementEncounter>(),
+            candidate => candidate.Header.Status == AuthorityResultStatus.Rejected);
+        Assert.NotEqual(context.PartyId, result.PartyId);
+        Assert.DoesNotContain(Server.NetworkSentMessages.GetMessages<NetworkStartSettlementEncounter>(),
+            result => result.Header.Status == AuthorityResultStatus.Accepted);
         Assert.Empty(
             Server.NetworkSentMessages.GetMessages<NetworkPartyEnterSettlement>());
         Server.Call(() =>
@@ -134,7 +131,7 @@ public class SiegeEntryValidationFlowTests : MapEventTestBase
     }
 
     [Fact]
-    public void EndSettlementEncounterRequest_ForPartyControlledByAnotherPeer_IsRejected()
+    public void EndSettlementEncounterRequest_DerivesPartyFromAuthenticatedPeer()
     {
         var owner = Clients.First();
         var requester = Clients.Skip(1).First();
@@ -157,14 +154,16 @@ public class SiegeEntryValidationFlowTests : MapEventTestBase
         ClearMessages();
 
         requester.Call(() => requester.Resolve<INetwork>().SendAll(
-            new NetworkRequestEndSettlementEncounter(context.PartyId)));
+            new NetworkRequestEndSettlementEncounter(
+                context.SettlementId,
+                CreateAuthorityHeader(requester))));
 
-        var result = Assert.Single(
-            Server.NetworkSentMessages.GetMessages<NetworkSettlementEncounterLeaveResult>());
-        Assert.Equal(SettlementEncounterLeaveOutcome.Suppressed, result.Outcome);
-        AssertInformationMessage(
-            requester,
-            "Unable to leave the settlement: your party is not controlled by you.");
+        var result = Server.NetworkSentMessages
+            .GetMessages<NetworkSettlementEncounterLeaveResult>()
+            .Last();
+        Assert.Equal(SettlementEncounterLeaveOutcome.AlreadyOutside, result.Outcome);
+        Assert.Equal(AuthorityResultStatus.Accepted, result.Header.Status);
+        Assert.NotEqual(context.PartyId, result.PartyId);
         Assert.Empty(
             Server.NetworkSentMessages.GetMessages<NetworkPartyLeaveSettlement>());
         Server.Call(() =>

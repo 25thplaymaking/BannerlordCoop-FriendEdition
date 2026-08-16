@@ -1,19 +1,23 @@
-﻿using Common.Messaging;
+using Common.Messaging;
+using GameInterface.Services.AuthorityRequests;
 using ProtoBuf;
 
 namespace Coop.Core.Server.Services.MobileParties.Messages;
 
-/// <summary>
-/// Message from the client requesting a settlement encounter to end
-/// </summary>
+/// <summary>Client intent to end its current settlement encounter; the server derives the party from the peer.</summary>
 [ProtoContract(SkipConstructor = true)]
+[AuthorityRoute("settlement.encounter.end", AuthorityRouteKind.Command)]
 internal readonly struct NetworkRequestEndSettlementEncounter : ICommand
 {
     [ProtoMember(1)]
-    public string PartyId { get; }
+    public string SettlementId { get; }
 
-    public NetworkRequestEndSettlementEncounter(string partyId)
+    [ProtoMember(2)]
+    public AuthorityRequestHeader Header { get; }
+
+    public NetworkRequestEndSettlementEncounter(string settlementId, AuthorityRequestHeader header = default)
     {
-        PartyId = partyId;
+        SettlementId = settlementId;
+        Header = header;
     }
 }

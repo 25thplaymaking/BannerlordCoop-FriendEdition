@@ -5,6 +5,8 @@ using Common.Util;
 using Coop.Core.Server.Services.MobileParties.Messages;
 using E2E.Tests.Environment.Instance;
 using E2E.Tests.Util;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Barters;
 using GameInterface.Services.Hideouts.Handlers;
 using GameInterface.Services.Hideouts.Messages;
@@ -504,6 +506,7 @@ public class HideoutMapEventTests : MapEventTestBase
         var requester = Clients.First();
         TestEnvironment.ConnectRegisteredPlayer(requester, "hideout-leaver");
         string? mapEventId = null;
+        string? settlementId = null;
 
         Server.Call(() =>
         {
@@ -511,6 +514,7 @@ public class HideoutMapEventTests : MapEventTestBase
 
             var settlement = GameObjectCreator.CreateInitializedObject<Settlement>();
             settlement.SetSettlementComponent(GameObjectCreator.CreateInitializedObject<Hideout>());
+            Assert.True(Server.ObjectManager.TryGetId(settlement, out settlementId));
             EnterSettlementAction.ApplyForParty(playerParty, settlement);
 
             var mapEvent = GameObjectCreator.CreateInitializedObject<MapEvent>();
@@ -534,7 +538,7 @@ public class HideoutMapEventTests : MapEventTestBase
         {
             Server.Resolve<IMessageBroker>().Publish(
                 requester.NetPeer,
-                new NetworkRequestEndSettlementEncounter(playerPartyId));
+                new NetworkRequestEndSettlementEncounter(settlementId!, CreateAuthorityHeader(requester)));
         }, MapEventDisabledMethods);
 
         Server.Call(() =>
@@ -554,6 +558,7 @@ public class HideoutMapEventTests : MapEventTestBase
         var requester = Clients.First();
         TestEnvironment.ConnectRegisteredPlayer(requester, "hideout-joiner");
         string? mapEventId = null;
+        string? settlementId = null;
 
         Server.Call(() =>
         {
@@ -562,6 +567,7 @@ public class HideoutMapEventTests : MapEventTestBase
 
             var settlement = GameObjectCreator.CreateInitializedObject<Settlement>();
             settlement.SetSettlementComponent(GameObjectCreator.CreateInitializedObject<Hideout>());
+            Assert.True(Server.ObjectManager.TryGetId(settlement, out settlementId));
             EnterSettlementAction.ApplyForParty(leaderParty, settlement);
             EnterSettlementAction.ApplyForParty(joinedParty, settlement);
 
@@ -586,7 +592,7 @@ public class HideoutMapEventTests : MapEventTestBase
         {
             Server.Resolve<IMessageBroker>().Publish(
                 requester.NetPeer,
-                new NetworkRequestEndSettlementEncounter(joinedPartyId));
+                new NetworkRequestEndSettlementEncounter(settlementId!, CreateAuthorityHeader(requester)));
         }, MapEventDisabledMethods);
 
         Server.Call(() =>
@@ -614,5 +620,11 @@ public class HideoutMapEventTests : MapEventTestBase
             Assert.NotNull(configurationField);
             configurationField.SetValue(coordinator, config.Object);
         });
+    }
+
+    private static AuthorityRequestHeader CreateAuthorityHeader(EnvironmentInstance client)
+    {
+        Assert.True(client.Resolve<IModConfigAuthority>().TryGetCurrent(out var snapshot));
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, 1, snapshot.Revision);
     }
 }

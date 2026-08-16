@@ -197,13 +197,7 @@ public class VillageHostileActionTests : MapEventTestBase
 
         RequestHostileAction(requester, VillageHostileAction.Raid, raiderMobilePartyId, target.SettlementId);
 
-        Assert.All(
-            requester.InternalMessages.GetMessages<NetworkSettlementEncounterLeaveResult>(),
-            message =>
-            {
-                Assert.Equal(otherMobilePartyId, message.PartyId);
-                Assert.Equal(SettlementEncounterLeaveOutcome.Applied, message.Outcome);
-            });
+        Assert.Empty(requester.InternalMessages.GetMessages<NetworkSettlementEncounterLeaveResult>());
         var leaveResult = Assert.Single(
             otherClient.InternalMessages.GetMessages<NetworkSettlementEncounterLeaveResult>());
         Assert.Equal(otherMobilePartyId, leaveResult.PartyId);

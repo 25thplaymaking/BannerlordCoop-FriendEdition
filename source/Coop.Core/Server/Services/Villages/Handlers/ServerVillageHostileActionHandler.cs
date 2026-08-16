@@ -17,6 +17,7 @@ using GameInterface.Services.Villages.Messages;
 using LiteNetLib;
 using Serilog;
 using System;
+using System.Collections.Generic;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
 
@@ -141,11 +142,10 @@ internal class ServerVillageHostileActionHandler : IHandler
 
             if (request.Action == VillageHostileAction.Raid)
             {
-                // Raid eviction has pre-existing broadcast/settlement mutations. It remains a
-                // separately classified pre-mutation boundary; this route does not widen the
-                // isolation policy for a partial eviction failure.
-                stage = "pre-mutation-raid-eviction";
-                KickOtherPlayersOutOfVillage(context.Player.ControllerId, mobileParty, settlement);
+                stage = "raid-eviction-snapshot";
+                var eviction = KickOtherPlayersOutOfVillage(context.Player.ControllerId, mobileParty, settlement);
+                if (eviction.IsAmbiguous)
+                    return IsolateAfterAmbiguousRaidEviction(context, request, eviction);
             }
 
             stage = "apply-hostile-action";
@@ -253,24 +253,137 @@ internal class ServerVillageHostileActionHandler : IHandler
         _ => "invalid-hostile-action",
     };
 
-    private void KickOtherPlayersOutOfVillage(string requestingControllerId, MobileParty raidingParty, Settlement settlement)
+    private AuthorityServerReply<NetworkVillageHostileActionResult> IsolateAfterAmbiguousRaidEviction(
+        AuthorityServerContext context,
+        NetworkRequestVillageHostileAction request,
+        RaidEvictionResult eviction)
     {
+        Logger.Fatal(eviction.Exception,
+            "Ambiguous village raid eviction; isolating requester and evicted peer. Route={Route} SessionId={SessionId} RequestId={RequestId} Action={Action} Party={Party} Settlement={Settlement} Stage={Stage} EvictedController={EvictedController}",
+            context.RouteId, context.Header.SessionId, context.Header.RequestId, request.Action,
+            request.MobilePartyId, request.SettlementId, eviction.Stage, eviction.ControllerId);
+        DisconnectPeer(eviction.Peer, "ambiguous village raid eviction", context);
+        DisconnectPeer(context.Peer, "ambiguous village raid eviction", context);
+        return new AuthorityServerReply<NetworkVillageHostileActionResult>(
+            new NetworkVillageHostileActionResult(new AuthorityResultHeader(
+                context.Header.SessionId, context.Header.RequestId, AuthorityResultStatus.ExecutionFailed,
+                context.Header.ExpectedRevision, "hostile-action-isolated"),
+                request.Action, request.MobilePartyId, request.SettlementId),
+            statePublished: false,
+            suppressReply: true);
+    }
+
+    private RaidEvictionResult KickOtherPlayersOutOfVillage(
+        string requestingControllerId,
+        MobileParty raidingParty,
+        Settlement settlement)
+    {
+        var occupants = new List<RaidEvictionOccupant>();
         foreach (var player in playerManager.Players)
         {
             if (player.ControllerId == requestingControllerId)
                 continue;
 
-            if (!objectManager.TryGetObject<MobileParty>(player.MobilePartyId, out var playerParty))
+            if (!objectManager.TryGetObject<MobileParty>(player.MobilePartyId, out var playerParty) ||
+                !playerManager.TryGetPeer(player.ControllerId, out var evictedPeer))
                 continue;
 
             if (playerParty == raidingParty || playerParty.CurrentSettlement != settlement)
                 continue;
 
-            network.SendAll(new NetworkSettlementEncounterLeaveResult(
-                player.MobilePartyId,
-                SettlementEncounterLeaveOutcome.Applied));
-            settlementInterface.PartyLeaveSettlement(playerParty);
+            occupants.Add(new RaidEvictionOccupant(player.ControllerId, player.MobilePartyId, playerParty, evictedPeer));
         }
+
+        foreach (var occupant in occupants)
+        {
+            bool publicationAttempted = false;
+            string stage = "raid-eviction-leave";
+            try
+            {
+                settlementInterface.PartyLeaveSettlement(occupant.Party);
+                if (occupant.Party.CurrentSettlement == settlement)
+                {
+                    stage = "raid-eviction-postcondition";
+                    return RaidEvictionResult.Ambiguous(occupant, stage,
+                        new InvalidOperationException("Evicted party remained in the raided village."));
+                }
+            }
+            catch (Exception exception)
+            {
+                return RaidEvictionResult.Ambiguous(occupant, stage, exception);
+            }
+
+            try
+            {
+                stage = "raid-eviction-publish";
+                publicationAttempted = true;
+                network.Send(occupant.Peer, new NetworkSettlementEncounterLeaveResult(
+                    occupant.PartyId,
+                    SettlementEncounterLeaveOutcome.Applied));
+            }
+            catch (Exception exception)
+            {
+                Logger.Error(exception,
+                    "Village raid eviction was applied but could not be published. Controller={ControllerId} Party={Party} Settlement={Settlement} PublicationAttempted={PublicationAttempted}",
+                    occupant.ControllerId, occupant.PartyId, settlement.StringId, publicationAttempted);
+                DisconnectPeer(occupant.Peer, "published village raid eviction failed", null);
+            }
+        }
+
+        return RaidEvictionResult.Complete;
+    }
+
+    private static void DisconnectPeer(NetPeer peer, string reason, AuthorityServerContext? context)
+    {
+        try
+        {
+            peer?.Disconnect();
+        }
+        catch (Exception exception)
+        {
+            Logger.Fatal(exception,
+                "Could not disconnect peer after {Reason}. Route={Route} SessionId={SessionId} RequestId={RequestId}",
+                reason, context?.RouteId, context?.Header.SessionId, context?.Header.RequestId);
+        }
+    }
+
+    private readonly struct RaidEvictionOccupant
+    {
+        public RaidEvictionOccupant(string controllerId, string partyId, MobileParty party, NetPeer peer)
+        {
+            ControllerId = controllerId;
+            PartyId = partyId;
+            Party = party;
+            Peer = peer;
+        }
+
+        public string ControllerId { get; }
+        public string PartyId { get; }
+        public MobileParty Party { get; }
+        public NetPeer Peer { get; }
+    }
+
+    private readonly struct RaidEvictionResult
+    {
+        public static readonly RaidEvictionResult Complete = new RaidEvictionResult();
+
+        private RaidEvictionResult(RaidEvictionOccupant occupant, string stage, Exception exception)
+        {
+            IsAmbiguous = true;
+            ControllerId = occupant.ControllerId;
+            Peer = occupant.Peer;
+            Stage = stage;
+            Exception = exception;
+        }
+
+        public bool IsAmbiguous { get; }
+        public string ControllerId { get; }
+        public NetPeer Peer { get; }
+        public string Stage { get; }
+        public Exception Exception { get; }
+
+        public static RaidEvictionResult Ambiguous(RaidEvictionOccupant occupant, string stage, Exception exception) =>
+            new RaidEvictionResult(occupant, stage, exception);
     }
 
     private void Handle_VillageHostileActionCooldownsChanged(MessagePayload<VillageHostileActionCooldownsChanged> payload)

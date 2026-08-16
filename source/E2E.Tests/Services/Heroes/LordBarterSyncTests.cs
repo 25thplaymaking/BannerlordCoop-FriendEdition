@@ -1,6 +1,8 @@
 using Common.Network;
 using Common.Util;
 using E2E.Tests.Environment.Instance;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using E2E.Tests.Services.MapEvents;
 using GameInterface.Services.Barters;
 using GameInterface.Services.Barters.Handlers;
@@ -26,11 +28,13 @@ using TaleWorlds.CampaignSystem.Siege;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
 using Xunit.Abstractions;
+using System.Threading;
 
 namespace E2E.Tests.Services.Heroes;
 
 public class LordBarterSyncTests : MapEventTestBase
 {
+    private static long nextAuthorityRequestId;
     private static int observedBarterAcceptedDispatches;
     private static IFaction? safePassagePlayerFaction;
     private static IFaction? safePassageTargetFaction;
@@ -104,7 +108,7 @@ public class LordBarterSyncTests : MapEventTestBase
                         true,
                         initialPlayerGold + 1),
                 },
-                requestId);
+                requestId, Array.Empty<DefectionPersuasionOutcome>(), CreateAuthorityHeader(client));
             var request = new NetworkRequestLordBarter(
                 target.HeroId,
                 PeaceConversationContext.MapParty,
@@ -120,7 +124,7 @@ public class LordBarterSyncTests : MapEventTestBase
                         true,
                         offeredGold),
                 },
-                requestId);
+                requestId, Array.Empty<DefectionPersuasionOutcome>(), CreateAuthorityHeader(client));
 
             client.Call(() => client.Resolve<INetwork>().SendAll(rejectedRequest));
             client.Call(() => client.Resolve<INetwork>().SendAll(request));
@@ -131,11 +135,15 @@ public class LordBarterSyncTests : MapEventTestBase
             Assert.Equal(3, results.Count);
             Assert.False(results[0].Accepted);
             Assert.Equal(requestId, results[0].RequestId);
+            Assert.Equal(rejectedRequest.Header.RequestId, results[0].Header.RequestId);
+            Assert.Equal(AuthorityResultStatus.Rejected, results[0].Header.Status);
             Assert.All(results.Skip(1), result =>
             {
                 Assert.True(result.Accepted, result.Reason);
                 Assert.Equal(requestId, result.RequestId);
                 Assert.Equal(initialPlayerGold - offeredGold, result.PlayerGold);
+                Assert.Equal(request.Header.RequestId, result.Header.RequestId);
+                Assert.Equal(AuthorityResultStatus.Accepted, result.Header.Status);
             });
             Assert.Equal(1, observedBarterAcceptedDispatches);
             Server.Call(() =>
@@ -347,7 +355,7 @@ public class LordBarterSyncTests : MapEventTestBase
         clientTwo.Call(() => clientTwo.Resolve<INetwork>().SendAll(new NetworkRequestLordBarter(
             targetHeroId, PeaceConversationContext.Settlement, settlementId, LordBarterKind.Generic,
             new[] { new PeaceBarterTerm(PeaceBarterTermType.Gold, playerTwo.HeroId, null, null, true, offeredGold) },
-            requestTwo)));
+            requestTwo, Array.Empty<DefectionPersuasionOutcome>(), CreateAuthorityHeader(clientTwo))));
         TestEnvironment.FlushCoalescer();
 
         var refused = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkLordBarterResult>());
@@ -358,7 +366,7 @@ public class LordBarterSyncTests : MapEventTestBase
         clientOne.Call(() => clientOne.Resolve<INetwork>().SendAll(new NetworkRequestLordBarter(
             targetHeroId, PeaceConversationContext.Settlement, settlementId, LordBarterKind.Generic,
             new[] { new PeaceBarterTerm(PeaceBarterTermType.Gold, playerOne.HeroId, null, null, true, offeredGold) },
-            requestOne)));
+            requestOne, Array.Empty<DefectionPersuasionOutcome>(), CreateAuthorityHeader(clientOne))));
         TestEnvironment.FlushCoalescer();
 
         var accepted = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkLordBarterResult>());
@@ -416,7 +424,7 @@ public class LordBarterSyncTests : MapEventTestBase
 
         clientTwo.Call(() => clientTwo.Resolve<INetwork>().SendAll(new NetworkRequestLordBarter(
             targetHeroId, PeaceConversationContext.Settlement, settlementId, LordBarterKind.Generic,
-            Array.Empty<PeaceBarterTerm>(), requestTwo)));
+            Array.Empty<PeaceBarterTerm>(), requestTwo, Array.Empty<DefectionPersuasionOutcome>(), CreateAuthorityHeader(clientTwo))));
         TestEnvironment.FlushCoalescer();
 
         var result = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkLordBarterResult>());
@@ -485,7 +493,7 @@ public class LordBarterSyncTests : MapEventTestBase
                     true,
                     offeredGold),
             },
-            requestId)));
+            requestId, Array.Empty<DefectionPersuasionOutcome>(), CreateAuthorityHeader(client))));
         TestEnvironment.FlushCoalescer();
 
         var result = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkLordBarterResult>());
@@ -595,7 +603,7 @@ public class LordBarterSyncTests : MapEventTestBase
                         true,
                         offeredGold),
                 },
-                requestId)));
+                requestId, Array.Empty<DefectionPersuasionOutcome>(), CreateAuthorityHeader(client))));
 
             var result = Assert.Single(
                 Server.NetworkSentMessages.GetMessages<NetworkLordBarterResult>());
@@ -1063,7 +1071,7 @@ public class LordBarterSyncTests : MapEventTestBase
                 target.PartyId,
                 LordBarterKind.JoinKingdomAsClan,
                 Array.Empty<PeaceBarterTerm>(),
-                requestId)));
+                requestId, Array.Empty<DefectionPersuasionOutcome>(), CreateAuthorityHeader(client))));
             TestEnvironment.FlushCoalescer();
 
             var result = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkLordBarterResult>());
@@ -1150,7 +1158,7 @@ public class LordBarterSyncTests : MapEventTestBase
             target.PartyId,
             LordBarterKind.JoinKingdomAsClan,
             Array.Empty<PeaceBarterTerm>(),
-            requestId)));
+            requestId, Array.Empty<DefectionPersuasionOutcome>(), CreateAuthorityHeader(client))));
 
         var result = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkLordBarterResult>());
         Assert.False(result.Accepted);
@@ -1221,6 +1229,14 @@ public class LordBarterSyncTests : MapEventTestBase
         Set(Server);
         foreach (var client in Clients)
             Set(client);
+    }
+
+    private static AuthorityRequestHeader CreateAuthorityHeader(EnvironmentInstance client)
+    {
+        var authority = client.Resolve<IModConfigAuthority>();
+        Assert.True(authority.TryGetCurrent(out ModConfigSnapshot snapshot));
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId,
+            Interlocked.Increment(ref nextAuthorityRequestId), snapshot.Revision);
     }
 
     private static void ObserveBarterAcceptedDispatch()

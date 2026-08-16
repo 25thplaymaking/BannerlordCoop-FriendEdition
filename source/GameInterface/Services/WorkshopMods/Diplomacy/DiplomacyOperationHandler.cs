@@ -146,7 +146,6 @@ internal sealed class DiplomacyOperationHandler : IHandler, IDiplomacyPatchRunti
         DiplomacyPatchRuntime.Current = this;
         messageBroker.Subscribe<AllGameObjectsRegistered>(HandleAllGameObjectsRegistered);
         messageBroker.Subscribe<NetworkDiplomacySnapshot>(HandleSnapshotObserved);
-        messageBroker.Subscribe<NetworkRequestDiplomacySnapshot>(HandleSnapshotRequestForPendingPrompt);
         messageBroker.Subscribe<NetworkDiplomacyKeepFiefPrompt>(HandleKeepFiefPrompt);
         messageBroker.Subscribe<NetworkDiplomacyMessengerArrivalPrompt>(HandleMessengerArrivalPrompt);
         messageBroker.Subscribe<NetworkDiplomacyMessengerAccident>(HandleMessengerAccident);
@@ -156,7 +155,6 @@ internal sealed class DiplomacyOperationHandler : IHandler, IDiplomacyPatchRunti
     {
         messageBroker.Unsubscribe<AllGameObjectsRegistered>(HandleAllGameObjectsRegistered);
         messageBroker.Unsubscribe<NetworkDiplomacySnapshot>(HandleSnapshotObserved);
-        messageBroker.Unsubscribe<NetworkRequestDiplomacySnapshot>(HandleSnapshotRequestForPendingPrompt);
         gameplayRoute.Dispose();
         messageBroker.Unsubscribe<NetworkDiplomacyKeepFiefPrompt>(HandleKeepFiefPrompt);
         messageBroker.Unsubscribe<NetworkDiplomacyMessengerArrivalPrompt>(HandleMessengerArrivalPrompt);
@@ -209,36 +207,6 @@ internal sealed class DiplomacyOperationHandler : IHandler, IDiplomacyPatchRunti
             return;
 
         acceptedRevision = Math.Max(acceptedRevision, payload.What.Revision);
-    }
-
-    private void HandleSnapshotRequestForPendingPrompt(
-        MessagePayload<NetworkRequestDiplomacySnapshot> payload)
-    {
-        if (!ModInformation.IsServer || payload?.Who is not NetPeer peer) return;
-        GameThread.RunSafe(
-            () =>
-            {
-                ResendPendingKeepFiefPrompt(peer);
-                PublishMessengerOutcomesForPeer(peer);
-            },
-            context: nameof(DiplomacyOperationHandler));
-    }
-
-    private void ResendPendingKeepFiefPrompt(NetPeer peer)
-    {
-        if (!playerManager.TryGetPlayer(peer, out var player) ||
-            !objectManager.TryGetObject(player.HeroId, out Hero actor) || actor?.Clan == null ||
-            actor.Clan.IsUnderMercenaryService || !CanUseGameplayRoute(out var config))
-            return;
-
-        Settlement pendingSettlement = Settlement.All.FirstOrDefault(settlement =>
-            settlement?.Town != null && settlement.Town.IsOwnerUnassigned &&
-            settlement.LastAttackerParty?.LeaderHero == actor);
-        if (pendingSettlement == null ||
-            !objectManager.TryGetId(pendingSettlement, out string settlementId))
-            return;
-
-        SendKeepFiefPrompt(peer, config, settlementId);
     }
 
     private void SendKeepFiefPrompt(NetPeer peer, ModConfigSnapshot config, string settlementId)
@@ -596,14 +564,6 @@ internal sealed class DiplomacyOperationHandler : IHandler, IDiplomacyPatchRunti
             if (playerManager.TryGetPeer(player.ControllerId, out var peer))
                 PublishMessengerOutcomes(player, peer);
         }
-    }
-
-    private void PublishMessengerOutcomesForPeer(NetPeer peer)
-    {
-        if (!ModInformation.IsServer ||
-            !playerManager.TryGetPlayer(peer, out var player))
-            return;
-        PublishMessengerOutcomes(player, peer);
     }
 
     private void PublishMessengerOutcomes(Players.Data.Player player, NetPeer peer)

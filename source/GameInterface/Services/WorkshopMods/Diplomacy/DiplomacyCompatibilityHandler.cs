@@ -12,8 +12,6 @@ using GameInterface.Services.WorkshopMods.Core;
 using LiteNetLib;
 using Serilog;
 using System;
-using System.Collections.Generic;
-using System.Diagnostics;
 using TaleWorlds.Library;
 
 namespace GameInterface.Services.WorkshopMods.Diplomacy;
@@ -30,7 +28,6 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
     private readonly IAuthorityRouteHandle<DiplomacySnapshotIntent, NetworkDiplomacySnapshotQueryResult> snapshotRoute;
     private readonly object snapshotApplyGate = new();
     private readonly DiplomacyRevisionGate revisionGate = new();
-    private readonly DiplomacySnapshotRequestGate<NetPeer> requestGate = new();
     private NetworkDiplomacySnapshot pendingSnapshot;
     private NetPeer pendingSnapshotPeer;
     private NetworkDiplomacySnapshot trustedSnapshot;
@@ -97,7 +94,6 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
     internal void HandleCampaignReady(MessagePayload<CampaignReady> _)
     {
         revisionGate.Reset();
-        requestGate.Reset();
         pendingSnapshot = null;
         pendingSnapshotPeer = null;
         trustedSnapshot = null;
@@ -127,48 +123,6 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
         {
             AcceptHostConfig(accepted);
         }
-    }
-
-    internal void HandleSnapshotRequest(MessagePayload<NetworkRequestDiplomacySnapshot> payload)
-    {
-        if (!ModInformation.IsServer || !campaignReady || !HasCurrentHostConfig() ||
-            payload?.Who is not NetPeer peer)
-        {
-            return;
-        }
-
-        // CampaignReady is raised on the joining client before NetworkPlayerCampaignEntered creates
-        // its server-side Player mapping. The accepted mod-config identity is already pinned by the
-        // module handshake, so use that completed barrier instead of a mapping that cannot exist yet.
-        if (!payload.What.TryValidateWireShape(out string requestFailure))
-        {
-            Logger.Warning(
-                "Disconnecting peer {Peer} after malformed Diplomacy snapshot request: {Failure}",
-                peer.Id,
-                requestFailure);
-            peer.Disconnect();
-            return;
-        }
-        if (!payload.What.Matches(acceptedHostConfig))
-        {
-            Logger.Warning(
-                "Disconnecting peer {Peer} whose Diplomacy request did not match the accepted host configuration",
-                peer.Id);
-            peer.Disconnect();
-            return;
-        }
-        if (!requestGate.TryAccept(peer)) return;
-
-        Logger.Information(
-            "Accepted pre-campaign Diplomacy snapshot request from peer {Peer}: config session={Session}, revision={Revision}",
-            peer.Id,
-            payload.What.ConfigSessionId,
-            payload.What.ConfigRevision);
-
-        GameThread.RunSafe(
-            () => SendCurrentSnapshot(peer),
-            true,
-            nameof(DiplomacyCompatibilityHandler));
     }
 
     internal void HandleSnapshot(MessagePayload<NetworkDiplomacySnapshot> payload)
@@ -633,57 +587,6 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
         InformationManager.DisplayMessage(new InformationMessage(
             failure + " The connection was closed to prevent campaign divergence."));
         peer?.Disconnect();
-    }
-}
-
-/// <summary>Small bounded replay/rate gate for reflection-heavy state captures.</summary>
-internal sealed class DiplomacySnapshotRequestGate<TPeer> where TPeer : class
-{
-    private const int MaximumPeers = 64;
-    private readonly object sync = new();
-    private readonly Dictionary<TPeer, long> lastAccepted = new();
-    private readonly Func<long> timestamp;
-    private readonly long minimumInterval;
-
-    internal DiplomacySnapshotRequestGate(Func<long> timestamp = null, long minimumInterval = 0)
-    {
-        this.timestamp = timestamp ?? Stopwatch.GetTimestamp;
-        this.minimumInterval = minimumInterval > 0 ? minimumInterval : Stopwatch.Frequency;
-    }
-
-    internal bool TryAccept(TPeer peer)
-    {
-        if (peer == null) return false;
-        lock (sync)
-        {
-            long now = timestamp();
-            if (lastAccepted.TryGetValue(peer, out long previous) &&
-                now >= previous && now - previous < minimumInterval)
-            {
-                return false;
-            }
-
-            if (!lastAccepted.ContainsKey(peer) && lastAccepted.Count >= MaximumPeers)
-            {
-                var oldest = default(TPeer);
-                long oldestTimestamp = long.MaxValue;
-                foreach (var pair in lastAccepted)
-                {
-                    if (pair.Value >= oldestTimestamp) continue;
-                    oldest = pair.Key;
-                    oldestTimestamp = pair.Value;
-                }
-                if (oldest != null) lastAccepted.Remove(oldest);
-            }
-
-            lastAccepted[peer] = now;
-            return true;
-        }
-    }
-
-    internal void Reset()
-    {
-        lock (sync) lastAccepted.Clear();
     }
 }
 

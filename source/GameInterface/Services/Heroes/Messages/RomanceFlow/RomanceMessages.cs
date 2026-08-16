@@ -85,7 +85,7 @@ internal readonly struct NetworkRequestRomanceStateSync : ICommand
     [ProtoMember(1)]
     public readonly AuthorityRequestHeader Header;
 
-    public NetworkRequestRomanceStateSync(AuthorityRequestHeader header = default)
+    public NetworkRequestRomanceStateSync(AuthorityRequestHeader header)
     {
         Header = header;
     }

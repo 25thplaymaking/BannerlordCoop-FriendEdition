@@ -107,7 +107,6 @@ internal class RomanceHandler : IHandler
         messageBroker.Subscribe<RomanticStateChangeRequested>(Handle_RomanticStateChangeRequested);
         messageBroker.Subscribe<RomanceStatesChanged>(Handle_RomanceStatesChanged);
         messageBroker.Subscribe<HostModConfigAccepted>(Handle_HostModConfigAccepted);
-        messageBroker.Subscribe<NetworkRequestRomanceStateSync>(Handle_NetworkRequestRomanceStateSync);
         messageBroker.Subscribe<NetworkSyncRomanceStates>(Handle_NetworkSyncRomanceStates);
         messageBroker.Subscribe<NetworkRomanceStateChangeResult>(Handle_NetworkRomanceStateChangeResult);
         messageBroker.Subscribe<NetworkRomanceStateSyncResult>(Handle_NetworkRomanceStateSyncResult);
@@ -120,7 +119,6 @@ internal class RomanceHandler : IHandler
         messageBroker.Unsubscribe<RomanticStateChangeRequested>(Handle_RomanticStateChangeRequested);
         messageBroker.Unsubscribe<RomanceStatesChanged>(Handle_RomanceStatesChanged);
         messageBroker.Unsubscribe<HostModConfigAccepted>(Handle_HostModConfigAccepted);
-        messageBroker.Unsubscribe<NetworkRequestRomanceStateSync>(Handle_NetworkRequestRomanceStateSync);
         messageBroker.Unsubscribe<NetworkSyncRomanceStates>(Handle_NetworkSyncRomanceStates);
         messageBroker.Unsubscribe<NetworkRomanceStateChangeResult>(Handle_NetworkRomanceStateChangeResult);
         messageBroker.Unsubscribe<NetworkRomanceStateSyncResult>(Handle_NetworkRomanceStateSyncResult);
@@ -178,18 +176,6 @@ internal class RomanceHandler : IHandler
         if (ModInformation.IsClient) return;
 
         network.SendAll(new NetworkSyncRomanceStates(BuildSnapshot()));
-    }
-
-    private void Handle_NetworkRequestRomanceStateSync(MessagePayload<NetworkRequestRomanceStateSync> payload)
-    {
-        if (ModInformation.IsClient) return;
-        if (payload.Who is not NetPeer peer) return;
-
-        // Marriage barter still has a legacy rejection recovery path while that command family is
-        // being migrated. Only headerless requests use this compatibility branch; authenticated
-        // snapshot requests are owned exclusively by the BootstrapQuery route above.
-        if (payload.What.Header.RequestId != 0) return;
-        GameThread.RunSafe(() => SendSnapshot(peer), context: nameof(Handle_NetworkRequestRomanceStateSync));
     }
 
     private void Handle_NetworkSyncRomanceStates(MessagePayload<NetworkSyncRomanceStates> payload)
@@ -472,15 +458,6 @@ internal class RomanceHandler : IHandler
 
         return playerHero != null && targetHero != null && !targetHero.IsPlayerHero();
     }
-
-    private void Reject(NetPeer peer, string reason)
-    {
-        network.Send(peer, new NetworkRomanceRequestRejected(reason));
-        SendSnapshot(peer);
-    }
-
-    private void SendSnapshot(NetPeer peer)
-        => network.Send(peer, new NetworkSyncRomanceStates(BuildSnapshot()));
 
     private RomanceStateData[] BuildSnapshot()
     {

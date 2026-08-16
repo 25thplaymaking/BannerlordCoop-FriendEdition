@@ -9,7 +9,6 @@ using GameInterface.Services.GameState.Messages;
 using GameInterface.Services.Players;
 using GameInterface.Services.WorkshopMods.Diplomacy;
 using HarmonyLib;
-using LiteNetLib;
 using Moq;
 using ProtoBuf;
 using System;
@@ -19,7 +18,6 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using System.Runtime.Serialization;
 using Xunit;
 
 namespace GameInterface.Tests.Services.WorkshopMods.Diplomacy;
@@ -527,7 +525,12 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
     public void SnapshotRequest_ProtobufRoundTripsAcceptedConfigIdentity()
     {
         var acceptedConfig = CurrentConfigSnapshot();
-        var original = new NetworkRequestDiplomacySnapshot(acceptedConfig);
+        var header = new AuthorityRequestHeader(
+            acceptedConfig.ProtocolVersion,
+            acceptedConfig.SessionId,
+            requestId: 91,
+            acceptedConfig.Revision);
+        var original = new NetworkRequestDiplomacySnapshot(header, acceptedConfig);
 
         using var stream = new MemoryStream();
         Serializer.Serialize(stream, original);
@@ -536,6 +539,7 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
 
         Assert.True(copy.TryValidateWireShape(out var failure), failure);
         Assert.True(copy.Matches(acceptedConfig));
+        Assert.Equal(header.RequestId, copy.Header.RequestId);
     }
 
     [Theory]
@@ -973,16 +977,12 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
     }
 
     [Fact]
-    public void NullBrokerOrigins_CannotRequestOrApplySnapshots()
+    public void NullBrokerOrigins_CannotApplySnapshots()
     {
         var network = new Mock<INetwork>(MockBehavior.Strict);
         var runtime = new CountingRuntime();
         var handler = CreateHandler(runtime, network.Object);
 
-        ModInformation.IsServer = true;
-        handler.HandleSnapshotRequest(new MessagePayload<NetworkRequestDiplomacySnapshot>(
-            null,
-            new NetworkRequestDiplomacySnapshot()));
         ModInformation.IsServer = false;
         handler.HandleSnapshot(new MessagePayload<NetworkDiplomacySnapshot>(
             null,
@@ -990,33 +990,6 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
 
         network.VerifyNoOtherCalls();
         Assert.Equal(0, runtime.ApplyCount);
-    }
-
-    [Fact]
-    public void SnapshotRequest_BeforePlayerMapping_StillReceivesAuthoritativeSnapshot()
-    {
-        ModInformation.IsServer = true;
-        RuntimeHelpers.RunModuleConstructor(typeof(Coop.Tests.Mocks.TestNetwork).Module.ModuleHandle);
-        var peer = (NetPeer)FormatterServices.GetUninitializedObject(typeof(NetPeer));
-        int peerSnapshotSends = 0;
-        var network = new Mock<INetwork>(MockBehavior.Strict);
-        network.Setup(value => value.SendAll(It.IsAny<NetworkDiplomacySnapshot>()));
-        network.Setup(value => value.Send(peer, It.IsAny<NetworkDiplomacySnapshot>()))
-            .Callback(() => peerSnapshotSends++);
-        var handler = CreateHandler(new CountingRuntime(), network.Object);
-
-        // This assembly owns a continuously pumping game-loop thread. Re-marking GameThread from
-        // the xUnit worker races that pump and can kill the entire test host with "Wrong thread!".
-        // Marshal the server callbacks onto the real test pump, which also matches production.
-        GameThread.Run(() =>
-        {
-            handler.HandleCampaignReady(new MessagePayload<CampaignReady>(this, new CampaignReady()));
-            handler.HandleSnapshotRequest(new MessagePayload<NetworkRequestDiplomacySnapshot>(
-                peer,
-                new NetworkRequestDiplomacySnapshot(CurrentConfigSnapshot())));
-        }, blocking: true);
-
-        Assert.Equal(1, peerSnapshotSends);
     }
 
     [Fact]
@@ -1036,6 +1009,8 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
             It.IsAny<Action<MessagePayload<HostModConfigAccepted>>>()), Times.Once);
         broker.Verify(value => value.Subscribe(
             It.IsAny<Action<MessagePayload<NetworkLoadModConfig>>>()), Times.Never);
+        broker.Verify(value => value.Subscribe(
+            It.IsAny<Action<MessagePayload<NetworkRequestDiplomacySnapshot>>>()), Times.Never);
     }
 
     [Fact]
@@ -1123,20 +1098,6 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
             new HostModConfigAccepted(current)));
 
         Assert.Equal(0, requests);
-    }
-
-    [Fact]
-    public void SnapshotRequestGate_RateLimitsRepeatedAuthenticatedPeerCapture()
-    {
-        long now = 100;
-        var gate = new DiplomacySnapshotRequestGate<object>(() => now, minimumInterval: 10);
-        var peer = new object();
-
-        Assert.True(gate.TryAccept(peer));
-        now = 109;
-        Assert.False(gate.TryAccept(peer));
-        now = 110;
-        Assert.True(gate.TryAccept(peer));
     }
 
     private sealed class StubRuntime : IDiplomacyRuntime

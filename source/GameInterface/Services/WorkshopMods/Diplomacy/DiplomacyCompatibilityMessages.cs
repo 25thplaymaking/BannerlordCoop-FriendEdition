@@ -16,21 +16,12 @@ internal readonly struct NetworkRequestDiplomacySnapshot : ICommand
     [ProtoMember(4)] public readonly string ConfigSha256;
     [ProtoMember(5)] public readonly long AuthorityRequestId;
 
-    public NetworkRequestDiplomacySnapshot(ModConfigSnapshot acceptedConfig)
-    {
-        ConfigProtocolVersion = acceptedConfig?.ProtocolVersion ?? 0;
-        ConfigSessionId = acceptedConfig?.SessionId;
-        ConfigRevision = acceptedConfig?.Revision ?? 0;
-        ConfigSha256 = acceptedConfig?.Sha256;
-        AuthorityRequestId = 0;
-    }
-
     public NetworkRequestDiplomacySnapshot(AuthorityRequestHeader header, ModConfigSnapshot acceptedConfig)
-        : this(acceptedConfig)
     {
         ConfigProtocolVersion = header.ProtocolVersion;
         ConfigSessionId = header.SessionId;
         ConfigRevision = header.ExpectedRevision;
+        ConfigSha256 = acceptedConfig?.Sha256;
         AuthorityRequestId = header.RequestId;
     }
 

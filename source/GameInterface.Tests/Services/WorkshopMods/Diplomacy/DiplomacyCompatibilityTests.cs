@@ -4,7 +4,9 @@ using Common.Network;
 using GameInterface.Configuration;
 using GameInterface.Services;
 using GameInterface.Services.CampaignService.Messages;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.GameState.Messages;
+using GameInterface.Services.Players;
 using GameInterface.Services.WorkshopMods.Diplomacy;
 using HarmonyLib;
 using LiteNetLib;
@@ -1026,7 +1028,9 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
             new Mock<INetwork>().Object,
             new CountingRuntime(),
             new TestConfigAuthority(CurrentConfigSnapshot()),
-            new RecordingUiLifecycle());
+            new RecordingUiLifecycle(),
+            new AuthorityRequestRouter(broker.Object, new Mock<INetwork>().Object,
+                new Mock<IPlayerManager>().Object));
 
         broker.Verify(value => value.Subscribe(
             It.IsAny<Action<MessagePayload<HostModConfigAccepted>>>()), Times.Once);
@@ -1304,12 +1308,15 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
         IModConfigAuthority configAuthority = null,
         IDiplomacyClientUiLifecycle lifecycle = null)
     {
+        var broker = new Mock<IMessageBroker>().Object;
+        var resolvedNetwork = network ?? new Mock<INetwork>().Object;
         return new DiplomacyCompatibilityHandler(
-            new Mock<IMessageBroker>().Object,
-            network ?? new Mock<INetwork>().Object,
+            broker,
+            resolvedNetwork,
             runtime,
             configAuthority ?? new TestConfigAuthority(CurrentConfigSnapshot()),
-            lifecycle ?? new RecordingUiLifecycle());
+            lifecycle ?? new RecordingUiLifecycle(),
+            new AuthorityRequestRouter(broker, resolvedNetwork, new Mock<IPlayerManager>().Object));
     }
 
     private static ModConfigSnapshot CurrentConfigSnapshot() => new(

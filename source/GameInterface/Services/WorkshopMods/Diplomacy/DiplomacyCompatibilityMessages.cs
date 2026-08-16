@@ -6,6 +6,7 @@ using System.Collections.Generic;
 
 namespace GameInterface.Services.WorkshopMods.Diplomacy;
 
+[AuthorityRoute("workshop.diplomacy.snapshot", AuthorityRouteKind.BootstrapQuery)]
 [ProtoContract(SkipConstructor = true)]
 internal readonly struct NetworkRequestDiplomacySnapshot : ICommand
 {
@@ -13,6 +14,7 @@ internal readonly struct NetworkRequestDiplomacySnapshot : ICommand
     [ProtoMember(2)] public readonly string ConfigSessionId;
     [ProtoMember(3)] public readonly long ConfigRevision;
     [ProtoMember(4)] public readonly string ConfigSha256;
+    [ProtoMember(5)] public readonly long AuthorityRequestId;
 
     public NetworkRequestDiplomacySnapshot(ModConfigSnapshot acceptedConfig)
     {
@@ -20,7 +22,20 @@ internal readonly struct NetworkRequestDiplomacySnapshot : ICommand
         ConfigSessionId = acceptedConfig?.SessionId;
         ConfigRevision = acceptedConfig?.Revision ?? 0;
         ConfigSha256 = acceptedConfig?.Sha256;
+        AuthorityRequestId = 0;
     }
+
+    public NetworkRequestDiplomacySnapshot(AuthorityRequestHeader header, ModConfigSnapshot acceptedConfig)
+        : this(acceptedConfig)
+    {
+        ConfigProtocolVersion = header.ProtocolVersion;
+        ConfigSessionId = header.SessionId;
+        ConfigRevision = header.ExpectedRevision;
+        AuthorityRequestId = header.RequestId;
+    }
+
+    public AuthorityRequestHeader Header =>
+        new AuthorityRequestHeader(ConfigProtocolVersion, ConfigSessionId, AuthorityRequestId, ConfigRevision);
 
     internal bool TryValidateWireShape(out string failure)
     {
@@ -54,6 +69,35 @@ internal readonly struct NetworkRequestDiplomacySnapshot : ICommand
             if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
         return true;
     }
+}
+
+/// <summary>Correlated Diplomacy state bootstrap result; broadcasts keep their snapshot message.</summary>
+[ProtoContract(SkipConstructor = true)]
+internal readonly struct NetworkDiplomacySnapshotQueryResult : IEvent
+{
+    [ProtoMember(1)] public readonly NetworkDiplomacySnapshot Snapshot;
+    [ProtoMember(2)] public readonly string SessionId;
+    [ProtoMember(3)] public readonly long AuthorityRequestId;
+    [ProtoMember(4)] public readonly AuthorityResultStatus Status;
+    [ProtoMember(5)] public readonly long CommittedRevision;
+    [ProtoMember(6)] public readonly string ReasonCode;
+
+    public NetworkDiplomacySnapshotQueryResult(
+        AuthorityRequestHeader request,
+        AuthorityResultStatus status,
+        NetworkDiplomacySnapshot snapshot,
+        string reasonCode)
+    {
+        Snapshot = snapshot;
+        SessionId = request.SessionId;
+        AuthorityRequestId = request.RequestId;
+        Status = status;
+        CommittedRevision = snapshot?.Revision ?? request.ExpectedRevision;
+        ReasonCode = reasonCode;
+    }
+
+    public AuthorityResultHeader Header =>
+        new AuthorityResultHeader(SessionId, AuthorityRequestId, Status, CommittedRevision, ReasonCode);
 }
 
 [ProtoContract]

@@ -6,7 +6,9 @@ using Common.Util;
 using GameInterface.Configuration;
 using GameInterface.Services;
 using GameInterface.Services.CampaignService.Messages;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.GameState.Messages;
+using GameInterface.Services.WorkshopMods.Core;
 using LiteNetLib;
 using Serilog;
 using System;
@@ -25,6 +27,7 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
     private readonly IDiplomacyRuntime runtime;
     private readonly IModConfigAuthority configAuthority;
     private readonly IDiplomacyClientUiLifecycle uiLifecycle;
+    private readonly IAuthorityRouteHandle<DiplomacySnapshotIntent, NetworkDiplomacySnapshotQueryResult> snapshotRoute;
     private readonly object snapshotApplyGate = new();
     private readonly DiplomacyRevisionGate revisionGate = new();
     private readonly DiplomacySnapshotRequestGate<NetPeer> requestGate = new();
@@ -37,32 +40,56 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
     private bool loggedClientUiReadiness;
 
     internal DiplomacySnapshotApplyResult LastApplyResult { get; private set; }
+    internal WorkshopSnapshotReadiness SnapshotReadiness { get; private set; }
+    internal string SnapshotSessionId { get; private set; }
+    internal long SnapshotRevision { get; private set; } = -1;
 
     public DiplomacyCompatibilityHandler(
         IMessageBroker messageBroker,
         INetwork network,
         IDiplomacyRuntime runtime,
         IModConfigAuthority configAuthority,
-        IDiplomacyClientUiLifecycle uiLifecycle)
+        IDiplomacyClientUiLifecycle uiLifecycle,
+        IAuthorityRequestRouter authorityRequestRouter)
     {
         this.messageBroker = messageBroker;
         this.network = network;
         this.runtime = runtime;
         this.configAuthority = configAuthority;
         this.uiLifecycle = uiLifecycle;
+        snapshotRoute = authorityRequestRouter.Register(
+            AuthorityRoute<DiplomacySnapshotIntent, NetworkRequestDiplomacySnapshot,
+                NetworkDiplomacySnapshotQueryResult>.Define(
+                "workshop.diplomacy.snapshot", AuthorityRouteKind.BootstrapQuery,
+                CreateSnapshotHeader,
+                (_, header) => new NetworkRequestDiplomacySnapshot(header, acceptedHostConfig),
+                request => request.Header,
+                result => result.Header,
+                request => request.TryValidateWireShape(out var failure) ? null : "invalid-diplomacy-snapshot-query",
+                request => "snapshot:" + request.ConfigSessionId + ":" + request.ConfigRevision + ":" + request.ConfigSha256,
+                ValidateSnapshotHeader,
+                ExecuteSnapshotQuery,
+                CreateSnapshotTerminal,
+                ProbeSnapshotApplied,
+                _ => { },
+                PresentSnapshotTerminal,
+                configAuthority.IsTrustedServer,
+                AuthorityTimeoutPolicy.BootstrapQuery,
+                requireAuthenticatedPlayer: false));
 
         messageBroker.Subscribe<CampaignReady>(HandleCampaignReady);
-        messageBroker.Subscribe<NetworkRequestDiplomacySnapshot>(HandleSnapshotRequest);
         messageBroker.Subscribe<NetworkDiplomacySnapshot>(HandleSnapshot);
+        messageBroker.Subscribe<NetworkDiplomacySnapshotQueryResult>(HandleSnapshotQueryResult);
         messageBroker.Subscribe<HostModConfigAccepted>(HandleHostModConfig);
     }
 
     public void Dispose()
     {
         messageBroker.Unsubscribe<CampaignReady>(HandleCampaignReady);
-        messageBroker.Unsubscribe<NetworkRequestDiplomacySnapshot>(HandleSnapshotRequest);
         messageBroker.Unsubscribe<NetworkDiplomacySnapshot>(HandleSnapshot);
+        messageBroker.Unsubscribe<NetworkDiplomacySnapshotQueryResult>(HandleSnapshotQueryResult);
         messageBroker.Unsubscribe<HostModConfigAccepted>(HandleHostModConfig);
+        snapshotRoute.Dispose();
     }
 
     internal void HandleCampaignReady(MessagePayload<CampaignReady> _)
@@ -75,6 +102,9 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
         acceptedHostConfig = null;
         hostConfigLoaded = false;
         loggedClientUiReadiness = false;
+        SnapshotReadiness = WorkshopSnapshotReadiness.Unknown;
+        SnapshotSessionId = null;
+        SnapshotRevision = -1;
         campaignReady = false;
         if (!runtime.IsAvailable)
         {
@@ -190,6 +220,22 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
             nameof(DiplomacyCompatibilityHandler));
     }
 
+    private void HandleSnapshotQueryResult(MessagePayload<NetworkDiplomacySnapshotQueryResult> payload)
+    {
+        if (!ModInformation.IsClient || payload?.Who is not NetPeer serverPeer ||
+            !configAuthority.IsTrustedServer(serverPeer) ||
+            payload.What.Header.Status != AuthorityResultStatus.Accepted || payload.What.Snapshot == null)
+            return;
+
+        GameThread.RunSafe(
+            () => ApplyTrustedSnapshot(
+                payload.What.Snapshot,
+                () => serverPeer.Disconnect(),
+                message => InformationManager.DisplayMessage(new InformationMessage(message))),
+            true,
+            nameof(DiplomacyCompatibilityHandler));
+    }
+
     internal void HandleHostModConfig(MessagePayload<HostModConfigAccepted> payload)
     {
         // This event is a local-only post-commit notification. A wire origin is always invalid,
@@ -242,16 +288,80 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
             return;
         }
 
+        SnapshotReadiness = WorkshopSnapshotReadiness.Loading;
         Logger.Information(
             "Requesting authoritative Diplomacy snapshot: config session={Session}, revision={Revision}",
             acceptedHostConfig.SessionId,
             acceptedHostConfig.Revision);
-        network.SendAll(new NetworkRequestDiplomacySnapshot(acceptedHostConfig));
+        snapshotRoute.Submit(default);
     }
 
     private bool HasCurrentHostConfig() =>
         hostConfigLoaded && acceptedHostConfig != null &&
         configAuthority != null && configAuthority.IsCurrent(acceptedHostConfig);
+
+    private AuthorityRequestHeader CreateSnapshotHeader(long requestId)
+    {
+        if (!HasCurrentHostConfig()) return default;
+        return new AuthorityRequestHeader(
+            acceptedHostConfig.ProtocolVersion,
+            acceptedHostConfig.SessionId,
+            requestId,
+            acceptedHostConfig.Revision);
+    }
+
+    private AuthorityHeaderValidation ValidateSnapshotHeader(AuthorityRequestHeader header)
+    {
+        if (!HasCurrentHostConfig())
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "diplomacy-snapshot-unavailable");
+        if (header.ProtocolVersion != acceptedHostConfig.ProtocolVersion ||
+            !string.Equals(header.SessionId, acceptedHostConfig.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-config-session");
+        if (header.ExpectedRevision != acceptedHostConfig.Revision)
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-config-revision");
+        return AuthorityHeaderValidation.Valid;
+    }
+
+    private AuthorityServerReply<NetworkDiplomacySnapshotQueryResult> ExecuteSnapshotQuery(
+        AuthorityServerContext context,
+        NetworkRequestDiplomacySnapshot request)
+    {
+        if (!request.Matches(acceptedHostConfig))
+            return new AuthorityServerReply<NetworkDiplomacySnapshotQueryResult>(
+                CreateSnapshotTerminal(context.Header, AuthorityResultStatus.StaleState, "stale-config-identity"), false);
+        if (!TryCaptureSnapshot(out var snapshot, out var failure))
+        {
+            Logger.Warning("Diplomacy snapshot query is unavailable: {Failure}", failure);
+            return new AuthorityServerReply<NetworkDiplomacySnapshotQueryResult>(
+                CreateSnapshotTerminal(context.Header, AuthorityResultStatus.Unavailable, "diplomacy-snapshot-unavailable"), false);
+        }
+
+        // The correlated result carries the captured state. Its successful transport is the
+        // publication assertion for this BootstrapQuery; the router never infers it.
+        return new AuthorityServerReply<NetworkDiplomacySnapshotQueryResult>(
+            new NetworkDiplomacySnapshotQueryResult(context.Header, AuthorityResultStatus.Accepted, snapshot, null), true);
+    }
+
+    private static NetworkDiplomacySnapshotQueryResult CreateSnapshotTerminal(
+        AuthorityRequestHeader header,
+        AuthorityResultStatus status,
+        string reasonCode) =>
+        new NetworkDiplomacySnapshotQueryResult(header, status, null, reasonCode);
+
+    private AuthorityCommitProbeResult ProbeSnapshotApplied(NetworkDiplomacySnapshotQueryResult result) =>
+        result.Snapshot != null && SnapshotReadiness == WorkshopSnapshotReadiness.Ready &&
+        string.Equals(SnapshotSessionId, result.Header.SessionId, StringComparison.Ordinal) &&
+        SnapshotRevision == result.Header.CommittedRevision
+            ? AuthorityCommitProbeResult.Applied
+            : AuthorityCommitProbeResult.Pending;
+
+    private void PresentSnapshotTerminal(AuthorityClientOutcome<NetworkDiplomacySnapshotQueryResult> outcome)
+    {
+        if (outcome.Completion == AuthorityClientCompletion.Applied) return;
+        SnapshotReadiness = WorkshopSnapshotReadiness.Unavailable;
+        Logger.Warning("Diplomacy snapshot bootstrap ended without readiness. Completion={Completion} Reason={Reason}",
+            outcome.Completion, outcome.ReasonCode);
+    }
 
     private static bool SameConfigIdentity(ModConfigSnapshot left, ModConfigSnapshot right) =>
         left != null && right != null &&
@@ -322,6 +432,9 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
                 return;
             }
             trustedSnapshot = snapshot;
+            SnapshotReadiness = WorkshopSnapshotReadiness.Ready;
+            SnapshotSessionId = acceptedHostConfig?.SessionId;
+            SnapshotRevision = snapshot.Revision;
             if (!MarkClientUiReady()) return;
             Logger.Information(
                 "Applied Diplomacy {Version} host settings/state snapshot revision {Revision}; " +
@@ -430,30 +543,9 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
 
     private void SendCurrentSnapshot(NetPeer peer)
     {
-        if (!runtime.IsAvailable)
+        if (!TryCaptureSnapshot(out var snapshot, out var failure))
         {
-            DenyPeerOrAbortSession(peer, DiplomacyCompatibilityPolicy.DescribeResolutionFailure());
-            return;
-        }
-
-        NetworkDiplomacySnapshot snapshot;
-        try
-        {
-            snapshot = runtime.CaptureSnapshot();
-        }
-        catch (System.Exception ex)
-        {
-            DenyPeerOrAbortSession(peer, $"Diplomacy state capture threw: {ex.Message}");
-            return;
-        }
-        if (snapshot == null)
-        {
-            DenyPeerOrAbortSession(peer, "authoritative Diplomacy state capture returned no snapshot");
-            return;
-        }
-        if (!DiplomacySnapshotCodec.TryValidate(snapshot, out var failure))
-        {
-            DenyPeerOrAbortSession(peer, "authoritative Diplomacy state was invalid: " + failure);
+            DenyPeerOrAbortSession(peer, failure);
             return;
         }
 
@@ -478,6 +570,42 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
                 peer.Id);
             network.Send(peer, snapshot);
         }
+    }
+
+    private bool TryCaptureSnapshot(out NetworkDiplomacySnapshot snapshot, out string failure)
+    {
+        snapshot = null;
+        if (!runtime.IsAvailable)
+        {
+            failure = DiplomacyCompatibilityPolicy.DescribeResolutionFailure();
+            return false;
+        }
+        try
+        {
+            snapshot = runtime.CaptureSnapshot();
+        }
+        catch (System.Exception exception)
+        {
+            failure = "Diplomacy state capture threw: " + exception.Message;
+            return false;
+        }
+        if (snapshot == null)
+        {
+            failure = "authoritative Diplomacy state capture returned no snapshot";
+            return false;
+        }
+        if (!DiplomacySnapshotCodec.TryValidate(snapshot, out var validationFailure))
+        {
+            failure = "authoritative Diplomacy state was invalid: " + validationFailure;
+            return false;
+        }
+
+        failure = null;
+        return true;
+    }
+
+    private readonly struct DiplomacySnapshotIntent
+    {
     }
 
     private static void DenyPeerOrAbortSession(NetPeer peer, string failure)

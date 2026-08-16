@@ -3662,13 +3662,16 @@ internal sealed class FourberieCapabilitySource : Core.IWorkshopCapabilitySource
         var options = modConfig.Data == null
             ? Configuration.ModConfigProvider.ModOptions
             : new Configuration.ModOptions(modConfig.Data.ModOptions ?? new Configuration.ModOptionsData());
-        bool enabled = FourberieCapabilityPolicy.IsEnabled(
-            options.IsWorkshopModuleEnabled(ModuleId),
-            FourberiePatchRuntime.Current != null);
+        bool optionEnabled = options.IsWorkshopModuleEnabled(ModuleId);
+        // A compatible patch runtime and state snapshot do not make the legacy command safe.
+        // A real core-owned command route is introduced in Task 6.
+        bool enabled = false;
         yield return new Core.WorkshopCapability(
             ModuleId,
             Operation,
             enabled,
-            enabled ? string.Empty : "Fourberie is disabled or its authoritative gameplay route is unavailable.");
+            enabled ? string.Empty : optionEnabled
+                ? "authority-command-route-unavailable"
+                : "module-disabled");
     }
 }

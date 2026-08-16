@@ -375,13 +375,16 @@ internal sealed class DiplomacyCapabilitySource : IWorkshopCapabilitySource
         var options = modConfig.Data == null
             ? ModConfigProvider.ModOptions
             : new ModOptions(modConfig.Data.ModOptions ?? new ModOptionsData());
-        bool enabled = DiplomacyCapabilityPolicy.IsEnabled(
-            options.IsWorkshopModuleEnabled(ModuleId),
-            DiplomacyPatchRuntime.Current != null && DiplomacyCompatibilityPolicy.ResolveAssembly() != null);
+        bool optionEnabled = options.IsWorkshopModuleEnabled(ModuleId);
+        // The legacy operation transport is not an authority route. Task 4 may establish a
+        // snapshot, but it must never advertise gameplay until Task 6 owns the real command.
+        bool enabled = false;
         yield return new WorkshopCapability(
             ModuleId,
             Operation,
             enabled,
-            enabled ? string.Empty : "Diplomacy is disabled or its authoritative gameplay route is unavailable.");
+            enabled ? string.Empty : optionEnabled
+                ? "authority-command-route-unavailable"
+                : "module-disabled");
     }
 }

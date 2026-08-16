@@ -480,13 +480,15 @@ internal sealed class ImprovedGarrisonsCapabilitySource : IWorkshopCapabilitySou
             ? ModConfigProvider.ModOptions
             : new ModOptions(modConfig.Data.ModOptions ?? new ModOptionsData());
         bool optionEnabled = options.IsWorkshopModuleEnabled(ModuleId);
-        bool enabled = ImprovedGarrisonsCapabilityPolicy.IsEnabled(
-            optionEnabled,
-            ImprovedGarrisonsPatchRuntime.Current != null);
+        // Snapshot readiness is deliberately separate from command ownership. The current
+        // operation messages remain legacy until the Task 6 authority migration.
+        bool enabled = false;
         yield return new WorkshopCapability(
             ModuleId,
             Operation,
             enabled,
-            enabled ? string.Empty : "Improved Garrisons is disabled or its authoritative management route is unavailable.");
+            enabled ? string.Empty : optionEnabled
+                ? "authority-command-route-unavailable"
+                : "module-disabled");
     }
 }

@@ -26,6 +26,15 @@ public enum WorkshopCapabilityReadiness
     Unavailable,
 }
 
+/// <summary>Readiness of one authoritative Workshop state bootstrap for the accepted session.</summary>
+public enum WorkshopSnapshotReadiness
+{
+    Unknown,
+    Loading,
+    Ready,
+    Unavailable,
+}
+
 public interface IWorkshopCapabilityRegistry : IGameAbstraction
 {
     bool IsEnabled(string moduleId, string operation);

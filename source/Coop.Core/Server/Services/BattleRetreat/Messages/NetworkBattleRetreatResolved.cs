@@ -25,10 +25,18 @@ public record NetworkBattleRetreatResolved : IEvent
     [ProtoMember(3)]
     public string[] CampClearedPartyIds { get; }
 
-    public NetworkBattleRetreatResolved(string partyId, bool approved, string[] campClearedPartyIds)
+    [ProtoMember(4)]
+    public AuthorityResultHeader Header { get; }
+
+    public NetworkBattleRetreatResolved(
+        string partyId,
+        bool approved,
+        string[] campClearedPartyIds,
+        AuthorityResultHeader header = default)
     {
         PartyId = partyId;
         Approved = approved;
         CampClearedPartyIds = campClearedPartyIds;
+        Header = header;
     }
 }

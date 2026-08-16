@@ -12,6 +12,7 @@ namespace Coop.Core.Client.Services.BattleRetreat.Messages;
 /// so a client cannot dictate which of its troops die or how many.
 /// </remarks>
 [ProtoContract(SkipConstructor = true)]
+[AuthorityRoute("battle.retreat", AuthorityRouteKind.Command)]
 public record NetworkRequestBattleRetreat : ICommand
 {
     [ProtoMember(1)]
@@ -21,9 +22,16 @@ public record NetworkRequestBattleRetreat : ICommand
     [ProtoMember(2)]
     public string MapEventId { get; }
 
-    public NetworkRequestBattleRetreat(string partyId, string mapEventId)
+    [ProtoMember(3)]
+    public AuthorityRequestHeader Header { get; }
+
+    public NetworkRequestBattleRetreat(
+        string partyId,
+        string mapEventId,
+        AuthorityRequestHeader header = default)
     {
         PartyId = partyId;
         MapEventId = mapEventId;
+        Header = header;
     }
 }

@@ -13,6 +13,7 @@ namespace Coop.Core.Client.Services.BattleRetreat.Messages;
 /// battle that has already produced a result.
 /// </remarks>
 [ProtoContract(SkipConstructor = true)]
+[AuthorityRoute("battle.mission-retreat", AuthorityRouteKind.Command)]
 public record NetworkRequestBattleMissionRetreat : ICommand
 {
     [ProtoMember(1)]
@@ -22,9 +23,16 @@ public record NetworkRequestBattleMissionRetreat : ICommand
     [ProtoMember(2)]
     public string MapEventId { get; }
 
-    public NetworkRequestBattleMissionRetreat(string partyId, string mapEventId)
+    [ProtoMember(3)]
+    public AuthorityRequestHeader Header { get; }
+
+    public NetworkRequestBattleMissionRetreat(
+        string partyId,
+        string mapEventId,
+        AuthorityRequestHeader header = default)
     {
         PartyId = partyId;
         MapEventId = mapEventId;
+        Header = header;
     }
 }

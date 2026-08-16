@@ -3,6 +3,7 @@ using System.Linq;
 using Common.Messaging;
 using Coop.Core.Client.Services.BattleRetreat.Messages;
 using E2E.Tests.Environment.Instance;
+using GameInterface.Configuration;
 using GameInterface.Services.MapEvents.Messages;
 using GameInterface.Services.MapEvents.Messages.Leave;
 using GameInterface.Services.MapEvents.Messages.Retreat;
@@ -14,6 +15,7 @@ using TaleWorlds.CampaignSystem.GameComponents;
 using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.Core;
+using System.Threading;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -36,6 +38,8 @@ namespace E2E.Tests.Services.MapEvents;
 /// </remarks>
 public class BattleMissionRetreatTests : MapEventTestBase
 {
+    private static long nextAuthorityRequestId;
+
     public BattleMissionRetreatTests(ITestOutputHelper output) : base(output) { }
 
     [Fact]
@@ -205,8 +209,22 @@ public class BattleMissionRetreatTests : MapEventTestBase
             .ToList();
 
         Server.Call(
-            () => Server.SimulateMessage(client.NetPeer, new NetworkRequestBattleMissionRetreat(partyId, mapEventId)),
+            () => Server.SimulateMessage(client.NetPeer, CreateMissionRetreatRequest(client, partyId, mapEventId)),
             disabled);
+    }
+
+    private static NetworkRequestBattleMissionRetreat CreateMissionRetreatRequest(
+        EnvironmentInstance client,
+        string partyId,
+        string mapEventId)
+    {
+        var authority = client.Resolve<IModConfigAuthority>();
+        Assert.True(authority.TryGetCurrent(out ModConfigSnapshot snapshot));
+        return new NetworkRequestBattleMissionRetreat(
+            partyId,
+            mapEventId,
+            new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId,
+                Interlocked.Increment(ref nextAuthorityRequestId), snapshot.Revision));
     }
 
     private void AssertInBattle(EnvironmentInstance instance, string partyId, string mapEventId)

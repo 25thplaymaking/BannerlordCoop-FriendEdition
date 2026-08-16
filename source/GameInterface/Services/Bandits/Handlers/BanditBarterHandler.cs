@@ -680,7 +680,7 @@ internal sealed class BanditBarterHandler : IHandler
     private bool TryPackItems(ItemRoster roster, out ItemRosterElementData[] data)
     {
         var packed = new List<ItemRosterElementData>();
-        foreach (var element in roster.GetTroopRoster())
+        foreach (var element in roster)
         {
             if (element.Amount <= 0 || element.EquipmentElement.Item == null ||
                 !objectManager.TryGetCatalogId(element.EquipmentElement.Item, out var itemId)) { data = null; return false; }
@@ -698,7 +698,7 @@ internal sealed class BanditBarterHandler : IHandler
     private bool TryPackPrisoners(TroopRoster roster, out TroopRosterElementData[] data)
     {
         var packed = new List<TroopRosterElementData>();
-        foreach (var element in roster)
+        foreach (var element in roster.GetTroopRoster())
         {
             if (element.Character == null || element.Number <= 0 ||
                 !objectManager.TryGetId(element.Character, out var characterId)) { data = null; return false; }

@@ -1,5 +1,5 @@
 ﻿using Common;
-using Common.Network;
+using GameInterface.Services.Barters.Handlers;
 using GameInterface.Policies;
 using GameInterface.Services.Barters.Messages;
 using GameInterface.Services.Heroes.Extensions;
@@ -62,7 +62,6 @@ internal static class PeaceBarterPatch
         }
 
         if (!ContainerProvider.TryResolve<IObjectManager>(out var objectManager) ||
-            !ContainerProvider.TryResolve<INetwork>(out var network) ||
             !objectManager.TryGetId(targetHero, out var targetHeroId) ||
             !TryGetConversationContext(barterData, objectManager, out var context, out var contextId))
         {
@@ -81,12 +80,12 @@ internal static class PeaceBarterPatch
         pendingRequestId = Guid.NewGuid().ToString("N");
         pendingContext = context;
         pendingContextId = contextId;
-        network.SendAll(new NetworkRequestPeaceBarter(
-            targetHeroId,
-            context,
-            contextId,
-            terms.ToArray(),
-            pendingRequestId));
+        if (!PeaceBarterHandler.TrySubmit(new PeaceBarterIntent(
+                targetHeroId, context, contextId, terms.ToArray(), pendingRequestId)))
+        {
+            ClearPendingRequest();
+            ShowMessage("Unable to send the peace barter to the server.");
+        }
         return false;
     }
 
@@ -168,6 +167,15 @@ internal static class PeaceBarterPatch
         pendingRequestId = null;
         pendingContext = default;
         pendingContextId = null;
+    }
+
+    internal static void CompleteFailedRequest(string reason)
+    {
+        if (pendingBarter == null) return;
+        ClearPendingRequest();
+        ShowMessage(string.IsNullOrWhiteSpace(reason)
+            ? "The server could not apply the peace barter."
+            : reason);
     }
 
     private static bool IsPendingContextActive()

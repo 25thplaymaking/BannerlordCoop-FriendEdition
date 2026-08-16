@@ -24,6 +24,7 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
+using TaleWorlds.CampaignSystem.Siege;
 using TaleWorlds.Core;
 using static GameInterface.Services.ObjectManager.ObjectManager;
 
@@ -49,6 +50,8 @@ internal class ServerSiegeEntryHandler : IHandler
     private readonly IAuthorityRouteHandle<SiegeEntryIntent, NetworkBesiegeSettlementApproved> besiegeRoute;
     private readonly IAuthorityRouteHandle<SiegeEntryIntent, NetworkJoinSiegeCampApproved> joinRoute;
     private readonly IAuthorityRouteHandle<SiegeBreakIntent, NetworkBreakSiegeApproved> breakRoute;
+    private readonly IAuthorityRouteHandle<SiegeEntryIntent, NetworkSiegeAssaultApproved> assaultRoute;
+    private readonly IAuthorityRouteHandle<SiegeEntryIntent, NetworkBreakInContinuationApproved> breakInRoute;
 
     public ServerSiegeEntryHandler(
         IMessageBroker messageBroker,
@@ -93,83 +96,26 @@ internal class ServerSiegeEntryHandler : IHandler
                 ValidateHeader, ExecuteBreak, CreateBreakTerminalResult, _ => AuthorityCommitProbeResult.Pending,
                 _ => { }, _ => { }, configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
                 failClosedOnApplyFailure: true, isExpectedClientResult: IsExpectedBreakResult));
-        messageBroker.Subscribe<NetworkRequestSiegeAssault>(HandleAssault);
+        assaultRoute = authorityRequestRouter.Register(
+            AuthorityRoute<SiegeEntryIntent, NetworkRequestSiegeAssault, NetworkSiegeAssaultApproved>.Define(
+                "siege.assault", AuthorityRouteKind.Command, CreateHeader,
+                (intent, header) => new NetworkRequestSiegeAssault(intent.PartyId, intent.SettlementId, header),
+                request => request.Header, result => result.Header, ValidateAssaultWireShape, BuildAssaultCommandKey,
+                ValidateHeader, ExecuteAssault, CreateAssaultTerminalResult, _ => AuthorityCommitProbeResult.Pending,
+                _ => { }, _ => { }, configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true, isExpectedClientResult: IsExpectedAssaultResult));
+        breakInRoute = authorityRequestRouter.Register(
+            AuthorityRoute<SiegeEntryIntent, NetworkRequestBreakInContinuation, NetworkBreakInContinuationApproved>.Define(
+                "siege.break-in-continuation", AuthorityRouteKind.Command, CreateHeader,
+                (intent, header) => new NetworkRequestBreakInContinuation(null, intent.PartyId, intent.SettlementId, header),
+                request => request.Header, result => result.Header, ValidateBreakInWireShape, BuildBreakInCommandKey,
+                ValidateHeader, ExecuteBreakInContinuation, CreateBreakInTerminalResult, _ => AuthorityCommitProbeResult.Pending,
+                _ => { }, _ => { }, configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true, isExpectedClientResult: IsExpectedBreakInResult));
         messageBroker.Subscribe<SiegeAssaultStarted>(HandleAssaultStarted);
         messageBroker.Subscribe<SiegePreparationStarted>(HandlePreparationStarted);
         messageBroker.Subscribe<SiegeEndedWithoutBattle>(HandleSiegeEnded);
         messageBroker.Subscribe<SiegeCampPositionRolled>(HandleCampPosition);
-        messageBroker.Subscribe<NetworkRequestBreakInContinuation>(HandleBreakInContinuation);
-    }
-
-    private void HandleBreakInContinuation(MessagePayload<NetworkRequestBreakInContinuation> payload)
-    {
-        var obj = payload.What;
-        if (!(payload.Who is NetPeer peer))
-        {
-            Logger.Error("Received {Message} with no originating peer", nameof(NetworkRequestBreakInContinuation));
-            return;
-        }
-
-        GameThread.RunSafe(() =>
-        {
-            bool approved;
-            try
-            {
-                approved = TryApplyBreakInContinuation(peer, obj);
-            }
-            catch (Exception e)
-            {
-                Logger.Error(e, "Failed to apply break-in continuation request {RequestId}", obj.RequestId);
-                approved = false;
-            }
-
-            SendBreakInContinuationResult(peer, obj, approved);
-        }, context: nameof(HandleBreakInContinuation));
-    }
-
-    private bool TryApplyBreakInContinuation(
-        NetPeer peer,
-        NetworkRequestBreakInContinuation request)
-    {
-        if (!DoesPeerControlParty(peer, request)) return false;
-
-        if (!objectManager.TryGetObjectWithLogging<MobileParty>(request.PartyId, out var party) ||
-            !objectManager.TryGetObjectWithLogging<Settlement>(request.SettlementId, out var settlement))
-            return false;
-
-        var alreadyEntered = ReferenceEquals(party.CurrentSettlement, settlement);
-        if (!CanApplyBreakInContinuation(party, settlement, alreadyEntered))
-        {
-            Logger.Warning("Rejecting break-in request {RequestId} for party {PartyId} and settlement {SettlementId}",
-                request.RequestId, request.PartyId, request.SettlementId);
-            return false;
-        }
-
-        if (alreadyEntered)
-        {
-            network.Send(peer, new NetworkPartyEnterSettlement(
-                Compact(request.SettlementId, typeof(Settlement)),
-                Compact(request.PartyId, typeof(MobileParty))));
-        }
-        else
-        {
-            settlementInterface.PartyEnterSettlement(party, settlement);
-        }
-
-        return ReferenceEquals(party.CurrentSettlement, settlement);
-    }
-
-    private bool DoesPeerControlParty(
-        NetPeer peer,
-        NetworkRequestBreakInContinuation request)
-    {
-        if (playerManager.TryGetPlayer(peer, out var player) &&
-            player.MobilePartyId == request.PartyId)
-            return true;
-
-        Logger.Warning("Rejecting break-in request {RequestId} from a peer that does not control party {PartyId}",
-            request.RequestId, request.PartyId);
-        return false;
     }
 
     private static bool CanApplyBreakInContinuation(
@@ -191,17 +137,6 @@ internal class ServerSiegeEntryHandler : IHandler
         var siegeEvent = settlement.SiegeEvent;
         return siegeEvent != null &&
             siegeEvent.CanPartyJoinSide(partyBase, BattleSideEnum.Defender);
-    }
-
-    private void SendBreakInContinuationResult(
-        NetPeer peer,
-        NetworkRequestBreakInContinuation request,
-        bool approved)
-    {
-        network.Send(peer, new NetworkBreakInContinuationApproved(
-            request.RequestId,
-            request.SettlementId,
-            approved));
     }
 
     // Runs on the game thread already; joins defenders with patches live before broadcasting the prompts.
@@ -284,47 +219,6 @@ internal class ServerSiegeEntryHandler : IHandler
         return ids.ToArray();
     }
 
-    private void HandleAssault(MessagePayload<NetworkRequestSiegeAssault> payload)
-    {
-        var obj = payload.What;
-
-        GameThread.RunSafe(() =>
-        {
-            if (!objectManager.TryGetObjectWithLogging<MobileParty>(obj.PartyId, out _)) return;
-            if (!objectManager.TryGetObjectWithLogging<Settlement>(obj.SettlementId, out var settlement)) return;
-
-            var camp = settlement.SiegeEvent?.BesiegerCamp;
-            if (camp == null)
-            {
-                Logger.Error("Party {PartyId} tried to assault {SettlementId} which is not under siege", obj.PartyId, obj.SettlementId);
-                return;
-            }
-
-            // Create the assault authoritatively with patches LIVE so the map event registers + replicates and
-            // SiegeAssaultPromptPatches fires SiegeAssaultStarted (broadcasting the attacker/defender prompts). The
-            // camp leader is the authoritative attacker, matching vanilla lead_assault_on_consequence.
-            if (settlement.Party.MapEvent == null)
-            {
-                // SiegeEntryFlowPatches only reroutes the assault menu consequence, so the vanilla
-                // preparation-complete on_condition is bypassed; enforce it authoritatively here.
-                if (!camp.IsPreparationComplete)
-                {
-                    Logger.Warning("Party {PartyId} tried to assault {SettlementId} before siege preparations completed", obj.PartyId, obj.SettlementId);
-                    return;
-                }
-
-                StartBattleAction.ApplyStartAssaultAgainstWalls(camp.LeaderParty, settlement);
-                return;
-            }
-
-            // Assault already live (e.g. a repeat click): re-broadcast the prompt so a besieger still catching up enters it.
-            if (settlement.Party.MapEvent.IsSiegeAssault && objectManager.TryGetId(camp.LeaderParty, out var leaderId))
-            {
-                network.SendAll(new NetworkPromptSiegeAssault(leaderId, obj.SettlementId));
-            }
-        });
-    }
-
     // Runs on the game thread already — published from the party-joined-siege patch; only resolves an id and broadcasts, so no GameThread.RunSafe.
     private void HandleCampPosition(MessagePayload<SiegeCampPositionRolled> payload)
     {
@@ -351,6 +245,12 @@ internal class ServerSiegeEntryHandler : IHandler
         string.IsNullOrWhiteSpace(request.PartyId) || request.PartyId.Length > 256
             ? "invalid-siege-break-party" : null;
 
+    private static string ValidateAssaultWireShape(NetworkRequestSiegeAssault request) =>
+        ValidateEntryIdentifiers(request.PartyId, request.SettlementId);
+
+    private static string ValidateBreakInWireShape(NetworkRequestBreakInContinuation request) =>
+        ValidateEntryIdentifiers(request.PartyId, request.SettlementId);
+
     private static string ValidateEntryIdentifiers(string partyId, string settlementId) =>
         string.IsNullOrWhiteSpace(partyId) || partyId.Length > 256 ||
         string.IsNullOrWhiteSpace(settlementId) || settlementId.Length > 256
@@ -364,6 +264,12 @@ internal class ServerSiegeEntryHandler : IHandler
 
     private static string BuildBreakCommandKey(NetworkRequestBreakSiege request) =>
         string.Concat(request.PartyId.Length, ":", request.PartyId, ":", request.FinishLocalMenus);
+
+    private static string BuildAssaultCommandKey(NetworkRequestSiegeAssault request) =>
+        BuildEntryCommandKey(request.PartyId, request.SettlementId);
+
+    private static string BuildBreakInCommandKey(NetworkRequestBreakInContinuation request) =>
+        BuildEntryCommandKey(request.PartyId, request.SettlementId);
 
     private static string BuildEntryCommandKey(string partyId, string settlementId) =>
         string.Concat(partyId.Length, ":", partyId, ":", settlementId.Length, ":", settlementId);
@@ -379,6 +285,260 @@ internal class ServerSiegeEntryHandler : IHandler
         if (header.ExpectedRevision != current.Revision)
             return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-state");
         return AuthorityHeaderValidation.Valid;
+    }
+
+    private AuthorityServerReply<NetworkSiegeAssaultApproved> ExecuteAssault(
+        AuthorityServerContext context,
+        NetworkRequestSiegeAssault request)
+    {
+        if (!string.Equals(context.Player.MobilePartyId, request.PartyId, StringComparison.Ordinal))
+            return RejectAssault(context, request, "invalid-requester");
+        if (!objectManager.TryGetObjectWithLogging<MobileParty>(context.Player.MobilePartyId, out var party))
+            return RejectAssault(context, request, "party-not-found");
+        if (!objectManager.TryGetObjectWithLogging<Settlement>(request.SettlementId, out var settlement))
+            return RejectAssault(context, request, "settlement-not-found");
+
+        var camp = settlement.SiegeEvent?.BesiegerCamp;
+        if (!TryValidateAssault(party, settlement, camp, out var rejectionReason))
+            return RejectAssault(context, request, rejectionReason);
+
+        var currentMapEvent = settlement.Party?.MapEvent;
+        bool mutationBoundaryCrossed = false;
+        try
+        {
+            if (currentMapEvent == null)
+            {
+                // Crossing this call can create and globally publish the MapEvent. There is no safe
+                // rollback boundary after it starts, so all replicas must be isolated on ambiguity.
+                mutationBoundaryCrossed = true;
+                StartBattleAction.ApplyStartAssaultAgainstWalls(camp.LeaderParty, settlement);
+            }
+
+            var appliedMapEvent = settlement.Party?.MapEvent;
+            if (appliedMapEvent == null || !appliedMapEvent.IsSiegeAssault ||
+                !ReferenceEquals(party.MapEvent, appliedMapEvent))
+                throw new InvalidOperationException("Canonical siege assault was not established after the command.");
+            if (!objectManager.TryGetId(camp.LeaderParty, out var leaderId))
+                throw new InvalidOperationException("Could not resolve the canonical siege assault leader.");
+            if (!objectManager.TryGetId(appliedMapEvent, out var mapEventId))
+                throw new InvalidOperationException("Could not resolve the canonical siege assault map event.");
+
+            // The native mutation has already queued global MapEvent replication and its ordinary prompts.
+            // Queue an exact requester proof behind them before the Accepted result.
+            network.Send(context.Peer, new NetworkPromptSiegeAssault(
+                leaderId,
+                request.SettlementId,
+                AcceptedHeader(context.Header),
+                request.PartyId,
+                mapEventId));
+            return new AuthorityServerReply<NetworkSiegeAssaultApproved>(
+                CreateAssaultResult(context.Header, request, AuthorityResultStatus.Accepted, null), statePublished: true);
+        }
+        catch (Exception exception)
+        {
+            Logger.Error(exception,
+                "Siege assault failed after entering authority mutation. Route={Route} SessionId={SessionId} RequestId={RequestId} Party={PartyId} Settlement={SettlementId}",
+                context.RouteId, context.Header.SessionId, context.Header.RequestId, request.PartyId, request.SettlementId);
+            if (mutationBoundaryCrossed)
+                DisconnectAllConnectedPeers("ambiguous siege assault mutation", context);
+            else
+                DisconnectPeer(context.Peer, "failed siege assault idempotent acknowledgement", context);
+            return new AuthorityServerReply<NetworkSiegeAssaultApproved>(
+                CreateAssaultResult(context.Header, request, AuthorityResultStatus.ExecutionFailed, "siege-assault-isolated"),
+                statePublished: false,
+                suppressReply: true);
+        }
+    }
+
+    private AuthorityServerReply<NetworkBreakInContinuationApproved> ExecuteBreakInContinuation(
+        AuthorityServerContext context,
+        NetworkRequestBreakInContinuation request)
+    {
+        if (!string.Equals(context.Player.MobilePartyId, request.PartyId, StringComparison.Ordinal))
+            return RejectBreakIn(context, request, "invalid-requester");
+        if (!objectManager.TryGetObjectWithLogging<MobileParty>(context.Player.MobilePartyId, out var party))
+            return RejectBreakIn(context, request, "party-not-found");
+        if (!objectManager.TryGetObjectWithLogging<Settlement>(request.SettlementId, out var settlement))
+            return RejectBreakIn(context, request, "settlement-not-found");
+
+        bool alreadyEntered = ReferenceEquals(party.CurrentSettlement, settlement);
+        if (!CanApplyBreakInContinuation(party, settlement, alreadyEntered))
+            return RejectBreakIn(context, request, "cannot-continue-break-in");
+
+        bool mutationBoundaryCrossed = false;
+        try
+        {
+            if (!alreadyEntered)
+            {
+                // This prefix can publish PartyEnterSettlement to every replica before the native
+                // operation completes. Any later failure has global, unrecoverable reach.
+                mutationBoundaryCrossed = true;
+                settlementInterface.PartyEnterSettlement(party, settlement);
+            }
+
+            if (!ReferenceEquals(party.CurrentSettlement, settlement))
+                throw new InvalidOperationException("Canonical settlement entry was not established after break-in continuation.");
+
+            // Both the fresh and idempotent branches get an exact requester proof after the generic
+            // replicated entry, and before the terminal result.
+            network.Send(context.Peer, new NetworkPartyEnterSettlement(
+                Compact(request.SettlementId, typeof(Settlement)),
+                Compact(request.PartyId, typeof(MobileParty)),
+                AcceptedHeader(context.Header)));
+            return new AuthorityServerReply<NetworkBreakInContinuationApproved>(
+                CreateBreakInResult(context.Header, request, AuthorityResultStatus.Accepted, null), statePublished: true);
+        }
+        catch (Exception exception)
+        {
+            Logger.Error(exception,
+                "Break-in continuation failed. Route={Route} SessionId={SessionId} RequestId={RequestId} Party={PartyId} Settlement={SettlementId} AlreadyEntered={AlreadyEntered}",
+                context.RouteId, context.Header.SessionId, context.Header.RequestId, request.PartyId, request.SettlementId, alreadyEntered);
+            if (mutationBoundaryCrossed)
+                DisconnectAllConnectedPeers("ambiguous break-in continuation mutation", context);
+            else
+                DisconnectPeer(context.Peer, "failed break-in idempotent acknowledgement", context);
+
+            return new AuthorityServerReply<NetworkBreakInContinuationApproved>(
+                CreateBreakInResult(context.Header, request, AuthorityResultStatus.ExecutionFailed, "break-in-isolated"),
+                statePublished: false,
+                suppressReply: true);
+        }
+    }
+
+    private static AuthorityResultHeader AcceptedHeader(AuthorityRequestHeader header) =>
+        new(header.SessionId, header.RequestId, AuthorityResultStatus.Accepted, header.ExpectedRevision, null);
+
+    private bool TryValidateAssault(
+        MobileParty party,
+        Settlement settlement,
+        BesiegerCamp camp,
+        out string reason)
+    {
+        reason = null;
+        if (!party.IsActive || party.Party == null)
+            reason = "party-inactive";
+        else if (settlement.Party == null)
+            reason = "settlement-unavailable";
+        else if (camp == null || !ReferenceEquals(party.BesiegerCamp, camp))
+            reason = "not-siege-participant";
+        else if (!ReferenceEquals(camp.LeaderParty, party))
+            reason = "not-siege-leader";
+        else if (settlement.Party.MapEvent != null && !settlement.Party.MapEvent.IsSiegeAssault)
+            reason = "invalid-battle-phase";
+        else if (settlement.Party.MapEvent != null &&
+            (!ReferenceEquals(party.MapEvent, settlement.Party.MapEvent) || party.Party.Side != BattleSideEnum.Attacker))
+            reason = "assault-state-mismatch";
+        else if (settlement.Party.MapEvent == null && !camp.IsPreparationComplete)
+            reason = "preparation-incomplete";
+        return reason == null;
+    }
+
+    private AuthorityServerReply<NetworkSiegeAssaultApproved> RejectAssault(
+        AuthorityServerContext context,
+        NetworkRequestSiegeAssault request,
+        string reason)
+    {
+        network.Send(context.Peer, new SendInformationMessage($"Unable to start the siege assault: {GetAssaultFailureMessage(reason)}."));
+        return new AuthorityServerReply<NetworkSiegeAssaultApproved>(
+            CreateAssaultResult(context.Header, request, AuthorityResultStatus.Rejected, reason), statePublished: false);
+    }
+
+    private static NetworkSiegeAssaultApproved CreateAssaultTerminalResult(
+        AuthorityRequestHeader header,
+        AuthorityResultStatus status,
+        string reason) =>
+        new(status == AuthorityResultStatus.Accepted,
+            new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason), null, null);
+
+    private static NetworkSiegeAssaultApproved CreateAssaultResult(
+        AuthorityRequestHeader header,
+        NetworkRequestSiegeAssault request,
+        AuthorityResultStatus status,
+        string reason) =>
+        new(status == AuthorityResultStatus.Accepted,
+            new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason),
+            request.PartyId,
+            request.SettlementId);
+
+    private static bool IsExpectedAssaultResult(
+        NetworkRequestSiegeAssault request,
+        NetworkSiegeAssaultApproved result) =>
+        result.Approved == (result.Header.Status == AuthorityResultStatus.Accepted) &&
+        string.Equals(request.PartyId, result.PartyId, StringComparison.Ordinal) &&
+        string.Equals(request.SettlementId, result.SettlementId, StringComparison.Ordinal);
+
+    private AuthorityServerReply<NetworkBreakInContinuationApproved> RejectBreakIn(
+        AuthorityServerContext context,
+        NetworkRequestBreakInContinuation request,
+        string reason)
+    {
+        network.Send(context.Peer, new SendInformationMessage($"Unable to continue the siege break-in: {GetBreakInFailureMessage(reason)}."));
+        return new AuthorityServerReply<NetworkBreakInContinuationApproved>(
+            CreateBreakInResult(context.Header, request, AuthorityResultStatus.Rejected, reason), statePublished: false);
+    }
+
+    private static NetworkBreakInContinuationApproved CreateBreakInTerminalResult(
+        AuthorityRequestHeader header,
+        AuthorityResultStatus status,
+        string reason) =>
+        new(null, null, status == AuthorityResultStatus.Accepted,
+            new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason), null);
+
+    private static NetworkBreakInContinuationApproved CreateBreakInResult(
+        AuthorityRequestHeader header,
+        NetworkRequestBreakInContinuation request,
+        AuthorityResultStatus status,
+        string reason) =>
+        new(request.RequestId, request.SettlementId, status == AuthorityResultStatus.Accepted,
+            new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason), request.PartyId);
+
+    private static bool IsExpectedBreakInResult(
+        NetworkRequestBreakInContinuation request,
+        NetworkBreakInContinuationApproved result) =>
+        result.Approved == (result.Header.Status == AuthorityResultStatus.Accepted) &&
+        string.Equals(request.PartyId, result.PartyId, StringComparison.Ordinal) &&
+        string.Equals(request.SettlementId, result.SettlementId, StringComparison.Ordinal);
+
+    private static string GetAssaultFailureMessage(string reason) => reason switch
+    {
+        "invalid-requester" => "your party is not controlled by you",
+        "party-not-found" or "settlement-not-found" => "your party or settlement is no longer available",
+        "party-inactive" => "your party is inactive",
+        "settlement-unavailable" => "the settlement is unavailable",
+        "not-siege-participant" => "your party is no longer in this siege",
+        "not-siege-leader" => "only the siege leader can command the assault",
+        "invalid-battle-phase" => "the siege is already in another battle phase",
+        "assault-state-mismatch" => "the assault state is still synchronizing",
+        "preparation-incomplete" => "siege preparations are not complete",
+        _ => "the server could not apply the request",
+    };
+
+    private static string GetBreakInFailureMessage(string reason) => reason switch
+    {
+        "invalid-requester" => "your party is not controlled by you",
+        "party-not-found" or "settlement-not-found" => "your party or settlement is no longer available",
+        "cannot-continue-break-in" => "the siege state no longer permits it",
+        _ => "the server could not apply the request",
+    };
+
+    private static void DisconnectPeer(NetPeer peer, string reason, AuthorityServerContext context)
+    {
+        try { peer?.Disconnect(); }
+        catch (Exception exception)
+        {
+            Logger.Fatal(exception,
+                "Could not disconnect peer after {Reason}. Route={Route} SessionId={SessionId} RequestId={RequestId}",
+                reason, context.RouteId, context.Header.SessionId, context.Header.RequestId);
+        }
+    }
+
+    private void DisconnectAllConnectedPeers(string reason, AuthorityServerContext context)
+    {
+        foreach (var player in playerManager.Players)
+        {
+            if (!playerManager.IsConnected(player) || !playerManager.TryGetPeer(player.ControllerId, out var peer)) continue;
+            DisconnectPeer(peer, reason, context);
+        }
     }
 
     private AuthorityServerReply<NetworkBesiegeSettlementApproved> ExecuteBesiege(
@@ -719,11 +879,11 @@ internal class ServerSiegeEntryHandler : IHandler
         besiegeRoute.Dispose();
         joinRoute.Dispose();
         breakRoute.Dispose();
-        messageBroker.Unsubscribe<NetworkRequestSiegeAssault>(HandleAssault);
+        assaultRoute.Dispose();
+        breakInRoute.Dispose();
         messageBroker.Unsubscribe<SiegeAssaultStarted>(HandleAssaultStarted);
         messageBroker.Unsubscribe<SiegePreparationStarted>(HandlePreparationStarted);
         messageBroker.Unsubscribe<SiegeEndedWithoutBattle>(HandleSiegeEnded);
         messageBroker.Unsubscribe<SiegeCampPositionRolled>(HandleCampPosition);
-        messageBroker.Unsubscribe<NetworkRequestBreakInContinuation>(HandleBreakInContinuation);
     }
 }

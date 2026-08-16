@@ -14,10 +14,17 @@ public record NetworkPartyEnterSettlement : ICommand
     public string SettlementId;
     [ProtoMember(2)]
     public string PartyId;
+    /// <summary>Present only for an authority route's requester-specific state acknowledgement.</summary>
+    [ProtoMember(3)]
+    public AuthorityResultHeader Header { get; }
 
-    public NetworkPartyEnterSettlement(string settlementId, string partyId)
+    public NetworkPartyEnterSettlement(
+        string settlementId,
+        string partyId,
+        AuthorityResultHeader header = default)
     {
         SettlementId = settlementId;
         PartyId = partyId;
+        Header = header;
     }
 }

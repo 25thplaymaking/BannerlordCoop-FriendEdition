@@ -3,6 +3,7 @@ using Common.Logging;
 using Common.Messaging;
 using Common.Network;
 using Common.Util;
+using Coop.Core.Client.Services.MobileParties.Messages;
 using Coop.Core.Client.Services.SiegeEvents.Messages;
 using Coop.Core.Server.Services.SiegeEvents.Messages;
 using GameInterface.Configuration;
@@ -19,6 +20,7 @@ using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
+using TaleWorlds.Core;
 
 namespace Coop.Core.Client.Services.SiegeEvents.Handlers;
 
@@ -39,9 +41,13 @@ internal class ClientSiegeEntryHandler : IHandler
     private readonly IAuthorityRouteHandle<SiegeEntryIntent, NetworkBesiegeSettlementApproved> besiegeRoute;
     private readonly IAuthorityRouteHandle<SiegeEntryIntent, NetworkJoinSiegeCampApproved> joinRoute;
     private readonly IAuthorityRouteHandle<SiegeBreakIntent, NetworkBreakSiegeApproved> breakRoute;
+    private readonly IAuthorityRouteHandle<SiegeEntryIntent, NetworkSiegeAssaultApproved> assaultRoute;
+    private readonly IAuthorityRouteHandle<SiegeEntryIntent, NetworkBreakInContinuationApproved> breakInRoute;
     private PendingInterruptedAssault pendingInterruptedAssault;
     private PendingBreakInContinuation pendingBreakInContinuation;
     private string pendingBreakPartyId;
+    private CorrelatedAssaultState lastAssaultState;
+    private CorrelatedBreakInState lastBreakInState;
 
     // Game-thread only: prompts and CampaignTick continuations both run through the campaign queue.
     private sealed class PendingInterruptedAssault
@@ -123,6 +129,26 @@ internal class ClientSiegeEntryHandler : IHandler
                     configAuthority.IsTrustedServer, new AuthorityTimeoutPolicy(configuration.ObjectCreationTimeout,
                         configuration.ObjectCreationTimeout, retryCount: 1), failClosedOnApplyFailure: true,
                     isExpectedClientResult: IsExpectedBreakResult));
+            assaultRoute = authorityRequestRouter.Register(
+                AuthorityRoute<SiegeEntryIntent, NetworkRequestSiegeAssault, NetworkSiegeAssaultApproved>.Define(
+                    "siege.assault", AuthorityRouteKind.Command, CreateHeader,
+                    (intent, header) => new NetworkRequestSiegeAssault(intent.PartyId, intent.SettlementId, header),
+                    request => request.Header, result => result.Header, ValidateAssaultWireShape, BuildAssaultCommandKey,
+                    ValidateHeader, (_, __) => throw new InvalidOperationException("Siege assault routes execute only on the server."),
+                    CreateAssaultTerminalResult, ProbeAssaultCommit, _ => { }, PresentAssaultOutcome,
+                    configAuthority.IsTrustedServer, new AuthorityTimeoutPolicy(configuration.ObjectCreationTimeout,
+                        configuration.ObjectCreationTimeout, retryCount: 1), failClosedOnApplyFailure: true,
+                    isExpectedClientResult: IsExpectedAssaultResult));
+            breakInRoute = authorityRequestRouter.Register(
+                AuthorityRoute<SiegeEntryIntent, NetworkRequestBreakInContinuation, NetworkBreakInContinuationApproved>.Define(
+                    "siege.break-in-continuation", AuthorityRouteKind.Command, CreateHeader,
+                    (intent, header) => new NetworkRequestBreakInContinuation(null, intent.PartyId, intent.SettlementId, header),
+                    request => request.Header, result => result.Header, ValidateBreakInWireShape, BuildBreakInCommandKey,
+                    ValidateHeader, (_, __) => throw new InvalidOperationException("Siege break-in routes execute only on the server."),
+                    CreateBreakInTerminalResult, ProbeBreakInCommit, _ => { }, PresentBreakInOutcome,
+                    configAuthority.IsTrustedServer, new AuthorityTimeoutPolicy(configuration.ObjectCreationTimeout,
+                        configuration.ObjectCreationTimeout, retryCount: 1), failClosedOnApplyFailure: true,
+                    isExpectedClientResult: IsExpectedBreakInResult));
         }
         messageBroker.Subscribe<BesiegeSettlementAttempted>(HandleBesiegeAttempt);
         messageBroker.Subscribe<JoinSiegeCampAttempted>(HandleJoinAttempt);
@@ -135,106 +161,47 @@ internal class ClientSiegeEntryHandler : IHandler
         messageBroker.Subscribe<NetworkSnapSiegeCampPartyPosition>(HandleCampPositionSnap);
         messageBroker.Subscribe<CampaignTick>(HandleCampaignTick);
         messageBroker.Subscribe<BreakInContinuationAttempted>(HandleBreakInContinuationAttempt);
-        messageBroker.Subscribe<NetworkBreakInContinuationApproved>(HandleBreakInContinuationApproved);
+        messageBroker.Subscribe<NetworkPartyEnterSettlement>(HandleCorrelatedSettlementEntry);
     }
 
     private void HandleBreakInContinuationAttempt(MessagePayload<BreakInContinuationAttempted> payload)
     {
-        var now = DateTime.UtcNow;
         var pending = pendingBreakInContinuation;
         if (pending != null)
         {
-            if (pending.ExpiresAtUtc > now)
-            {
-                Logger.Information(
-                    "Ignoring break-in continuation attempt while request {RequestId} is pending",
-                    pending.RequestId);
-                return;
-            }
-
-            Logger.Warning(
-                "Retrying break-in continuation after request {RequestId} timed out",
-                pending.RequestId);
-            ClearPendingBreakInContinuation(pending, restoreLocationEncounter: true);
+            Logger.Information("Ignoring break-in continuation while the authority route is pending");
+            return;
         }
 
         var obj = payload.What;
         if (!objectManager.TryGetIdWithLogging(obj.Party, out var partyId)) return;
         if (!objectManager.TryGetIdWithLogging(obj.Settlement, out var settlementId)) return;
 
-        var requestId = Guid.NewGuid().ToString();
         var previousLocationEncounter = PlayerEncounter.LocationEncounter;
         siegeEventInterface.PrepareLocalPlayerBreakIn(obj.Settlement);
         var stagedLocationEncounter = PlayerEncounter.LocationEncounter;
         pendingBreakInContinuation = new PendingBreakInContinuation(
-            requestId,
+            partyId,
             settlementId,
             PlayerEncounter.Current,
             Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId,
             previousLocationEncounter,
-            stagedLocationEncounter,
-            now + BreakInContinuationTimeout);
+            stagedLocationEncounter);
 
-        network.SendAll(new NetworkRequestBreakInContinuation(requestId, partyId, settlementId));
+        if (breakInRoute == null)
+        {
+            ClearPendingBreakInContinuation(pendingBreakInContinuation, restoreLocationEncounter: true);
+            return;
+        }
+
+        breakInRoute.Submit(new SiegeEntryIntent(partyId, settlementId));
     }
 
-    private void HandleBreakInContinuationApproved(MessagePayload<NetworkBreakInContinuationApproved> payload)
+    private void HandleCorrelatedSettlementEntry(MessagePayload<NetworkPartyEnterSettlement> payload)
     {
         var obj = payload.What;
-
-        GameThread.RunSafe(() =>
-        {
-            var pending = pendingBreakInContinuation;
-            if (pending == null ||
-                pending.RequestId != obj.RequestId ||
-                pending.SettlementId != obj.SettlementId)
-                return;
-
-            if (!obj.Approved)
-            {
-                var rejectionMenuId = Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId;
-                var shouldRecoverFromDebrief =
-                    ReferenceEquals(PlayerEncounter.Current, pending.Encounter) &&
-                    rejectionMenuId == pending.MenuId;
-                ClearPendingBreakInContinuation(pending, restoreLocationEncounter: true);
-                if (shouldRecoverFromDebrief)
-                {
-                    siegeEventInterface.FinishLocalPlayerSiegeLeave();
-                    Logger.Information("Server rejected the break-in continuation; returning to the campaign map");
-                }
-                else
-                {
-                    Logger.Information("Server rejected the break-in continuation after the encounter changed");
-                }
-                return;
-            }
-
-            if (!objectManager.TryGetObjectWithLogging<Settlement>(obj.SettlementId, out var settlement))
-            {
-                ClearPendingBreakInContinuation(pending, restoreLocationEncounter: true);
-                return;
-            }
-
-            var currentMenuId = Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId;
-            if (!ReferenceEquals(PlayerEncounter.Current, pending.Encounter) ||
-                !ReferenceEquals(PlayerEncounter.EncounterSettlement, settlement) ||
-                currentMenuId != pending.MenuId)
-            {
-                ClearPendingBreakInContinuation(pending, restoreLocationEncounter: false);
-                Logger.Warning("Ignoring break-in approval because the encounter or menu changed");
-                return;
-            }
-
-            if (!ReferenceEquals(MobileParty.MainParty?.CurrentSettlement, settlement))
-            {
-                ClearPendingBreakInContinuation(pending, restoreLocationEncounter: true);
-                Logger.Error("Ignoring break-in approval because the settlement entry was not applied");
-                return;
-            }
-
-            ClearPendingBreakInContinuation(pending, restoreLocationEncounter: false);
-            siegeEventInterface.ContinueLocalPlayerBreakIn(settlement);
-        }, context: nameof(HandleBreakInContinuationApproved));
+        if (obj.Header.RequestId <= 0) return;
+        lastBreakInState = new CorrelatedBreakInState(obj.Header, obj.PartyId, obj.SettlementId);
     }
 
     private void ClearPendingBreakInContinuation(
@@ -380,7 +347,13 @@ internal class ClientSiegeEntryHandler : IHandler
         if (!objectManager.TryGetIdWithLogging(obj.Party, out var partyId)) return;
         if (!objectManager.TryGetIdWithLogging(obj.Settlement, out var settlementId)) return;
 
-        network.SendAll(new NetworkRequestSiegeAssault(partyId, settlementId));
+        if (assaultRoute == null)
+        {
+            UnwindSiegeEntry("authority-route-unavailable");
+            return;
+        }
+
+        assaultRoute.Submit(new SiegeEntryIntent(partyId, settlementId));
     }
 
     private void HandleAssaultPrompt(MessagePayload<NetworkPromptSiegeAssault> payload)
@@ -389,6 +362,12 @@ internal class ClientSiegeEntryHandler : IHandler
 
         GameThread.RunSafe(() =>
         {
+            if (obj.Header.RequestId > 0)
+                lastAssaultState = new CorrelatedAssaultState(
+                    obj.Header,
+                    obj.RequestingPartyId,
+                    obj.SettlementId,
+                    obj.MapEventId);
             if (!objectManager.TryGetObjectWithLogging<MobileParty>(obj.AttackerPartyId, out var attackerParty)) return;
             if (!objectManager.TryGetObjectWithLogging<Settlement>(obj.SettlementId, out var settlement)) return;
 
@@ -461,6 +440,12 @@ internal class ClientSiegeEntryHandler : IHandler
         string.IsNullOrWhiteSpace(request.PartyId) || request.PartyId.Length > 256
             ? "invalid-siege-break-party" : null;
 
+    private static string ValidateAssaultWireShape(NetworkRequestSiegeAssault request) =>
+        ValidateEntryIdentifiers(request.PartyId, request.SettlementId);
+
+    private static string ValidateBreakInWireShape(NetworkRequestBreakInContinuation request) =>
+        ValidateEntryIdentifiers(request.PartyId, request.SettlementId);
+
     private static string ValidateEntryIdentifiers(string partyId, string settlementId) =>
         string.IsNullOrWhiteSpace(partyId) || partyId.Length > 256 ||
         string.IsNullOrWhiteSpace(settlementId) || settlementId.Length > 256
@@ -474,6 +459,12 @@ internal class ClientSiegeEntryHandler : IHandler
 
     private static string BuildBreakCommandKey(NetworkRequestBreakSiege request) =>
         string.Concat(request.PartyId.Length, ":", request.PartyId, ":", request.FinishLocalMenus);
+
+    private static string BuildAssaultCommandKey(NetworkRequestSiegeAssault request) =>
+        BuildEntryCommandKey(request.PartyId, request.SettlementId);
+
+    private static string BuildBreakInCommandKey(NetworkRequestBreakInContinuation request) =>
+        BuildEntryCommandKey(request.PartyId, request.SettlementId);
 
     private static string BuildEntryCommandKey(string partyId, string settlementId) =>
         string.Concat(partyId.Length, ":", partyId, ":", settlementId.Length, ":", settlementId);
@@ -516,12 +507,32 @@ internal class ClientSiegeEntryHandler : IHandler
         new(SiegeBreakOutcome.Rejected, false, false,
             new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason));
 
+    private static NetworkSiegeAssaultApproved CreateAssaultTerminalResult(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        new(status == AuthorityResultStatus.Accepted,
+            new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason), null, null);
+
+    private static NetworkBreakInContinuationApproved CreateBreakInTerminalResult(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        new(null, null, status == AuthorityResultStatus.Accepted,
+            new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason), null);
+
     private static bool IsExpectedBreakResult(NetworkRequestBreakSiege request,
         NetworkBreakSiegeApproved result) =>
         result.Outcome == (result.Header.Status == AuthorityResultStatus.Accepted
             ? SiegeBreakOutcome.Applied : SiegeBreakOutcome.Rejected) &&
         string.Equals(request.PartyId, result.PartyId, StringComparison.Ordinal) &&
         request.FinishLocalMenus == result.FinishLocalMenus;
+
+    private static bool IsExpectedAssaultResult(NetworkRequestSiegeAssault request,
+        NetworkSiegeAssaultApproved result) => result.Approved == (result.Header.Status == AuthorityResultStatus.Accepted) &&
+        string.Equals(request.PartyId, result.PartyId, StringComparison.Ordinal) &&
+        string.Equals(request.SettlementId, result.SettlementId, StringComparison.Ordinal);
+
+    private static bool IsExpectedBreakInResult(NetworkRequestBreakInContinuation request,
+        NetworkBreakInContinuationApproved result) => result.Approved == (result.Header.Status == AuthorityResultStatus.Accepted) &&
+        string.Equals(request.PartyId, result.PartyId, StringComparison.Ordinal) &&
+        string.Equals(request.SettlementId, result.SettlementId, StringComparison.Ordinal);
 
     private AuthorityCommitProbeResult ProbeBesiegeCommit(NetworkBesiegeSettlementApproved result) =>
         HasCanonicalCampMembership(result.PartyId, result.SettlementId, requireLeader: true)
@@ -542,6 +553,44 @@ internal class ClientSiegeEntryHandler : IHandler
             ? AuthorityCommitProbeResult.Applied
             : AuthorityCommitProbeResult.Pending;
     }
+
+    private AuthorityCommitProbeResult ProbeAssaultCommit(NetworkSiegeAssaultApproved result)
+    {
+        var state = lastAssaultState;
+        if (state == null || !HeadersMatch(state.Header, result.Header) ||
+            !string.Equals(state.RequestingPartyId, result.PartyId, StringComparison.Ordinal) ||
+            !string.Equals(state.SettlementId, result.SettlementId, StringComparison.Ordinal))
+            return AuthorityCommitProbeResult.Pending;
+        if (!objectManager.TryGetObject<MobileParty>(result.PartyId, out var party) ||
+            !objectManager.TryGetObject<Settlement>(result.SettlementId, out var settlement) ||
+            !objectManager.TryGetObject<TaleWorlds.CampaignSystem.MapEvents.MapEvent>(state.MapEventId, out var mapEvent))
+            return AuthorityCommitProbeResult.Pending;
+
+        return ReferenceEquals(settlement.Party?.MapEvent, mapEvent) &&
+            ReferenceEquals(party.MapEvent, mapEvent) &&
+            mapEvent.IsSiegeAssault && party.Party.Side == BattleSideEnum.Attacker
+            ? AuthorityCommitProbeResult.Applied
+            : AuthorityCommitProbeResult.Pending;
+    }
+
+    private AuthorityCommitProbeResult ProbeBreakInCommit(NetworkBreakInContinuationApproved result)
+    {
+        var state = lastBreakInState;
+        if (state == null || !HeadersMatch(state.Header, result.Header) ||
+            !string.Equals(state.PartyId, result.PartyId, StringComparison.Ordinal) ||
+            !string.Equals(state.SettlementId, result.SettlementId, StringComparison.Ordinal) ||
+            !objectManager.TryGetObject<MobileParty>(result.PartyId, out var party) ||
+            !objectManager.TryGetObject<Settlement>(result.SettlementId, out var settlement))
+            return AuthorityCommitProbeResult.Pending;
+
+        return ReferenceEquals(party.CurrentSettlement, settlement)
+            ? AuthorityCommitProbeResult.Applied
+            : AuthorityCommitProbeResult.Pending;
+    }
+
+    private static bool HeadersMatch(AuthorityResultHeader left, AuthorityResultHeader right) =>
+        left.RequestId == right.RequestId && left.CommittedRevision == right.CommittedRevision &&
+        left.Status == right.Status && string.Equals(left.SessionId, right.SessionId, StringComparison.Ordinal);
 
     private bool HasCanonicalCampMembership(string partyId, string settlementId, bool requireLeader)
     {
@@ -600,6 +649,44 @@ internal class ClientSiegeEntryHandler : IHandler
         }
     }
 
+    private void PresentAssaultOutcome(AuthorityClientOutcome<NetworkSiegeAssaultApproved> outcome)
+    {
+        // The correlated prompt has already adopted the canonical assault encounter. A result is
+        // only a completion gate; it must not create a second client-local map event.
+        if (outcome.Applied) return;
+        UnwindSiegeEntry(outcome.ReasonCode ?? "siege-assault-not-applied");
+    }
+
+    private void PresentBreakInOutcome(AuthorityClientOutcome<NetworkBreakInContinuationApproved> outcome)
+    {
+        var pending = pendingBreakInContinuation;
+        if (pending == null) return;
+
+        if (!outcome.Applied ||
+            !objectManager.TryGetObject<Settlement>(outcome.Result.SettlementId, out var settlement))
+        {
+            var rejectionMenuId = Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId;
+            bool shouldRecoverFromDebrief = ReferenceEquals(PlayerEncounter.Current, pending.Encounter) &&
+                rejectionMenuId == pending.MenuId;
+            ClearPendingBreakInContinuation(pending, restoreLocationEncounter: true);
+            if (shouldRecoverFromDebrief)
+                siegeEventInterface.FinishLocalPlayerSiegeLeave();
+            return;
+        }
+
+        var currentMenuId = Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId;
+        if (!ReferenceEquals(PlayerEncounter.Current, pending.Encounter) ||
+            !ReferenceEquals(PlayerEncounter.EncounterSettlement, settlement) || currentMenuId != pending.MenuId)
+        {
+            ClearPendingBreakInContinuation(pending, restoreLocationEncounter: false);
+            Logger.Warning("Ignoring break-in authority outcome because the encounter or menu changed");
+            return;
+        }
+
+        ClearPendingBreakInContinuation(pending, restoreLocationEncounter: false);
+        siegeEventInterface.ContinueLocalPlayerBreakIn(settlement);
+    }
+
     private void UnwindSiegeBreak(string reason)
     {
         // A rejected/cancelled/timeout leave has no safe local mutation to finish. Remove only
@@ -621,6 +708,8 @@ internal class ClientSiegeEntryHandler : IHandler
         besiegeRoute?.Dispose();
         joinRoute?.Dispose();
         breakRoute?.Dispose();
+        assaultRoute?.Dispose();
+        breakInRoute?.Dispose();
         messageBroker.Unsubscribe<NetworkPromptSiegeDefense>(HandleDefensePrompt);
         messageBroker.Unsubscribe<NetworkPromptSiegePreparation>(HandlePreparationPrompt);
         messageBroker.Unsubscribe<NetworkPromptSiegeEnded>(HandleSiegeEndedPrompt);
@@ -630,7 +719,7 @@ internal class ClientSiegeEntryHandler : IHandler
         messageBroker.Unsubscribe<CampaignTick>(HandleCampaignTick);
         pendingInterruptedAssault = null;
         messageBroker.Unsubscribe<BreakInContinuationAttempted>(HandleBreakInContinuationAttempt);
-        messageBroker.Unsubscribe<NetworkBreakInContinuationApproved>(HandleBreakInContinuationApproved);
+        messageBroker.Unsubscribe<NetworkPartyEnterSettlement>(HandleCorrelatedSettlementEntry);
     }
 
     private readonly struct SiegeEntryIntent
@@ -659,30 +748,57 @@ internal class ClientSiegeEntryHandler : IHandler
 
     private sealed class PendingBreakInContinuation
     {
-        public readonly string RequestId;
+        public readonly string PartyId;
         public readonly string SettlementId;
         public readonly PlayerEncounter Encounter;
         public readonly string MenuId;
         public readonly LocationEncounter PreviousLocationEncounter;
         public readonly LocationEncounter StagedLocationEncounter;
-        public readonly DateTime ExpiresAtUtc;
 
         public PendingBreakInContinuation(
-            string requestId,
+            string partyId,
             string settlementId,
             PlayerEncounter encounter,
             string menuId,
             LocationEncounter previousLocationEncounter,
-            LocationEncounter stagedLocationEncounter,
-            DateTime expiresAtUtc)
+            LocationEncounter stagedLocationEncounter)
         {
-            RequestId = requestId;
+            PartyId = partyId;
             SettlementId = settlementId;
             Encounter = encounter;
             MenuId = menuId;
             PreviousLocationEncounter = previousLocationEncounter;
             StagedLocationEncounter = stagedLocationEncounter;
-            ExpiresAtUtc = expiresAtUtc;
         }
+    }
+
+    private sealed class CorrelatedAssaultState
+    {
+        public CorrelatedAssaultState(AuthorityResultHeader header, string requestingPartyId, string settlementId, string mapEventId)
+        {
+            Header = header;
+            RequestingPartyId = requestingPartyId;
+            SettlementId = settlementId;
+            MapEventId = mapEventId;
+        }
+
+        public AuthorityResultHeader Header { get; }
+        public string RequestingPartyId { get; }
+        public string SettlementId { get; }
+        public string MapEventId { get; }
+    }
+
+    private sealed class CorrelatedBreakInState
+    {
+        public CorrelatedBreakInState(AuthorityResultHeader header, string partyId, string settlementId)
+        {
+            Header = header;
+            PartyId = partyId;
+            SettlementId = settlementId;
+        }
+
+        public AuthorityResultHeader Header { get; }
+        public string PartyId { get; }
+        public string SettlementId { get; }
     }
 }

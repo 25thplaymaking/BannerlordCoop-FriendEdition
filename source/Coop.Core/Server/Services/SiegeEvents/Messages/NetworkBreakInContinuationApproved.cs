@@ -15,11 +15,22 @@ public record NetworkBreakInContinuationApproved : IEvent
     public string SettlementId { get; }
     [ProtoMember(3)]
     public bool Approved { get; }
+    [ProtoMember(4)]
+    public AuthorityResultHeader Header { get; }
+    [ProtoMember(5)]
+    public string PartyId { get; }
 
-    public NetworkBreakInContinuationApproved(string requestId, string settlementId, bool approved)
+    public NetworkBreakInContinuationApproved(
+        string requestId,
+        string settlementId,
+        bool approved,
+        AuthorityResultHeader header = default,
+        string partyId = null)
     {
         RequestId = requestId;
         SettlementId = settlementId;
         Approved = approved;
+        Header = header;
+        PartyId = partyId;
     }
 }

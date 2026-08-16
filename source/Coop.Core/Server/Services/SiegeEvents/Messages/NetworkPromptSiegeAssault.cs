@@ -14,10 +14,25 @@ public record NetworkPromptSiegeAssault : IEvent
     public string AttackerPartyId { get; }
     [ProtoMember(2)]
     public string SettlementId { get; }
+    /// <summary>Present only for the requester-specific canonical-state acknowledgement.</summary>
+    [ProtoMember(3)]
+    public AuthorityResultHeader Header { get; }
+    [ProtoMember(4)]
+    public string RequestingPartyId { get; }
+    [ProtoMember(5)]
+    public string MapEventId { get; }
 
-    public NetworkPromptSiegeAssault(string attackerPartyId, string settlementId)
+    public NetworkPromptSiegeAssault(
+        string attackerPartyId,
+        string settlementId,
+        AuthorityResultHeader header = default,
+        string requestingPartyId = null,
+        string mapEventId = null)
     {
         AttackerPartyId = attackerPartyId;
         SettlementId = settlementId;
+        Header = header;
+        RequestingPartyId = requestingPartyId;
+        MapEventId = mapEventId;
     }
 }

@@ -1,5 +1,7 @@
+using Common;
 using Common.Messaging;
 using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.WorkshopMods.Core;
 using ProtoBuf;
 using System;
@@ -34,6 +36,7 @@ internal enum DiplomacyOperationStatus
     Failed = 5,
 }
 
+[AuthorityRoute("workshop.diplomacy.gameplay", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 internal sealed class NetworkRequestDiplomacyOperation : ICommand
 {
@@ -44,6 +47,9 @@ internal sealed class NetworkRequestDiplomacyOperation : ICommand
     [ProtoMember(5)] public string TargetId { get; private set; }
     [ProtoMember(6)] public string SecondaryTargetId { get; private set; }
     [ProtoMember(7)] public int IntValue { get; private set; }
+    // The original members stay stable for old save/network fixtures.  The authority header is
+    // deliberately an adapter over those values, with the protocol version occupying a new slot.
+    [ProtoMember(8)] public int ConfigProtocolVersion { get; private set; }
 
     private NetworkRequestDiplomacyOperation()
     {
@@ -66,6 +72,20 @@ internal sealed class NetworkRequestDiplomacyOperation : ICommand
         SecondaryTargetId = secondaryTargetId ?? string.Empty;
         IntValue = intValue;
     }
+
+    public NetworkRequestDiplomacyOperation(
+        AuthorityRequestHeader header,
+        DiplomacyOperation operation,
+        string targetId,
+        string secondaryTargetId,
+        int intValue)
+        : this(header.SessionId, header.RequestId, header.ExpectedRevision, operation, targetId, secondaryTargetId, intValue)
+    {
+        ConfigProtocolVersion = header.ProtocolVersion;
+    }
+
+    public AuthorityRequestHeader Header =>
+        new AuthorityRequestHeader(ConfigProtocolVersion, SessionId, RequestId, ExpectedRevision);
 }
 
 [ProtoContract(SkipConstructor = true)]
@@ -77,6 +97,16 @@ internal sealed class NetworkDiplomacyOperationResult : ICommand
     [ProtoMember(4)] public DiplomacyOperationStatus Status { get; private set; }
     [ProtoMember(5)] public long Revision { get; private set; }
     [ProtoMember(6)] public string TargetId { get; private set; }
+    [ProtoMember(7)] public AuthorityResultStatus AuthorityStatus { get; private set; }
+    [ProtoMember(8)] public string ReasonCode { get; private set; }
+    [ProtoMember(9)] public string CommandDigest { get; private set; }
+    [ProtoMember(10)] public string SnapshotFingerprint { get; private set; }
+    [ProtoMember(11)] public string SecondaryTargetId { get; private set; }
+    [ProtoMember(12)] public int IntValue { get; private set; }
+    [ProtoMember(13)] public int MessengerId { get; private set; }
+    [ProtoMember(14)] public long ArrivalTicks { get; private set; }
+    [ProtoMember(15)] public int ActorGold { get; private set; }
+    [ProtoMember(16)] public int TargetRelation { get; private set; }
 
     private NetworkDiplomacyOperationResult()
     {
@@ -96,7 +126,52 @@ internal sealed class NetworkDiplomacyOperationResult : ICommand
         Status = status;
         Revision = revision;
         TargetId = targetId ?? string.Empty;
+        AuthorityStatus = status == DiplomacyOperationStatus.Accepted
+            ? AuthorityResultStatus.Accepted
+            : AuthorityResultStatus.Rejected;
+        ReasonCode = status.ToString();
+        CommandDigest = string.Empty;
+        SnapshotFingerprint = string.Empty;
+        SecondaryTargetId = string.Empty;
     }
+
+    public NetworkDiplomacyOperationResult(
+        AuthorityRequestHeader request,
+        DiplomacyOperation operation,
+        DiplomacyOperationStatus legacyStatus,
+        AuthorityResultStatus status,
+        string reasonCode,
+        string commandDigest,
+        long committedRevision,
+        string snapshotFingerprint,
+        string targetId,
+        string secondaryTargetId,
+        int intValue = 0,
+        int messengerId = 0,
+        long arrivalTicks = 0,
+        int actorGold = 0,
+        int targetRelation = 0)
+    {
+        SessionId = request.SessionId;
+        RequestId = request.RequestId;
+        Operation = operation;
+        Status = legacyStatus;
+        Revision = committedRevision;
+        TargetId = targetId ?? string.Empty;
+        AuthorityStatus = status;
+        ReasonCode = reasonCode ?? string.Empty;
+        CommandDigest = commandDigest ?? string.Empty;
+        SnapshotFingerprint = snapshotFingerprint ?? string.Empty;
+        SecondaryTargetId = secondaryTargetId ?? string.Empty;
+        IntValue = intValue;
+        MessengerId = messengerId;
+        ArrivalTicks = arrivalTicks;
+        ActorGold = actorGold;
+        TargetRelation = targetRelation;
+    }
+
+    public AuthorityResultHeader Header =>
+        new AuthorityResultHeader(SessionId, RequestId, AuthorityStatus, Revision, ReasonCode);
 }
 
 [ProtoContract(SkipConstructor = true)]
@@ -175,7 +250,7 @@ internal static class DiplomacyOperationProtocol
 
     public static bool IsRequestShapeValid(NetworkRequestDiplomacyOperation request)
     {
-        if (request == null || !IsSessionId(request.SessionId) || request.RequestId <= 0 ||
+        if (request == null || !request.Header.TryValidate(out _) || !IsSessionId(request.SessionId) || request.RequestId <= 0 ||
             request.ExpectedRevision < 0 || !Enum.IsDefined(typeof(DiplomacyOperation), request.Operation) ||
             !IsStableId(request.TargetId, allowEmpty: true) ||
             !IsStableId(request.SecondaryTargetId, allowEmpty: true) ||
@@ -212,7 +287,10 @@ internal static class DiplomacyOperationProtocol
         result != null && IsSessionId(result.SessionId) && result.RequestId > 0 &&
         Enum.IsDefined(typeof(DiplomacyOperation), result.Operation) &&
         Enum.IsDefined(typeof(DiplomacyOperationStatus), result.Status) &&
-        result.Revision >= 0 && IsStableId(result.TargetId, allowEmpty: false);
+        result.Revision >= 0 && IsStableId(result.TargetId, allowEmpty: false) &&
+        Enum.IsDefined(typeof(AuthorityResultStatus), result.AuthorityStatus) &&
+        IsStableId(result.SecondaryTargetId, allowEmpty: true) &&
+        (string.IsNullOrEmpty(result.SnapshotFingerprint) || result.SnapshotFingerprint.Length == 64);
 
     public static bool IsKeepFiefPromptShapeValid(NetworkDiplomacyKeepFiefPrompt prompt) =>
         prompt != null && IsSessionId(prompt.SessionId) && prompt.Revision >= 0 &&
@@ -247,96 +325,6 @@ internal static class DiplomacyOperationProtocol
         value != null && value.Length == 32 && Guid.TryParseExact(value, "N", out _);
 }
 
-internal enum DiplomacyReplayDecision
-{
-    New,
-    Replay,
-    Conflict,
-}
-
-internal sealed class DiplomacyRequestLedger<TKey>
-{
-    private sealed class Entry
-    {
-        public Entry(string commandKey, NetworkDiplomacyOperationResult result)
-        {
-            CommandKey = commandKey;
-            Result = result;
-        }
-
-        public string CommandKey { get; }
-        public NetworkDiplomacyOperationResult Result { get; }
-    }
-
-    private readonly object sync = new();
-    private readonly Dictionary<TKey, Dictionary<long, Entry>> entries = new();
-    private readonly Dictionary<TKey, long> highWater = new();
-    private readonly int capacity;
-
-    public DiplomacyRequestLedger(int capacity)
-    {
-        if (capacity < 1) throw new ArgumentOutOfRangeException(nameof(capacity));
-        this.capacity = capacity;
-    }
-
-    public DiplomacyReplayDecision Inspect(
-        TKey peer,
-        long requestId,
-        string commandKey,
-        out NetworkDiplomacyOperationResult result)
-    {
-        lock (sync)
-        {
-            if (!entries.TryGetValue(peer, out var peerEntries) ||
-                !peerEntries.TryGetValue(requestId, out var entry))
-            {
-                if (highWater.TryGetValue(peer, out long highestRecorded) && requestId <= highestRecorded)
-                {
-                    result = null;
-                    return DiplomacyReplayDecision.Conflict;
-                }
-                result = null;
-                return DiplomacyReplayDecision.New;
-            }
-
-            result = entry.Result;
-            return string.Equals(entry.CommandKey, commandKey, StringComparison.Ordinal)
-                ? DiplomacyReplayDecision.Replay
-                : DiplomacyReplayDecision.Conflict;
-        }
-    }
-
-    public void Record(
-        TKey peer,
-        long requestId,
-        string commandKey,
-        NetworkDiplomacyOperationResult result)
-    {
-        lock (sync)
-        {
-            if (!entries.TryGetValue(peer, out var peerEntries))
-            {
-                peerEntries = new Dictionary<long, Entry>();
-                entries.Add(peer, peerEntries);
-            }
-            if (peerEntries.ContainsKey(requestId)) return;
-            if (peerEntries.Count >= capacity) peerEntries.Remove(peerEntries.Keys.Min());
-            peerEntries.Add(requestId, new Entry(commandKey, result));
-            if (!highWater.TryGetValue(peer, out long previous) || requestId > previous)
-                highWater[peer] = requestId;
-        }
-    }
-
-    public void Reset()
-    {
-        lock (sync)
-        {
-            entries.Clear();
-            highWater.Clear();
-        }
-    }
-}
-
 internal static class DiplomacyCapabilityPolicy
 {
     public static bool IsEnabled(bool optionEnabled, bool routeReady) => optionEnabled && routeReady;
@@ -364,10 +352,17 @@ internal sealed class DiplomacyCapabilitySource : IWorkshopCapabilitySource
     internal const string Operation = "Gameplay";
 
     private readonly IModConfig modConfig;
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRequestRouter authorityRequestRouter;
+    private readonly DiplomacyCompatibilityHandler compatibilityHandler;
 
-    public DiplomacyCapabilitySource(IModConfig modConfig)
+    public DiplomacyCapabilitySource(IModConfig modConfig, IModConfigAuthority configAuthority = null,
+        IAuthorityRequestRouter authorityRequestRouter = null, DiplomacyCompatibilityHandler compatibilityHandler = null)
     {
         this.modConfig = modConfig;
+        this.configAuthority = configAuthority;
+        this.authorityRequestRouter = authorityRequestRouter;
+        this.compatibilityHandler = compatibilityHandler;
     }
 
     public IEnumerable<WorkshopCapability> CaptureCapabilities()
@@ -376,9 +371,14 @@ internal sealed class DiplomacyCapabilitySource : IWorkshopCapabilitySource
             ? ModConfigProvider.ModOptions
             : new ModOptions(modConfig.Data.ModOptions ?? new ModOptionsData());
         bool optionEnabled = options.IsWorkshopModuleEnabled(ModuleId);
-        // The legacy operation transport is not an authority route. Task 4 may establish a
-        // snapshot, but it must never advertise gameplay until Task 6 owns the real command.
-        bool enabled = false;
+        bool snapshotRouteReady = authorityRequestRouter?.IsRegistered("workshop.diplomacy.snapshot",
+            AuthorityRouteKind.BootstrapQuery);
+        bool gameplayRouteReady = authorityRequestRouter?.IsRegistered("workshop.diplomacy.gameplay",
+            AuthorityRouteKind.Command);
+        bool snapshotCurrent = configAuthority != null && configAuthority.TryGetCurrent(out var config) &&
+            (!ModInformation.IsClient || (compatibilityHandler.SnapshotReadiness == WorkshopSnapshotReadiness.Ready &&
+                string.Equals(compatibilityHandler.SnapshotSessionId, config.SessionId, StringComparison.Ordinal)));
+        bool enabled = optionEnabled && snapshotRouteReady && gameplayRouteReady && snapshotCurrent;
         yield return new WorkshopCapability(
             ModuleId,
             Operation,

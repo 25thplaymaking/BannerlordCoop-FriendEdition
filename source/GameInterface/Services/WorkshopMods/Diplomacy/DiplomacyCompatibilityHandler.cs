@@ -43,6 +43,8 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
     internal WorkshopSnapshotReadiness SnapshotReadiness { get; private set; }
     internal string SnapshotSessionId { get; private set; }
     internal long SnapshotRevision { get; private set; } = -1;
+    // Read-only route proof used by gameplay commands; ownership and application remain here.
+    internal NetworkDiplomacySnapshot TrustedSnapshot => trustedSnapshot;
 
     public DiplomacyCompatibilityHandler(
         IMessageBroker messageBroker,

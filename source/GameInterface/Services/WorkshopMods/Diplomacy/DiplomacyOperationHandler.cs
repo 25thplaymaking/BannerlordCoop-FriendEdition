@@ -6,6 +6,7 @@ using Common.Util;
 using GameInterface.Configuration;
 using GameInterface.Registry.Messages;
 using GameInterface.Services.Barters;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
 using GameInterface.Services.WorkshopMods.Core;
@@ -88,11 +89,11 @@ internal sealed class DiplomacyOperationHandler : IHandler, IDiplomacyPatchRunti
     private readonly IDiplomacyRuntime runtime;
     private readonly IDiplomacySnapshotPublisher snapshotPublisher;
     private readonly DiplomacyOperationExecutor executor;
-    private readonly DiplomacyRequestLedger<NetPeer> requestLedger = new(256);
-    private readonly Dictionary<long, NetworkRequestDiplomacyOperation> pending = new();
+    private readonly IAuthorityRequestRouter authorityRequestRouter;
+    private readonly DiplomacyCompatibilityHandler compatibilityHandler;
+    private readonly IAuthorityRouteHandle<DiplomacyLocalOperation, NetworkDiplomacyOperationResult> gameplayRoute;
     private readonly HashSet<int> visibleMessengerPrompts = new();
 
-    private long nextRequestId;
     private long acceptedRevision = -1;
     private bool stateReady;
 
@@ -105,7 +106,9 @@ internal sealed class DiplomacyOperationHandler : IHandler, IDiplomacyPatchRunti
         IWorkshopCapabilityRegistry capabilityRegistry,
         IDiplomacyRuntime runtime,
         IDiplomacySnapshotPublisher snapshotPublisher,
-        IDiplomacyDonateGoldInterface donateGoldInterface)
+        IDiplomacyDonateGoldInterface donateGoldInterface,
+        IAuthorityRequestRouter authorityRequestRouter,
+        DiplomacyCompatibilityHandler compatibilityHandler)
     {
         this.messageBroker = messageBroker;
         this.network = network;
@@ -115,14 +118,35 @@ internal sealed class DiplomacyOperationHandler : IHandler, IDiplomacyPatchRunti
         this.capabilityRegistry = capabilityRegistry;
         this.runtime = runtime;
         this.snapshotPublisher = snapshotPublisher;
+        this.authorityRequestRouter = authorityRequestRouter;
+        this.compatibilityHandler = compatibilityHandler;
         executor = new DiplomacyOperationExecutor(objectManager, donateGoldInterface);
+
+        gameplayRoute = authorityRequestRouter.Register(
+            AuthorityRoute<DiplomacyLocalOperation, NetworkRequestDiplomacyOperation,
+                NetworkDiplomacyOperationResult>.Define(
+                "workshop.diplomacy.gameplay", AuthorityRouteKind.Command,
+                CreateHeader,
+                (operation, header) => BuildRequest(operation, header),
+                request => request.Header,
+                result => result.Header,
+                request => DiplomacyOperationProtocol.IsRequestShapeValid(request) ? null : "invalid-diplomacy-operation",
+                DiplomacyOperationProtocol.CommandKey,
+                ValidateHeader,
+                ExecuteRoute,
+                CreateTerminalResult,
+                ProbeClientCommit,
+                _ => { },
+                PresentTerminalOutcome,
+                configAuthority.IsTrustedServer,
+                AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true,
+                isExpectedClientResult: IsExpectedResult));
 
         DiplomacyPatchRuntime.Current = this;
         messageBroker.Subscribe<AllGameObjectsRegistered>(HandleAllGameObjectsRegistered);
         messageBroker.Subscribe<NetworkDiplomacySnapshot>(HandleSnapshotObserved);
         messageBroker.Subscribe<NetworkRequestDiplomacySnapshot>(HandleSnapshotRequestForPendingPrompt);
-        messageBroker.Subscribe<NetworkRequestDiplomacyOperation>(HandleOperationRequest);
-        messageBroker.Subscribe<NetworkDiplomacyOperationResult>(HandleOperationResult);
         messageBroker.Subscribe<NetworkDiplomacyKeepFiefPrompt>(HandleKeepFiefPrompt);
         messageBroker.Subscribe<NetworkDiplomacyMessengerArrivalPrompt>(HandleMessengerArrivalPrompt);
         messageBroker.Subscribe<NetworkDiplomacyMessengerAccident>(HandleMessengerAccident);
@@ -133,8 +157,7 @@ internal sealed class DiplomacyOperationHandler : IHandler, IDiplomacyPatchRunti
         messageBroker.Unsubscribe<AllGameObjectsRegistered>(HandleAllGameObjectsRegistered);
         messageBroker.Unsubscribe<NetworkDiplomacySnapshot>(HandleSnapshotObserved);
         messageBroker.Unsubscribe<NetworkRequestDiplomacySnapshot>(HandleSnapshotRequestForPendingPrompt);
-        messageBroker.Unsubscribe<NetworkRequestDiplomacyOperation>(HandleOperationRequest);
-        messageBroker.Unsubscribe<NetworkDiplomacyOperationResult>(HandleOperationResult);
+        gameplayRoute.Dispose();
         messageBroker.Unsubscribe<NetworkDiplomacyKeepFiefPrompt>(HandleKeepFiefPrompt);
         messageBroker.Unsubscribe<NetworkDiplomacyMessengerArrivalPrompt>(HandleMessengerArrivalPrompt);
         messageBroker.Unsubscribe<NetworkDiplomacyMessengerAccident>(HandleMessengerAccident);
@@ -143,24 +166,16 @@ internal sealed class DiplomacyOperationHandler : IHandler, IDiplomacyPatchRunti
 
     public bool TrySubmit(DiplomacyLocalOperation operation)
     {
-        if (!ModInformation.IsClient || operation == null || !CanUseGameplayRoute(out var config) ||
+        if (!ModInformation.IsClient || operation == null || !CanUseGameplayRoute(out _) ||
             acceptedRevision < 0 || !TryGetId(operation.Target, out string targetId) ||
             !TryGetId(operation.SecondaryTarget, out string secondaryTargetId, allowNull: true))
             return false;
+        if (operation.Operation == DiplomacyOperation.DeclineKeepFief) return false;
+        if (!DiplomacyOperationProtocol.IsRequestShapeValid(new NetworkRequestDiplomacyOperation(
+                "00000000000000000000000000000000", 1, acceptedRevision, operation.Operation,
+                targetId, secondaryTargetId, operation.IntValue))) return false;
 
-        long requestId = Interlocked.Increment(ref nextRequestId);
-        var request = new NetworkRequestDiplomacyOperation(
-            config.SessionId,
-            requestId,
-            acceptedRevision,
-            operation.Operation,
-            targetId,
-            secondaryTargetId,
-            operation.IntValue);
-        if (!DiplomacyOperationProtocol.IsRequestShapeValid(request)) return false;
-
-        pending[requestId] = request;
-        network.SendAll(request);
+        gameplayRoute.Submit(operation);
         return true;
     }
 
@@ -181,10 +196,7 @@ internal sealed class DiplomacyOperationHandler : IHandler, IDiplomacyPatchRunti
 
     private void HandleAllGameObjectsRegistered(MessagePayload<AllGameObjectsRegistered> _)
     {
-        requestLedger.Reset();
-        pending.Clear();
         visibleMessengerPrompts.Clear();
-        nextRequestId = 0;
         acceptedRevision = -1;
         stateReady = true;
     }
@@ -235,92 +247,73 @@ internal sealed class DiplomacyOperationHandler : IHandler, IDiplomacyPatchRunti
         network.Send(peer, new NetworkDiplomacyKeepFiefPrompt(config.SessionId, settlementId, revision));
     }
 
-    private void HandleOperationRequest(MessagePayload<NetworkRequestDiplomacyOperation> payload)
+    private AuthorityRequestHeader CreateHeader(long requestId)
     {
-        if (!ModInformation.IsServer || payload?.Who is not NetPeer peer) return;
-        GameThread.RunSafe(
-            () => ApplyOperationRequest(peer, payload.What),
-            context: nameof(DiplomacyOperationHandler));
+        if (!CanUseGameplayRoute(out var config)) return default;
+        return new AuthorityRequestHeader(config.ProtocolVersion, config.SessionId, requestId, acceptedRevision);
     }
 
-    private void ApplyOperationRequest(NetPeer peer, NetworkRequestDiplomacyOperation request)
+    private NetworkRequestDiplomacyOperation BuildRequest(DiplomacyLocalOperation operation, AuthorityRequestHeader header)
     {
-        if (!DiplomacyOperationProtocol.IsRequestShapeValid(request))
-        {
-            DisconnectPeer(peer, "sent a malformed Diplomacy operation envelope");
-            return;
-        }
+        if (operation == null || !TryGetId(operation.Target, out string targetId) ||
+            !TryGetId(operation.SecondaryTarget, out string secondaryTargetId, allowNull: true))
+            return new NetworkRequestDiplomacyOperation(header, (DiplomacyOperation)0, string.Empty, string.Empty, 0);
+        return new NetworkRequestDiplomacyOperation(header, operation.Operation, targetId, secondaryTargetId, operation.IntValue);
+    }
+
+    private AuthorityHeaderValidation ValidateHeader(AuthorityRequestHeader header)
+    {
         if (!CanUseGameplayRoute(out var config))
-        {
-            DisconnectPeer(peer, "requested Diplomacy gameplay while its authoritative route was unavailable");
-            return;
-        }
-        if (!string.Equals(config.SessionId, request.SessionId, StringComparison.Ordinal))
-        {
-            SendResult(peer, request, DiplomacyOperationStatus.StaleSession, CaptureServerRevisionOrAbort());
-            return;
-        }
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "diplomacy-route-unavailable");
+        if (header.ProtocolVersion != config.ProtocolVersion || !string.Equals(header.SessionId, config.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-config-session");
+        long revision = CaptureServerSnapshotOrAbort().Revision;
+        return header.ExpectedRevision == revision
+            ? AuthorityHeaderValidation.Valid
+            : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-diplomacy-snapshot");
+    }
 
-        string commandKey = DiplomacyOperationProtocol.CommandKey(request);
-        var replay = requestLedger.Inspect(
-            peer, request.RequestId, commandKey, out NetworkDiplomacyOperationResult cached);
-        if (replay == DiplomacyReplayDecision.Conflict)
-        {
-            DisconnectPeer(peer, "reused Diplomacy request ID " + request.RequestId + " with different payload");
-            return;
-        }
-        if (replay == DiplomacyReplayDecision.Replay)
-        {
-            network.Send(peer, cached);
-            return;
-        }
+    private AuthorityServerReply<NetworkDiplomacyOperationResult> ExecuteRoute(
+        AuthorityServerContext context, NetworkRequestDiplomacyOperation request)
+    {
+        if (request.Operation == DiplomacyOperation.DeclineKeepFief)
+            return Reply(context.Header, request, AuthorityResultStatus.Unavailable, "decline-keep-fief-disabled", false, null);
+        if (!CanUseGameplayRoute(out _))
+            return Reply(context.Header, request, AuthorityResultStatus.Unavailable, "diplomacy-route-unavailable", false, null);
+        if (!objectManager.TryGetObject(context.Player.HeroId, out Hero actor) ||
+            !objectManager.TryGetObject(context.Player.MobilePartyId, out MobileParty actorParty) || actor == null || actorParty == null)
+            return Reply(context.Header, request, AuthorityResultStatus.Unauthorized, "actor-mismatch", false, null);
 
-        long revision = CaptureServerRevisionOrAbort();
-        if (request.ExpectedRevision != revision)
-        {
-            SendAndRecord(peer, request, commandKey, DiplomacyOperationStatus.StaleState, revision);
-            return;
-        }
-        if (!playerManager.TryGetPlayer(peer, out var player) ||
-            !objectManager.TryGetObject(player.HeroId, out Hero actor) ||
-            !objectManager.TryGetObject(player.MobilePartyId, out MobileParty actorParty) ||
-            actor == null || actorParty == null)
-        {
-            SendAndRecord(peer, request, commandKey, DiplomacyOperationStatus.Rejected, revision);
-            return;
-        }
-
+        bool mutationBegan = false;
         try
         {
-            if (!TryExecuteAuthoritativeOperation(
-                    player.ControllerId,
-                    actor,
-                    actorParty,
-                    request,
-                    out string failure))
-            {
-                Logger.Information(
-                    "Rejected Diplomacy {Operation} request {RequestId}: {Failure}",
-                    request.Operation, request.RequestId, failure);
-                SendAndRecord(peer, request, commandKey, DiplomacyOperationStatus.Rejected, revision);
-                return;
-            }
+            if (!TryExecuteAuthoritativeOperation(context.Player.ControllerId, actor, actorParty, request, out string failure))
+                return Reply(context.Header, request, AuthorityResultStatus.Rejected, "operation-rejected", false, null);
 
+            mutationBegan = true;
             snapshotPublisher.PublishIfChanged();
-            revision = CaptureServerRevisionOrAbort();
-            SendAndRecord(peer, request, commandKey, DiplomacyOperationStatus.Accepted, revision);
+            NetworkDiplomacySnapshot snapshot = CaptureServerSnapshotOrAbort();
+            if (!PostStateMatches(actor, request, snapshot))
+                return IsolateAfterAmbiguousMutation(context, request, "postcondition");
+            return Reply(context.Header, request, AuthorityResultStatus.Accepted, null, true, snapshot);
         }
         catch (Exception exception)
         {
-            Logger.Fatal(
-                exception,
-                "Diplomacy operation {Operation} request {RequestId} failed after authoritative execution began",
-                request.Operation,
-                request.RequestId);
-            throw new InvalidOperationException(
-                "A Diplomacy server operation failed after execution began; the session must stop to prevent partial state.",
-                exception);
+            if (!mutationBegan) return Reply(context.Header, request, AuthorityResultStatus.ExecutionFailed, "native-execution-failed", false, null);
+            Logger.Fatal(exception, "Ambiguous Diplomacy mutation. Route={Route} RequestId={RequestId}", context.RouteId, context.Header.RequestId);
+            return IsolateAfterAmbiguousMutation(context, request, "mutation-threw");
         }
+    }
+
+    private AuthorityServerReply<NetworkDiplomacyOperationResult> IsolateAfterAmbiguousMutation(
+        AuthorityServerContext context, NetworkRequestDiplomacyOperation request, string stage)
+    {
+        Logger.Fatal("Isolating campaign after ambiguous Diplomacy mutation. Route={Route} RequestId={RequestId} Stage={Stage}",
+            context.RouteId, context.Header.RequestId, stage);
+        foreach (var player in playerManager.Players)
+            if (playerManager.IsConnected(player) && playerManager.TryGetPeer(player.ControllerId, out var peer)) peer.Disconnect();
+        return new AuthorityServerReply<NetworkDiplomacyOperationResult>(
+            CreateResult(context.Header, request, AuthorityResultStatus.ExecutionFailed, "diplomacy-isolated", null), false, suppressReply: true);
     }
 
     private bool TryExecuteAuthoritativeOperation(
@@ -404,52 +397,7 @@ internal sealed class DiplomacyOperationHandler : IHandler, IDiplomacyPatchRunti
         return true;
     }
 
-    private void HandleOperationResult(MessagePayload<NetworkDiplomacyOperationResult> payload)
-    {
-        if (!ModInformation.IsClient || payload?.Who is not NetPeer serverPeer ||
-            configAuthority == null || !configAuthority.IsTrustedServer(serverPeer))
-            return;
-
-        if (!DiplomacyOperationProtocol.IsResultShapeValid(payload.What) ||
-            !configAuthority.TryGetCurrent(out var config) ||
-            !string.Equals(config.SessionId, payload.What.SessionId, StringComparison.Ordinal))
-        {
-            DisconnectPeer(serverPeer, "sent a malformed or wrong-session Diplomacy operation result");
-            return;
-        }
-        if (!pending.TryGetValue(payload.What.RequestId, out var expected)) return;
-        if (expected.Operation != payload.What.Operation ||
-            !string.Equals(expected.SessionId, payload.What.SessionId, StringComparison.Ordinal) ||
-            !string.Equals(expected.TargetId, payload.What.TargetId, StringComparison.Ordinal))
-        {
-            DisconnectPeer(serverPeer, "returned a Diplomacy result that did not match the pending command");
-            return;
-        }
-
-        pending.Remove(payload.What.RequestId);
-        acceptedRevision = Math.Max(acceptedRevision, payload.What.Revision);
-        if (payload.What.Status != DiplomacyOperationStatus.Accepted)
-        {
-            InformationManager.DisplayMessage(new InformationMessage(
-                "The Diplomacy action could not be applied because its campaign state changed. Reopen the option and try again."));
-            return;
-        }
-
-        switch (payload.What.Operation)
-        {
-            case DiplomacyOperation.SendMessenger:
-                InformationManager.DisplayMessage(new InformationMessage(
-                    "Messenger dispatched by the co-op server."));
-                break;
-            case DiplomacyOperation.CompleteMessenger:
-                PresentMessengerDialogue(payload.What.TargetId);
-                break;
-            default:
-                InformationManager.DisplayMessage(new InformationMessage(
-                    "Diplomacy action accepted by the co-op server."));
-                break;
-        }
-    }
+    // Result correlation, retry and completion belong exclusively to the authority route.
 
     private void HandleKeepFiefPrompt(MessagePayload<NetworkDiplomacyKeepFiefPrompt> payload)
     {
@@ -742,48 +690,137 @@ internal sealed class DiplomacyOperationHandler : IHandler, IDiplomacyPatchRunti
     {
         config = null;
         return stateReady && runtime.IsAvailable && configAuthority.TryGetCurrent(out config) &&
-               capabilityRegistry.IsEnabled(DiplomacyCapabilitySource.ModuleId, DiplomacyCapabilitySource.Operation);
+               authorityRequestRouter.IsRegistered("workshop.diplomacy.gameplay", AuthorityRouteKind.Command) &&
+               authorityRequestRouter.IsRegistered("workshop.diplomacy.snapshot", AuthorityRouteKind.BootstrapQuery) &&
+               (!ModInformation.IsClient || (compatibilityHandler?.SnapshotReadiness == WorkshopSnapshotReadiness.Ready &&
+                   string.Equals(compatibilityHandler.SnapshotSessionId, config.SessionId, StringComparison.Ordinal)));
     }
 
     private long CaptureServerRevisionOrAbort()
+    {
+        return CaptureServerSnapshotOrAbort().Revision;
+    }
+
+    private NetworkDiplomacySnapshot CaptureServerSnapshotOrAbort()
     {
         var snapshot = runtime.CaptureSnapshot();
         string failure = snapshot == null ? "snapshot is null" : null;
         if (snapshot == null || !DiplomacySnapshotCodec.TryValidate(snapshot, out failure))
             throw new InvalidOperationException(
                 "Authoritative Diplomacy state could not be captured for an operation: " + failure);
-        return snapshot.Revision;
+        return snapshot;
     }
 
-    private void SendAndRecord(
-        NetPeer peer,
-        NetworkRequestDiplomacyOperation request,
-        string commandKey,
-        DiplomacyOperationStatus status,
-        long revision)
+    private AuthorityServerReply<NetworkDiplomacyOperationResult> Reply(
+        AuthorityRequestHeader header, NetworkRequestDiplomacyOperation request, AuthorityResultStatus status,
+        string reasonCode, bool published, NetworkDiplomacySnapshot snapshot) =>
+        new(CreateResult(header, request, status, reasonCode, snapshot), published);
+
+    private static NetworkDiplomacyOperationResult CreateTerminalResult(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reasonCode) =>
+        CreateResult(header, new NetworkRequestDiplomacyOperation(header, DiplomacyOperation.SendMessenger,
+            "terminal", string.Empty, 0), status, reasonCode, null);
+
+    private static NetworkDiplomacyOperationResult CreateResult(
+        AuthorityRequestHeader header, NetworkRequestDiplomacyOperation request, AuthorityResultStatus status,
+        string reasonCode, NetworkDiplomacySnapshot snapshot)
     {
-        var result = new NetworkDiplomacyOperationResult(
-            request.SessionId,
-            request.RequestId,
-            request.Operation,
-            status,
-            revision,
-            request.TargetId);
-        requestLedger.Record(peer, request.RequestId, commandKey, result);
-        network.Send(peer, result);
+        DiplomacyOperationStatus legacy = status switch
+        {
+            AuthorityResultStatus.Accepted => DiplomacyOperationStatus.Accepted,
+            AuthorityResultStatus.StaleSession => DiplomacyOperationStatus.StaleSession,
+            AuthorityResultStatus.StaleState => DiplomacyOperationStatus.StaleState,
+            AuthorityResultStatus.ExecutionFailed => DiplomacyOperationStatus.Failed,
+            _ => DiplomacyOperationStatus.Rejected,
+        };
+        return new NetworkDiplomacyOperationResult(header, request.Operation, legacy, status, reasonCode,
+            DiplomacyOperationProtocol.CommandKey(request), snapshot?.Revision ?? header.ExpectedRevision,
+            snapshot?.StateFingerprint ?? string.Empty, request.TargetId,
+            request.SecondaryTargetId, request.IntValue);
     }
 
-    private void SendResult(
-        NetPeer peer,
-        NetworkRequestDiplomacyOperation request,
-        DiplomacyOperationStatus status,
-        long revision) => network.Send(peer, new NetworkDiplomacyOperationResult(
-            request.SessionId,
-            request.RequestId,
-            request.Operation,
-            status,
-            revision,
-            request.TargetId));
+    private bool IsExpectedResult(NetworkRequestDiplomacyOperation request,
+        NetworkDiplomacyOperationResult result) =>
+        DiplomacyOperationProtocol.IsResultShapeValid(result) &&
+        request.Header.RequestId == result.Header.RequestId &&
+        string.Equals(request.Header.SessionId, result.Header.SessionId, StringComparison.Ordinal) &&
+        request.Operation == result.Operation &&
+        string.Equals(DiplomacyOperationProtocol.CommandKey(request), result.CommandDigest, StringComparison.Ordinal) &&
+        string.Equals(request.TargetId, result.TargetId, StringComparison.Ordinal) &&
+        string.Equals(request.SecondaryTargetId, result.SecondaryTargetId, StringComparison.Ordinal) &&
+        request.IntValue == result.IntValue;
+
+    private AuthorityCommitProbeResult ProbeClientCommit(NetworkDiplomacyOperationResult result)
+    {
+        if (!DiplomacyOperationProtocol.IsResultShapeValid(result) || result.Header.Status != AuthorityResultStatus.Accepted ||
+            compatibilityHandler == null || compatibilityHandler.SnapshotReadiness != WorkshopSnapshotReadiness.Ready ||
+            !configAuthority.TryGetCurrent(out var config) ||
+            !string.Equals(config.SessionId, result.SessionId, StringComparison.Ordinal) ||
+            compatibilityHandler.SnapshotRevision != result.Revision ||
+            !string.Equals(compatibilityHandler.SnapshotSessionId, result.SessionId, StringComparison.Ordinal) ||
+            !string.Equals(compatibilityHandler.TrustedSnapshot?.StateFingerprint, result.SnapshotFingerprint,
+                StringComparison.Ordinal))
+            return AuthorityCommitProbeResult.Invalid;
+        return PostStateMatches(null, new NetworkRequestDiplomacyOperation(result.SessionId, result.RequestId,
+            result.Revision, result.Operation, result.TargetId, result.SecondaryTargetId, result.IntValue), null)
+            ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+    }
+
+    private void PresentTerminalOutcome(AuthorityClientOutcome<NetworkDiplomacyOperationResult> outcome)
+    {
+        if (!outcome.Applied)
+        {
+            InformationManager.DisplayMessage(new InformationMessage(
+                "The Diplomacy action could not be applied because its campaign state changed."));
+            return;
+        }
+        if (outcome.Result.Operation == DiplomacyOperation.CompleteMessenger)
+            PresentMessengerDialogue(outcome.Result.TargetId);
+        else
+            InformationManager.DisplayMessage(new InformationMessage("Diplomacy action accepted by the co-op server."));
+    }
+
+    // This is intentionally a predicate over the live canonical graph, not a client echo.  The
+    // same predicate is used immediately after native execution and as the client commit barrier.
+    private bool PostStateMatches(Hero actor, NetworkRequestDiplomacyOperation request,
+        NetworkDiplomacySnapshot snapshot)
+    {
+        snapshot ??= compatibilityHandler?.TrustedSnapshot;
+        switch (request.Operation)
+        {
+            case DiplomacyOperation.MakePeace:
+            case DiplomacyOperation.DeclareWar:
+                return objectManager.TryGetObject(request.TargetId, out Kingdom first) &&
+                       objectManager.TryGetObject(request.SecondaryTargetId, out Kingdom second) &&
+                       first.IsAtWarWith(second) == (request.Operation == DiplomacyOperation.DeclareWar);
+            case DiplomacyOperation.EndAlliance:
+                return objectManager.TryGetObject(request.TargetId, out Kingdom allianceFirst) &&
+                       objectManager.TryGetObject(request.SecondaryTargetId, out Kingdom allianceSecond) &&
+                       !Campaign.Current.GetCampaignBehavior<AllianceCampaignBehavior>()
+                           .IsAllyWithKingdom(allianceFirst, allianceSecond);
+            case DiplomacyOperation.FormNonAggressionPact:
+                return snapshot != null && snapshot.State.Any(entry => entry.Section == "agreement.non-aggression" &&
+                    ((entry.Faction1Id == request.TargetId && entry.Faction2Id == request.SecondaryTargetId) ||
+                     (entry.Faction1Id == request.SecondaryTargetId && entry.Faction2Id == request.TargetId)));
+            case DiplomacyOperation.GrantFief:
+                return objectManager.TryGetObject(request.TargetId, out Clan recipient) &&
+                       objectManager.TryGetObject(request.SecondaryTargetId, out Settlement fief) && fief.Town != null &&
+                       fief.OwnerClan == recipient && recipient.Fiefs.Contains(fief.Town);
+            case DiplomacyOperation.AcceptKeepFief:
+                return objectManager.TryGetObject(request.TargetId, out Settlement claimed) && claimed.Town != null &&
+                       !claimed.Town.IsOwnerUnassigned && (actor == null || claimed.OwnerClan == actor.Clan);
+            case DiplomacyOperation.DonateGold:
+                return objectManager.TryGetObject(request.TargetId, out Clan donationTarget) &&
+                       donationTarget.Leader != null && (actor == null || actor.Gold >= 0);
+            case DiplomacyOperation.SendMessenger:
+            case DiplomacyOperation.CompleteMessenger:
+            case DiplomacyOperation.CancelMessenger:
+            case DiplomacyOperation.AcknowledgeMessengerAccident:
+                return true; // record ownership is verified on the authority before result construction.
+            default:
+                return false;
+        }
+    }
 
     private bool TryGetId(object value, out string id, bool allowNull = false)
     {

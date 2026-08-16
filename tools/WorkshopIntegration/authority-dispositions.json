@@ -6941,6 +6941,7 @@
       "disposition": "ServerCommand",
       "owner": "DiplomacyOperationHandler routes (donate gold, grant fief); client guard DiplomacyPlayerKingdomActionGuardPatch",
       "capability": "ExplicitOperations",
+      "routeId": "workshop.diplomacy.gameplay",
       "tests": [
         "DiplomacyCompatibilityTests",
         "DiplomacyOperationTests"
@@ -6965,6 +6966,7 @@
       "disposition": "ServerCommand",
       "owner": "DiplomacyOperationHandler unified route; Framework clients guarded via concrete overrides (a0d1567f0)",
       "capability": "ExplicitOperations",
+      "routeId": "workshop.diplomacy.gameplay",
       "tests": [
         "DiplomacyCompatibilityTests",
         "DiplomacyOperationTests"
@@ -6984,6 +6986,7 @@
       "disposition": "ServerCommand",
       "owner": "DiplomacyPlayerActionRoutingPatch/DiplomacyDonateGoldPatches -> DiplomacyOperationHandler unified command route",
       "capability": "ExplicitOperations",
+      "routeId": "workshop.diplomacy.gameplay",
       "tests": [
         "DiplomacyCompatibilityTests",
         "DiplomacyOperationTests"
@@ -6999,6 +7002,7 @@
       "disposition": "ServerCommand",
       "owner": "SharedMutationMethods server funnel for diplomacy.* cheats (GAP-5, e18075f98)",
       "capability": "ExplicitOperations",
+      "routeId": "workshop.diplomacy.gameplay",
       "tests": [
         "DiplomacyCompatibilityTests",
         "DiplomacyOperationTests"

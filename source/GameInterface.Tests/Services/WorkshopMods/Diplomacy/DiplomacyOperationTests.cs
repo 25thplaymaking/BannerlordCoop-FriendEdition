@@ -1,4 +1,5 @@
 using GameInterface.Services.WorkshopMods.Diplomacy;
+using Common.Messaging;
 using ProtoBuf;
 using System;
 using System.IO;
@@ -54,6 +55,7 @@ public sealed class DiplomacyOperationTests
         Assert.Equal("clan.target", roundTrip.TargetId);
         Assert.Equal("settlement.source", roundTrip.SecondaryTargetId);
         Assert.Equal(17, roundTrip.IntValue);
+        Assert.Equal(7, roundTrip.Header.ProtocolVersion);
     }
 
     [Theory]
@@ -155,46 +157,21 @@ public sealed class DiplomacyOperationTests
     }
 
     [Fact]
-    public void ReplayLedger_ReplaysExactDuplicateAndRejectsConflictingReuse()
+    public void GameplayEnvelope_DeclaresTheTypedAuthorityRouteAndEchoesTheFullCommandDigest()
     {
-        var ledger = new DiplomacyRequestLedger<object>(capacity: 2);
-        var peer = new object();
-        var result = new NetworkDiplomacyOperationResult(
-            SessionId, 73, DiplomacyOperation.SendMessenger,
-            DiplomacyOperationStatus.Accepted, revision: 12, targetId: "hero.target");
+        var attribute = (AuthorityRouteAttribute)Attribute.GetCustomAttribute(
+            typeof(NetworkRequestDiplomacyOperation), typeof(AuthorityRouteAttribute));
+        Assert.NotNull(attribute);
+        Assert.Equal("workshop.diplomacy.gameplay", attribute.RouteId);
+        Assert.Equal(AuthorityRouteKind.Command, attribute.Kind);
 
-        Assert.Equal(DiplomacyReplayDecision.New,
-            ledger.Inspect(peer, 73, "same", out _));
-        ledger.Record(peer, 73, "same", result);
-        Assert.Equal(DiplomacyReplayDecision.Replay,
-            ledger.Inspect(peer, 73, "same", out var replay));
-        Assert.Same(result, replay);
-        Assert.Equal(DiplomacyReplayDecision.Conflict,
-            ledger.Inspect(peer, 73, "different", out _));
-    }
-
-    [Fact]
-    public void ReplayLedger_RejectsEvictedOrOutOfOrderRequestIds()
-    {
-        var ledger = new DiplomacyRequestLedger<object>(capacity: 2);
-        var peer = new object();
-
-        foreach (long requestId in new long[] { 1, 2, 3 })
-        {
-            var result = new NetworkDiplomacyOperationResult(
-                SessionId, requestId, DiplomacyOperation.SendMessenger,
-                DiplomacyOperationStatus.Accepted, requestId, "hero.target");
-            Assert.Equal(DiplomacyReplayDecision.New,
-                ledger.Inspect(peer, requestId, "command-" + requestId, out _));
-            ledger.Record(peer, requestId, "command-" + requestId, result);
-        }
-
-        Assert.Equal(DiplomacyReplayDecision.Conflict,
-            ledger.Inspect(peer, 1, "command-1", out _));
-        Assert.Equal(DiplomacyReplayDecision.Conflict,
-            ledger.Inspect(peer, 2, "different", out _));
-        Assert.Equal(DiplomacyReplayDecision.New,
-            ledger.Inspect(peer, 4, "command-4", out _));
+        var request = Request(DiplomacyOperation.MakePeace, "kingdom.a", "kingdom.b");
+        var result = new NetworkDiplomacyOperationResult(request.Header, request.Operation,
+            DiplomacyOperationStatus.Accepted, AuthorityResultStatus.Accepted, null,
+            DiplomacyOperationProtocol.CommandKey(request), 12, new string('a', 64),
+            request.TargetId, request.SecondaryTargetId, request.IntValue);
+        Assert.Equal(DiplomacyOperationProtocol.CommandKey(request), result.CommandDigest);
+        Assert.Equal(request.Header.RequestId, result.Header.RequestId);
     }
 
     [Theory]
@@ -274,11 +251,6 @@ public sealed class DiplomacyOperationTests
         string targetId = "",
         string secondaryTargetId = "",
         int intValue = 0) => new(
-            SessionId,
-            requestId: 73,
-            expectedRevision: 11,
-            operation,
-            targetId,
-            secondaryTargetId,
-            intValue);
+        new AuthorityRequestHeader(protocolVersion: 7, sessionId: SessionId, requestId: 73, expectedRevision: 11),
+        operation, targetId, secondaryTargetId, intValue);
 }

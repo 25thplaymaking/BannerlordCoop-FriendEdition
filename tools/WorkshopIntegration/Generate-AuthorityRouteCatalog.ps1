@@ -160,6 +160,7 @@ foreach ($assembly in $inspections) {
         if ($kind.StartsWith('Unknown', [StringComparison]::Ordinal)) { Add-Issue $issues "module=$($assembly.moduleId) message=$requestType route=$routeId owner=$($definitionFiles -join ',') test=$($tests -join ','): unknown route kind" }
         if ($definitionFiles.Count -eq 0) { Add-Issue $issues "module=$($assembly.moduleId) message=$requestType route=$routeId owner=<missing> test=$($tests -join ','): no typed route definition owner" }
         if ($resultTypes.Count -eq 0) { Add-Issue $issues "module=$($assembly.moduleId) message=$requestType route=$routeId owner=$($definitionFiles -join ',') test=$($tests -join ','): no typed result type" }
+        elseif ($resultTypes.Count -ne 1) { Add-Issue $issues "module=$($assembly.moduleId) message=$requestType route=$routeId owner=$($definitionFiles -join ',') test=$($tests -join ','): ambiguous typed result contracts $($resultTypes -join ',')" }
         if ($tests.Count -eq 0) { Add-Issue $issues "module=$($assembly.moduleId) message=$requestType route=$routeId owner=$($definitionFiles -join ',') test=<missing>: no focused route contract test" }
         $routes.Add($record)
     }

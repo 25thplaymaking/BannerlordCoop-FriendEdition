@@ -12,10 +12,12 @@ using GameInterface;
 using GameInterface.AutoSync;
 using GameInterface.Configuration;
 using GameInterface.Services.CampaignService.Handlers;
+using GameInterface.Services.Entity;
 using GameInterface.Services.GameState.Messages;
 using GameInterface.Services.MapEvents;
 using GameInterface.Services.MapEvents.PlayerPartyInteractions;
 using GameInterface.Services.Players;
+using GameInterface.Services.Players.Data;
 using GameInterface.Tests.Bootstrap;
 using GameInterface.Utils;
 using HarmonyLib;
@@ -129,6 +131,41 @@ public class E2ETestEnvironment : IDisposable
             Assert.True(
                 playerManager.IsConnected(player),
                 $"Player '{controllerId}' was not connected to the supplied client peer.");
+        });
+    }
+
+    /// <summary>
+    /// Registers a campaign player and associates the exact E2E transport peer that controls its
+    /// party. This mirrors the server's player-manager lifecycle used after character creation,
+    /// without bypassing authority-route authentication in test fixtures.
+    /// </summary>
+    public void RegisterAndConnectPlayer(EnvironmentInstance client, string controllerId, string mobilePartyId)
+    {
+        if (client == null) throw new ArgumentNullException(nameof(client));
+        if (string.IsNullOrWhiteSpace(controllerId)) throw new ArgumentException("A controller id is required.", nameof(controllerId));
+        if (string.IsNullOrWhiteSpace(mobilePartyId)) throw new ArgumentException("A mobile-party id is required.", nameof(mobilePartyId));
+
+        client.Call(() => client.Resolve<IControllerIdProvider>().SetControllerId(controllerId));
+        Server.Call(() =>
+        {
+            IPlayerManager players = Server.Resolve<IPlayerManager>();
+            var player = new Player(
+                controllerId,
+                heroId: null,
+                mobilePartyId: mobilePartyId,
+                clanId: null,
+                characterObjectId: null);
+            if (!players.AddPlayer(player))
+                throw new InvalidOperationException("Unable to register E2E player '" + controllerId + "'.");
+
+            players.SetPeer(controllerId, client.NetPeer);
+            if (!players.TryGetPlayer(client.NetPeer, out Player connected) ||
+                !string.Equals(connected.MobilePartyId, mobilePartyId, StringComparison.Ordinal) ||
+                !players.IsConnected(connected))
+            {
+                throw new InvalidOperationException(
+                    "The E2E peer was not associated with its registered controlled mobile party.");
+            }
         });
     }
 

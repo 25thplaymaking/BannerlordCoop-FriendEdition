@@ -8,8 +8,6 @@ using GameInterface.Configuration;
 using GameInterface.Services.Armies.Messages;
 using GameInterface.Services.Armies.Patches;
 using GameInterface.Services.MapEvents.Messages.Leave;
-using GameInterface.Services.Players;
-using GameInterface.Services.Players.Data;
 using GameInterface.Services.SiegeEvents.Patches;
 using HarmonyLib;
 using Helpers;
@@ -219,13 +217,6 @@ public class SiegeLeaveMenuTests : IDisposable
         var leavingClient = Clients.First();
         var (partyId, _) = SetupBesiegingPlayerParty(leavingClient);
         var armyId = SetupArmyFollower(partyId);
-        Server.Call(() =>
-        {
-            var players = Server.Resolve<IPlayerManager>();
-            Assert.True(players.AddPlayer(new Player("siege-leaver", null, partyId, null, null)));
-            players.SetPeer("siege-leaver", leavingClient.NetPeer);
-        });
-
         var disabledMethods = LeaveRoundTripDisabledMethods
             .Where(method => method.DeclaringType != typeof(GameMenu) ||
                 method.Name != nameof(GameMenu.ExitToLast))
@@ -756,6 +747,7 @@ public class SiegeLeaveMenuTests : IDisposable
         }
 
         SetMainParty(leavingInstance, partyId);
+        TestEnvironment.RegisterAndConnectPlayer(leavingInstance, "siege-leaver", partyId);
 
         return (partyId, siegeEventId);
     }

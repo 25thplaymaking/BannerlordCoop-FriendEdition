@@ -1,4 +1,5 @@
 using Common;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.WorkshopMods.PlayerSettlement;
 using ProtoBuf;
 using System;
@@ -114,6 +115,63 @@ public sealed class PlayerSettlementConstructionTests : IDisposable
             property => property.Name.Contains("Port", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void ConstructionRoute_UsesTheAuthorityHeaderAndExactResultEnvelope()
+    {
+        var header = new AuthorityRequestHeader(4, "session-player-settlement", 17, 8);
+        var request = new NetworkRequestPlayerSettlementConstruction(
+            header, Request(PlayerSettlementConstructionOperation.BuildTown, "", "", "", Frame(1f)));
+
+        var attribute = (AuthorityRouteAttribute)Attribute.GetCustomAttribute(
+            typeof(NetworkRequestPlayerSettlementConstruction), typeof(AuthorityRouteAttribute));
+        Assert.NotNull(attribute);
+        Assert.Equal("workshop.player-settlement.construction", attribute.RouteId);
+        Assert.Equal(AuthorityRouteKind.Command, attribute.Kind);
+        Assert.Equal(header.SessionId, request.Header.SessionId);
+        Assert.Equal(header.ProtocolVersion, request.Header.ProtocolVersion);
+
+        var affected = Entry(PlayerSettlementObjectKind.Town, "created_town", "");
+        var result = new NetworkPlayerSettlementConstructionResult(header,
+            PlayerSettlementConstructionStatus.Accepted, AuthorityResultStatus.Accepted, "",
+            PlayerSettlementConstructionProtocol.CommandKey(request), "graph-fingerprint", new[] { affected },
+            72, "owner", "garrison", 9);
+        Assert.Equal(9, result.Header.CommittedRevision);
+        Assert.Equal("graph-fingerprint", result.GraphFingerprint);
+        Assert.Single(result.AffectedEntries);
+        Assert.Equal("garrison", result.GarrisonId);
+    }
+
+    [Fact]
+    public void ConstructionDiff_RequiresExactRootsParentsAndTargets()
+    {
+        var town = Request(PlayerSettlementConstructionOperation.BuildTown, "", "", "", Frame(1f));
+        Assert.True(PlayerSettlementCompatibilityHandler.TryGetConstructionDiff(town,
+            Array.Empty<PlayerSettlementStateEntry>(), new[]
+            {
+                Entry(PlayerSettlementObjectKind.Town, "town", ""),
+                Entry(PlayerSettlementObjectKind.BoundVillage, "town_village", "town"),
+            }, out var townChanges));
+        Assert.Equal(2, townChanges.Length);
+
+        var village = Request(PlayerSettlementConstructionOperation.BuildVillage, "", "bound", "grain", Frame(1f));
+        Assert.True(PlayerSettlementCompatibilityHandler.TryGetConstructionDiff(village,
+            Array.Empty<PlayerSettlementStateEntry>(), new[] { Entry(PlayerSettlementObjectKind.BoundVillage, "village", "bound") },
+            out _));
+        Assert.False(PlayerSettlementCompatibilityHandler.TryGetConstructionDiff(village,
+            Array.Empty<PlayerSettlementStateEntry>(), new[]
+            {
+                Entry(PlayerSettlementObjectKind.BoundVillage, "village", "bound"),
+                Entry(PlayerSettlementObjectKind.ExtraVillage, "extra", ""),
+            }, out _));
+
+        var rebuild = Request(PlayerSettlementConstructionOperation.Rebuild, "target", "", "", Frame(1f));
+        var before = new[] { Entry(PlayerSettlementObjectKind.Town, "target", "") };
+        var after = new[] { Entry(PlayerSettlementObjectKind.Town, "target", "", "changed") };
+        Assert.True(PlayerSettlementCompatibilityHandler.TryGetConstructionDiff(rebuild, before, after, out _));
+        Assert.False(PlayerSettlementCompatibilityHandler.TryGetConstructionDiff(rebuild, before,
+            new[] { Entry(PlayerSettlementObjectKind.Town, "other", "") }, out _));
+    }
+
     private static NetworkRequestPlayerSettlementConstruction Request(
         PlayerSettlementConstructionOperation operation,
         string target,
@@ -143,6 +201,11 @@ public sealed class PlayerSettlementConstructionTests : IDisposable
         bits[0] = BitConverter.ToInt32(BitConverter.GetBytes(first), 0);
         return new PlayerSettlementBitTransform(bits);
     }
+
+    private static PlayerSettlementStateEntry Entry(PlayerSettlementObjectKind kind, string id, string parent,
+        string fingerprint = "initial") =>
+        new PlayerSettlementStateEntry(kind, 0, id, parent, "", "", id, 1f, "<xml />", "hash-" + fingerprint,
+            "component-" + fingerprint);
 
     private sealed class RecordingRuntime : IPlayerSettlementPatchRuntime
     {

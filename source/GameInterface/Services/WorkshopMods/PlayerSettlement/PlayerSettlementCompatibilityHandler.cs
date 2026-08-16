@@ -26,6 +26,24 @@ using TaleWorlds.Library;
 
 namespace GameInterface.Services.WorkshopMods.PlayerSettlement;
 
+internal sealed class PlayerSettlementConstructionIntent
+{
+    internal PlayerSettlementConstructionIntent(NetworkRequestPlayerSettlementConstruction request) => Request = request;
+    internal NetworkRequestPlayerSettlementConstruction Request { get; }
+}
+
+internal readonly struct PlayerSettlementConstructionPostState
+{
+    internal PlayerSettlementConstructionPostState(string ownerId, string garrisonId)
+    {
+        OwnerId = ownerId ?? string.Empty;
+        GarrisonId = garrisonId ?? string.Empty;
+    }
+
+    internal string OwnerId { get; }
+    internal string GarrisonId { get; }
+}
+
 /// <summary>
 /// Exact-binary Player Settlement 7.5.0 boundary. Generated XML is loaded only by the host before
 /// Coop registry enumeration; clients receive the resulting object graph through the normal
@@ -43,13 +61,13 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
     private readonly IObjectManager objectManager;
     private readonly IPlayerManager playerManager;
     private readonly IModConfigAuthority configAuthority;
+    private readonly IWorkshopCapabilityRegistry capabilityRegistry;
+    private readonly IAuthorityRequestRouter authorityRequestRouter;
     private readonly IAuthorityRouteHandle<PlayerSettlementSnapshotIntent, NetworkPlayerSettlementStateQueryResult> snapshotRoute;
+    private readonly IAuthorityRouteHandle<PlayerSettlementConstructionIntent, NetworkPlayerSettlementConstructionResult> constructionRoute;
     private readonly Harmony adapterHarmony;
     private readonly HashSet<string> notifiedMethods = new HashSet<string>(StringComparer.Ordinal);
     private readonly PlayerSettlementRevisionGate revisionGate = new PlayerSettlementRevisionGate();
-    private readonly Dictionary<NetPeer, Dictionary<long, (string Key, NetworkPlayerSettlementConstructionResult Result)>> constructionLedger =
-        new Dictionary<NetPeer, Dictionary<long, (string, NetworkPlayerSettlementConstructionResult)>>();
-    private readonly HashSet<long> pendingConstructionRequests = new HashSet<long>();
 
     private Assembly assembly;
     private Type behaviorType;
@@ -64,7 +82,6 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
     internal WorkshopSnapshotReadiness SnapshotReadiness { get; private set; }
     internal string SnapshotSessionId { get; private set; }
     internal long SnapshotRevision { get; private set; } = -1;
-    private long nextConstructionRequestId;
     private PlayerSettlementConstructionBridge constructionBridge;
 
     public PlayerSettlementCompatibilityHandler(
@@ -74,6 +91,7 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         IPlayerManager playerManager,
         Harmony harmony,
         IModConfigAuthority configAuthority,
+        IWorkshopCapabilityRegistry capabilityRegistry,
         IAuthorityRequestRouter authorityRequestRouter)
     {
         this.messageBroker = messageBroker;
@@ -81,6 +99,8 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         this.objectManager = objectManager;
         this.playerManager = playerManager;
         this.configAuthority = configAuthority;
+        this.capabilityRegistry = capabilityRegistry;
+        this.authorityRequestRouter = authorityRequestRouter;
         if (harmony == null) throw new ArgumentNullException(nameof(harmony));
         adapterHarmony = new Harmony(PlayerSettlementHarmonyIsolation.AdapterHarmonyOwner);
 
@@ -107,12 +127,31 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
                 AuthorityTimeoutPolicy.BootstrapQuery,
                 requireAuthenticatedPlayer: false));
 
+        constructionRoute = authorityRequestRouter.Register(
+            AuthorityRoute<PlayerSettlementConstructionIntent, NetworkRequestPlayerSettlementConstruction,
+                NetworkPlayerSettlementConstructionResult>.Define(
+                "workshop.player-settlement.construction", AuthorityRouteKind.Command,
+                CreateConstructionHeader,
+                (intent, header) => new NetworkRequestPlayerSettlementConstruction(header, intent.Request),
+                request => request.Header,
+                result => result.Header,
+                request => PlayerSettlementConstructionProtocol.TryValidate(request, out _) ? null : "invalid-construction-request",
+                PlayerSettlementConstructionProtocol.CommandKey,
+                ValidateConstructionHeader,
+                ExecuteConstructionRoute,
+                CreateConstructionTerminal,
+                ProbeConstructionApplied,
+                _ => StartSnapshotBootstrap(),
+                PresentConstructionOutcome,
+                configAuthority.IsTrustedServer,
+                AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true,
+                isExpectedClientResult: IsExpectedConstructionResult));
+
         messageBroker.Subscribe<AllGameObjectsRegistered>(HandleAllGameObjectsRegistered);
         messageBroker.Subscribe<NetworkPlayerSettlementState>(HandleState);
         messageBroker.Subscribe<NetworkPlayerSettlementStateQueryResult>(HandleStateQueryResult);
         messageBroker.Subscribe<HostModConfigAccepted>(HandleHostModConfigAccepted);
-        messageBroker.Subscribe<NetworkRequestPlayerSettlementConstruction>(HandleConstructionRequest);
-        messageBroker.Subscribe<NetworkPlayerSettlementConstructionResult>(HandleConstructionResult);
     }
 
     public void Dispose()
@@ -122,8 +161,7 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         messageBroker.Unsubscribe<NetworkPlayerSettlementStateQueryResult>(HandleStateQueryResult);
         messageBroker.Unsubscribe<HostModConfigAccepted>(HandleHostModConfigAccepted);
         snapshotRoute.Dispose();
-        messageBroker.Unsubscribe<NetworkRequestPlayerSettlementConstruction>(HandleConstructionRequest);
-        messageBroker.Unsubscribe<NetworkPlayerSettlementConstructionResult>(HandleConstructionResult);
+        constructionRoute.Dispose();
         if (ReferenceEquals(PlayerSettlementPatchRuntime.Current, this))
             PlayerSettlementPatchRuntime.Current = null;
     }
@@ -158,11 +196,11 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
 
     public bool TrySubmitConstruction(object owner, MethodBase original, object[] arguments)
     {
-        // The legacy construction command has no core authority owner yet. Snapshot readiness
-        // never authorizes it; Task 6 supplies the real command route.
-        if (compatible && ModInformation.IsClient)
-            NotifyFeatureBlocked("authority-command-route-unavailable");
-        return false;
+        if (!CanUseConstructionRoute() || !constructionBridge.TryCapture(owner, original, arguments, 1,
+                revisionGate.Revision, id => objectManager.TryGetId(id, out var value) ? value : string.Empty,
+                out var request, out _)) return false;
+        constructionRoute.Submit(new PlayerSettlementConstructionIntent(request));
+        return true;
     }
 
     public void ValidateObjectRegistration(bool isSavedCampaign)
@@ -442,9 +480,6 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         if (!compatible) return;
 
         revisionGate.Reset();
-        constructionLedger.Clear();
-        pendingConstructionRequests.Clear();
-        nextConstructionRequestId = 0;
         snapshotReady = !ModInformation.IsClient;
         SnapshotReadiness = ModInformation.IsClient ? WorkshopSnapshotReadiness.Unknown : WorkshopSnapshotReadiness.Ready;
         SnapshotSessionId = null;
@@ -579,14 +614,6 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             context: nameof(PlayerSettlementCompatibilityHandler));
     }
 
-    private void HandleConstructionRequest(MessagePayload<NetworkRequestPlayerSettlementConstruction> payload)
-    {
-        if (!compatible || !ModInformation.IsServer || payload.Who is not NetPeer peer) return;
-        GameThread.RunSafe(
-            () => ApplyConstructionRequest(peer, payload.What),
-            context: nameof(PlayerSettlementCompatibilityHandler));
-    }
-
     private void HandleStateQueryResult(MessagePayload<NetworkPlayerSettlementStateQueryResult> payload)
     {
         if (!compatible || !ModInformation.IsClient || payload?.Who is not NetPeer serverPeer ||
@@ -611,108 +638,219 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         }, context: nameof(PlayerSettlementCompatibilityHandler));
     }
 
-    private void ApplyConstructionRequest(NetPeer peer, NetworkRequestPlayerSettlementConstruction request)
+    private AuthorityRequestHeader CreateConstructionHeader(long requestId)
     {
-        if (!PlayerSettlementConstructionProtocol.TryValidate(request, out var failure))
-        {
-            Logger.Warning("Rejected malformed Player Settlement construction from peer {Peer}: {Failure}", peer.Id, failure);
-            return;
-        }
-        var key = PlayerSettlementConstructionProtocol.CommandKey(request);
-        if (!constructionLedger.TryGetValue(peer, out var peerEntries))
-        {
-            peerEntries = new Dictionary<long, (string, NetworkPlayerSettlementConstructionResult)>();
-            constructionLedger.Add(peer, peerEntries);
-        }
-        if (peerEntries.TryGetValue(request.RequestId, out var prior))
-        {
-            if (!string.Equals(prior.Key, key, StringComparison.Ordinal))
-            {
-                DenyPeerOrAbortSession(peer, "reused Player Settlement request ID with a different payload");
-                return;
-            }
-            network.Send(peer, prior.Result);
-            SendSnapshotOrAbort(peer);
-            return;
-        }
-        if (request.ExpectedRevision != serverRevision)
-        {
-            RecordConstructionResult(peer, key, new NetworkPlayerSettlementConstructionResult(
-                request.RequestId, PlayerSettlementConstructionStatus.StaleState, serverRevision,
-                "The settlement graph changed; refresh and confirm placement again."));
-            SendSnapshotOrAbort(peer);
-            return;
-        }
-        if (!playerManager.TryGetPlayer(peer, out var player) ||
-            !objectManager.TryGetObject(player.HeroId, out Hero actor) ||
-            !objectManager.TryGetObject(player.MobilePartyId, out MobileParty actorParty) ||
-            actor == null || actorParty == null || !actor.IsAlive || actor.Clan == null)
-        {
-            RecordConstructionResult(peer, key, new NetworkPlayerSettlementConstructionResult(
-                request.RequestId, PlayerSettlementConstructionStatus.Rejected, serverRevision,
-                "The connected controller has no eligible campaign hero and party."));
-            return;
-        }
+        if (!configAuthority.TryGetCurrent(out var config)) return default;
+        return new AuthorityRequestHeader(config.ProtocolVersion, config.SessionId, requestId, revisionGate.Revision);
+    }
 
-        var behavior = behaviorType.GetField("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-            ?.GetValue(null);
+    private AuthorityHeaderValidation ValidateConstructionHeader(AuthorityRequestHeader header)
+    {
+        if (!CanUseConstructionRoute())
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "construction-route-unavailable");
+        if (!configAuthority.TryGetCurrent(out var config) || header.ProtocolVersion != config.ProtocolVersion ||
+            !string.Equals(header.SessionId, config.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-config-session");
+        return header.ExpectedRevision == revisionGate.Revision ? AuthorityHeaderValidation.Valid :
+            AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-construction-graph");
+    }
+
+    private bool CanUseConstructionRoute() => compatible && objectRegistrationValidated && snapshotReady &&
+        capabilityRegistry.IsEnabled(PlayerSettlementCapabilitySource.ModuleId, PlayerSettlementCapabilitySource.Operation) &&
+        authorityRequestRouter.IsRegistered("workshop.player-settlement.construction", AuthorityRouteKind.Command) &&
+        authorityRequestRouter.IsRegistered("workshop.player-settlement.snapshot", AuthorityRouteKind.BootstrapQuery) &&
+        (!ModInformation.IsClient || (SnapshotReadiness == WorkshopSnapshotReadiness.Ready &&
+            configAuthority.TryGetCurrent(out var config) && SnapshotSessionId == config.SessionId));
+
+    private AuthorityServerReply<NetworkPlayerSettlementConstructionResult> ExecuteConstructionRoute(
+        AuthorityServerContext context, NetworkRequestPlayerSettlementConstruction request)
+    {
+        if (!playerManager.TryGetPlayer(context.Peer, out var player) ||
+            !objectManager.TryGetObject(player.HeroId, out Hero actor) ||
+            !objectManager.TryGetObject(player.MobilePartyId, out MobileParty party) || actor == null || party == null ||
+            !actor.IsAlive || actor.Clan == null)
+            return ConstructionReply(context.Header, request, AuthorityResultStatus.Unauthorized, "actor-not-eligible", null, null, null, false);
+        PlayerSettlementStateEntry[] before;
+        string beforeFingerprint;
         try
         {
-            using (new BarterPlayerContext(actor, actorParty))
-            {
-                if (!constructionBridge.TryExecute(
-                        behavior,
-                        actor,
-                        actorParty,
-                        request,
-                        id => objectManager.TryGetObject(id, out Settlement settlement) ? settlement : null,
-                        id => objectManager.TryGetObject(id, out CultureObject culture) ? culture : null,
-                        out failure))
-                {
-                    RecordConstructionResult(peer, key, new NetworkPlayerSettlementConstructionResult(
-                        request.RequestId, PlayerSettlementConstructionStatus.Rejected, serverRevision, failure));
-                    return;
-                }
-            }
+            before = CaptureStateOrThrow("construction pre-capture");
+            beforeFingerprint = PlayerSettlementStateCodec.ComputeHash(before);
+        }
+        catch (Exception exception) { return ConstructionReply(context.Header, request, AuthorityResultStatus.Unavailable, exception.Message, null, null, actor, false); }
+        object behavior = behaviorType.GetField("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(null);
+        try
+        {
+            using (new BarterPlayerContext(actor, party))
+                if (!constructionBridge.TryExecute(behavior, actor, party, request,
+                    id => objectManager.TryGetObject(id, out Settlement value) ? value : null,
+                    id => objectManager.TryGetObject(id, out CultureObject value) ? value : null, out var failure))
+                    return ConstructionReply(context.Header, request, AuthorityResultStatus.Rejected, failure, null, null, actor, false);
+            var after = CaptureStateOrThrow("construction post-capture");
+            if (string.Equals(beforeFingerprint, PlayerSettlementStateCodec.ComputeHash(after), StringComparison.Ordinal) ||
+                !TryGetConstructionDiff(request, before, after, out var changed))
+                throw new InvalidOperationException("construction graph diff was missing, extra, or not operation-valid");
+            if (!TryRegisterAndValidateAffectedSettlements(changed, out var postState))
+                throw new InvalidOperationException("construction object registration/post-state validation failed");
+            if (!SendSnapshotOrAbort(null)) throw new InvalidOperationException("construction snapshot publication failed");
+            return ConstructionReply(context.Header, request, AuthorityResultStatus.Accepted, null, changed, lastServerFingerprint,
+                actor, true, postState.OwnerId, postState.GarrisonId);
         }
         catch (Exception exception)
         {
-            DenyPeerOrAbortSession(null,
-                "Player Settlement construction failed after creator mutation began: " + exception.Message);
+            DenyPeerOrAbortSession(null, "construction mutation/publication ambiguity: " + exception.Message);
+            return new AuthorityServerReply<NetworkPlayerSettlementConstructionResult>(
+                CreateConstructionTerminal(context.Header, AuthorityResultStatus.ExecutionFailed, "ambiguous-construction"), false, true);
+        }
+    }
+
+    internal static bool TryGetConstructionDiff(NetworkRequestPlayerSettlementConstruction request,
+        PlayerSettlementStateEntry[] before, PlayerSettlementStateEntry[] after, out PlayerSettlementStateEntry[] changed)
+    {
+        changed = Array.Empty<PlayerSettlementStateEntry>();
+        if (request == null || before == null || after == null) return false;
+
+        // Metadata records are canonical identities. A construction operation may alter an existing
+        // target and its directly-owned villages, but it may not silently remove an unrelated record.
+        if (before.Any(prior => !after.Any(entry => SameGraphNode(prior, entry)))) return false;
+        changed = after.Where(entry => !before.Any(prior => SameIdentity(prior, entry))).ToArray();
+        if (changed.Length == 0) return false;
+
+        return request.Operation switch
+        {
+            PlayerSettlementConstructionOperation.BuildTown =>
+                IsExactNewRoot(changed, PlayerSettlementObjectKind.Town),
+            PlayerSettlementConstructionOperation.BuildCastle =>
+                IsExactNewRoot(changed, PlayerSettlementObjectKind.Castle),
+            PlayerSettlementConstructionOperation.BuildVillage =>
+                IsExactNewVillage(changed, request.BoundId),
+            PlayerSettlementConstructionOperation.Rebuild or PlayerSettlementConstructionOperation.Overwrite =>
+                IsExactTargetDiff(changed, request.TargetId),
+            _ => false,
+        };
+    }
+
+    private static bool SameIdentity(PlayerSettlementStateEntry left, PlayerSettlementStateEntry right) =>
+        left != null && right != null && left.Kind == right.Kind && left.StringId == right.StringId &&
+        left.ParentStringId == right.ParentStringId && left.XmlSha256 == right.XmlSha256 &&
+        left.ComponentFingerprint == right.ComponentFingerprint;
+
+    private static bool SameGraphNode(PlayerSettlementStateEntry left, PlayerSettlementStateEntry right) =>
+        left != null && right != null && left.Kind == right.Kind && left.StringId == right.StringId &&
+        left.ParentStringId == right.ParentStringId;
+
+    private static bool IsExactNewRoot(PlayerSettlementStateEntry[] changed, PlayerSettlementObjectKind rootKind)
+    {
+        var roots = changed.Where(entry => string.IsNullOrEmpty(entry.ParentStringId)).ToArray();
+        if (roots.Length != 1 || roots[0].Kind != rootKind) return false;
+        return changed.All(entry => ReferenceEquals(entry, roots[0]) ||
+            entry.Kind == PlayerSettlementObjectKind.BoundVillage && entry.ParentStringId == roots[0].StringId);
+    }
+
+    private static bool IsExactNewVillage(PlayerSettlementStateEntry[] changed, string boundId)
+    {
+        if (changed.Length != 1) return false;
+        var entry = changed[0];
+        return entry.Kind == PlayerSettlementObjectKind.ExtraVillage && string.IsNullOrEmpty(entry.ParentStringId) ||
+            entry.Kind == PlayerSettlementObjectKind.BoundVillage && entry.ParentStringId == boundId;
+    }
+
+    private static bool IsExactTargetDiff(PlayerSettlementStateEntry[] changed, string targetId) =>
+        !string.IsNullOrEmpty(targetId) && changed.Any(entry => entry.StringId == targetId) &&
+        changed.All(entry => entry.StringId == targetId || entry.ParentStringId == targetId);
+
+    private bool TryRegisterAndValidateAffectedSettlements(PlayerSettlementStateEntry[] changed,
+        out PlayerSettlementConstructionPostState postState)
+    {
+        var capturedPostState = default(PlayerSettlementConstructionPostState);
+        bool registered = objectManager.RunRegistrationTransaction(() =>
+        {
+            Settlement primary = null;
+            foreach (var entry in changed)
+            {
+                var settlement = Settlement.All.FirstOrDefault(value => value?.StringId == entry.StringId);
+                if (settlement == null) return false;
+                if (!objectManager.Contains(entry.StringId) && !objectManager.AddExisting(entry.StringId, settlement)) return false;
+                if (!objectManager.TryGetObject(entry.StringId, out Settlement registered) || !ReferenceEquals(registered, settlement))
+                    return false;
+                if (primary == null || string.IsNullOrEmpty(entry.ParentStringId)) primary = settlement;
+            }
+
+            string ownerId = primary?.OwnerClan?.StringId ?? string.Empty;
+            MobileParty garrison = primary?.Town?.GarrisonParty;
+            string garrisonId = string.Empty;
+            if (garrison != null && !objectManager.TryGetId(garrison, out garrisonId)) return false;
+            capturedPostState = new PlayerSettlementConstructionPostState(ownerId, garrisonId);
+            return true;
+        });
+        postState = capturedPostState;
+        return registered;
+    }
+
+    private AuthorityServerReply<NetworkPlayerSettlementConstructionResult> ConstructionReply(
+        AuthorityRequestHeader header, NetworkRequestPlayerSettlementConstruction request, AuthorityResultStatus status,
+        string message, PlayerSettlementStateEntry[] changed, string fingerprint, Hero actor, bool published,
+        string ownerId = null, string garrisonId = null) =>
+        new(new NetworkPlayerSettlementConstructionResult(header,
+            status == AuthorityResultStatus.Accepted ? PlayerSettlementConstructionStatus.Accepted :
+            status == AuthorityResultStatus.StaleState ? PlayerSettlementConstructionStatus.StaleState : PlayerSettlementConstructionStatus.Rejected,
+            status, message, PlayerSettlementConstructionProtocol.CommandKey(request), fingerprint, changed,
+            actor?.Gold ?? 0, ownerId ?? actor?.Clan?.StringId, garrisonId ?? string.Empty,
+            status == AuthorityResultStatus.Accepted ? serverRevision : header.ExpectedRevision), published);
+
+    private static NetworkPlayerSettlementConstructionResult CreateConstructionTerminal(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        new(header, PlayerSettlementConstructionStatus.Rejected, status, reason, string.Empty, string.Empty,
+            Array.Empty<PlayerSettlementStateEntry>(), 0, string.Empty, string.Empty, header.ExpectedRevision);
+
+    private bool IsExpectedConstructionResult(NetworkRequestPlayerSettlementConstruction request,
+        NetworkPlayerSettlementConstructionResult result) => result.Header.RequestId == request.Header.RequestId &&
+        result.Header.SessionId == request.Header.SessionId && result.CommandDigest == PlayerSettlementConstructionProtocol.CommandKey(request);
+
+    private AuthorityCommitProbeResult ProbeConstructionApplied(NetworkPlayerSettlementConstructionResult result) =>
+        result.Header.Status == AuthorityResultStatus.Accepted && SnapshotReadiness == WorkshopSnapshotReadiness.Ready &&
+        SnapshotRevision == result.Revision && revisionGate.Fingerprint == result.GraphFingerprint &&
+        ExactConstructionReplicaMatches(result)
+            ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+
+    private bool ExactConstructionReplicaMatches(NetworkPlayerSettlementConstructionResult result)
+    {
+        try
+        {
+            var entries = CaptureStateOrThrow("construction client probe");
+            if (result.AffectedEntries == null || result.AffectedEntries.Length == 0 ||
+                !result.AffectedEntries.All(expected => entries.Any(actual => SameIdentity(expected, actual)))) return false;
+            foreach (var entry in result.AffectedEntries)
+            {
+                if (!objectManager.TryGetObject(entry.StringId, out Settlement settlement) || settlement == null ||
+                    (!string.IsNullOrEmpty(result.OwnerId) && settlement.OwnerClan?.StringId != result.OwnerId)) return false;
+            }
+            if (!string.IsNullOrEmpty(result.GarrisonId) &&
+                !objectManager.TryGetObject(result.GarrisonId, out MobileParty _)) return false;
+            return Hero.MainHero != null && Hero.MainHero.Gold == result.ActorGold;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private void PresentConstructionOutcome(AuthorityClientOutcome<NetworkPlayerSettlementConstructionResult> outcome)
+    {
+        if (outcome.Applied)
+        {
+            InformationManager.DisplayMessage(new InformationMessage("Player Settlement construction committed by the host."));
             return;
         }
-
-        SendSnapshotOrAbort(peer: null);
-        var accepted = new NetworkPlayerSettlementConstructionResult(
-            request.RequestId, PlayerSettlementConstructionStatus.Accepted, serverRevision,
-            "Settlement construction committed by the host.");
-        RecordConstructionResult(peer, key, accepted);
-    }
-
-    private void RecordConstructionResult(
-        NetPeer peer,
-        string key,
-        NetworkPlayerSettlementConstructionResult result)
-    {
-        if (!constructionLedger.TryGetValue(peer, out var entries))
+        if (outcome.Result?.AuthorityStatus == AuthorityResultStatus.StaleState)
         {
-            entries = new Dictionary<long, (string, NetworkPlayerSettlementConstructionResult)>();
-            constructionLedger.Add(peer, entries);
+            snapshotReady = false;
+            SnapshotReadiness = WorkshopSnapshotReadiness.Unknown;
+            StartSnapshotBootstrap();
         }
-        if (entries.Count >= 256) entries.Remove(entries.Keys.Min());
-        entries[result.RequestId] = (key, result);
-        network.Send(peer, result);
     }
 
-    private void HandleConstructionResult(MessagePayload<NetworkPlayerSettlementConstructionResult> payload)
-    {
-        if (!compatible || !ModInformation.IsClient || payload.Who is not NetPeer serverPeer ||
-            !PlayerSettlementSnapshotOriginGuard.IsTrustedServerTransport(serverPeer, localIsClient: true) ||
-            payload.What == null || !pendingConstructionRequests.Remove(payload.What.RequestId)) return;
-        InformationManager.DisplayMessage(new InformationMessage(payload.What.Message));
-    }
-
-    private void SendSnapshotOrAbort(NetPeer peer)
+    private bool SendSnapshotOrAbort(NetPeer peer)
     {
         PlayerSettlementStateEntry[] entries;
         try
@@ -722,7 +860,7 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         catch (Exception exception)
         {
             DenyPeerOrAbortSession(peer, exception.Message);
-            return;
+            return false;
         }
 
         var fingerprint = PlayerSettlementStateCodec.ComputeHash(entries);
@@ -743,7 +881,7 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         if (!PlayerSettlementStateCodec.TryValidate(state, out var failure))
         {
             DenyPeerOrAbortSession(peer, "captured state was invalid: " + failure);
-            return;
+            return false;
         }
 
         try
@@ -754,11 +892,12 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         catch (Exception exception)
         {
             DenyPeerOrAbortSession(peer, "state publication failed: " + exception.Message);
-            return;
+            return false;
         }
 
         serverRevision = nextRevision;
         lastServerFingerprint = fingerprint;
+        return true;
     }
 
     private bool TryCaptureSnapshot(out NetworkPlayerSettlementState snapshot, out string failure)

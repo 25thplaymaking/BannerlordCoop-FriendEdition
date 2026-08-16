@@ -130,6 +130,9 @@ public class GameInterfaceModule : Module
         builder.RegisterType<ImprovedGarrisonsCapabilitySource>()
             .As<IWorkshopCapabilitySource>()
             .InstancePerLifetimeScope();
+        builder.RegisterType<PlayerSettlementCapabilitySource>()
+            .As<IWorkshopCapabilitySource>()
+            .InstancePerLifetimeScope();
         builder.RegisterType<FourberieCapabilitySource>()
             .As<IWorkshopCapabilitySource>()
             .InstancePerLifetimeScope();

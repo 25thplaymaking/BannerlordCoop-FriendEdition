@@ -7609,6 +7609,25 @@
       "moduleId": "PlayerSettlement",
       "assemblySha256": "74f9ab2ebc82bdc755886c6ad0802500c2df89015d7c65cd5018c543dbf18119",
       "metadataTokens": [
+        "0x060002D6",
+        "0x060002DE",
+        "0x06000313",
+        "0x06000327",
+        "0x06000346"
+      ],
+      "disposition": "ServerCommand",
+      "owner": "PlayerSettlementCompatibilityHandler authoritative construction transaction",
+      "routeId": "workshop.player-settlement.construction",
+      "capability": "Construction",
+      "tests": [
+        "PlayerSettlementConstructionTests.ConstructionRoute_UsesTheAuthorityHeaderAndExactResultEnvelope",
+        "PlayerSettlementConstructionTests.ConstructionDiff_RequiresExactRootsParentsAndTargets"
+      ]
+    },
+    {
+      "moduleId": "PlayerSettlement",
+      "assemblySha256": "74f9ab2ebc82bdc755886c6ad0802500c2df89015d7c65cd5018c543dbf18119",
+      "metadataTokens": [
         "0x060000D2",
         "0x060000D3",
         "0x060000DC",
@@ -7767,7 +7786,6 @@
         "0x060002D3",
         "0x060002D4",
         "0x060002D5",
-        "0x060002D6",
         "0x060002D7",
         "0x060002D8",
         "0x060002D9",
@@ -7775,7 +7793,6 @@
         "0x060002DB",
         "0x060002DC",
         "0x060002DD",
-        "0x060002DE",
         "0x060002DF",
         "0x060002E0",
         "0x060002E1",
@@ -7828,7 +7845,6 @@
         "0x06000310",
         "0x06000311",
         "0x06000312",
-        "0x06000313",
         "0x06000314",
         "0x06000315",
         "0x06000316",
@@ -7848,7 +7864,6 @@
         "0x06000324",
         "0x06000325",
         "0x06000326",
-        "0x06000327",
         "0x06000328",
         "0x06000329",
         "0x0600032A",
@@ -7879,7 +7894,6 @@
         "0x06000343",
         "0x06000344",
         "0x06000345",
-        "0x06000346",
         "0x06000347",
         "0x06000348",
         "0x06000349",

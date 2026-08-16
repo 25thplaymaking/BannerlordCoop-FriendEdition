@@ -1,4 +1,8 @@
+using Common;
 using Common.Messaging;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
+using GameInterface.Services.WorkshopMods.Core;
 using ProtoBuf;
 using System;
 using System.Collections;
@@ -14,6 +18,42 @@ using TaleWorlds.Library;
 using TaleWorlds.ObjectSystem;
 
 namespace GameInterface.Services.WorkshopMods.PlayerSettlement;
+
+internal sealed class PlayerSettlementCapabilitySource : IWorkshopCapabilitySource
+{
+    internal const string ModuleId = "PlayerSettlement";
+    internal const string Operation = "Construction";
+
+    private readonly IModConfig modConfig;
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRequestRouter authorityRequestRouter;
+    private readonly PlayerSettlementCompatibilityHandler compatibilityHandler;
+
+    public PlayerSettlementCapabilitySource(IModConfig modConfig, IModConfigAuthority configAuthority = null,
+        IAuthorityRequestRouter authorityRequestRouter = null,
+        PlayerSettlementCompatibilityHandler compatibilityHandler = null)
+    {
+        this.modConfig = modConfig;
+        this.configAuthority = configAuthority;
+        this.authorityRequestRouter = authorityRequestRouter;
+        this.compatibilityHandler = compatibilityHandler;
+    }
+
+    public IEnumerable<WorkshopCapability> CaptureCapabilities()
+    {
+        var options = modConfig.Data == null ? ModConfigProvider.ModOptions :
+            new ModOptions(modConfig.Data.ModOptions ?? new ModOptionsData());
+        bool optionEnabled = options.IsWorkshopModuleEnabled(ModuleId);
+        bool routeReady = authorityRequestRouter?.IsRegistered("workshop.player-settlement.construction", AuthorityRouteKind.Command) == true &&
+            authorityRequestRouter.IsRegistered("workshop.player-settlement.snapshot", AuthorityRouteKind.BootstrapQuery);
+        bool snapshotCurrent = configAuthority != null && configAuthority.TryGetCurrent(out var config) &&
+            (!ModInformation.IsClient || (compatibilityHandler?.SnapshotReadiness == WorkshopSnapshotReadiness.Ready &&
+                string.Equals(compatibilityHandler.SnapshotSessionId, config.SessionId, StringComparison.Ordinal)));
+        bool enabled = optionEnabled && routeReady && snapshotCurrent;
+        yield return new WorkshopCapability(ModuleId, Operation, enabled,
+            enabled ? string.Empty : optionEnabled ? "authority-command-route-unavailable" : "module-disabled");
+    }
+}
 
 internal enum PlayerSettlementConstructionOperation
 {
@@ -73,6 +113,7 @@ internal sealed class PlayerSettlementDeepEditIntent
     }
 }
 
+[AuthorityRoute("workshop.player-settlement.construction", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 internal sealed class NetworkRequestPlayerSettlementConstruction : ICommand
 {
@@ -91,6 +132,8 @@ internal sealed class NetworkRequestPlayerSettlementConstruction : ICommand
     [ProtoMember(13)] public PlayerSettlementBitTransform SettlementFrame { get; private set; }
     [ProtoMember(14)] public PlayerSettlementBitTransform GateFrame { get; private set; }
     [ProtoMember(15)] private PlayerSettlementDeepEditIntent[] deepEdits;
+    [ProtoMember(16)] public string SessionId { get; private set; }
+    [ProtoMember(17)] public int ConfigProtocolVersion { get; private set; }
 
     internal PlayerSettlementDeepEditIntent[] DeepEdits => deepEdits ?? Array.Empty<PlayerSettlementDeepEditIntent>();
 
@@ -130,6 +173,19 @@ internal sealed class NetworkRequestPlayerSettlementConstruction : ICommand
         GateFrame = gateFrame;
         this.deepEdits = deepEdits ?? Array.Empty<PlayerSettlementDeepEditIntent>();
     }
+
+    internal NetworkRequestPlayerSettlementConstruction(AuthorityRequestHeader header,
+        NetworkRequestPlayerSettlementConstruction intent)
+        : this(header.RequestId, header.ExpectedRevision, intent.Operation, intent.TargetId, intent.BoundId,
+            intent.BoundTargetId, intent.SettlementName, intent.CultureId, intent.TemplateId, intent.VillageType,
+            intent.VillageNumber, intent.SettlementFrame, intent.GateFrame, intent.DeepEdits)
+    {
+        SessionId = header.SessionId;
+        ConfigProtocolVersion = header.ProtocolVersion;
+    }
+
+    internal AuthorityRequestHeader Header =>
+        new AuthorityRequestHeader(ConfigProtocolVersion, SessionId, RequestId, ExpectedRevision);
 }
 
 [ProtoContract(SkipConstructor = true)]
@@ -139,6 +195,14 @@ internal sealed class NetworkPlayerSettlementConstructionResult : ICommand
     [ProtoMember(2)] public PlayerSettlementConstructionStatus Status { get; private set; }
     [ProtoMember(3)] public long Revision { get; private set; }
     [ProtoMember(4)] public string Message { get; private set; }
+    [ProtoMember(5)] public string SessionId { get; private set; }
+    [ProtoMember(6)] public AuthorityResultStatus AuthorityStatus { get; private set; }
+    [ProtoMember(7)] public string CommandDigest { get; private set; }
+    [ProtoMember(8)] public string GraphFingerprint { get; private set; }
+    [ProtoMember(9)] public PlayerSettlementStateEntry[] AffectedEntries { get; private set; }
+    [ProtoMember(10)] public int ActorGold { get; private set; }
+    [ProtoMember(11)] public string OwnerId { get; private set; }
+    [ProtoMember(12)] public string GarrisonId { get; private set; }
 
     private NetworkPlayerSettlementConstructionResult()
     {
@@ -155,6 +219,28 @@ internal sealed class NetworkPlayerSettlementConstructionResult : ICommand
         Revision = revision;
         Message = message ?? string.Empty;
     }
+
+    internal NetworkPlayerSettlementConstructionResult(AuthorityRequestHeader header,
+        PlayerSettlementConstructionStatus status, AuthorityResultStatus authorityStatus, string message,
+        string digest, string fingerprint, PlayerSettlementStateEntry[] affected, int actorGold,
+        string ownerId, string garrisonId, long committedRevision)
+    {
+        RequestId = header.RequestId;
+        Status = status;
+        Revision = committedRevision;
+        Message = message ?? string.Empty;
+        SessionId = header.SessionId;
+        AuthorityStatus = authorityStatus;
+        CommandDigest = digest ?? string.Empty;
+        GraphFingerprint = fingerprint ?? string.Empty;
+        AffectedEntries = affected ?? Array.Empty<PlayerSettlementStateEntry>();
+        ActorGold = actorGold;
+        OwnerId = ownerId ?? string.Empty;
+        GarrisonId = garrisonId ?? string.Empty;
+    }
+
+    internal AuthorityResultHeader Header =>
+        new AuthorityResultHeader(SessionId, RequestId, AuthorityStatus, Revision, Message);
 }
 
 internal static class PlayerSettlementConstructionProtocol

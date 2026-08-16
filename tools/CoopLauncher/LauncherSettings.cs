@@ -40,6 +40,9 @@ public sealed class LauncherSettings
     /// <summary>Anonymous installation id used only for report rate limiting; contains no account identity.</summary>
     public string ReportClientId { get; set; } = "";
 
+    /// <summary>Most recently submitted crash bundle directory; prevents repeat prompts for the same crash.</summary>
+    public string LastSubmittedCrashReport { get; set; } = "";
+
     public string GetOrCreateReportClientId()
     {
         if (!Guid.TryParse(ReportClientId, out _))

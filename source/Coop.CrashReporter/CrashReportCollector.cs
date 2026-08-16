@@ -93,7 +93,28 @@ namespace Coop.CrashReporter
                 reportPath,
                 dumpCopied ? copiedDumpPath : null,
                 copiedLogs);
+            TryReopenLauncherForReview();
             return 0;
+        }
+
+        private static void TryReopenLauncherForReview()
+        {
+            try
+            {
+                string launcherPath = Environment.GetEnvironmentVariable("COOP_LAUNCHER_PATH");
+                if (string.IsNullOrWhiteSpace(launcherPath) || !File.Exists(launcherPath))
+                    return;
+
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = launcherPath,
+                    UseShellExecute = true,
+                });
+            }
+            catch
+            {
+                // Crash collection is complete even when the launcher cannot be reopened.
+            }
         }
 
         private HashSet<string> FindDumps()

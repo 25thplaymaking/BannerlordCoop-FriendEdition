@@ -39,6 +39,7 @@ public sealed class LauncherSettingsTests : IDisposable
             CloseAfterLaunch = false,
             VerboseLogging = true,
             ReportClientId = "5f98966d-15c1-4640-bf87-cdfa26fa3e74",
+            LastSubmittedCrashReport = "2026-08-15_18-42-05_client_1234_deadbeef",
         };
         settings.Save(SettingsPath);
 
@@ -51,6 +52,7 @@ public sealed class LauncherSettingsTests : IDisposable
         Assert.False(loaded.CloseAfterLaunch);
         Assert.True(loaded.VerboseLogging);
         Assert.Equal(settings.ReportClientId, loaded.ReportClientId);
+        Assert.Equal(settings.LastSubmittedCrashReport, loaded.LastSubmittedCrashReport);
     }
 
     [Fact]

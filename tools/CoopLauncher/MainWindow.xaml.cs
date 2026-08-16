@@ -20,6 +20,9 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _statusTimer = new() { Interval = TimeSpan.FromSeconds(12) };
     private PortalClient _portal;
     private IReadOnlyList<GameLocator.GameInstallation> _installations = [];
+    private List<CampaignLordStats> _rosterSource = [];
+    private readonly List<string> _reportImages = [];
+    private CrashReportCandidate? _pendingCrashReport;
 
     private string? _bannerlordExe;
     private string? _modulesDir;
@@ -110,6 +113,11 @@ public partial class MainWindow : Window
             ShowPanel(RosterPanel);
             await LoadRosterAsync();
         };
+        RosterSearchBox.TextChanged += (_, _) => ApplyRosterFilters();
+        RosterScopePicker.SelectionChanged += (_, _) => ApplyRosterFilters();
+        RosterStatusPicker.SelectionChanged += (_, _) => ApplyRosterFilters();
+        RosterSortPicker.SelectionChanged += (_, _) => ApplyRosterFilters();
+        RosterRefreshButton.Click += async (_, _) => await LoadRosterAsync();
         OptionsTab.Checked += (_, _) => ShowPanel(OptionsPanel);
         WireOptions();
 
@@ -204,6 +212,8 @@ public partial class MainWindow : Window
         await RefreshStatusAsync();
         _statusTimer.Start();
         await CheckArmoryAsync();
+
+        PromptForPendingCrashReport();
 
         if (_continuePreparation &&
             _snapshot?.PrimaryAction == ArmoryPrimaryAction.Prepare)
@@ -647,6 +657,7 @@ public partial class MainWindow : Window
         VerboseLoggingCheck.Click += (_, _) => SaveSimpleToggles();
         OpenLogsFolderButton.Click += (_, _) => OpenPathInExplorer(Path.GetDirectoryName(Log.Path)!);
         GithubButton.Click += (_, _) => OpenUrl(_config.ProjectUrl);
+        AttachImagesButton.Click += OnAttachImagesClicked;
         SubmitReportButton.Click += OnSubmitReportClicked;
         RefreshGameInstallations();
     }
@@ -843,6 +854,64 @@ public partial class MainWindow : Window
 
     // ─────────────────────────── Roster / reports ───────────────────────────
 
+    private void PromptForPendingCrashReport()
+    {
+        CrashReportCandidate? candidate = CrashReportLocator.FindPending(_settings.LastSubmittedCrashReport);
+        if (candidate is null) return;
+
+        _pendingCrashReport = candidate;
+        ReportAttachmentsText.Text = "A local crash bundle is ready for review and will not upload without confirmation.";
+        MessageBoxResult choice = MessageBox.Show(
+            "Bannerlord ended unexpectedly and the co-op crash reporter prepared a local diagnostic bundle. " +
+            "Would you like to review it in the Steward report form?",
+            "Calradia Co-op — crash report ready",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (choice != MessageBoxResult.Yes) return;
+
+        OptionsTab.IsChecked = true;
+        ShowPanel(OptionsPanel);
+        ReportKindPicker.SelectedIndex = 0;
+        ReportTitleText.Text = "Bannerlord crash report";
+        ReportDescriptionText.Text =
+            "The launcher found a crash bundle prepared by the co-op crash reporter. " +
+            "Add what you were doing immediately before Bannerlord closed.\n\n" +
+            candidate.Summary;
+        RefreshReportAttachmentsText();
+        ReportDescriptionText.Focus();
+    }
+
+    private void OnAttachImagesClicked(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Select report images",
+            Multiselect = true,
+            Filter = "Images|*.png;*.jpg;*.jpeg;*.webp",
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        foreach (string path in dialog.FileNames)
+        {
+            if (_reportImages.Count >= 4) break;
+            if (ReportAttachmentPackager.IsEligibleImage(path) &&
+                !_reportImages.Contains(path, StringComparer.OrdinalIgnoreCase))
+                _reportImages.Add(path);
+        }
+        RefreshReportAttachmentsText();
+    }
+
+    private void RefreshReportAttachmentsText()
+    {
+        var parts = new List<string>();
+        if (_pendingCrashReport is not null) parts.Add("1 crash bundle");
+        if (_reportImages.Count > 0) parts.Add($"{_reportImages.Count} image(s)");
+        ReportAttachmentsText.Text = parts.Count == 0
+            ? "No images or crash bundle selected."
+            : $"Selected: {string.Join(" + ", parts)}. Attachments upload only after report confirmation." +
+              (_reportImages.Count > 0 ? " Existing image metadata is included." : "");
+    }
+
     private async Task LoadRosterAsync()
     {
         if (!_portal.IsConfigured)
@@ -861,17 +930,12 @@ public partial class MainWindow : Window
                 RosterGrid.ItemsSource = null;
                 return;
             }
-            var rows = stats.Players
-                .OrderByDescending(player => player.Renown)
-                .ThenByDescending(player => player.Level)
-                .ThenBy(player => player.Name, StringComparer.OrdinalIgnoreCase)
-                .Select((player, index) => new RankedCharacterStats(player, index + 1))
-                .ToArray();
-            RosterGrid.ItemsSource = rows;
+            _rosterSource = stats.EnumerateLords().ToList();
+            ApplyRosterFilters();
             string age = stats.UpdatedAt == default ? "just now" : stats.UpdatedAt.LocalDateTime.ToString("g");
             RosterSummaryText.Text =
-                $"Campaign day {stats.CampaignDay:N0}  •  {stats.OnlinePlayers} online  •  " +
-                $"Bannerlord {stats.GameVersion}  •  updated {age}  •  ranked by renown";
+                $"{_rosterSource.Count:N0} lords  •  campaign day {stats.CampaignDay:N0}  •  " +
+                $"{stats.OnlinePlayers} online  •  Bannerlord {stats.GameVersion}  •  updated {age}";
         }
         catch (Exception ex)
         {
@@ -880,6 +944,52 @@ public partial class MainWindow : Window
             RosterGrid.ItemsSource = null;
         }
     }
+
+    private void ApplyRosterFilters()
+    {
+        if (RosterGrid is null) return;
+
+        string search = RosterSearchBox?.Text.Trim() ?? string.Empty;
+        string scope = SelectedTag(RosterScopePicker, "all");
+        string status = SelectedTag(RosterStatusPicker, "all");
+        string sort = SelectedTag(RosterSortPicker, "renown");
+
+        IEnumerable<CampaignLordStats> rows = _rosterSource.Where(lord =>
+        {
+            if (scope == "player" && !string.Equals(lord.Controller, "player", StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (scope == "ai" && !string.Equals(lord.Controller, "ai", StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (status == "online" && !lord.Online) return false;
+            if (status != "all" && status != "online" &&
+                !string.Equals(lord.Status, status, StringComparison.OrdinalIgnoreCase))
+                return false;
+            return string.IsNullOrWhiteSpace(search) ||
+                   (lord.Name ?? "").Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                   (lord.Clan ?? "").Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                   (lord.Kingdom ?? "").Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                   (lord.Culture ?? "").Contains(search, StringComparison.OrdinalIgnoreCase);
+        });
+
+        IOrderedEnumerable<CampaignLordStats> ranked = sort switch
+        {
+            "gold" => rows.OrderByDescending(lord => lord.Gold),
+            "influence" => rows.OrderByDescending(lord => lord.Influence),
+            "level" => rows.OrderByDescending(lord => lord.Level),
+            "party" => rows.OrderByDescending(lord => lord.PartySize),
+            "fiefs" => rows.OrderByDescending(lord => lord.Fiefs),
+            _ => rows.OrderByDescending(lord => lord.Renown),
+        };
+
+        RosterGrid.ItemsSource = ranked
+            .ThenByDescending(lord => lord.Level)
+            .ThenBy(lord => lord.Name, StringComparer.OrdinalIgnoreCase)
+            .Select((lord, index) => new RankedLordStats(lord, index + 1))
+            .ToArray();
+    }
+
+    private static string SelectedTag(ComboBox? picker, string fallback)
+        => (picker?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? fallback;
 
     private async void OnSubmitReportClicked(object sender, RoutedEventArgs e)
     {
@@ -892,6 +1002,20 @@ public partial class MainWindow : Window
             return;
         }
 
+        ReportAttachmentPackage package = default;
+        bool hasAttachments = _pendingCrashReport is not null || _reportImages.Count > 0;
+        if (hasAttachments)
+        {
+            package = await Task.Run(() => ReportAttachmentPackager.Create(
+                _reportImages, _pendingCrashReport?.ZipPath));
+            if (!package.Success || string.IsNullOrWhiteSpace(package.Path))
+            {
+                OptionsStatusText.Foreground = Steel;
+                OptionsStatusText.Text = package.Message;
+                return;
+            }
+        }
+
         SubmitReportButton.IsEnabled = false;
         object previous = SubmitReportButton.Content;
         SubmitReportButton.Content = "CREATING ISSUE…";
@@ -902,6 +1026,14 @@ public partial class MainWindow : Window
             string logs = AttachLogsCheck.IsChecked == true
                 ? await Task.Run(() => LogPackager.BuildReportExcerpt(_bannerlordExe))
                 : string.Empty;
+            if (_pendingCrashReport is not null)
+            {
+                string crashSummary = _pendingCrashReport.Summary;
+                const string summaryHeader = "\n\nCrash collector summary:\n";
+                int remaining = 4_000 - description.Length - summaryHeader.Length;
+                if (remaining > 0)
+                    description += summaryHeader + crashSummary[..Math.Min(crashSummary.Length, remaining)];
+            }
             string reportClientId = _settings.GetOrCreateReportClientId();
             _settings.Save(LauncherSettings.DefaultPath);
             var submission = new ReportSubmission(
@@ -913,8 +1045,27 @@ public partial class MainWindow : Window
             OptionsStatusText.Text = result.Message;
             if (result.Success)
             {
-                ReportTitleText.Clear();
-                ReportDescriptionText.Clear();
+                bool uploaded = true;
+                if (hasAttachments && package.Path is not null)
+                {
+                    ReportAttachmentResult attachment = await _portal.UploadReportBundleAsync(result, package.Path);
+                    uploaded = attachment.Success;
+                    OptionsStatusText.Foreground = attachment.Success ? Gold : Steel;
+                    OptionsStatusText.Text = attachment.Message;
+                }
+                if (uploaded)
+                {
+                    if (_pendingCrashReport is not null)
+                    {
+                        _settings.LastSubmittedCrashReport = _pendingCrashReport.Id;
+                        _pendingCrashReport = null;
+                    }
+                    _reportImages.Clear();
+                    _settings.Save(LauncherSettings.DefaultPath);
+                    RefreshReportAttachmentsText();
+                    ReportTitleText.Clear();
+                    ReportDescriptionText.Clear();
+                }
                 if (!string.IsNullOrWhiteSpace(result.IssueUrl)) OpenUrl(result.IssueUrl);
             }
         }
@@ -926,18 +1077,27 @@ public partial class MainWindow : Window
         }
         finally
         {
+            if (!string.IsNullOrWhiteSpace(package.Path))
+            {
+                try { File.Delete(package.Path); }
+                catch (Exception ex) { Log.Write($"Could not remove local report package: {ex.Message}"); }
+            }
             SubmitReportButton.Content = previous;
             SubmitReportButton.IsEnabled = true;
         }
     }
 
-    private sealed class RankedCharacterStats
+    private sealed class RankedLordStats
     {
-        public RankedCharacterStats(CharacterStats source, int rank)
+        public RankedLordStats(CampaignLordStats source, int rank)
         {
             Rank = rank;
             Name = source.Name;
+            Controller = Display(source.Controller, "AI");
             Clan = source.Clan;
+            Kingdom = source.Kingdom;
+            Status = Display(source.Status, "Active");
+            CurrentAction = Display(source.CurrentAction, "Unknown");
             Level = source.Level;
             Gold = source.Gold;
             Renown = source.Renown;
@@ -949,7 +1109,11 @@ public partial class MainWindow : Window
         }
         public int Rank { get; }
         public string Name { get; }
+        public string Controller { get; }
         public string Clan { get; }
+        public string Kingdom { get; }
+        public string Status { get; }
+        public string CurrentAction { get; }
         public int Level { get; }
         public int Gold { get; }
         public int Renown { get; }
@@ -958,6 +1122,13 @@ public partial class MainWindow : Window
         public int PartySize { get; }
         public int Fiefs { get; }
         public bool Online { get; }
+
+        private static string Display(string value, string fallback)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return fallback;
+            return string.Join(" ", value.Split([' ', '-', '_'], StringSplitOptions.RemoveEmptyEntries)
+                .Select(part => char.ToUpperInvariant(part[0]) + part[1..].ToLowerInvariant()));
+        }
     }
 
     // ─────────────────────────── Embers ───────────────────────────

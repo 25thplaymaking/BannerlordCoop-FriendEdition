@@ -111,9 +111,26 @@
                         <ColumnDefinition Width="200" />
                     </Grid.ColumnDefinitions>
 
-                    <TextBlock Grid.Column="0" Text="F R O N T I R" VerticalAlignment="Center"
-                               Margin="16,0,0,0" FontSize="12" Foreground="{StaticResource Gold}"
-                               FontWeight="SemiBold" />
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center"
+                                Margin="14,0,0,0" ToolTip="Calradia Co-op">
+                        <!-- The Concord Standard: two shields joined by a shared road. Original launcher mark. -->
+                        <Viewbox Width="26" Height="26" Margin="0,0,8,0">
+                            <Grid Width="32" Height="32">
+                                <Path Data="M3,5 L15,2 L15,25 L9,30 L3,25 Z" Fill="#FF74241D"
+                                      Stroke="{StaticResource Gold}" StrokeThickness="1.6" />
+                                <Path Data="M29,5 L17,2 L17,25 L23,30 L29,25 Z" Fill="#FF263947"
+                                      Stroke="{StaticResource Gold}" StrokeThickness="1.6" />
+                                <Path Data="M12,7 L20,25" Stroke="{StaticResource GoldBright}" StrokeThickness="2" />
+                                <Path Data="M20,7 L12,25" Stroke="{StaticResource GoldBright}" StrokeThickness="2" />
+                            </Grid>
+                        </Viewbox>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="CALRADIA CO-OP" FontFamily="{StaticResource Display}"
+                                       FontSize="13" FontWeight="Bold" Foreground="{StaticResource Gold}" />
+                            <TextBlock Text="CAMPAIGN LAUNCHER" FontFamily="{StaticResource Dispatch}"
+                                       FontSize="7.5" Foreground="{StaticResource Steel}" />
+                        </StackPanel>
+                    </StackPanel>
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center"
                                 VerticalAlignment="Stretch">
@@ -140,8 +157,19 @@
                 <Grid Grid.Row="1">
 
                     <!-- ── Backdrop: dusk sky → mountains → war camp. All original vector art. ── -->
-                    <Grid IsHitTestVisible="False">
-                        <!-- Sky -->
+                    <Image Source="pack://application:,,,/Assets/calradia-muster-backdrop.png"
+                           Stretch="UniformToFill" Opacity="0.9" IsHitTestVisible="False" />
+                    <Rectangle IsHitTestVisible="False" Opacity="0.48">
+                        <Rectangle.Fill>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                <GradientStop Color="#FF090807" Offset="0" />
+                                <GradientStop Color="#99100D0B" Offset="0.48" />
+                                <GradientStop Color="#D914100D" Offset="1" />
+                            </LinearGradientBrush>
+                        </Rectangle.Fill>
+                    </Rectangle>
+                    <Grid IsHitTestVisible="False" Opacity="0.28">
+                        <!-- Original vector weather and depth remain as a restrained overlay. -->
                         <Rectangle>
                             <Rectangle.Fill>
                                 <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
@@ -219,15 +247,15 @@
                         <Path Canvas.Left="53" Canvas.Top="34" Stroke="#66E7C56A" StrokeThickness="1"
                               Data="M0,0 L114,0 L114,364 L57,332 L0,364 Z" />
 
-                        <!-- Heraldic sigil: crossed swords. Gold when the host is up, steel when it's down. -->
+                        <!-- Concord Standard initials; gold when the host is up, steel when it is down. -->
                         <TextBlock x:Name="Sigil" Canvas.Left="60" Canvas.Top="168" Width="100"
-                                   TextAlignment="Center" FontFamily="Segoe UI Symbol" FontSize="72"
-                                   Text="&#x2694;" Foreground="{StaticResource Steel}" />
+                                   TextAlignment="Center" FontFamily="{StaticResource Display}" FontSize="54"
+                                   FontWeight="Bold" Text="C C" Foreground="{StaticResource Steel}" />
 
                         <!-- Muster year etched toward the tail -->
                         <TextBlock Canvas.Left="42" Canvas.Top="300" Width="136" TextAlignment="Center"
                                    FontFamily="{StaticResource Display}" FontSize="18" FontWeight="Bold"
-                                   Foreground="{StaticResource Parchment}" Text="MMXXVI" Opacity="0.7" />
+                                   Foreground="{StaticResource Parchment}" Text="CONCORD" Opacity="0.7" />
                     </Canvas>
 
                     <!-- ── Readability scrim behind the content column ── -->
@@ -441,18 +469,19 @@
                         </ScrollViewer>
                     </Grid>
 
-                    <!-- ══ ROSTER / AUTHORITATIVE CAMPAIGN LEADERBOARD ══ -->
-                    <Grid x:Name="RosterPanel" Margin="330,34,60,34" MaxWidth="820"
+                    <!-- ══ LORDS / AUTHORITATIVE CAMPAIGN LEDGER ══ -->
+                    <Grid x:Name="RosterPanel" Margin="330,34,44,34" MaxWidth="900"
                           Visibility="Collapsed">
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
                         <StackPanel Grid.Row="0" Margin="0,0,0,12">
-                            <TextBlock Text="T H E   C A M P A I G N   R O S T E R"
+                            <TextBlock Text="T H E   C A M P A I G N   L E D G E R"
                                        FontSize="12" Foreground="{StaticResource Steel}" />
-                            <TextBlock Text="Character Leaderboard"
+                            <TextBlock Text="Lords of Calradia"
                                        FontFamily="{StaticResource Display}" FontSize="34" FontWeight="Bold"
                                        Foreground="{StaticResource Parchment}" Margin="0,2,0,0" />
                             <Rectangle Height="1" Width="170" HorizontalAlignment="Left"
@@ -461,7 +490,45 @@
                         <TextBlock x:Name="RosterSummaryText" Grid.Row="1" Margin="0,0,0,10"
                                    FontFamily="{StaticResource Dispatch}" FontSize="11.5"
                                    Foreground="{StaticResource Steel}" Text="Fetching the host's campaign ledger…" />
-                        <DataGrid x:Name="RosterGrid" Grid.Row="2" IsReadOnly="True" AutoGenerateColumns="False"
+                        <Grid Grid.Row="2" Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="2*" />
+                                <ColumnDefinition Width="120" />
+                                <ColumnDefinition Width="132" />
+                                <ColumnDefinition Width="138" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="RosterSearchBox" Grid.Column="0" Height="30" Margin="0,0,8,0"
+                                     Padding="9,5" Background="#CC17120E" Foreground="{StaticResource Parchment}"
+                                     BorderBrush="#66C9A24B" BorderThickness="1" FontFamily="{StaticResource Utility}"
+                                     ToolTip="Search lords, clans, kingdoms, and cultures" />
+                            <ComboBox x:Name="RosterScopePicker" Grid.Column="1" Style="{StaticResource WarComboBox}"
+                                      Height="30" Margin="0,0,8,0" SelectedIndex="0" ToolTip="Filter by controller">
+                                <ComboBoxItem Content="ALL LORDS" Tag="all" />
+                                <ComboBoxItem Content="PLAYERS" Tag="player" />
+                                <ComboBoxItem Content="AI LORDS" Tag="ai" />
+                            </ComboBox>
+                            <ComboBox x:Name="RosterStatusPicker" Grid.Column="2" Style="{StaticResource WarComboBox}"
+                                      Height="30" Margin="0,0,8,0" SelectedIndex="0" ToolTip="Filter by current status">
+                                <ComboBoxItem Content="ANY STATUS" Tag="all" />
+                                <ComboBoxItem Content="ONLINE" Tag="online" />
+                                <ComboBoxItem Content="ACTIVE" Tag="active" />
+                                <ComboBoxItem Content="PRISONER" Tag="prisoner" />
+                                <ComboBoxItem Content="WOUNDED" Tag="wounded" />
+                            </ComboBox>
+                            <ComboBox x:Name="RosterSortPicker" Grid.Column="3" Style="{StaticResource WarComboBox}"
+                                      Height="30" Margin="0,0,8,0" SelectedIndex="0" ToolTip="Choose leaderboard ranking">
+                                <ComboBoxItem Content="RENOWN" Tag="renown" />
+                                <ComboBoxItem Content="GOLD" Tag="gold" />
+                                <ComboBoxItem Content="INFLUENCE" Tag="influence" />
+                                <ComboBoxItem Content="LEVEL" Tag="level" />
+                                <ComboBoxItem Content="PARTY SIZE" Tag="party" />
+                                <ComboBoxItem Content="FIEFS" Tag="fiefs" />
+                            </ComboBox>
+                            <Button x:Name="RosterRefreshButton" Grid.Column="4" Style="{StaticResource GhostButton}"
+                                    Content="REFRESH" Height="30" ToolTip="Fetch the latest campaign ledger" />
+                        </Grid>
+                        <DataGrid x:Name="RosterGrid" Grid.Row="3" IsReadOnly="True" AutoGenerateColumns="False"
                                   CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column"
                                   GridLinesVisibility="Horizontal" Background="#99140F0B"
                                   Foreground="{StaticResource Parchment}" BorderBrush="#55C9A24B"
@@ -478,17 +545,20 @@
                                 </Style>
                             </DataGrid.ColumnHeaderStyle>
                             <DataGrid.Columns>
-                                <DataGridTextColumn Header="#" Binding="{Binding Rank}" Width="38" />
-                                <DataGridTextColumn Header="CHARACTER" Binding="{Binding Name}" Width="150" />
-                                <DataGridTextColumn Header="CLAN" Binding="{Binding Clan}" Width="125" />
-                                <DataGridTextColumn Header="LVL" Binding="{Binding Level}" Width="48" />
-                                <DataGridTextColumn Header="GOLD" Binding="{Binding Gold, StringFormat=N0}" Width="78" />
-                                <DataGridTextColumn Header="RENOWN" Binding="{Binding Renown, StringFormat=N0}" Width="72" />
-                                <DataGridTextColumn Header="INFL." Binding="{Binding Influence, StringFormat=N0}" Width="62" />
-                                <DataGridTextColumn Header="TIER" Binding="{Binding ClanTier}" Width="48" />
-                                <DataGridTextColumn Header="PARTY" Binding="{Binding PartySize}" Width="58" />
-                                <DataGridTextColumn Header="FIEFS" Binding="{Binding Fiefs}" Width="48" />
-                                <DataGridCheckBoxColumn Header="ON" Binding="{Binding Online}" Width="42" />
+                                <DataGridTextColumn Header="#" Binding="{Binding Rank}" Width="28" />
+                                <DataGridTextColumn Header="LORD" Binding="{Binding Name}" Width="105" />
+                                <DataGridTextColumn Header="CTRL" Binding="{Binding Controller}" Width="52" />
+                                <DataGridTextColumn Header="CLAN" Binding="{Binding Clan}" Width="80" />
+                                <DataGridTextColumn Header="REALM" Binding="{Binding Kingdom}" Width="75" />
+                                <DataGridTextColumn Header="STATUS" Binding="{Binding Status}" Width="60" />
+                                <DataGridTextColumn Header="ACTIVITY" Binding="{Binding CurrentAction}" Width="74" />
+                                <DataGridTextColumn Header="LVL" Binding="{Binding Level}" Width="32" />
+                                <DataGridTextColumn Header="GOLD" Binding="{Binding Gold, StringFormat=N0}" Width="50" />
+                                <DataGridTextColumn Header="RENOWN" Binding="{Binding Renown, StringFormat=N0}" Width="59" />
+                                <DataGridTextColumn Header="INF." Binding="{Binding Influence, StringFormat=N0}" Width="47" />
+                                <DataGridTextColumn Header="PTY" Binding="{Binding PartySize}" Width="39" />
+                                <DataGridTextColumn Header="F" Binding="{Binding Fiefs}" Width="35" />
+                                <DataGridCheckBoxColumn Header="ON" Binding="{Binding Online, Mode=OneWay}" Width="30" />
                             </DataGrid.Columns>
                         </DataGrid>
                     </Grid>
@@ -642,9 +712,16 @@
                                 <StackPanel Orientation="Horizontal" Margin="0,8,0,8">
                                     <CheckBox x:Name="AttachLogsCheck" Style="{StaticResource WarCheck}"
                                               IsChecked="True" Content="Attach a redacted excerpt of launcher and game logs" />
+                                    <Button x:Name="AttachImagesButton" Style="{StaticResource GhostButton}"
+                                            Margin="14,0,0,0" Content="ADD IMAGES"
+                                            ToolTip="Add up to four PNG, JPEG, or WebP images (8 MB each)" />
                                     <Button x:Name="SubmitReportButton" Style="{StaticResource GhostButton}"
-                                            Margin="18,0,0,0" Content="CREATE GITHUB ISSUE" />
+                                            Margin="14,0,0,0" Content="SEND REPORT" />
                                 </StackPanel>
+                                <TextBlock x:Name="ReportAttachmentsText" Margin="0,0,0,8"
+                                           FontFamily="{StaticResource Dispatch}" FontSize="10.5"
+                                           Foreground="{StaticResource Steel}"
+                                           Text="No images or crash bundle selected." />
                                 <TextBlock x:Name="OptionsStatusText" FontFamily="{StaticResource Dispatch}"
                                            FontSize="11" Foreground="{StaticResource Steel}"
                                            TextWrapping="Wrap" Text="" />

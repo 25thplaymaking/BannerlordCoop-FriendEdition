@@ -6,6 +6,7 @@ using GameInterface.Configuration;
 using GameInterface.Registry.Messages;
 using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.CampaignService.Messages;
+using GameInterface.Services.WorkshopMods.Core;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
 using GameInterface.Services.Barters;
@@ -60,6 +61,9 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
     private bool compatible;
     private bool objectRegistrationValidated;
     private bool snapshotReady;
+    internal WorkshopSnapshotReadiness SnapshotReadiness { get; private set; }
+    internal string SnapshotSessionId { get; private set; }
+    internal long SnapshotRevision { get; private set; } = -1;
     private long nextConstructionRequestId;
     private PlayerSettlementConstructionBridge constructionBridge;
 
@@ -442,6 +446,9 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         pendingConstructionRequests.Clear();
         nextConstructionRequestId = 0;
         snapshotReady = !ModInformation.IsClient;
+        SnapshotReadiness = ModInformation.IsClient ? WorkshopSnapshotReadiness.Unknown : WorkshopSnapshotReadiness.Ready;
+        SnapshotSessionId = null;
+        SnapshotRevision = -1;
         if (ModInformation.IsClient)
         {
             StartSnapshotBootstrap();
@@ -466,6 +473,7 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
     {
         if (!compatible || !objectRegistrationValidated || !ModInformation.IsClient || snapshotReady ||
             !configAuthority.TryGetCurrent(out _)) return;
+        SnapshotReadiness = WorkshopSnapshotReadiness.Loading;
         snapshotRoute.Submit(default);
     }
 
@@ -513,6 +521,7 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
     {
         if (outcome.Completion == AuthorityClientCompletion.Applied) return;
         snapshotReady = false;
+        SnapshotReadiness = WorkshopSnapshotReadiness.Unavailable;
         Logger.Warning("Player Settlement snapshot bootstrap ended without readiness. Completion={Completion} Reason={Reason}",
             outcome.Completion, outcome.ReasonCode);
     }
@@ -538,6 +547,13 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             () =>
             {
                 var accepted = ApplySnapshot(payload.What, out var failure);
+                if (accepted)
+                {
+                    snapshotReady = true;
+                    SnapshotReadiness = WorkshopSnapshotReadiness.Ready;
+                    if (configAuthority.TryGetCurrent(out var config)) SnapshotSessionId = config.SessionId;
+                    SnapshotRevision = payload.What.Revision;
+                }
                 if (!PlayerSettlementSnapshotFailurePolicy.MustDisconnect(
                         trustedServerTransport: true,
                         snapshotAccepted: accepted))
@@ -576,6 +592,9 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             if (ApplySnapshot(payload.What.Snapshot, out var failure))
             {
                 snapshotReady = true;
+                SnapshotReadiness = WorkshopSnapshotReadiness.Ready;
+                if (configAuthority.TryGetCurrent(out var config)) SnapshotSessionId = config.SessionId;
+                SnapshotRevision = payload.What.Snapshot.Revision;
                 return;
             }
             snapshotReady = false;

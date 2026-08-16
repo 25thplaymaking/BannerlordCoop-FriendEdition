@@ -71,6 +71,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
     private bool compatible;
     private bool stateReady;
     private bool objectsRegistered;
+    internal WorkshopSnapshotReadiness SnapshotReadiness { get; private set; }
+    internal string SnapshotSessionId { get; private set; }
+    internal long SnapshotRevision { get; private set; } = -1;
     private FourberieOperationExecutor operationExecutor;
     private (FourberieMethodSpec Spec, MethodInfo Original, MethodInfo Prefix, MethodInfo Postfix)[] expectedGuards;
 
@@ -817,6 +820,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         lock (snapshotSync) revisionGate.Reset();
         objectsRegistered = true;
         stateReady = !ModInformation.IsClient;
+        SnapshotReadiness = ModInformation.IsClient ? WorkshopSnapshotReadiness.Unknown : WorkshopSnapshotReadiness.Ready;
+        SnapshotSessionId = null;
+        SnapshotRevision = -1;
         if (ModInformation.IsClient)
         {
             StartSnapshotBootstrap();
@@ -838,6 +844,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
     {
         if (!compatible || !objectsRegistered || !ModInformation.IsClient || stateReady ||
             !configAuthority.TryGetCurrent(out _)) return;
+        SnapshotReadiness = WorkshopSnapshotReadiness.Loading;
         snapshotRoute.Submit(default);
     }
 
@@ -884,6 +891,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
     {
         if (outcome.Completion == AuthorityClientCompletion.Applied) return;
         stateReady = false;
+        SnapshotReadiness = WorkshopSnapshotReadiness.Unavailable;
         Logger.Warning("Fourberie snapshot bootstrap ended without readiness. Completion={Completion} Reason={Reason}",
             outcome.Completion, outcome.ReasonCode);
     }
@@ -1355,6 +1363,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                 if (TryApplySnapshot(payload.What, out var failure))
                 {
                     TryShowContractProposal();
+                    SnapshotReadiness = WorkshopSnapshotReadiness.Ready;
+                    if (configAuthority.TryGetCurrent(out var config)) SnapshotSessionId = config.SessionId;
+                    SnapshotRevision = payload.What.Revision;
                     return;
                 }
 
@@ -1382,6 +1393,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                 if (TryApplySnapshot(payload.What.Snapshot, out var failure))
                 {
                     stateReady = true;
+                    SnapshotReadiness = WorkshopSnapshotReadiness.Ready;
+                    if (configAuthority.TryGetCurrent(out var config)) SnapshotSessionId = config.SessionId;
+                    SnapshotRevision = payload.What.Snapshot.Revision;
                     TryShowContractProposal();
                     return;
                 }

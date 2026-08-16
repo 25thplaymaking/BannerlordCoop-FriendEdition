@@ -207,12 +207,7 @@ internal sealed class ConversationPartyTracker : IHandler
         lock (stateLock)
         {
             if (string.IsNullOrEmpty(state.SessionId) || string.IsNullOrEmpty(state.LeaseId)) return ConversationLeaseApplyResult.Conflict;
-            if (replicaSessionId != state.SessionId)
-            {
-                replicaSessionId = state.SessionId;
-                replicaLeases.Clear();
-                conflictedReplicaLeaseIds.Clear();
-            }
+            if (replicaSessionId != state.SessionId) return ConversationLeaseApplyResult.Stale;
             if (replicaLeases.TryGetValue(state.LeaseId, out var current))
             {
                 if (current.Revision > state.Revision) return ConversationLeaseApplyResult.Stale;
@@ -228,6 +223,18 @@ internal sealed class ConversationPartyTracker : IHandler
                 state.OwnerPartyId, state.TargetPartyId, state.SessionId);
             TrimReplicaHistory();
             return ConversationLeaseApplyResult.Applied;
+        }
+    }
+
+    /// <summary>Called only after the host configuration snapshot has been accepted.</summary>
+    internal void ResetReplicaSession(string acceptedSessionId)
+    {
+        lock (stateLock)
+        {
+            if (replicaSessionId == acceptedSessionId) return;
+            replicaSessionId = acceptedSessionId;
+            replicaLeases.Clear();
+            conflictedReplicaLeaseIds.Clear();
         }
     }
 

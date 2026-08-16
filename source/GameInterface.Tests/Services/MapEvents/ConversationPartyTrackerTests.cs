@@ -33,6 +33,7 @@ public class ConversationPartyTrackerTests
         using var tracker = new ConversationPartyTracker(new Mock<IObjectManager>().Object);
         var active = new NetworkConversationLeaseState("lease", 3, true, "owner", "target", "session-a");
 
+        tracker.ResetReplicaSession("session-a");
         Assert.Equal(ConversationLeaseApplyResult.Applied, tracker.ApplyLeaseState(active));
         Assert.True(tracker.IsReplicaLease("session-a", "lease", 3, true, "owner", "target"));
         Assert.False(tracker.IsReplicaLease("session-b", "lease", 3, true, "owner", "target"));
@@ -41,10 +42,25 @@ public class ConversationPartyTrackerTests
             new NetworkConversationLeaseState("lease", 3, false, "owner", "target", "session-a")));
         Assert.True(tracker.IsReplicaLeaseConflicted("session-a", "lease"));
 
+        tracker.ResetReplicaSession("session-b");
         Assert.Equal(ConversationLeaseApplyResult.Applied, tracker.ApplyLeaseState(
             new NetworkConversationLeaseState("replacement", 1, true, "owner", "target", "session-b")));
         Assert.False(tracker.IsReplicaLeaseConflicted("session-a", "lease"));
         Assert.True(tracker.IsReplicaLease("session-b", "replacement", 1, true, "owner", "target"));
+    }
+
+    [Fact]
+    public void ReplicaLease_OldSessionAfterAcceptedReplacement_IsIgnored()
+    {
+        using var tracker = new ConversationPartyTracker(new Mock<IObjectManager>().Object);
+        tracker.ResetReplicaSession("session-new");
+        var current = new NetworkConversationLeaseState("new", 5, true, "owner", "target", "session-new");
+        Assert.Equal(ConversationLeaseApplyResult.Applied, tracker.ApplyLeaseState(current));
+
+        Assert.Equal(ConversationLeaseApplyResult.Stale, tracker.ApplyLeaseState(
+            new NetworkConversationLeaseState("old", 99, true, "owner", "target", "session-old")));
+        Assert.True(tracker.IsReplicaLease("session-new", "new", 5, true, "owner", "target"));
+        Assert.False(tracker.IsReplicaLease("session-old", "old", 99, true, "owner", "target"));
     }
 
     [Fact]

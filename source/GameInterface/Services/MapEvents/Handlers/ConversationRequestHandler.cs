@@ -5,6 +5,7 @@ using Common.Network;
 using Common.Network.Messages;
 using Common.Util;
 using GameInterface.Services.MapEvents.Messages;
+using GameInterface.Services.CampaignService.Messages;
 using GameInterface.Services.AuthorityRequests;
 using GameInterface.Configuration;
 using GameInterface.Services.MapEvents.Messages.Conversation;
@@ -105,6 +106,8 @@ internal class ConversationRequestHandler : IHandler
         this.playerPartyInteractionHandler = playerPartyInteractionHandler;
         this.playerManager = playerManager;
         this.configAuthority = configAuthority;
+        if (!ModInformation.IsServer && configAuthority.TryGetCurrent(out var acceptedConfig))
+            conversationPartyTracker.ResetReplicaSession(acceptedConfig.SessionId);
 
         beginRoute = authorityRequestRouter.Register(AuthorityRoute<NetworkRequestConversation,
             NetworkRequestConversation, NetworkConversationBeginResult>.Define(
@@ -126,6 +129,7 @@ internal class ConversationRequestHandler : IHandler
             failClosedOnApplyFailure: true));
 
         messageBroker.Subscribe<ConversationRequested>(Handle_ConversationRequested);
+        messageBroker.Subscribe<HostModConfigAccepted>(Handle_HostModConfigAccepted);
         messageBroker.Subscribe<NetworkConversationLeaseState>(Handle_NetworkConversationLeaseState);
         messageBroker.Subscribe<NetworkAllowConversation>(Handle_NetworkAllowConversation);
         messageBroker.Subscribe<ConversationEnded>(Handle_ConversationEnded);
@@ -137,6 +141,7 @@ internal class ConversationRequestHandler : IHandler
     public void Dispose()
     {
         messageBroker.Unsubscribe<ConversationRequested>(Handle_ConversationRequested);
+        messageBroker.Unsubscribe<HostModConfigAccepted>(Handle_HostModConfigAccepted);
         messageBroker.Unsubscribe<NetworkConversationLeaseState>(Handle_NetworkConversationLeaseState);
         messageBroker.Unsubscribe<NetworkAllowConversation>(Handle_NetworkAllowConversation);
         messageBroker.Unsubscribe<ConversationEnded>(Handle_ConversationEnded);
@@ -384,7 +389,20 @@ internal class ConversationRequestHandler : IHandler
     private void Handle_NetworkConversationLeaseState(MessagePayload<NetworkConversationLeaseState> payload)
     {
         if (ModInformation.IsServer || !configAuthority.IsTrustedServer(payload.Who)) return;
+        if (!configAuthority.TryGetCurrent(out var accepted) ||
+            !string.Equals(payload.What.SessionId, accepted.SessionId, StringComparison.Ordinal))
+        {
+            Logger.Warning("Ignoring stale conversation lease state. LeaseId={LeaseId} StateSession={StateSession} AcceptedSession={AcceptedSession}",
+                payload.What.LeaseId, payload.What.SessionId, accepted?.SessionId);
+            return;
+        }
         conversationPartyTracker.ApplyLeaseState(payload.What);
+    }
+
+    private void Handle_HostModConfigAccepted(MessagePayload<HostModConfigAccepted> payload)
+    {
+        if (ModInformation.IsServer || payload?.What.Snapshot == null || !configAuthority.IsCurrent(payload.What.Snapshot)) return;
+        conversationPartyTracker.ResetReplicaSession(payload.What.Snapshot.SessionId);
     }
 
     private void PresentBegin(AuthorityClientOutcome<NetworkConversationBeginResult> outcome)

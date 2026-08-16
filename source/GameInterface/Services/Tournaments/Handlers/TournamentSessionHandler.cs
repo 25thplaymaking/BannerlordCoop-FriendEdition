@@ -47,9 +47,12 @@ internal sealed partial class TournamentSessionHandler : IHandler
     private readonly IAuthorityRouteHandle<TournamentLaunchIntent, NetworkTournamentLaunchResult> startRoute;
     private readonly IAuthorityRouteHandle<TournamentLaunchIntent, NetworkTournamentLaunchResult> spectateRoute;
     private readonly IAuthorityRouteHandle<TournamentMissionEnteredIntent, NetworkTournamentMissionEnteredResult> missionEnteredRoute;
+    private readonly IAuthorityRouteHandle<TournamentChoiceIntent, NetworkTournamentChoiceResult> choiceRoute;
+    private readonly IAuthorityRouteHandle<TournamentBetIntent, NetworkTournamentBetResult> betRoute;
     private readonly Dictionary<string, NetworkEnterTournamentMission> pendingMissionLaunches = new();
     private readonly HashSet<string> openedMissionLaunches = new();
     private readonly Dictionary<string, BetLedgerEntry> betLedger = new();
+    private readonly Dictionary<string, NetworkTournamentBetState> receivedBetStates = new();
     private readonly Dictionary<string, TournamentCompletionTransaction> completionTransactions = new();
     private readonly HashSet<string> completionInProgress = new();
     private readonly HashSet<string> liveProgressionControllers = new();
@@ -138,10 +141,29 @@ internal sealed partial class TournamentSessionHandler : IHandler
                 configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
                 failClosedOnApplyFailure: true,
                 isExpectedClientResult: IsExpectedMissionEnteredResult));
+        choiceRoute = authorityRequestRouter.Register(
+            AuthorityRoute<TournamentChoiceIntent, NetworkRequestTournamentChoice, NetworkTournamentChoiceResult>.Define(
+                "tournament.choice", AuthorityRouteKind.Command, CreateAuthorityHeader,
+                (intent, header) => new NetworkRequestTournamentChoice(header, intent.SessionId, intent.ExpectedRevision,
+                    intent.BracketRevision, intent.MatchId, intent.Choice, intent.StructuralDigest),
+                request => request.Header, result => result.Header, ValidateChoiceWireShape, BuildChoiceCommandKey,
+                ValidateAuthorityHeader, ExecuteChoice, CreateChoiceTerminal, ProbeChoiceApplied,
+                _ => TournamentStateSyncHandler.RequestCanonicalResync(), PresentChoiceTerminal,
+                configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true, isExpectedClientResult: IsExpectedChoiceResult));
+        betRoute = authorityRequestRouter.Register(
+            AuthorityRoute<TournamentBetIntent, NetworkRequestTournamentBet, NetworkTournamentBetResult>.Define(
+                "tournament.bet", AuthorityRouteKind.Command, CreateAuthorityHeader,
+                (intent, header) => new NetworkRequestTournamentBet(header, intent.SessionId, intent.ExpectedRevision,
+                    intent.BracketRevision, intent.MatchId, intent.Amount, intent.Sequence, intent.Quote),
+                request => request.Header, result => result.Header, ValidateBetWireShape, BuildBetCommandKey,
+                ValidateAuthorityHeader, ExecuteBet, CreateBetTerminal, ProbeBetApplied,
+                _ => TournamentStateSyncHandler.RequestCanonicalResync(), PresentBetTerminal,
+                configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true, isExpectedClientResult: IsExpectedBetResult));
 
         messageBroker.Subscribe<NetworkRequestLeaveActiveTournament>(Handle_LeaveActive);
-        messageBroker.Subscribe<NetworkRequestTournamentChoice>(Handle_Choice);
-        messageBroker.Subscribe<NetworkRequestTournamentBet>(Handle_Bet);
+        messageBroker.Subscribe<NetworkTournamentBetState>(Handle_BetState);
         messageBroker.Subscribe<NetworkSubmitTournamentSpawnManifest>(Handle_SpawnManifest);
         messageBroker.Subscribe<NetworkSubmitTournamentMatchResult>(Handle_MatchResult);
         messageBroker.Subscribe<NetworkSubmitTournamentHitProgression>(Handle_HitProgression);
@@ -159,9 +181,10 @@ internal sealed partial class TournamentSessionHandler : IHandler
         startRoute.Dispose();
         spectateRoute.Dispose();
         missionEnteredRoute.Dispose();
+        choiceRoute.Dispose();
+        betRoute.Dispose();
         messageBroker.Unsubscribe<NetworkRequestLeaveActiveTournament>(Handle_LeaveActive);
-        messageBroker.Unsubscribe<NetworkRequestTournamentChoice>(Handle_Choice);
-        messageBroker.Unsubscribe<NetworkRequestTournamentBet>(Handle_Bet);
+        messageBroker.Unsubscribe<NetworkTournamentBetState>(Handle_BetState);
         messageBroker.Unsubscribe<NetworkSubmitTournamentSpawnManifest>(Handle_SpawnManifest);
         messageBroker.Unsubscribe<NetworkSubmitTournamentMatchResult>(Handle_MatchResult);
         messageBroker.Unsubscribe<NetworkSubmitTournamentHitProgression>(Handle_HitProgression);
@@ -202,6 +225,18 @@ internal sealed partial class TournamentSessionHandler : IHandler
         Action<AuthorityClientOutcome<NetworkTournamentMissionEnteredResult>> completion = null) =>
         Instance?.missionEnteredRoute.Submit(
             new TournamentMissionEnteredIntent(sessionId, expectedRevision, missionInstanceId, isSpectator), completion);
+
+    internal static AuthorityRequestTicket<NetworkTournamentChoiceResult> SubmitChoice(
+        TournamentSessionSnapshot snapshot, TournamentPlayerChoice choice,
+        Action<AuthorityClientOutcome<NetworkTournamentChoiceResult>> completion = null) =>
+        Instance?.choiceRoute.Submit(new TournamentChoiceIntent(snapshot.SessionId, snapshot.Revision,
+            snapshot.BracketRevision, snapshot.CurrentMatchId, choice, TournamentAuthorityProtocol.StructuralDigest(snapshot)), completion);
+
+    internal static AuthorityRequestTicket<NetworkTournamentBetResult> SubmitBet(
+        TournamentSessionSnapshot snapshot, int amount, long sequence, TournamentBetQuote quote,
+        Action<AuthorityClientOutcome<NetworkTournamentBetResult>> completion = null) =>
+        Instance?.betRoute.Submit(new TournamentBetIntent(snapshot.SessionId, snapshot.Revision, snapshot.BracketRevision,
+            snapshot.CurrentMatchId, amount, sequence, quote), completion);
 
     private AuthorityRequestHeader CreateAuthorityHeader(long requestId)
     {
@@ -454,6 +489,35 @@ internal sealed partial class TournamentSessionHandler : IHandler
         public long ExpectedRevision { get; }
         public string MissionInstanceId { get; }
         public bool IsSpectator { get; }
+    }
+
+    private readonly struct TournamentChoiceIntent
+    {
+        public TournamentChoiceIntent(string sessionId, long expectedRevision, long bracketRevision, string matchId,
+            TournamentPlayerChoice choice, string structuralDigest) =>
+            (SessionId, ExpectedRevision, BracketRevision, MatchId, Choice, StructuralDigest) =
+            (sessionId, expectedRevision, bracketRevision, matchId, choice, structuralDigest);
+        public string SessionId { get; }
+        public long ExpectedRevision { get; }
+        public long BracketRevision { get; }
+        public string MatchId { get; }
+        public TournamentPlayerChoice Choice { get; }
+        public string StructuralDigest { get; }
+    }
+
+    private readonly struct TournamentBetIntent
+    {
+        public TournamentBetIntent(string sessionId, long expectedRevision, long bracketRevision, string matchId,
+            int amount, long sequence, TournamentBetQuote quote) =>
+            (SessionId, ExpectedRevision, BracketRevision, MatchId, Amount, Sequence, Quote) =
+            (sessionId, expectedRevision, bracketRevision, matchId, amount, sequence, quote);
+        public string SessionId { get; }
+        public long ExpectedRevision { get; }
+        public long BracketRevision { get; }
+        public string MatchId { get; }
+        public int Amount { get; }
+        public long Sequence { get; }
+        public TournamentBetQuote Quote { get; }
     }
 
     private bool HasEnrollmentInAnotherTown(string controllerId, string townId)
@@ -719,55 +783,96 @@ internal sealed partial class TournamentSessionHandler : IHandler
         }
     }
 
-    private void Handle_Choice(MessagePayload<NetworkRequestTournamentChoice> payload)
+    private static string ValidateChoiceWireShape(NetworkRequestTournamentChoice request) =>
+        IsBoundedTournamentId(request.SessionId) && IsBoundedTournamentId(request.MatchId) &&
+        request.ExpectedRevision >= 0 && request.BracketRevision >= 0 &&
+        TournamentAuthorityProtocol.IsBoundedDigest(request.StructuralDigest) ? null : "invalid-tournament-choice";
+
+    private static string BuildChoiceCommandKey(NetworkRequestTournamentChoice request) => string.Concat(
+        FieldKey(request.SessionId), request.ExpectedRevision.ToString(), request.BracketRevision.ToString(),
+        FieldKey(request.MatchId), ((int)request.Choice).ToString(), FieldKey(request.StructuralDigest));
+
+    private AuthorityServerReply<NetworkTournamentChoiceResult> ExecuteChoice(
+        AuthorityServerContext context, NetworkRequestTournamentChoice request)
     {
-        if (ModInformation.IsClient || !TryAuthenticate(payload.Who, out var peer, out var player))
-            return;
+        if (!sessionRegistry.TryGet(request.SessionId, out TournamentSessionSnapshot current))
+            return ChoiceReply(context.Header, AuthorityResultStatus.StaleState, null, request, context.Player.ControllerId,
+                TournamentBallotOutcome.Open, "tournament-not-found");
 
-        GameThread.RunSafe(() =>
+        bool sameEpoch = current.Phase == TournamentSessionPhase.AwaitingChoices &&
+            current.CurrentMatchId == request.MatchId && current.BracketRevision == request.BracketRevision &&
+            IsVoter(current, context.Player.ControllerId) &&
+            TournamentAuthorityProtocol.StructuralDigest(current) == request.StructuralDigest;
+        if (!sameEpoch)
         {
-            if (!sessionRegistry.TryGet(payload.What.SessionId, out var current))
-            {
-                SendCanonical(peer, current);
-                return;
-            }
+            SendCanonical(context.Peer, current);
+            return ChoiceReply(context.Header, AuthorityResultStatus.StaleState, current, request, context.Player.ControllerId,
+                TournamentBallotOutcome.Open, "stale-tournament-choice", true);
+        }
 
-            var status = sessionRegistry.TryChoose(
-                payload.What.SessionId,
-                payload.What.ExpectedRevision,
-                payload.What.MatchId,
-                player.ControllerId,
-                payload.What.Choice,
-                out var snapshot,
-                out var outcome);
-            TournamentSessionSnapshot canonical = snapshot ?? current;
-            Logger.Information(
-                "[Tournament] Vote session={SessionId}, match={MatchId}, controller={ControllerId}, role={Role}, choice={Choice}, status={Status}, ready={ReadyCount}/{ReadyVoterCount}, skip={SkipCount}/{SkipVoterCount}, outcome={Outcome}, expectedRevision={ExpectedRevision}, revision={Revision}",
-                current.SessionId,
-                payload.What.MatchId,
-                player.ControllerId,
-                GetPlayerRole(canonical, player.ControllerId),
-                payload.What.Choice,
-                status,
-                canonical.ReadyCount,
-                canonical.VoterCount,
-                canonical.SkipCount,
-                canonical.VoterCount,
-                outcome,
-                payload.What.ExpectedRevision,
-                canonical.Revision);
-            if (status == TournamentMutationStatus.Applied && outcome == TournamentBallotOutcome.SimulateMatch)
-            {
-                TournamentSessionSnapshot simulated = SimulateCurrentMatchAndAdvance(snapshot, player.ControllerId);
-                if (simulated.Revision == snapshot.Revision)
-                    BroadcastSnapshot(snapshot);
-            }
-            else
-            {
-                PublishMutation(status, peer, snapshot);
-            }
-        }, context: nameof(Handle_Choice));
+        long revision = request.ExpectedRevision == current.Revision ? request.ExpectedRevision : current.Revision;
+        TournamentMutationStatus status = sessionRegistry.TryChoose(request.SessionId, revision, request.MatchId,
+            context.Player.ControllerId, request.Choice, out TournamentSessionSnapshot changed, out TournamentBallotOutcome outcome);
+        TournamentSessionSnapshot canonical = changed ?? current;
+        if (status == TournamentMutationStatus.Applied && outcome == TournamentBallotOutcome.SimulateMatch)
+            canonical = SimulateCurrentMatchAndAdvance(canonical, context.Player.ControllerId);
+
+        if (status == TournamentMutationStatus.Applied || status == TournamentMutationStatus.NoChange)
+        {
+            // A correlated canonical snapshot is always emitted before the Accepted terminal reply.
+            if (status == TournamentMutationStatus.Applied) BroadcastSnapshot(canonical);
+            else SendCanonical(context.Peer, canonical);
+            return ChoiceReply(context.Header, AuthorityResultStatus.Accepted, canonical, request, context.Player.ControllerId,
+                outcome, null, true);
+        }
+
+        SendCanonical(context.Peer, canonical);
+        return ChoiceReply(context.Header, AuthorityResultStatus.StaleState, canonical, request, context.Player.ControllerId,
+            outcome, "stale-tournament-choice", true);
     }
+
+    private static AuthorityServerReply<NetworkTournamentChoiceResult> ChoiceReply(AuthorityRequestHeader header,
+        AuthorityResultStatus status, TournamentSessionSnapshot snapshot, NetworkRequestTournamentChoice request,
+        string controllerId, TournamentBallotOutcome outcome, string reasonCode, bool statePublished = false) => new(
+        new NetworkTournamentChoiceResult(header, status, snapshot, request.Choice, outcome, controllerId, reasonCode),
+        statePublished);
+
+    private static NetworkTournamentChoiceResult CreateChoiceTerminal(AuthorityRequestHeader header,
+        AuthorityResultStatus status, string reasonCode) => new(header, status, null, default,
+        TournamentBallotOutcome.Open, null, reasonCode);
+
+    private AuthorityCommitProbeResult ProbeChoiceApplied(NetworkTournamentChoiceResult result)
+    {
+        if (result.Status != AuthorityResultStatus.Accepted || result.Snapshot == null ||
+            result.ControllerId != controllerIdProvider.ControllerId ||
+            !sessionRegistry.TryGet(result.TournamentSessionId, out TournamentSessionSnapshot applied))
+            return AuthorityCommitProbeResult.Pending;
+        if (applied.Revision != result.CommittedRevision || applied.CurrentMatchId != result.MatchId ||
+            applied.BracketRevision != result.BracketRevision ||
+            TournamentAuthorityProtocol.StructuralDigest(applied) != result.StructuralDigest)
+            return AuthorityCommitProbeResult.Invalid;
+        bool choicePresent = applied.Choices.Any(choice => choice.ControllerId == controllerIdProvider.ControllerId &&
+            choice.Choice == result.Choice);
+        bool outcomeChangedEpoch = result.Outcome != TournamentBallotOutcome.Open;
+        return choicePresent || outcomeChangedEpoch ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+    }
+
+    private static bool IsExpectedChoiceResult(NetworkRequestTournamentChoice request,
+        NetworkTournamentChoiceResult result) => result.Status != AuthorityResultStatus.Accepted ||
+        (result.ConfigSessionId == request.ConfigSessionId && result.AuthorityRequestId == request.AuthorityRequestId &&
+         result.TournamentSessionId == request.SessionId && result.Choice == request.Choice &&
+         result.Snapshot != null && result.Snapshot.Revision == result.CommittedRevision);
+
+    private static void PresentChoiceTerminal(AuthorityClientOutcome<NetworkTournamentChoiceResult> outcome)
+    {
+        if (outcome.Completion == AuthorityClientCompletion.Applied) return;
+        Logger.Warning("Tournament choice ended without an applied canonical ballot. Completion={Completion}, Reason={Reason}; reselect after refresh.",
+            outcome.Completion, outcome.ReasonCode);
+        TournamentStateSyncHandler.RequestCanonicalResync();
+    }
+
+    private static bool IsVoter(TournamentSessionSnapshot snapshot, string controllerId) =>
+        TryGetPlayerSlot(snapshot, controllerId, out _) || IsSpectatorRole(snapshot, controllerId);
 
     private void Handle_LeaveActive(MessagePayload<NetworkRequestLeaveActiveTournament> payload)
     {
@@ -779,16 +884,6 @@ internal sealed partial class TournamentSessionHandler : IHandler
             payload.What.ExpectedRevision,
             player.ControllerId,
             peer), context: nameof(Handle_LeaveActive));
-    }
-
-    private void Handle_Bet(MessagePayload<NetworkRequestTournamentBet> payload)
-    {
-        if (ModInformation.IsClient || !TryAuthenticate(payload.Who, out var peer, out var player))
-            return;
-
-        GameThread.RunSafe(
-            () => ProcessBetRequest(peer, player, payload.What),
-            context: nameof(Handle_Bet));
     }
 
     private void Handle_SpawnManifest(MessagePayload<NetworkSubmitTournamentSpawnManifest> payload)
@@ -1790,7 +1885,7 @@ internal sealed partial class TournamentSessionHandler : IHandler
         peer ??= tournamentPeerControllers
             .FirstOrDefault(entry => entry.Value == controllerId)
             .Key;
-        long sequence = Math.Max(ledger.LastRequestSequence, ledger.LastResponseSequence) + 1;
+        long sequence = ledger.LastDomainSequence + 1;
         betLedger.Remove(key);
         SendBetResult(
             peer,
@@ -1815,16 +1910,9 @@ internal sealed partial class TournamentSessionHandler : IHandler
         public readonly Dictionary<string, int> MatchAmounts = new();
         public int ExpectedPayout;
         public int TotalBettedDenars;
-        public long LastRequestSequence;
-        public long LastResponseSequence;
-        public long LastResponseRevision;
-        public bool HasResponse;
-        public bool LastAccepted;
-        public string LastReason;
-        public int LastBettedDenars;
-        public int LastThisRoundBettedDenars;
-        public int LastExpectedPayout;
         public string LastMatchId;
-        public bool LastIsSettlement;
+        public long LastDomainSequence;
+        public string LastHeroId;
+        public int LastHeroGold;
     }
 }

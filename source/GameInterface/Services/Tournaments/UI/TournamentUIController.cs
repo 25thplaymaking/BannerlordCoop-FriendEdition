@@ -186,28 +186,19 @@ internal sealed class TournamentUIController : ITournamentUIController, IHandler
     public void RequestChoice(TournamentSessionSnapshot snapshot, TournamentPlayerChoice choice)
     {
         if (snapshot == null || string.IsNullOrEmpty(snapshot.CurrentMatchId)) return;
-
-        network.SendAll(new NetworkRequestTournamentChoice(
-            snapshot.SessionId,
-            snapshot.Revision,
-            snapshot.CurrentMatchId,
-            choice));
+        TournamentSessionHandler.SubmitChoice(snapshot, choice);
     }
 
     public void RequestBet(TournamentSessionSnapshot snapshot, int amount)
     {
         if (snapshot == null || string.IsNullOrEmpty(snapshot.CurrentMatchId)) return;
+        if (!TryGetBetQuote(snapshot, out TournamentBetQuote quote)) return;
 
         long sequence = betSequencesBySessionId.AddOrUpdate(
             snapshot.SessionId,
             1,
             (_, currentSequence) => currentSequence + 1);
-        network.SendAll(new NetworkRequestTournamentBet(
-            snapshot.SessionId,
-            snapshot.Revision,
-            snapshot.CurrentMatchId,
-            amount,
-            sequence));
+        TournamentSessionHandler.SubmitBet(snapshot, amount, sequence, quote);
     }
 
     private void Handle_TournamentSessionUpdated(MessagePayload<TournamentSessionUpdated> payload)

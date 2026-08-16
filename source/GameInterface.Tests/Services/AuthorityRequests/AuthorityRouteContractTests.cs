@@ -2,6 +2,7 @@ using Common.Messaging;
 using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.MapEvents.Messages.Start;
 using GameInterface.Services.Tournaments.Messages;
+using GameInterface.Services.Tournaments.Data;
 using GameInterface.Services.Villages.Data;
 using GameInterface.Services.Villages.Messages;
 using System;
@@ -147,6 +148,86 @@ public sealed class AuthorityRouteContractTests
         Assert.Equal("mission-a", request.MissionInstanceId);
         Assert.True(request.IsSpectator);
     }
+
+    [Fact]
+    public void TournamentChoiceRequest_DeclaresRouteAndRetainsAuthorityAndBracketEpoch()
+    {
+        var header = new AuthorityRequestHeader(1, "0123456789abcdef0123456789abcdef", 33, 9);
+        var request = new NetworkRequestTournamentChoice(header, "tournament-a", 22, 4, "match-a",
+            TournamentPlayerChoice.Join, "v1|structure");
+
+        var attribute = (AuthorityRouteAttribute)Attribute.GetCustomAttribute(
+            typeof(NetworkRequestTournamentChoice), typeof(AuthorityRouteAttribute));
+        Assert.NotNull(attribute);
+        Assert.Equal("tournament.choice", attribute.RouteId);
+        Assert.Equal(header.SessionId, request.Header.SessionId);
+        Assert.Equal(33, request.Header.RequestId);
+        Assert.Equal(22, request.ExpectedRevision);
+        Assert.Equal(4, request.BracketRevision);
+        Assert.Equal("v1|structure", request.StructuralDigest);
+    }
+
+    [Fact]
+    public void TournamentBetRequest_DeclaresRouteAndCarriesExactQuoteAndDomainSequence()
+    {
+        var header = new AuthorityRequestHeader(1, "0123456789abcdef0123456789abcdef", 34, 10);
+        var request = new NetworkRequestTournamentBet(header, "tournament-a", 23, 5, "match-b", 125, 7,
+            new TournamentBetQuote(400, 2.5f));
+
+        var attribute = (AuthorityRouteAttribute)Attribute.GetCustomAttribute(
+            typeof(NetworkRequestTournamentBet), typeof(AuthorityRouteAttribute));
+        Assert.NotNull(attribute);
+        Assert.Equal("tournament.bet", attribute.RouteId);
+        Assert.Equal(header.RequestId, request.Header.RequestId);
+        Assert.Equal(23, request.ExpectedRevision);
+        Assert.Equal(5, request.BracketRevision);
+        Assert.Equal(7, request.Sequence);
+        Assert.Equal(400, request.QuoteMaximumBet);
+        Assert.Equal(2.5f, request.QuoteOdd);
+    }
+
+    [Fact]
+    public void TournamentChoiceResult_CarriesTheCanonicalSnapshotBeforeItsCorrelatedTerminal()
+    {
+        var header = new AuthorityRequestHeader(1, "0123456789abcdef0123456789abcdef", 35, 11);
+        TournamentSessionSnapshot snapshot = CreateTournamentSnapshot();
+        var result = new NetworkTournamentChoiceResult(header, AuthorityResultStatus.Accepted, snapshot,
+            TournamentPlayerChoice.Join, TournamentBallotOutcome.Open, "controller-a", null);
+
+        Assert.Equal(header.SessionId, result.Header.SessionId);
+        Assert.Equal(header.RequestId, result.Header.RequestId);
+        Assert.Same(snapshot, result.Snapshot);
+        Assert.Equal(snapshot.Revision, result.Header.CommittedRevision);
+        Assert.Equal(snapshot.CurrentMatchId, result.MatchId);
+        Assert.Equal(snapshot.BracketRevision, result.BracketRevision);
+    }
+
+    [Fact]
+    public void TournamentBetStateAndResult_CarryTheSameTargetedCommitTuple()
+    {
+        var header = new AuthorityRequestHeader(1, "0123456789abcdef0123456789abcdef", 36, 12);
+        TournamentSessionSnapshot snapshot = CreateTournamentSnapshot();
+        var state = new NetworkTournamentBetState(header, snapshot, 8, "controller-a", "hero-a", 875, 125, 125, 312);
+        var result = new NetworkTournamentBetResult(header, AuthorityResultStatus.Accepted, snapshot,
+            "controller-a", "hero-a", 8, 125, 125, 312, 875, null);
+
+        Assert.Equal(result.ConfigSessionId, state.ConfigSessionId);
+        Assert.Equal(result.AuthorityRequestId, state.AuthorityRequestId);
+        Assert.Equal(result.TournamentSessionId, state.TournamentSessionId);
+        Assert.Equal(result.Revision, state.CommittedRevision);
+        Assert.Equal(result.MatchId, state.MatchId);
+        Assert.Equal(result.Sequence, state.Sequence);
+        Assert.Equal(result.HeroGold, state.HeroGold);
+        Assert.Equal(result.BettedDenars, state.TotalBettedDenars);
+        Assert.Equal(result.ThisRoundBettedDenars, state.ThisRoundBettedDenars);
+        Assert.Equal(result.ExpectedPayout, state.ExpectedPayout);
+    }
+
+    private static TournamentSessionSnapshot CreateTournamentSnapshot() => new(
+        "tournament-a", "mission-a", "town-a", "scene-a", "prize-a", TournamentSessionPhase.AwaitingChoices,
+        24, 6, "match-a", "controller-a", Array.Empty<string>(), Array.Empty<TournamentContestantData>(),
+        Array.Empty<string>(), Array.Empty<TournamentPlayerChoiceData>(), Array.Empty<TournamentRoundData>(),
+        0, 0, 0, false, false, null);
 
     [Fact]
     public void Router_RefusesARouteWhoseTypedMessageDoesNotDeclareTheSameIdentity()

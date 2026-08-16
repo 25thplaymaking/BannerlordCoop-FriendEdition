@@ -72,7 +72,7 @@ public class TournamentUIControllerTests
     }
 
     [Fact]
-    public void StaleActiveLeave_RetriesAtCanonicalRevisionUntilMemberRemoved()
+    public void ActiveLeave_DoesNotEmitLegacyUncorrelatedNetworkRequest()
     {
         using var controller = CreateController("player-a", out var sent);
         var revisionOne = CreateSnapshot(
@@ -102,14 +102,11 @@ public class TournamentUIControllerTests
             TournamentSessionPhase.AwaitingChoices,
             true));
 
-        var requests = sent.Cast<NetworkRequestLeaveActiveTournament>().ToArray();
-        Assert.Equal(2, requests.Length);
-        Assert.Equal(1, requests[0].ExpectedRevision);
-        Assert.Equal(2, requests[1].ExpectedRevision);
+        Assert.DoesNotContain(sent, message => message is NetworkRequestLeaveActiveTournament);
     }
 
     [Fact]
-    public void CompletedActiveLeave_RetriesUntilServerRemovesSession()
+    public void CompletedActiveLeave_DoesNotEmitLegacyUncorrelatedNetworkRequest()
     {
         using var controller = CreateController("player-a", out var sent);
         var completed = CreateSnapshot(
@@ -123,9 +120,7 @@ public class TournamentUIControllerTests
         controller.RequestLeaveActive(completed);
         controller.RetryPendingActiveLeave(completed);
 
-        var requests = sent.Cast<NetworkRequestLeaveActiveTournament>().ToArray();
-        Assert.Equal(2, requests.Length);
-        Assert.All(requests, request => Assert.Equal(5, request.ExpectedRevision));
+        Assert.DoesNotContain(sent, message => message is NetworkRequestLeaveActiveTournament);
     }
 
     [Fact]

@@ -81,11 +81,17 @@ public class TournamentCanonicalClientFlowTests : SyncTestBase
                 _ => Interlocked.Increment(ref removalCount));
         }
 
-        Broadcast(new NetworkTournamentSessionRemoved(initial.SessionId, initial.TownId));
+        Broadcast(new NetworkTournamentSessionRemoved("config-a", initial.SessionId, initial.TownId,
+            initial.MissionInstanceId, initial.Revision + 1, authorityRequestId: 0));
 
         AssertRemoved(clients[0], initial.SessionId, initial.TownId);
         AssertRemoved(clients[1], initial.SessionId, initial.TownId);
         Assert.Equal(2, Volatile.Read(ref removalCount));
+
+        // A relay-delayed pre-terminal snapshot cannot resurrect a removed tournament.
+        Broadcast(new NetworkTournamentSessionSnapshot(lateSpectator));
+        AssertRemoved(clients[0], initial.SessionId, initial.TownId);
+        AssertRemoved(clients[1], initial.SessionId, initial.TownId);
     }
 
     private void Broadcast<T>(T message) where T : Common.Messaging.IMessage

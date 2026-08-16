@@ -217,6 +217,7 @@ public readonly struct NetworkTournamentLaunchResult : IEvent
     public AuthorityResultHeader Header => new(SessionId, AuthorityRequestId, Status, CommittedRevision, ReasonCode);
 }
 
+[AuthorityRoute("tournament.leave-active", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 public readonly struct NetworkRequestLeaveActiveTournament : ICommand
 {
@@ -224,12 +225,50 @@ public readonly struct NetworkRequestLeaveActiveTournament : ICommand
     public readonly string SessionId;
     [ProtoMember(2)]
     public readonly long ExpectedRevision;
+    [ProtoMember(3)] public readonly int ProtocolVersion;
+    [ProtoMember(4)] public readonly string ConfigSessionId;
+    [ProtoMember(5)] public readonly long AuthorityRequestId;
+    [ProtoMember(6)] public readonly long ConfigRevision;
 
-    public NetworkRequestLeaveActiveTournament(string sessionId, long expectedRevision)
+    public NetworkRequestLeaveActiveTournament(AuthorityRequestHeader header, string sessionId, long expectedRevision)
     {
         SessionId = sessionId;
         ExpectedRevision = expectedRevision;
+        ProtocolVersion = header.ProtocolVersion;
+        ConfigSessionId = header.SessionId;
+        AuthorityRequestId = header.RequestId;
+        ConfigRevision = header.ExpectedRevision;
     }
+
+    public AuthorityRequestHeader Header => new(ProtocolVersion, ConfigSessionId, AuthorityRequestId, ConfigRevision);
+}
+
+[ProtoContract(SkipConstructor = true)]
+public readonly struct NetworkTournamentLeaveActiveResult : IEvent
+{
+    [ProtoMember(1)] public readonly TournamentSessionSnapshot Snapshot;
+    [ProtoMember(2)] public readonly NetworkTournamentSessionRemoved Tombstone;
+    [ProtoMember(3)] public readonly string SessionId;
+    [ProtoMember(4)] public readonly long AuthorityRequestId;
+    [ProtoMember(5)] public readonly AuthorityResultStatus Status;
+    [ProtoMember(6)] public readonly long CommittedRevision;
+    [ProtoMember(7)] public readonly string ReasonCode;
+
+    public NetworkTournamentLeaveActiveResult(AuthorityRequestHeader request, AuthorityResultStatus status,
+        TournamentSessionSnapshot snapshot, NetworkTournamentSessionRemoved tombstone, string reasonCode)
+    {
+        Snapshot = snapshot;
+        Tombstone = tombstone;
+        SessionId = request.SessionId;
+        AuthorityRequestId = request.RequestId;
+        Status = status;
+        CommittedRevision = tombstone.TerminalRevision != 0
+            ? tombstone.TerminalRevision
+            : snapshot?.Revision ?? request.ExpectedRevision;
+        ReasonCode = reasonCode;
+    }
+
+    public AuthorityResultHeader Header => new(SessionId, AuthorityRequestId, Status, CommittedRevision, ReasonCode);
 }
 
 [AuthorityRoute("tournament.choice", AuthorityRouteKind.Command)]

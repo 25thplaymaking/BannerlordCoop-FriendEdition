@@ -2,6 +2,7 @@ using GameInterface.Services.Tournaments.Data;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using GameInterface.Services.Tournaments.Messages;
 
 namespace GameInterface.Services.Tournaments;
 
@@ -132,6 +133,8 @@ public interface ITournamentSessionRegistry : IGameAbstraction
         out TournamentSessionSnapshot snapshot);
     bool TryGetSpawnManifest(string sessionId, out TournamentSpawnManifestData manifest);
     bool ApplySnapshot(TournamentSessionSnapshot snapshot);
+    bool ApplyTombstone(NetworkTournamentSessionRemoved tombstone);
+    bool TryGetTombstone(string configSessionId, string sessionId, out NetworkTournamentSessionRemoved tombstone);
     bool Remove(string sessionId);
 }
 
@@ -142,6 +145,10 @@ public sealed partial class TournamentSessionRegistry : ITournamentSessionRegist
     private readonly object gate = new();
     private readonly Dictionary<string, TournamentSessionState> sessionsById = new();
     private readonly Dictionary<string, string> sessionIdsByTown = new();
+    // Tombstones are intentionally bounded in-memory state: enough to dominate delayed relay
+    // messages without introducing persistence or a second authority store.
+    private readonly Dictionary<string, NetworkTournamentSessionRemoved> tombstonesByConfigAndSession = new();
+    private const int MaximumRetainedTombstones = 256;
 
     public TournamentSessionSnapshot[] GetAll()
     {
@@ -279,8 +286,9 @@ public sealed partial class TournamentSessionRegistry : ITournamentSessionRegist
 
             if (!session.Contestants.Any(contestant => contestant.IsHuman))
             {
-                RemoveSession(session);
-                snapshot = null;
+                // The handler creates and retains the terminal tombstone before removal. Keeping
+                // this snapshot here is the required hand-off for that ordered finalization.
+                snapshot = session.CreateSnapshot();
                 sessionRemoved = true;
                 return TournamentMutationStatus.Applied;
             }
@@ -685,6 +693,11 @@ public sealed partial class TournamentSessionRegistry : ITournamentSessionRegist
                 string.IsNullOrEmpty(snapshot.TownId))
                 return false;
 
+            if (tombstonesByConfigAndSession.Values.Any(tombstone =>
+                    tombstone.SessionId == snapshot.SessionId &&
+                    tombstone.TerminalRevision >= snapshot.Revision))
+                return false;
+
             if (sessionsById.TryGetValue(snapshot.SessionId, out var existing) && existing.Revision >= snapshot.Revision)
                 return false;
 
@@ -709,6 +722,39 @@ public sealed partial class TournamentSessionRegistry : ITournamentSessionRegist
             return true;
         }
     }
+
+    public bool ApplyTombstone(NetworkTournamentSessionRemoved tombstone)
+    {
+        lock (gate)
+        {
+            if (string.IsNullOrEmpty(tombstone.SessionId) || string.IsNullOrEmpty(tombstone.TownId) ||
+                string.IsNullOrEmpty(tombstone.MissionInstanceId) || tombstone.TerminalRevision < 1)
+                return false;
+
+            string key = TombstoneKey(tombstone.ConfigSessionId, tombstone.SessionId);
+            if (tombstonesByConfigAndSession.TryGetValue(key, out var existing) &&
+                existing.TerminalRevision >= tombstone.TerminalRevision)
+                return false;
+
+            tombstonesByConfigAndSession[key] = tombstone;
+            if (tombstonesByConfigAndSession.Count > MaximumRetainedTombstones)
+                tombstonesByConfigAndSession.Remove(tombstonesByConfigAndSession.Keys.First());
+
+            if (sessionsById.TryGetValue(tombstone.SessionId, out var session))
+                RemoveSession(session);
+            return true;
+        }
+    }
+
+    public bool TryGetTombstone(string configSessionId, string sessionId,
+        out NetworkTournamentSessionRemoved tombstone)
+    {
+        lock (gate)
+            return tombstonesByConfigAndSession.TryGetValue(TombstoneKey(configSessionId, sessionId), out tombstone);
+    }
+
+    private static string TombstoneKey(string configSessionId, string sessionId) =>
+        string.Concat(configSessionId ?? string.Empty, "\n", sessionId ?? string.Empty);
 
     private bool TryResolveForMutation(
         string sessionId,

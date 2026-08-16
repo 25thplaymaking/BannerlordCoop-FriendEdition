@@ -118,7 +118,7 @@ public class TournamentBettingFlowTests : SyncTestBase
         Server.NetworkSentMessages.Clear();
         Server.SimulateMessage(
             fixture.Bettor.NetPeer,
-            new NetworkRequestLeaveActiveTournament(SessionId, live.Revision));
+            new NetworkRequestLeaveActiveTournament(CreateHostReportHeader(99), SessionId, live.Revision));
 
         NetworkTournamentBetResult settlement = AssertSettlement("Tournament bet forfeited");
         Assert.Equal(MatchId, settlement.MatchId);

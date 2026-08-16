@@ -308,9 +308,14 @@ internal sealed class TournamentUIController : ITournamentUIController, IHandler
 
     private void SendLeaveActive(TournamentSessionSnapshot snapshot)
     {
-        network.SendAll(new NetworkRequestLeaveActiveTournament(
+        TournamentSessionHandler.SubmitLeaveActive(
             snapshot.SessionId,
-            snapshot.Revision));
+            snapshot.Revision,
+            outcome =>
+            {
+                if (outcome.Completion != AuthorityClientCompletion.Applied)
+                    pendingActiveLeaves.TryRemove(snapshot.SessionId, out _);
+            });
     }
 
     private void RouteRemovedSession(string townId)

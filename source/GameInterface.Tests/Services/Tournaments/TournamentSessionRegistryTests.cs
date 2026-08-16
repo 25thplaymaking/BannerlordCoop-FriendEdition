@@ -1,5 +1,6 @@
 using GameInterface.Services.Tournaments;
 using GameInterface.Services.Tournaments.Data;
+using GameInterface.Services.Tournaments.Messages;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -65,7 +66,7 @@ public class TournamentSessionRegistryTests
     }
 
     [Fact]
-    public void LastPreparationLeave_RemovesSessionAndRestoresNativeTournamentAvailability()
+    public void LastPreparationLeave_ProvidesFinalSnapshotForTerminalTombstone()
     {
         var registry = new TournamentSessionRegistry();
         TournamentSessionSnapshot snapshot = CreateSession(registry, "session-1", "town-1");
@@ -88,7 +89,12 @@ public class TournamentSessionRegistryTests
 
         Assert.Equal(TournamentMutationStatus.Applied, status);
         Assert.True(removed);
-        Assert.Null(removedSnapshot);
+        Assert.NotNull(removedSnapshot);
+        Assert.True(registry.TryGetByTown("town-1", out _));
+
+        var tombstone = new NetworkTournamentSessionRemoved("config-1", removedSnapshot.SessionId,
+            removedSnapshot.TownId, removedSnapshot.MissionInstanceId, removedSnapshot.Revision + 1, 0);
+        Assert.True(registry.ApplyTombstone(tombstone));
         Assert.False(registry.TryGetByTown("town-1", out _));
     }
 
@@ -104,6 +110,22 @@ public class TournamentSessionRegistryTests
         Assert.True(registry.TryGetByTown("town-1", out var first));
         Assert.True(registry.TryGetByTown("town-2", out var second));
         Assert.NotEqual(first.SessionId, second.SessionId);
+    }
+
+    [Fact]
+    public void Tombstone_DominatesDelayedSnapshotAndIsIdempotent()
+    {
+        var registry = new TournamentSessionRegistry();
+        TournamentSessionSnapshot snapshot = CreateSession(registry, "session-1", "town-1");
+        var tombstone = new NetworkTournamentSessionRemoved("config-1", snapshot.SessionId, snapshot.TownId,
+            snapshot.MissionInstanceId, snapshot.Revision + 1, authorityRequestId: 7);
+
+        Assert.True(registry.ApplyTombstone(tombstone));
+        Assert.False(registry.ApplyTombstone(tombstone));
+        Assert.False(registry.TryGet(snapshot.SessionId, out _));
+        Assert.True(registry.TryGetTombstone("config-1", snapshot.SessionId, out var retained));
+        Assert.Equal(7, retained.AuthorityRequestId);
+        Assert.False(registry.ApplySnapshot(snapshot));
     }
 
     [Fact]

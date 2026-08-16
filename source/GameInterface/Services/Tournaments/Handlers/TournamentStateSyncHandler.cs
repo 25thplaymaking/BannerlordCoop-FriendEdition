@@ -293,9 +293,10 @@ internal sealed class TournamentStateSyncHandler : IHandler
         foreach (TournamentSessionSnapshot stale in TournamentStateReconciliation.GetStaleSessions(
                      sessionRegistry.GetAll(), sessions))
         {
-            if (!sessionRegistry.Remove(stale.SessionId))
+            var tombstone = CreateInternalTombstone(stale);
+            if (!sessionRegistry.ApplyTombstone(tombstone))
                 continue;
-            messageBroker.Publish(this, new TournamentSessionRemoved(stale.SessionId, stale.TownId));
+            messageBroker.Publish(this, new TournamentSessionRemoved(tombstone));
         }
     }
 
@@ -403,11 +404,16 @@ internal sealed class TournamentStateSyncHandler : IHandler
 
         GameThread.RunSafe(() =>
         {
-            sessionRegistry.Remove(payload.What.SessionId);
-            messageBroker.Publish(this, new TournamentSessionRemoved(
-                payload.What.SessionId,
-                payload.What.TownId));
+            if (sessionRegistry.ApplyTombstone(payload.What))
+                messageBroker.Publish(this, new TournamentSessionRemoved(payload.What));
         }, context: nameof(Handle_SessionRemoved));
+    }
+
+    private NetworkTournamentSessionRemoved CreateInternalTombstone(TournamentSessionSnapshot snapshot)
+    {
+        string configSessionId = configAuthority.TryGetCurrent(out ModConfigSnapshot config) ? config.SessionId : string.Empty;
+        return new NetworkTournamentSessionRemoved(configSessionId, snapshot.SessionId, snapshot.TownId,
+            snapshot.MissionInstanceId, snapshot.Revision + 1, authorityRequestId: 0);
     }
 
     private NetworkTournamentStateSnapshot CreateStateSnapshot()

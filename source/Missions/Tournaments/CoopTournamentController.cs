@@ -1975,7 +1975,7 @@ public class CoopTournamentController : CoopMissionController
         if (leaveRequestRevision == snapshot.Revision) return;
 
         leaveRequestRevision = snapshot.Revision;
-        relayNetwork.SendAll(new NetworkRequestLeaveActiveTournament(snapshot.SessionId, snapshot.Revision));
+        TournamentSessionHandler.SubmitLeaveActive(snapshot.SessionId, snapshot.Revision);
     }
 
     protected override void OnLeaving()
@@ -1983,7 +1983,7 @@ public class CoopTournamentController : CoopMissionController
         ProcessPendingLocalDamage(force: true);
 
         if (snapshot != null && !snapshot.IsCompleted && HasLocalMissionMember(snapshot) && !leaveRequested)
-            relayNetwork.SendAll(new NetworkRequestLeaveActiveTournament(snapshot.SessionId, snapshot.Revision));
+            TournamentSessionHandler.SubmitLeaveActive(snapshot.SessionId, snapshot.Revision);
 
         if (session.HasInstance)
             relayNetwork.SendAll(new NetworkMissionLeft(session.OwnControllerId, session.InstanceId));

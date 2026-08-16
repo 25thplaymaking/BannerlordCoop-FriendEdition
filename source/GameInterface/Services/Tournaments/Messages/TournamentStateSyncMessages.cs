@@ -106,11 +106,20 @@ public readonly struct NetworkTournamentSessionRemoved : ICommand
     public readonly string SessionId;
     [ProtoMember(2)]
     public readonly string TownId;
+    [ProtoMember(3)] public readonly string ConfigSessionId;
+    [ProtoMember(4)] public readonly string MissionInstanceId;
+    [ProtoMember(5)] public readonly long TerminalRevision;
+    [ProtoMember(6)] public readonly long AuthorityRequestId;
 
-    public NetworkTournamentSessionRemoved(string sessionId, string townId)
+    public NetworkTournamentSessionRemoved(string configSessionId, string sessionId, string townId,
+        string missionInstanceId, long terminalRevision, long authorityRequestId)
     {
+        ConfigSessionId = configSessionId;
         SessionId = sessionId;
         TownId = townId;
+        MissionInstanceId = missionInstanceId;
+        TerminalRevision = terminalRevision;
+        AuthorityRequestId = authorityRequestId;
     }
 }
 
@@ -118,11 +127,19 @@ public sealed class TournamentSessionRemoved : IEvent
 {
     public string SessionId { get; }
     public string TownId { get; }
+    public string ConfigSessionId { get; }
+    public string MissionInstanceId { get; }
+    public long TerminalRevision { get; }
+    public long AuthorityRequestId { get; }
 
-    public TournamentSessionRemoved(string sessionId, string townId)
+    public TournamentSessionRemoved(NetworkTournamentSessionRemoved tombstone)
     {
-        SessionId = sessionId;
-        TownId = townId;
+        ConfigSessionId = tombstone.ConfigSessionId;
+        SessionId = tombstone.SessionId;
+        TownId = tombstone.TownId;
+        MissionInstanceId = tombstone.MissionInstanceId;
+        TerminalRevision = tombstone.TerminalRevision;
+        AuthorityRequestId = tombstone.AuthorityRequestId;
     }
 }
 

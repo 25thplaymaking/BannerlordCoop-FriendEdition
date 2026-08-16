@@ -131,6 +131,17 @@ public class PlayerArmyWaitBehaviorTests : IDisposable
             Assert.True(playerManager.AddPlayer(
                 new Player("PlayerOne", clientHeroId, clientPartyId, clanId: null, characterObjectId: null)));
             playerManager.SetPeer("PlayerOne", client.NetPeer);
+
+            Assert.True(playerManager.TryGetPlayer(client.NetPeer, out var registered));
+            Assert.Equal(clientPartyId, registered.MobilePartyId);
+            Assert.Equal(clientHeroId, registered.HeroId);
+            Assert.True(playerManager.IsConnected(registered));
+            Assert.True(server.ObjectManager.TryGetObject<MobileParty>(registered.MobilePartyId, out var actor));
+            Assert.True(server.ObjectManager.TryGetId(actor.LeaderHero, out var actorHeroId));
+            Assert.Equal(registered.HeroId, actorHeroId);
+            Assert.True(server.ObjectManager.TryGetObject<Army>(armyId, out var army));
+            Assert.Same(army, actor.Army);
+            Assert.Contains(actor, army._parties);
         });
 
         client.Call(() =>

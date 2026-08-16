@@ -183,7 +183,22 @@ internal sealed class ArmyAuthorityHandler : IHandler
 
     private void Add(Army army, MobileParty party, bool merged) { ArmyPatches.AddMobilePartyInArmy(party, army); objectManager.TryGetId(army, out var a); objectManager.TryGetId(party, out var p); network.SendAll(new NetworkAddMobilePartyInArmy(a, p, merged)); }
     private void Remove(Army army, MobileParty party, MobileParty client) { ArmyPatches.RemoveMobilePartyInArmy(party, army, client); objectManager.TryGetId(army, out var a); objectManager.TryGetId(party, out var p); objectManager.TryGetId(client, out var cp); network.SendAll(new NetworkRemovePartyInArmy(a, p, cp)); }
-    private bool Actor(AuthorityServerContext c, out MobileParty party, out string reason) { party = null; reason = null; if (string.IsNullOrWhiteSpace(c.Player.MobilePartyId) || !objectManager.TryGetObject(c.Player.MobilePartyId, out party) || party.LeaderHero == null || !string.Equals(party.LeaderHero.StringId, c.Player.HeroId, StringComparison.Ordinal)) { reason = "army-actor-missing"; return false; } return true; }
+    private bool Actor(AuthorityServerContext c, out MobileParty party, out string reason)
+    {
+        party = null;
+        reason = null;
+        if (string.IsNullOrWhiteSpace(c.Player.MobilePartyId) ||
+            !objectManager.TryGetObject(c.Player.MobilePartyId, out party) ||
+            party.LeaderHero == null ||
+            !objectManager.TryGetId(party.LeaderHero, out var leaderHeroId) ||
+            !string.Equals(leaderHeroId, c.Player.HeroId, StringComparison.Ordinal))
+        {
+            reason = "army-actor-missing";
+            return false;
+        }
+
+        return true;
+    }
     private bool Army(string id, out Army army) => objectManager.TryGetObject(id, out army);
     private bool Party(string id, out MobileParty party) => objectManager.TryGetObject(id, out party);
     private static bool SameFaction(MobileParty one, MobileParty two) => one?.MapFaction != null && ReferenceEquals(one.MapFaction, two?.MapFaction);

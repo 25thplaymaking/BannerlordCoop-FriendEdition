@@ -3,6 +3,8 @@ using Common.Logging;
 using Common.Messaging;
 using Common.Network;
 using Common.Util;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players.Messages;
 using LiteNetLib;
@@ -33,20 +35,33 @@ internal class PlayerDeletionHandler : IHandler
     private readonly INetwork network;
     private readonly IObjectManager objectManager;
     private readonly IPlayerManager playerManager;
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRouteHandle<object, NetworkPlayerSelfDeleteResult> selfDeleteRoute;
 
     public PlayerDeletionHandler(
         IMessageBroker messageBroker,
         INetwork network,
         IObjectManager objectManager,
-        IPlayerManager playerManager)
+        IPlayerManager playerManager,
+        IModConfigAuthority configAuthority,
+        INetworkConfig configuration,
+        IAuthorityRequestRouter authorityRequestRouter)
     {
         this.messageBroker = messageBroker;
         this.network = network;
         this.objectManager = objectManager;
         this.playerManager = playerManager;
+        this.configAuthority = configAuthority;
+        selfDeleteRoute = authorityRequestRouter.Register(
+            AuthorityRoute<object, NetworkRequestDeletePlayer, NetworkPlayerSelfDeleteResult>.Define(
+                "player.self-delete", AuthorityRouteKind.Command, CreateHeader,
+                (_, header) => new NetworkRequestDeletePlayer(header), request => request.Header, result => result.Header,
+                _ => null, _ => "self", ValidateHeader, ExecuteSelfDelete, SelfDeleteTerminal, _ => AuthorityCommitProbeResult.Applied,
+                _ => { }, PresentSelfDeleteTerminal, configAuthority.IsTrustedServer,
+                new AuthorityTimeoutPolicy(configuration.ObjectCreationTimeout, configuration.ObjectCreationTimeout, 0),
+                failClosedOnApplyFailure: true));
 
         messageBroker.Subscribe<PlayerDeleteRequested>(Handle_PlayerDeleteRequested);
-        messageBroker.Subscribe<NetworkRequestDeletePlayer>(Handle_NetworkRequestDeletePlayer);
         messageBroker.Subscribe<NetworkPlayerRemoved>(Handle_NetworkPlayerRemoved);
         messageBroker.Subscribe<NetworkDeletePlayerDenied>(Handle_NetworkDeletePlayerDenied);
     }
@@ -54,7 +69,7 @@ internal class PlayerDeletionHandler : IHandler
     public void Dispose()
     {
         messageBroker.Unsubscribe<PlayerDeleteRequested>(Handle_PlayerDeleteRequested);
-        messageBroker.Unsubscribe<NetworkRequestDeletePlayer>(Handle_NetworkRequestDeletePlayer);
+        selfDeleteRoute.Dispose();
         messageBroker.Unsubscribe<NetworkPlayerRemoved>(Handle_NetworkPlayerRemoved);
         messageBroker.Unsubscribe<NetworkDeletePlayerDenied>(Handle_NetworkDeletePlayerDenied);
     }
@@ -66,11 +81,65 @@ internal class PlayerDeletionHandler : IHandler
     {
         if (ModInformation.IsServer) return;
 
-        // Advisory only, for server-side cross-checking; the server derives the player to delete
-        // from the requesting connection.
-        objectManager.TryGetId(Hero.MainHero, out var heroId);
+        selfDeleteRoute.Submit(default);
+    }
 
-        network.SendAll(new NetworkRequestDeletePlayer(heroId));
+    private AuthorityRequestHeader CreateHeader(long requestId)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot snapshot)) return default;
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, requestId, snapshot.Revision);
+    }
+
+    private AuthorityHeaderValidation ValidateHeader(AuthorityRequestHeader header)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot current))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "config-unavailable");
+        if (header.ProtocolVersion != current.ProtocolVersion)
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.InvalidRequest, "unsupported-protocol");
+        if (!string.Equals(header.SessionId, current.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-session");
+        return header.ExpectedRevision == current.Revision ? AuthorityHeaderValidation.Valid :
+            AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-state");
+    }
+
+    private AuthorityServerReply<NetworkPlayerSelfDeleteResult> ExecuteSelfDelete(
+        AuthorityServerContext context, NetworkRequestDeletePlayer request)
+    {
+        if (!playerManager.TryGetPlayer(context.Peer, out var player))
+            return SelfDeleteReply(context.Header, AuthorityResultStatus.Unauthorized, "peer-not-player");
+        if (objectManager.TryGetObject<MobileParty>(player.MobilePartyId, out var party) && party != null &&
+            (party.Party?.MapEvent != null || party.BesiegerCamp != null || party.CurrentSettlement != null))
+            return SelfDeleteReply(context.Header, AuthorityResultStatus.Rejected, "self-delete-state-active");
+
+        try
+        {
+            DeletePlayer(context.Peer, null);
+            if (playerManager.TryGetPlayer(context.Peer, out var remainingPlayer))
+                return SelfDeleteReply(context.Header, AuthorityResultStatus.ExecutionFailed, "self-delete-not-applied");
+            // DeletePlayer broadcasts PlayerRemoved before deliberate peer disconnection, then native
+            // death/destroy replication. The requester cannot receive a truthful terminal result.
+            return new AuthorityServerReply<NetworkPlayerSelfDeleteResult>(
+                new NetworkPlayerSelfDeleteResult(context.Header, AuthorityResultStatus.Accepted, null), true, suppressReply: true);
+        }
+        catch (Exception exception)
+        {
+            Logger.Error(exception, "Self-delete failed for {ControllerId}", player.ControllerId);
+            context.Peer.Disconnect();
+            return new AuthorityServerReply<NetworkPlayerSelfDeleteResult>(
+                SelfDeleteTerminal(context.Header, AuthorityResultStatus.ExecutionFailed, "self-delete-failed"), false, suppressReply: true);
+        }
+    }
+
+    private static NetworkPlayerSelfDeleteResult SelfDeleteTerminal(AuthorityRequestHeader header,
+        AuthorityResultStatus status, string reason) => new(header, status, reason);
+
+    private static AuthorityServerReply<NetworkPlayerSelfDeleteResult> SelfDeleteReply(AuthorityRequestHeader header,
+        AuthorityResultStatus status, string reason) => new(new NetworkPlayerSelfDeleteResult(header, status, reason), false);
+
+    private static void PresentSelfDeleteTerminal(AuthorityClientOutcome<NetworkPlayerSelfDeleteResult> outcome)
+    {
+        if (!outcome.Applied && outcome.Completion != AuthorityClientCompletion.Cancelled)
+            Logger.Warning("Self-delete was not accepted. Completion={Completion} Reason={Reason}", outcome.Completion, outcome.ReasonCode);
     }
 
     /// <summary>
@@ -87,8 +156,9 @@ internal class PlayerDeletionHandler : IHandler
             return;
         }
 
-        var requestedHeroId = payload.What.HeroId;
-        GameThread.RunSafe(() => DeletePlayer(peer, requestedHeroId), context: nameof(PlayerDeletionHandler));
+        // This legacy handler is deliberately no longer subscribed. Keep any accidental direct invocation
+        // peer-derived only; the typed route above is the sole live client authority path.
+        GameThread.RunSafe(() => DeletePlayer(peer, null), context: nameof(PlayerDeletionHandler));
     }
 
     private void DeletePlayer(NetPeer peer, string requestedHeroId)

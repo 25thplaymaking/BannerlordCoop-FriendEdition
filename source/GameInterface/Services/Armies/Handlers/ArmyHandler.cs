@@ -74,6 +74,9 @@ public class ArmyHandler : IHandler
 
     private void HandleAddMobilePartyInArmy(MessagePayload<MobilePartyInArmyAdded> obj)
     {
+        // Client events are intents handled by ArmyAuthorityHandler.  These Network* messages are
+        // server-to-client replication only.
+        if (!ModInformation.IsServer) return;
         if (!objectManager.TryGetIdWithLogging(obj.What.Army, out var armyId)) return;
 
         if (!objectManager.TryGetIdWithLogging(obj.What.MobileParty, out var mobilePartyId)) return;
@@ -86,6 +89,11 @@ public class ArmyHandler : IHandler
 
     private void HandleChangeAddMobilePartyInArmy(MessagePayload<NetworkAddMobilePartyInArmy> payload)
     {
+        if (ModInformation.IsServer && payload.Who is NetPeer)
+        {
+            Logger.Warning("Rejected client supplied army membership replication");
+            return;
+        }
         var obj = payload.What;
         GameThread.RunSafe(() =>
         {
@@ -110,6 +118,7 @@ public class ArmyHandler : IHandler
 
     private void HandleRemoveMobilePartyInArmy(MessagePayload<MobilePartyInArmyRemoved> obj)
     {
+        if (!ModInformation.IsServer) return;
         if (!objectManager.TryGetIdWithLogging(obj.What.Army, out var armyId)) return;
         if (!objectManager.TryGetIdWithLogging(obj.What.MobileParty, out var mobilePartyId)) return;
         var clientMobilePartyId = string.Empty;
@@ -126,6 +135,11 @@ public class ArmyHandler : IHandler
 
     private void HandleChangeRemoveMobilePartyInArmy(MessagePayload<NetworkRemovePartyInArmy> payload)
     {
+        if (ModInformation.IsServer && payload.Who is NetPeer)
+        {
+            Logger.Warning("Rejected client supplied army removal replication");
+            return;
+        }
         var data = payload.What;
         var senderPeer = ModInformation.IsServer ? payload.Who as NetPeer : null;
 
@@ -177,6 +191,7 @@ public class ArmyHandler : IHandler
 
     private void HandleArmyAiBehaviorObjectChanged(MessagePayload<ArmyAiBehaviorObjectChanged> payload)
     {
+        if (!ModInformation.IsServer) return;
         var obj = payload.What;
         if (!objectManager.TryGetIdWithLogging(obj.Army, out var armyId)) return;
 
@@ -191,6 +206,11 @@ public class ArmyHandler : IHandler
 
     private void HandleNetworkSetArmyAiBehaviorObject(MessagePayload<NetworkSetArmyAiBehaviorObject> payload)
     {
+        if (ModInformation.IsServer && payload.Who is NetPeer)
+        {
+            Logger.Warning("Rejected client supplied army objective replication");
+            return;
+        }
         var obj = payload.What;
         GameThread.RunSafe(() =>
         {
@@ -213,6 +233,7 @@ public class ArmyHandler : IHandler
     }
     private void HandlePlayerCreatedArmy(MessagePayload<PlayerCreatedArmy> payload)
     {
+        if (!ModInformation.IsServer) return;
         var obj = payload.What;
         if (!objectManager.TryGetIdWithLogging(obj.Kingdom, out var kingdomId)) return;
         if (!objectManager.TryGetIdWithLogging(obj.Leader, out var leaderId)) return;
@@ -230,6 +251,11 @@ public class ArmyHandler : IHandler
 
     private void HandleNetworkPlayerCreatedArmy(MessagePayload<NetworkPlayerCreatedArmy> payload)
     {
+        if (ModInformation.IsServer && payload.Who is NetPeer)
+        {
+            Logger.Warning("Rejected client supplied army creation replication");
+            return;
+        }
         var obj = payload.What;
         GameThread.RunSafe(() =>
         {
@@ -258,6 +284,7 @@ public class ArmyHandler : IHandler
     }
     private void HandlePlayerBoostedArmyCohesion(MessagePayload<PlayerBoostedArmyCohesion> payload)
     {
+        if (!ModInformation.IsServer) return;
         var obj = payload.What;
         if (!objectManager.TryGetIdWithLogging(obj.ArmyLeaderParty, out var leaderPartyId)) return;
 
@@ -266,6 +293,11 @@ public class ArmyHandler : IHandler
 
     private void HandleNetworkPlayerBoostedArmyCohesion(MessagePayload<NetworkPlayerBoostedArmyCohesion> payload)
     {
+        if (ModInformation.IsServer && payload.Who is NetPeer)
+        {
+            Logger.Warning("Rejected client supplied army cohesion replication");
+            return;
+        }
         var obj = payload.What;
         if (!objectManager.TryGetObjectWithLogging<MobileParty>(obj.ArmyLeaderPartyId, out var leaderParty)) return;
 

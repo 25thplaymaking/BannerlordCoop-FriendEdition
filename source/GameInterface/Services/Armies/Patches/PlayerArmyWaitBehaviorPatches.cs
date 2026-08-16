@@ -254,15 +254,9 @@ internal class PlayerArmyWaitBehaviorPatches
 
         if (army == null) return false; // already out - nothing to route
 
-        // Route the authoritative removal, then mirror it locally (like the abandon and siege leave
-        // paths). Without the local mirror the party stayed in the army until the server echo, and
-        // the state-menu tick shoved the player straight back into army_wait.
+        // The authoritative route publishes the removal; do not locally mutate a speculative army.
         var message = new MobilePartyInArmyRemoved(army, mainParty, mainParty);
         MessageBroker.Instance.Publish(__instance, message);
-        using (new AllowedThread())
-        {
-            ArmyPatches.RemoveMobilePartyInArmy(mainParty, army, mainParty);
-        }
         return false;
     }
 
@@ -273,7 +267,6 @@ internal class PlayerArmyWaitBehaviorPatches
         var mainParty = MobileParty.MainParty;
         var army = mainParty.Army;
 
-        MessageBroker.Instance.Publish(__instance, new ChangeClanInfluence(Clan.PlayerClan, (int)(float)Campaign.Current.Models.DiplomacyModel.GetInfluenceCostOfAbandoningArmy()));
         if (PlayerEncounter.Current != null)
         {
             PlayerEncounter.Finish(true);
@@ -287,10 +280,6 @@ internal class PlayerArmyWaitBehaviorPatches
 
         var message = new MobilePartyInArmyRemoved(army, mainParty, mainParty);
         MessageBroker.Instance.Publish(__instance, message);
-        using (new AllowedThread())
-        {
-            ArmyPatches.RemoveMobilePartyInArmy(mainParty, army, mainParty);
-        }
         return false;
     }
 
@@ -310,10 +299,6 @@ internal class PlayerArmyWaitBehaviorPatches
         if (army != null)
         {
             MessageBroker.Instance.Publish(mainParty, new MobilePartyInArmyRemoved(army, mainParty, mainParty));
-            using (new AllowedThread())
-            {
-                ArmyPatches.RemoveMobilePartyInArmy(mainParty, army, mainParty);
-            }
         }
 
         PlayerArmyWaitBehavior.army_dispersed_continue_on_consequence(args);

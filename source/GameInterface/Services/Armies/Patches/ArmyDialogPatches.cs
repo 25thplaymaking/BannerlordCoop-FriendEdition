@@ -28,11 +28,6 @@ internal class ArmyDialogPatches
     [HarmonyPrefix]
     private static bool Prefix(EncounterGameMenuBehavior __instance, MenuCallbackArgs args)
     {
-        using (new AllowedThread())
-        {
-            ArmyPatches.AddMobilePartyInArmy(MobileParty.MainParty, PlayerEncounter.EncounteredMobileParty.Army);
-            MobileParty.MainParty.Army.AddPartyToMergedParties(MobileParty.MainParty);
-        }
         var message = new MobilePartyInArmyAdded(PlayerEncounter.EncounteredMobileParty.Army, MobileParty.MainParty, true);
         MessageBroker.Instance.Publish(__instance, message);
         PlayerEncounter.Finish(true);
@@ -47,7 +42,6 @@ internal class ArmyDialogPatches
         mainParty.SetMoveModeHold();
         var message = new MobilePartyInArmyRemoved(mainParty.Army, mainParty, mainParty);
         MessageBroker.Instance.Publish(__instance, message);
-        ArmyPatches.RemoveMobilePartyInArmy(mainParty, mainParty.Army, mainParty);
         PlayerEncounter.Finish(true);
         if (mainParty.BesiegerCamp != null)
         {
@@ -76,7 +70,6 @@ internal class ArmyDialogPatches
         }
         var message = new MobilePartyInArmyRemoved(MobileParty.MainParty.Army, MobileParty.MainParty, MobileParty.MainParty);
         MessageBroker.Instance.Publish(__instance, message);
-        ArmyPatches.RemoveMobilePartyInArmy(MobileParty.MainParty, MobileParty.MainParty.Army, MobileParty.MainParty);
         return false;
     }
 }

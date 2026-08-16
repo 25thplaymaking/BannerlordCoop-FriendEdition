@@ -2,6 +2,7 @@ using GameInterface.Services.Barters.Messages;
 using GameInterface.Services.Bandits.Messages;
 using GameInterface.Services.Inventory.Data;
 using GameInterface.Services.TroopRosters.Data;
+using Common.Messaging;
 using ProtoBuf.Meta;
 using System.IO;
 using Xunit;
@@ -249,4 +250,3 @@ public class NetworkBarterSerializationTest
         return (T)RuntimeTypeModel.Default.Deserialize(stream, null, typeof(T));
     }
 }
-using Common.Messaging;

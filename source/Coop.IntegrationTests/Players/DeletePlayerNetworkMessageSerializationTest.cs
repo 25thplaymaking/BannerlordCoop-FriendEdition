@@ -1,3 +1,4 @@
+using Common.Messaging;
 using GameInterface.Services.Players.Messages;
 using ProtoBuf;
 
@@ -8,22 +9,15 @@ public class DeletePlayerNetworkMessageSerializationTest
     [Fact]
     public void NetworkRequestDeletePlayer_RoundTrips()
     {
-        var original = new NetworkRequestDeletePlayer("Hero_Player");
+        var original = new NetworkRequestDeletePlayer(
+            new AuthorityRequestHeader(1, "session-player-delete", 17, 4));
 
         var copy = RoundTrip(original);
 
-        Assert.Equal("Hero_Player", copy.HeroId);
-    }
-
-    [Fact]
-    public void NetworkRequestDeletePlayer_RoundTrips_WithoutHero()
-    {
-        // The hero id is advisory; a client that cannot resolve its own hero sends null.
-        var original = new NetworkRequestDeletePlayer(null);
-
-        var copy = RoundTrip(original);
-
-        Assert.Null(copy.HeroId);
+        Assert.Equal(1, copy.Header.ProtocolVersion);
+        Assert.Equal("session-player-delete", copy.Header.SessionId);
+        Assert.Equal(17, copy.Header.RequestId);
+        Assert.Equal(4, copy.Header.ExpectedRevision);
     }
 
     [Fact]

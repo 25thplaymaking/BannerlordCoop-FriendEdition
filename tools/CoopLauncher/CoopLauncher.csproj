@@ -34,6 +34,8 @@
     <None Update="launcher-config.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- Frontir shield crest; embedded so the borderless window's taskbar/Alt-Tab icon resolves at runtime. -->
     <Resource Include="Frontir.ico" />
+    <!-- Original Calradia Co-op backdrop; embedded so visual identity is available offline. -->
+    <Resource Include="Assets\calradia-muster-backdrop.png" />
   </ItemGroup>
 
 </Project>

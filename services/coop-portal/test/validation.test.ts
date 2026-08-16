@@ -23,4 +23,25 @@ describe("portal validation", () => {
       logs: "",
     })?.kind).toBe("feature");
   });
+
+  it("accepts a bounded schema-two lord snapshot", () => {
+    expect(testing.isStats({
+      schemaVersion: 2,
+      updatedAt: "2026-08-15T22:00:00Z",
+      gameVersion: "1.4.8",
+      campaignDay: 42,
+      onlinePlayers: 1,
+      lords: [{ id: "lord_1", name: "Aldric", controller: "ai" }],
+    })).toBe(true);
+  });
+
+  it("rejects an unbounded lord snapshot", () => {
+    expect(testing.isStats({
+      updatedAt: "2026-08-15T22:00:00Z",
+      gameVersion: "1.4.8",
+      campaignDay: 42,
+      onlinePlayers: 1,
+      lords: Array.from({ length: 2_001 }),
+    })).toBe(false);
+  });
 });

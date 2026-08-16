@@ -1,9 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
 
 const MAX_BODY_BYTES = 64 * 1024;
+const MAX_STATS_BODY_BYTES = 1024 * 1024;
 const MAX_TITLE = 120;
 const MAX_DESCRIPTION = 4_000;
 const MAX_LOGS = 40_000;
+const UPLOAD_TOKEN_TTL_MS = 15 * 60 * 1_000;
 
 type ReportInput = {
   clientId: string;
@@ -16,11 +18,18 @@ type ReportInput = {
 };
 
 type StatsInput = {
+  schemaVersion?: number;
   updatedAt: string;
   gameVersion: string;
   campaignDay: number;
   onlinePlayers: number;
-  players: unknown[];
+  players?: unknown[];
+  lords?: unknown[];
+};
+
+type StoredReport = {
+  issueUrl: string;
+  reportId?: string;
 };
 
 export default {
@@ -61,10 +70,11 @@ async function publishStats(request: Request, env: Env): Promise<Response> {
   if (!(await secretEquals(supplied, env.PUBLISH_TOKEN)))
     return json({ message: "Unauthorized." }, 401);
 
-  const value = await readJson(request);
+  const value = await readJson(request, MAX_STATS_BODY_BYTES);
   if (!isStats(value)) return json({ message: "Invalid campaign snapshot." }, 400);
   await env.PORTAL_KV.put("campaign-stats", JSON.stringify(value));
-  console.log(JSON.stringify({ event: "stats_published", players: value.players.length }));
+  const rows = value.lords ?? value.players ?? [];
+  console.log(JSON.stringify({ event: "stats_published", lords: rows.length }));
   return json({ message: "Campaign snapshot published." });
 }
 
@@ -79,11 +89,25 @@ async function createReport(request: Request, env: Env): Promise<Response> {
 
   const duplicateKey = `report:${await sha256(`${report.kind}\n${report.title}\n${report.description}`)}`;
   const existing = await env.PORTAL_KV.get(duplicateKey);
-  if (existing !== null)
-    return json({ message: "That report was already submitted recently.", issueUrl: existing });
+  if (existing !== null) {
+    const previous = parseStoredReport(existing);
+    if (previous !== null) {
+      const uploadToken = previous.reportId === undefined
+        ? undefined
+        : await createUploadToken(previous.reportId, Date.now() + UPLOAD_TOKEN_TTL_MS, env.PUBLISH_TOKEN);
+      return json({
+        message: "That report was already submitted recently.",
+        issueUrl: previous.issueUrl,
+        reportId: previous.reportId,
+        uploadToken,
+      });
+    }
+  }
 
+  const reportId = crypto.randomUUID();
+  const uploadToken = await createUploadToken(reportId, Date.now() + UPLOAD_TOKEN_TTL_MS, env.PUBLISH_TOKEN);
   const prefix = report.kind === "bug" ? "[Launcher Bug]" : "[Launcher Request]";
-  const body = buildIssueBody(report);
+  const body = buildIssueBody(report, reportId);
   const githubResponse = await fetch(`https://api.github.com/repos/${env.GITHUB_REPOSITORY}/issues`, {
     method: "POST",
     headers: {
@@ -102,14 +126,21 @@ async function createReport(request: Request, env: Env): Promise<Response> {
 
   const issue = await githubResponse.json<{ html_url?: string }>();
   if (typeof issue.html_url !== "string") return json({ message: "GitHub returned an invalid issue response." }, 502);
-  await env.PORTAL_KV.put(duplicateKey, issue.html_url, { expirationTtl: 60 * 60 * 24 });
+  await env.PORTAL_KV.put(duplicateKey, JSON.stringify({ issueUrl: issue.html_url, reportId }), {
+    expirationTtl: 60 * 60 * 24,
+  });
   console.log(JSON.stringify({ event: "github_issue_created", kind: report.kind }));
-  return json({ message: "GitHub issue created successfully.", issueUrl: issue.html_url }, 201);
+  return json({
+    message: "GitHub issue created successfully.",
+    issueUrl: issue.html_url,
+    reportId,
+    uploadToken,
+  }, 201);
 }
 
-async function readJson(request: Request): Promise<unknown> {
+async function readJson(request: Request, maximumBytes = MAX_BODY_BYTES): Promise<unknown> {
   const declared = Number(request.headers.get("content-length") ?? "0");
-  if (declared > MAX_BODY_BYTES) throw new PayloadTooLargeError();
+  if (declared > maximumBytes) throw new PayloadTooLargeError();
   if (request.body === null) return null;
 
   const reader = request.body.getReader();
@@ -119,7 +150,7 @@ async function readJson(request: Request): Promise<unknown> {
     const { done, value } = await reader.read();
     if (done) break;
     length += value.byteLength;
-    if (length > MAX_BODY_BYTES) {
+    if (length > maximumBytes) {
       await reader.cancel();
       throw new PayloadTooLargeError();
     }
@@ -148,19 +179,21 @@ function normalizeReport(value: unknown): ReportInput | null {
 function isStats(value: unknown): value is StatsInput {
   if (!isObject(value) || typeof value.updatedAt !== "string" || typeof value.gameVersion !== "string" ||
       typeof value.campaignDay !== "number" || typeof value.onlinePlayers !== "number" ||
-      !Number.isInteger(value.campaignDay) || !Number.isInteger(value.onlinePlayers) || !Array.isArray(value.players))
+      !Number.isInteger(value.campaignDay) || !Number.isInteger(value.onlinePlayers))
     return false;
-  return value.players.length <= 100 && value.campaignDay >= 0 && value.onlinePlayers >= 0;
+  const rows = Array.isArray(value.lords) ? value.lords : value.players;
+  return Array.isArray(rows) && rows.length <= 2_000 &&
+    value.campaignDay >= 0 && value.onlinePlayers >= 0;
 }
 
-function buildIssueBody(report: ReportInput): string {
+function buildIssueBody(report: ReportInput, reportId = "not assigned"): string {
   const diagnostic = report.logs.length === 0
     ? "_No logs attached._"
     : `\`\`\`text\n${report.logs.replaceAll("```", "` ` `")}\n\`\`\``;
   return `${report.description}\n\n` +
     `### Launcher diagnostics\n\n` +
     `- Report type: ${report.kind}\n- Launcher: ${report.launcherVersion || "unknown"}\n` +
-    `- Bannerlord: ${report.gameVersion || "unknown"}\n- Submitted: ${new Date().toISOString()}\n\n` +
+    `- Bannerlord: ${report.gameVersion || "unknown"}\n- Report ID: ${reportId}\n- Submitted: ${new Date().toISOString()}\n\n` +
     `<details><summary>Redacted log excerpt</summary>\n\n${diagnostic}\n\n</details>\n\n` +
     `_Created automatically by the Calradia Co-op launcher._`;
 }
@@ -175,6 +208,17 @@ function clean(value: unknown, maximum: number): string {
   return typeof value === "string" ? value.trim().slice(0, maximum) : "";
 }
 
+function parseStoredReport(value: string): StoredReport | null {
+  if (value.startsWith("https://")) return { issueUrl: value }; // Pre-revamp dedupe entries.
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isObject(parsed) && typeof parsed.issueUrl === "string" &&
+      (parsed.reportId === undefined || typeof parsed.reportId === "string")
+      ? parsed as StoredReport
+      : null;
+  } catch { return null; }
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -182,6 +226,19 @@ function isObject(value: unknown): value is Record<string, unknown> {
 async function sha256(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function createUploadToken(reportId: string, expiresAt: number, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${reportId}.${expiresAt}`));
+  const hexadecimal = Array.from(new Uint8Array(signature), byte => byte.toString(16).padStart(2, "0")).join("");
+  return `${expiresAt}.${hexadecimal}`;
 }
 
 async function secretEquals(left: string, right: string): Promise<boolean> {

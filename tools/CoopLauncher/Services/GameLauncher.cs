@@ -46,6 +46,10 @@ public static class GameLauncher
             WorkingDirectory = Path.GetDirectoryName(bannerlordExe)!,
             UseShellExecute = false,
         };
+        // The game-side crash collector inherits this path and can reopen the launcher only
+        // after an unexpected exit. No crash data leaves the machine until the player confirms.
+        if (!string.IsNullOrWhiteSpace(Environment.ProcessPath))
+            psi.Environment["COOP_LAUNCHER_PATH"] = Environment.ProcessPath;
 
         // ArgumentList quotes each element correctly, so a token with spaces or an odd password
         // can't split into stray arguments.

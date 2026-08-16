@@ -1,6 +1,5 @@
 using Common;
 using GameInterface;
-using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
 using Serilog;
 using System;
@@ -82,24 +81,33 @@ namespace Coop.Core
         private static StatsSnapshot BuildSnapshot()
         {
             IPlayerManager players;
-            IObjectManager objects;
-            if (!ContainerProvider.TryResolve(out players) || !ContainerProvider.TryResolve(out objects))
+            if (!ContainerProvider.TryResolve(out players))
                 throw new InvalidOperationException("Player registry is unavailable");
 
-            var rows = new List<CharacterStats>();
-            foreach (var registration in players.Players)
+            var registrations = players.Players.ToList();
+            var rows = new List<CampaignLordStats>();
+            foreach (Hero hero in Hero.AllAliveHeroes)
             {
-                Hero hero;
-                if (!objects.TryGetObject(registration.HeroId, out hero) || hero == null) continue;
-                Clan clan = hero.Clan;
-                MobileParty party = null;
-                if (!string.IsNullOrWhiteSpace(registration.MobilePartyId))
-                    objects.TryGetObject(registration.MobilePartyId, out party);
+                if (hero == null || !hero.IsLord) continue;
 
-                rows.Add(new CharacterStats
+                var registration = registrations.FirstOrDefault(candidate =>
+                    string.Equals(candidate.HeroId, hero.StringId, StringComparison.OrdinalIgnoreCase));
+                Clan clan = hero.Clan;
+                MobileParty party = hero.PartyBelongedTo;
+                bool playerControlled = registration != null;
+
+                rows.Add(new CampaignLordStats
                 {
-                    Name = hero.Name == null ? registration.HeroId : hero.Name.ToString(),
+                    Id = hero.StringId ?? string.Empty,
+                    Name = hero.Name == null ? hero.StringId : hero.Name.ToString(),
+                    Controller = playerControlled ? "player" : "ai",
                     Clan = clan == null || clan.Name == null ? "Independent" : clan.Name.ToString(),
+                    Kingdom = clan == null || clan.Kingdom == null || clan.Kingdom.Name == null
+                        ? "Independent"
+                        : clan.Kingdom.Name.ToString(),
+                    Culture = hero.Culture == null || hero.Culture.Name == null
+                        ? "Unknown"
+                        : hero.Culture.Name.ToString(),
                     Level = hero.Level,
                     Gold = hero.Gold,
                     Renown = clan == null ? 0 : (int)Math.Round(clan.Renown),
@@ -107,7 +115,12 @@ namespace Coop.Core
                     ClanTier = clan == null ? 0 : clan.Tier,
                     PartySize = party == null ? 0 : party.MemberRoster.TotalManCount,
                     Fiefs = clan == null ? 0 : clan.Fiefs.Count,
-                    Online = players.IsConnected(registration),
+                    Online = playerControlled && players.IsConnected(registration),
+                    Status = ResolveStatus(hero),
+                    CurrentAction = ResolveAction(hero, party),
+                    Location = hero.CurrentSettlement == null || hero.CurrentSettlement.Name == null
+                        ? "Unknown"
+                        : hero.CurrentSettlement.Name.ToString(),
                 });
             }
 
@@ -118,8 +131,23 @@ namespace Coop.Core
                 GameVersion = "1.4.8",
                 CampaignDay = Math.Max(0, (int)CampaignTime.Now.ToDays),
                 OnlinePlayers = rows.Count(row => row.Online),
-                Players = rows,
+                Lords = rows,
             };
+        }
+
+        private static string ResolveStatus(Hero hero)
+        {
+            if (hero.IsPrisoner) return "prisoner";
+            if (hero.IsWounded) return "wounded";
+            return "active";
+        }
+
+        private static string ResolveAction(Hero hero, MobileParty party)
+        {
+            if (hero.IsPrisoner) return "captured";
+            if (party != null) return "traveling";
+            if (hero.CurrentSettlement != null) return "in-settlement";
+            return "unknown";
         }
 
         private async Task PublishAsync(StatsSnapshot snapshot)
@@ -163,17 +191,22 @@ namespace Coop.Core
 
         private sealed class StatsSnapshot
         {
+            public int SchemaVersion { get { return 2; } }
             public DateTimeOffset UpdatedAt { get; set; }
             public string GameVersion { get; set; }
             public int CampaignDay { get; set; }
             public int OnlinePlayers { get; set; }
-            public List<CharacterStats> Players { get; set; }
+            public List<CampaignLordStats> Lords { get; set; }
         }
 
-        private sealed class CharacterStats
+        private sealed class CampaignLordStats
         {
+            public string Id { get; set; }
             public string Name { get; set; }
+            public string Controller { get; set; }
             public string Clan { get; set; }
+            public string Kingdom { get; set; }
+            public string Culture { get; set; }
             public int Level { get; set; }
             public int Gold { get; set; }
             public int Renown { get; set; }
@@ -182,6 +215,9 @@ namespace Coop.Core
             public int PartySize { get; set; }
             public int Fiefs { get; set; }
             public bool Online { get; set; }
+            public string Status { get; set; }
+            public string CurrentAction { get; set; }
+            public string Location { get; set; }
         }
     }
 }

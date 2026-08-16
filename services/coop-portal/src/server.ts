@@ -1,6 +1,9 @@
 import { createServer, type IncomingMessage } from "node:http";
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import portal from "./index.ts";
 
@@ -62,17 +65,95 @@ export class SlidingRateLimiter {
   }
 }
 
-async function readBody(request: IncomingMessage): Promise<Buffer | undefined> {
+async function readBody(request: IncomingMessage, maximumBytes: number): Promise<Buffer | undefined> {
   if (request.method === "GET" || request.method === "HEAD") return undefined;
   const chunks: Buffer[] = [];
   let length = 0;
   for await (const chunk of request) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     length += bytes.length;
-    if (length > 64 * 1024) throw new Error("payload_too_large");
+    if (length > maximumBytes) throw new Error("payload_too_large");
     chunks.push(bytes);
   }
   return Buffer.concat(chunks);
+}
+
+function sendJson(response: import("node:http").ServerResponse, status: number, value: unknown): void {
+  response.statusCode = status;
+  response.setHeader("content-type", "application/json; charset=utf-8");
+  response.setHeader("cache-control", "no-store");
+  response.setHeader("x-content-type-options", "nosniff");
+  response.end(JSON.stringify(value));
+}
+
+function hasValidUploadToken(reportId: string, supplied: string, secret: string): boolean {
+  const [expirationText, signature] = supplied.split(".");
+  const expiration = Number(expirationText);
+  if (!Number.isSafeInteger(expiration) || expiration <= Date.now() || !/^[0-9a-f]{64}$/i.test(signature ?? ""))
+    return false;
+  const expected = createHmac("sha256", secret).update(`${reportId}.${expiration}`).digest("hex");
+  return timingSafeEqual(Buffer.from(signature!, "hex"), Buffer.from(expected, "hex"));
+}
+
+async function handleReportAsset(
+  request: IncomingMessage,
+  response: import("node:http").ServerResponse,
+  attachmentRoot: string,
+  publishToken: string,
+): Promise<boolean> {
+  const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+  const match = /^\/report-assets\/([0-9a-f]{8}-[0-9a-f-]{27})$/i.exec(pathname);
+  if (match === null) return false;
+  if (request.method !== "POST") {
+    sendJson(response, 405, { message: "Method not allowed." });
+    return true;
+  }
+
+  const reportId = match[1];
+  const token = request.headers["x-report-token"];
+  const suppliedToken = typeof token === "string" ? token : "";
+  if (!hasValidUploadToken(reportId, suppliedToken, publishToken)) {
+    sendJson(response, 401, { message: "Upload authorization is invalid or expired." });
+    return true;
+  }
+
+  const contentType = request.headers["content-type"];
+  if (typeof contentType !== "string" || !contentType.toLowerCase().startsWith("application/zip")) {
+    sendJson(response, 415, { message: "A ZIP package is required." });
+    return true;
+  }
+
+  const maximumBytes = 120 * 1024 * 1024;
+  const declaredLength = Number(request.headers["content-length"] ?? "0");
+  if (declaredLength > maximumBytes) {
+    sendJson(response, 413, { message: "The report package is too large." });
+    return true;
+  }
+
+  const reportDirectory = resolve(attachmentRoot, reportId);
+  mkdirSync(reportDirectory, { recursive: true, mode: 0o700 });
+  const destination = resolve(reportDirectory, `bundle-${Date.now()}.zip`);
+  const temporary = `${destination}.partial`;
+  let received = 0;
+  const limit = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      received += chunk.length;
+      callback(received > maximumBytes ? new Error("payload_too_large") : null, chunk);
+    },
+  });
+
+  try {
+    await pipeline(request, limit, createWriteStream(temporary, { flags: "wx", mode: 0o600 }));
+    renameSync(temporary, destination);
+    sendJson(response, 201, { message: "Diagnostic package received." });
+  } catch (error) {
+    if (existsSync(temporary)) unlinkSync(temporary);
+    const tooLarge = error instanceof Error && error.message === "payload_too_large";
+    sendJson(response, tooLarge ? 413 : 500, {
+      message: tooLarge ? "The report package is too large." : "The diagnostic package could not be saved.",
+    });
+  }
+  return true;
 }
 
 export function startServer(): void {
@@ -84,6 +165,7 @@ export function startServer(): void {
   const port = Number(process.env.PORTAL_PORT ?? "4211");
   const host = process.env.PORTAL_HOST ?? "127.0.0.1";
   const dataPath = resolve(process.env.PORTAL_DATA_PATH ?? "./data/portal-kv.json");
+  const attachmentPath = process.env.REPORT_ATTACHMENT_PATH ?? resolve(dirname(dataPath), "report-attachments");
   const env = {
     GITHUB_REPOSITORY: process.env.GITHUB_REPOSITORY ?? "25thplaymaking/BannerlordCoop-FriendEdition",
     GITHUB_TOKEN: githubToken,
@@ -94,9 +176,13 @@ export function startServer(): void {
 
   const server = createServer(async (incoming, outgoing) => {
     try {
+      if (await handleReportAsset(incoming, outgoing, attachmentPath, publishToken)) return;
       const protocol = incoming.headers["x-forwarded-proto"] ?? "http";
       const authority = incoming.headers.host ?? `${host}:${port}`;
-      const body = await readBody(incoming);
+      const maximumBytes = (incoming.url ?? "").startsWith("/stats/publish")
+        ? 1024 * 1024
+        : 64 * 1024;
+      const body = await readBody(incoming, maximumBytes);
       const request = new Request(`${protocol}://${authority}${incoming.url ?? "/"}`, {
         method: incoming.method,
         headers: incoming.headers as HeadersInit,

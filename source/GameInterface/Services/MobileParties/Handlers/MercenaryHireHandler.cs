@@ -1,14 +1,13 @@
 ﻿using Common;
 using Common.Logging;
 using Common.Messaging;
-using Common.Network;
 using GameInterface.Configuration;
 using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.MobileParties.Messages;
 using GameInterface.Services.MobileParties.Patches;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.Players;
 using GameInterface.Services.UI.Notifications.Messages;
-using LiteNetLib;
 using Serilog;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
@@ -32,21 +31,21 @@ internal class MercenaryHireHandler : IHandler
 
     private readonly IMessageBroker messageBroker;
     private readonly IObjectManager objectManager;
-    private readonly INetwork network;
     private readonly IModConfigAuthority configAuthority;
+    private readonly IPlayerManager playerManager;
     private readonly IAuthorityRouteHandle<MercenaryHireIntent, MercenaryHireResult> hireRoute;
 
     public MercenaryHireHandler(
         IMessageBroker messageBroker,
         IObjectManager objectManager,
-        INetwork network,
         IModConfigAuthority configAuthority,
+        IPlayerManager playerManager,
         IAuthorityRequestRouter authorityRequestRouter)
     {
         this.messageBroker = messageBroker;
         this.objectManager = objectManager;
-        this.network = network;
         this.configAuthority = configAuthority;
+        this.playerManager = playerManager;
         hireRoute = authorityRequestRouter.Register(AuthorityRoute<MercenaryHireIntent, HireMercenaries, MercenaryHireResult>.Define(
             "mercenary.hire", AuthorityRouteKind.Command, CreateHeader,
             (intent, header) => new HireMercenaries(intent.TownId, intent.Count, header), request => request.Header, result => result.Header,
@@ -95,36 +94,40 @@ internal class MercenaryHireHandler : IHandler
             return Reply(context.Header, data.TownId, null, data.Count, 0, mainHero.Gold, availableCount, AuthorityResultStatus.Rejected, "hire-ineligible");
         }
 
-        // Apply with patches LIVE (no AllowedThread): the roster add replicates via the
-        // TroopRoster patches and the gold change via the Hero.Gold sync.
         CharacterObject mercenaryTroop = mercenaryData.TroopType;
-        mainParty.AddElementToMemberRoster(mercenaryTroop, data.Count);
-        GiveGoldAction.ApplyBetweenCharacters(mainHero, null, goldAmount, false);
+        int beforeTroopCount = mainParty.MemberRoster.GetTroopCount(mercenaryTroop);
+        int beforeGold = mainHero.Gold;
+        int beforeStock = mercenaryData.Number;
+        bool mutationStarted = false;
+        try
+        {
+            // Everything below this point can partially replicate. Never retry or emit an ordinary
+            // rejection after the first native mutation.
+            mutationStarted = true;
+            mainParty.AddElementToMemberRoster(mercenaryTroop, data.Count);
+            GiveGoldAction.ApplyBetweenCharacters(mainHero, null, goldAmount, false);
+            if (mainHero.GetPerkValue(DefaultPerks.Leadership.FamousCommander))
+                mainParty.MemberRoster.AddXpToTroop(mercenaryTroop, (int)DefaultPerks.Leadership.FamousCommander.SecondaryBonus * data.Count);
+            SkillLevelingManager.OnTroopRecruited(mainHero, data.Count, mercenaryTroop.Tier);
+            if (mercenaryTroop.Occupation == Occupation.Bandit)
+                SkillLevelingManager.OnBanditsRecruited(mainParty, mercenaryTroop, data.Count);
 
-        // The recruitment side effects of the hire. This is the host-safe equivalent of
-        // vanilla CampaignEventDispatcher.OnUnitRecruited, whose listener reads Hero.MainHero /
-        // MobileParty.MainParty (neither of which the dedicated host has); it runs against the
-        // resolved hero/party instead, with patches live so the troop XP and the hero's
-        // recruitment skill XP replicate to every client.
-        if (mainHero.GetPerkValue(DefaultPerks.Leadership.FamousCommander))
-        {
-            mainParty.MemberRoster.AddXpToTroop(mercenaryTroop, (int)DefaultPerks.Leadership.FamousCommander.SecondaryBonus * data.Count);
-        }
-        SkillLevelingManager.OnTroopRecruited(mainHero, data.Count, mercenaryTroop.Tier);
-        if (mercenaryTroop.Occupation == Occupation.Bandit)
-        {
-            SkillLevelingManager.OnBanditsRecruited(mainParty, mercenaryTroop, data.Count);
-        }
+            mercenaryData.ChangeMercenaryCount(-data.Count);
+            RecruitmentCampaignBehaviorPatch.PublishMercenaryStock(recruitmentBehavior, town);
+            if (!objectManager.TryGetId(mercenaryTroop, out var troopId) ||
+                mainParty.MemberRoster.GetTroopCount(mercenaryTroop) != beforeTroopCount + data.Count ||
+                mainHero.Gold != beforeGold - goldAmount || mercenaryData.Number != beforeStock - data.Count)
+                throw new InvalidOperationException("hire-postcondition-failed");
 
-        mercenaryData.ChangeMercenaryCount(-data.Count);
-        RecruitmentCampaignBehaviorPatch.PublishMercenaryStock(recruitmentBehavior, town);
-        if (!objectManager.TryGetId(mercenaryTroop, out var troopId))
-        {
-            try { context.Peer.Disconnect(); } catch { }
-            return new AuthorityServerReply<MercenaryHireResult>(Terminal(context.Header, AuthorityResultStatus.ExecutionFailed, "hire-publication-failed"), false, true);
+            return Reply(context.Header, data.TownId, troopId, data.Count, beforeTroopCount + data.Count, beforeGold - goldAmount,
+                beforeStock - data.Count, AuthorityResultStatus.Accepted, null);
         }
-        return Reply(context.Header, data.TownId, troopId, data.Count, mainParty.MemberRoster.GetTroopCount(mercenaryTroop), mainHero.Gold,
-            mercenaryData.Number, AuthorityResultStatus.Accepted, null);
+        catch (Exception exception) when (mutationStarted)
+        {
+            logger.Error(exception, "Mercenary hire crossed the mutation boundary and could not prove publication.");
+            DisconnectAllCampaignPeers();
+            return new AuthorityServerReply<MercenaryHireResult>(Terminal(context.Header, AuthorityResultStatus.ExecutionFailed, "hire-ambiguous"), false, true);
+        }
     }
 
     private AuthorityRequestHeader CreateHeader(long requestId)
@@ -164,8 +167,20 @@ internal class MercenaryHireHandler : IHandler
         if (result.Header.Status != AuthorityResultStatus.Accepted) return AuthorityCommitProbeResult.Applied;
         CharacterObject troop = string.IsNullOrWhiteSpace(result.TroopId) ? null : MBObjectManager.Instance.GetObject<CharacterObject>(result.TroopId);
         if (troop == null) return AuthorityCommitProbeResult.Pending;
-        return MobileParty.MainParty?.MemberRoster.GetTroopCount(troop) >= result.ExpectedPartyTroopCount && Hero.MainHero?.Gold == result.ExpectedHeroGold
+        Town town = string.IsNullOrWhiteSpace(result.TownId) ? null : MBObjectManager.Instance.GetObject<Town>(result.TownId);
+        var stock = town == null ? null : Campaign.Current?.GetCampaignBehavior<RecruitmentCampaignBehavior>()?.GetMercenaryData(town);
+        return MobileParty.MainParty?.MemberRoster.GetTroopCount(troop) == result.ExpectedPartyTroopCount &&
+            Hero.MainHero?.Gold == result.ExpectedHeroGold && stock != null && stock.TroopType == troop && stock.Number == result.ExpectedStock
             ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+    }
+
+    private void DisconnectAllCampaignPeers()
+    {
+        foreach (var player in playerManager.Players)
+        {
+            if (playerManager.TryGetPeer(player.ControllerId, out var peer))
+                try { peer.Disconnect(); } catch { }
+        }
     }
 
     private static void Present(AuthorityClientOutcome<MercenaryHireResult> outcome)
@@ -180,20 +195,12 @@ internal class MercenaryHireHandler : IHandler
         public int Count { get; }
     }
 
-    private void SendMercenaryStock(NetPeer peer, Town town, CharacterObject troopType, int number)
-    {
-        if (peer == null) return;
-        if (!objectManager.TryGetIdWithLogging(town, out var townId)) return;
-
-        string troopTypeId = null;
-        if (troopType != null && !objectManager.TryGetId(troopType, out troopTypeId)) return;
-
-        network.Send(peer, new NetworkUpdateMercenaryStock(townId, troopTypeId, number));
-    }
-
     internal static int GetMercenaryHireGoldAmount(int count, int unitPrice)
     {
         if (count <= 0 || unitPrice <= 0)
+            return 0;
+
+        if (count > int.MaxValue / unitPrice)
             return 0;
 
         return count * unitPrice;

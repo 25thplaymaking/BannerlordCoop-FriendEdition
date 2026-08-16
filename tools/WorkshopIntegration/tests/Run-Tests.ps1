@@ -46,23 +46,26 @@ $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
 $productionManifest = Get-Content -LiteralPath (Join-Path $repoRoot 'deploy\workshop-mods.json') -Raw | ConvertFrom-Json
 $approvedWorkshopIds = @(
     'Bannerlord.Harmony', 'Bannerlord.ButterLib', 'Bannerlord.UIExtenderEx',
-    'Bannerlord.MBOptionScreen', 'ImprovedGarrisons', 'DismembermentPlus', 'Fourberie',
-    'Bannerlord.Diplomacy', 'UnblockableThrust', 'PlayerSettlement'
+    'Bannerlord.MBOptionScreen', 'OpenSourceSaddlery', 'OpenSourceWeaponry', 'OpenSourceArmory',
+    'ImprovedGarrisons', 'DismembermentPlus', 'Fourberie', 'Bannerlord.Diplomacy',
+    'UnblockableThrust', 'PlayerSettlement', 'RebellionsAndDemographics'
 )
 $approvedActiveOrder = @(
     'Bannerlord.Harmony', 'Bannerlord.ButterLib', 'Bannerlord.UIExtenderEx',
     'Bannerlord.MBOptionScreen', 'Native', 'SandBoxCore', 'CustomBattle', 'Sandbox',
-    'StoryMode', 'PlayerSettlement', 'Coop', 'ImprovedGarrisons', 'DismembermentPlus',
+    'StoryMode', 'OpenSourceSaddlery', 'OpenSourceWeaponry', 'OpenSourceArmory',
+    'PlayerSettlement', 'Coop', 'ImprovedGarrisons', 'DismembermentPlus',
     'Fourberie', 'Bannerlord.Diplomacy', 'UnblockableThrust'
 )
+$approvedExactOrder = @($approvedActiveOrder + 'RebellionsAndDemographics')
 $productionIds = @($productionManifest.modules | ForEach-Object { [string]$_.moduleId })
-Assert-True ([int]$productionManifest.suite.expectedModuleCount -eq 10) 'production suite must require exactly ten Workshop modules'
-Assert-True (($productionIds -join ',') -ceq ($approvedWorkshopIds -join ',')) 'production suite must contain the exact approved ten-module set without RBM'
-Assert-True ((@($productionManifest.activationPolicy.client.exactModuleOrder) -join ',') -ceq ($approvedActiveOrder -join ',')) 'client exact order must match the approved ten-module loadout'
-Assert-True ((@($productionManifest.activationPolicy.client.activeModuleOrder) -join ',') -ceq ($approvedActiveOrder -join ',')) 'client active order must match the approved ten-module loadout'
-Assert-True (@($productionManifest.activationPolicy.client.stagedInactiveModuleIds).Count -eq 0) 'client suite must not retain stale inactive Workshop entries'
-Assert-True ((@($productionManifest.activationPolicy.server.exactActiveModuleOrder) -join ',') -ceq ($approvedActiveOrder -join ',')) 'server active order must match the approved ten-module loadout'
-Assert-True (@($productionManifest.activationPolicy.server.guardedModuleIds).Count -eq 0) 'server suite must not retain stale guarded Workshop entries'
+Assert-True ([int]$productionManifest.suite.expectedModuleCount -eq 14) 'production suite must require the exact fourteen-module package'
+Assert-True (($productionIds -join ',') -ceq ($approvedWorkshopIds -join ',')) 'production suite must contain the exact approved package without RBM'
+Assert-True ((@($productionManifest.activationPolicy.client.exactModuleOrder) -join ',') -ceq ($approvedExactOrder -join ',')) 'client exact order must include the staged R&D payload after the active loadout'
+Assert-True ((@($productionManifest.activationPolicy.client.activeModuleOrder) -join ',') -ceq ($approvedActiveOrder -join ',')) 'client active order must include all three OSA content modules and no held R&D binary'
+Assert-True ((@($productionManifest.activationPolicy.client.stagedInactiveModuleIds) -join ',') -ceq 'RebellionsAndDemographics') 'client must stage only the held R&D package'
+Assert-True ((@($productionManifest.activationPolicy.server.exactActiveModuleOrder) -join ',') -ceq ($approvedActiveOrder -join ',')) 'server active order must include all three OSA content modules and no held R&D binary'
+Assert-True ((@($productionManifest.activationPolicy.server.guardedModuleIds) -join ',') -ceq 'RebellionsAndDemographics') 'server must guard the unsupported R&D binary'
 Assert-True ((@($productionManifest.activationPolicy.server.neverActivateModuleIds) -join ',') -ceq 'BirthAndDeath') 'only optional TaleWorlds BirthAndDeath remains excluded'
 $vectorsPin = @($productionManifest.coopModule.requiredAssemblyPins | Where-Object {
     [string]$_.path -ceq 'bin/Win64_Shipping_Client/System.Numerics.Vectors.dll'
@@ -98,9 +101,13 @@ $invalidWithinCohort = & $workshopModule {
 )
 Assert-True (-not $invalidWithinCohort) 'numeric Workshop order must still be preserved within an activation cohort'
 $launcherConfig = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\CoopLauncher\launcher-config.json') -Raw | ConvertFrom-Json
+$authorityPolicy = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\WorkshopIntegration\authority-dispositions.json') -Raw | ConvertFrom-Json
 $launcherOrder = @(([string]$launcherConfig.moduleToken).Split('*') | Where-Object { $_ -and $_ -notin @('_MODULES_') })
 Assert-True (($launcherOrder -join ',') -ceq ($approvedActiveOrder -join ',')) 'launcher token must match the approved ten-module loadout'
-Write-Host 'PASS: production catalog inputs agree on the exact active ten-module loadout and retired RBM'
+Assert-True ((@($launcherConfig.blockedModuleIds) -join ',') -ceq 'RebellionsAndDemographics') 'launcher must refuse to advertise R&D as ready'
+$hold = @($authorityPolicy.inactiveModuleHolds | Where-Object { [string]$_.moduleId -ceq 'RebellionsAndDemographics' })
+Assert-True ($hold.Count -eq 1 -and [string]$hold[0].disposition -ceq 'Unsupported' -and [string]$hold[0].reason -ceq 'source-required-for-authority-and-1.4.8-migration') 'authority policy must retain the exact R&D source-migration hold'
+Write-Host 'PASS: production catalog inputs agree on exact active OSA content, held R&D, and retired RBM'
 
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('friend-edition-workshop-tests-' + [guid]::NewGuid().ToString('N'))
 try {

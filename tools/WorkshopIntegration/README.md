@@ -89,5 +89,27 @@ unclassified, blocked, lacks a Coop owner, or lacks a focused route test:
 .\tools\WorkshopIntegration\tests\Validate-AuthorityAudit.ps1 -Release
 ```
 
+The core authority-route audit is a separate compiled-contract gate. Build the production
+`GameInterface` and `Coop.Core` assemblies, then run:
+
+```powershell
+.\tools\WorkshopIntegration\Generate-AuthorityRouteCatalog.ps1 -Release
+```
+
+It writes `doc/generated/authority-route-catalog.json` and fails release validation when route IDs
+or request types collide, a typed request has no result/owner/test evidence, a Workshop
+`ServerCommand` names an unregistered route, a request-like `ICommand` lacks a checked
+`Command`/`BootstrapQuery`/`Replication`/`Internal` disposition, a capability is not gated by a
+registered route and current-session `Ready`, or a feature directly sends/subscribes a routed
+command outside `AuthorityRequestRouter`. Exact exceptional bridges belong in
+`authority-route-audit-policy.json`; exemptions require a reason, executable owner, and test.
+
+The inspector and generator fixtures can be run without the game runtime:
+
+```powershell
+.\tools\WorkshopIntegration\tests\Run-AuthorityInspectorTests.ps1
+.\tools\WorkshopIntegration\tests\Run-AuthorityRouteCatalogTests.ps1
+```
+
 Disposition rules are exact `(moduleId, assemblySha256, metadataToken)` joins in
 `authority-dispositions.json`; stale or duplicate method keys fail generation.

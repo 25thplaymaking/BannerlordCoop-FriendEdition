@@ -55,6 +55,20 @@ namespace TaleWorlds.CampaignSystem.Actions
     }
 }
 
+namespace Common.Messaging
+{
+    public interface ICommand { }
+    public enum AuthorityRouteKind { Command = 0, BootstrapQuery = 1 }
+    [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Struct)]
+    public sealed class AuthorityRouteAttribute : System.Attribute
+    {
+        public AuthorityRouteAttribute(string routeId, AuthorityRouteKind kind) { }
+    }
+}
+
+[Common.Messaging.AuthorityRoute("fixture.command", Common.Messaging.AuthorityRouteKind.Command)]
+public sealed class RoutedFixtureCommand : Common.Messaging.ICommand { }
+
 public sealed class AuthorityFixtureSingleton { }
 
 public static class AuthorityFixture
@@ -105,6 +119,7 @@ public static class AuthorityFixture
     if ($LASTEXITCODE -ne 0) { throw 'Assembly inspector failed.' }
 
     $inspection = (Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json).files[0]
+    $routedType = @($inspection.types | Where-Object { $_.name -ceq 'RoutedFixtureCommand' })[0]
     $pure = @($inspection.methods | Where-Object { $_.declaringType -ceq 'AuthorityFixture' -and $_.name -ceq 'Pure' })[0]
     $main = @($inspection.methods | Where-Object { $_.declaringType -ceq 'AuthorityFixture' -and $_.name -ceq 'ReadsMainHero' })[0]
     $mutation = @($inspection.methods | Where-Object { $_.declaringType -ceq 'AuthorityFixture' -and $_.name -ceq 'MutatesRelation' })[0]
@@ -128,12 +143,16 @@ public static class AuthorityFixture
     Assert-True (@($cachedLambda.authorityEvidence.directSignals).Count -eq 0) 'compiler delegate cache was flagged as shared state'
     Assert-True (@($singleton.authorityEvidence.directSignals).Count -eq 0) 'lazy singleton cache was flagged as shared state'
     Assert-True (@($singletonSetter.authorityEvidence.directSignals).Count -eq 0) 'singleton cache setter was flagged as shared state'
+    Assert-Contains @($routedType.interfaces) 'Common.Messaging.ICommand' 'ICommand implementation was not catalogued'
+    Assert-True ([string]$routedType.authorityRoute.routeId -ceq 'fixture.command') 'AuthorityRoute route ID was not decoded'
+    Assert-True ([int]$routedType.authorityRoute.kind -eq 0) 'AuthorityRoute kind was not decoded'
 
     Write-Host 'PASS: pure methods remain unflagged'
     Write-Host 'PASS: global player access is classified'
     Write-Host 'PASS: campaign mutation is classified'
     Write-Host 'PASS: authority sensitivity propagates through mod-owned calls'
     Write-Host 'PASS: shared collection and static-field mutation are classified without flagging local collections'
+    Write-Host 'PASS: routed ICommand type metadata is decoded without loading the assembly'
 }
 finally {
     if (Test-Path -LiteralPath $testRoot) {

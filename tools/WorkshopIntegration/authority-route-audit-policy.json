@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "allowedMessageDispositions": [
+    "Command",
+    "BootstrapQuery",
+    "Replication",
+    "Internal"
+  ],
+  "messageDispositions": [],
+  "bypassExemptions": []
+}

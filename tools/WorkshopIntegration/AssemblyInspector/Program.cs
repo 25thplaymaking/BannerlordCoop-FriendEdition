@@ -32,11 +32,11 @@ static AssemblyInspection Inspect(InspectionFile item)
         using var stream = File.OpenRead(item.Path);
         using var pe = new PEReader(stream, PEStreamOptions.LeaveOpen);
         if (!pe.HasMetadata)
-            return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, false, null, [], [], null);
+            return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, false, null, [], [], [], null);
 
         MetadataReader metadata = pe.GetMetadataReader();
         if (!metadata.IsAssembly)
-            return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, false, null, [], [], null);
+            return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, false, null, [], [], [], null);
 
         AssemblyDefinition definition = metadata.GetAssemblyDefinition();
         IReadOnlyDictionary<int, AuthorityEvidence> authorityEvidence = AuthoritySignalScanner.Scan(pe, metadata);
@@ -58,11 +58,36 @@ static AssemblyInspection Inspect(InspectionFile item)
         references.Sort((left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.FullName, right.FullName));
 
         var methods = new List<MethodInspection>();
+        var types = new List<TypeInspection>();
         var typeProvider = new MetadataTypeNameProvider();
+        var attributeProvider = new MetadataCustomAttributeTypeProvider(typeProvider);
         foreach (TypeDefinitionHandle typeHandle in metadata.TypeDefinitions)
         {
             TypeDefinition type = metadata.GetTypeDefinition(typeHandle);
             string declaringType = typeProvider.GetTypeFromDefinition(metadata, typeHandle, 0);
+            var interfaces = new List<string>();
+            foreach (InterfaceImplementationHandle interfaceHandle in type.GetInterfaceImplementations())
+            {
+                InterfaceImplementation implementation = metadata.GetInterfaceImplementation(interfaceHandle);
+                interfaces.Add(typeProvider.GetTypeName(metadata, implementation.Interface));
+            }
+            interfaces.Sort(StringComparer.Ordinal);
+
+            AuthorityRouteInspection? authorityRoute = null;
+            foreach (CustomAttributeHandle attributeHandle in type.GetCustomAttributes())
+            {
+                CustomAttribute attribute = metadata.GetCustomAttribute(attributeHandle);
+                string attributeType = attributeProvider.GetAttributeTypeName(metadata, attribute.Constructor);
+                if (!string.Equals(attributeType, "Common.Messaging.AuthorityRouteAttribute", StringComparison.Ordinal))
+                    continue;
+
+                CustomAttributeValue<string> value = attribute.DecodeValue(attributeProvider);
+                if (value.FixedArguments.Length != 2 || value.FixedArguments[0].Value is not string routeId)
+                    throw new BadImageFormatException($"{declaringType} has a malformed AuthorityRouteAttribute.");
+                authorityRoute = new AuthorityRouteInspection(routeId, Convert.ToInt32(value.FixedArguments[1].Value));
+            }
+            types.Add(new TypeInspection(declaringType, interfaces.ToArray(), authorityRoute));
+
             foreach (MethodDefinitionHandle methodHandle in type.GetMethods())
             {
                 MethodDefinition method = metadata.GetMethodDefinition(methodHandle);
@@ -87,17 +112,18 @@ static AssemblyInspection Inspect(InspectionFile item)
                 ? typeOrder
                 : StringComparer.Ordinal.Compare(left.MetadataToken, right.MetadataToken);
         });
+        types.Sort((left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
 
         return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, true,
-            identity, references.ToArray(), methods.ToArray(), null);
+            identity, references.ToArray(), methods.ToArray(), types.ToArray(), null);
     }
     catch (BadImageFormatException)
     {
-        return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, false, null, [], [], null);
+        return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, false, null, [], [], [], null);
     }
     catch (Exception exception)
     {
-        return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, false, null, [], [], exception.Message);
+        return new(item.ModuleId, item.RelativePath, item.Path, item.Included, item.Platform, hash, false, null, [], [], [], exception.Message);
     }
 }
 
@@ -126,8 +152,11 @@ internal sealed record InspectionFile(string ModuleId, string RelativePath, stri
 internal sealed record InspectionResult(AssemblyInspection[] Files);
 internal sealed record AssemblyInspection(
     string ModuleId, string RelativePath, string Path, bool Included, string Platform, string Sha256,
-    bool Managed, AssemblyIdentity? Identity, AssemblyIdentity[] References, MethodInspection[] Methods, string? Error);
+    bool Managed, AssemblyIdentity? Identity, AssemblyIdentity[] References, MethodInspection[] Methods,
+    TypeInspection[] Types, string? Error);
 internal sealed record AssemblyIdentity(string Name, string Version, string Culture, string PublicKeyToken, string FullName);
+internal sealed record TypeInspection(string Name, string[] Interfaces, AuthorityRouteInspection? AuthorityRoute);
+internal sealed record AuthorityRouteInspection(string RouteId, int Kind);
 internal sealed record MethodInspection(
     string DeclaringType,
     string Name,
@@ -142,6 +171,14 @@ internal sealed record MethodInspection(
 
 internal sealed class MetadataTypeNameProvider : ISignatureTypeProvider<string, object?>
 {
+    public string GetTypeName(MetadataReader reader, EntityHandle handle) => handle.Kind switch
+    {
+        HandleKind.TypeDefinition => GetTypeFromDefinition(reader, (TypeDefinitionHandle)handle, 0),
+        HandleKind.TypeReference => GetTypeFromReference(reader, (TypeReferenceHandle)handle, 0),
+        HandleKind.TypeSpecification => GetTypeFromSpecification(reader, null, (TypeSpecificationHandle)handle, 0),
+        _ => throw new BadImageFormatException($"Unsupported type handle {handle.Kind}."),
+    };
+
     public string GetArrayType(string elementType, ArrayShape shape)
         => $"{elementType}[{new string(',', Math.Max(0, shape.Rank - 1))}]";
 

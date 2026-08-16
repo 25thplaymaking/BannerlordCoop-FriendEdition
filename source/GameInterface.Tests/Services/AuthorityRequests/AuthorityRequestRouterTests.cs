@@ -1,5 +1,6 @@
 using Common;
 using Common.Messaging;
+using Common.Network.Messages;
 using Coop.Tests.Mocks;
 using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Players;
@@ -28,7 +29,7 @@ public sealed class AuthorityRequestRouterTests
         var request = Assert.Single(network.GetPeerMessagesFromType<TestRequest>(server));
         Assert.Equal(1, request.Header.RequestId);
 
-        broker.Publish(server, new TestResult(new AuthorityResultHeader("other", request.Header.RequestId,
+        broker.Publish(server, new TestResult(new AuthorityResultHeader(request.Header.SessionId, request.Header.RequestId + 1,
             AuthorityResultStatus.Accepted, 3, "")));
         Assert.False(ticket.IsCompleted);
 
@@ -84,6 +85,66 @@ public sealed class AuthorityRequestRouterTests
         Assert.Equal(1, presentations);
     }
 
+    [Fact]
+    public void ClientSessionEnded_CancelsPendingRequestAndStillInvokesCompletion()
+    {
+        using var broker = new MessageBroker();
+        using var network = new TestNetwork();
+        network.CreatePeer();
+        using var router = new AuthorityRequestRouter(broker, network, new Mock<IPlayerManager>().Object);
+        int completions = 0;
+        using var route = router.Register(CreateRoute(() => AuthorityCommitProbeResult.Pending));
+
+        var ticket = route.Submit("intent", _ => completions++);
+        broker.Publish(this, new ClientSessionEnded(default));
+
+        Assert.True(ticket.IsCompleted);
+        Assert.Equal(AuthorityClientCompletion.Cancelled, ticket.Outcome.Completion);
+        Assert.Equal(1, completions);
+    }
+
+    [Fact]
+    public void AcceptedPresentationFailure_FailsClosedButDoesNotSuppressCallerCompletion()
+    {
+        using var broker = new MessageBroker();
+        using var network = new TestNetwork();
+        var server = network.CreatePeer();
+        using var router = new AuthorityRequestRouter(broker, network, new Mock<IPlayerManager>().Object);
+        int completions = 0;
+        using var route = router.Register(CreateRoute(
+            () => AuthorityCommitProbeResult.Applied,
+            presented: _ => throw new InvalidOperationException("presentation-failure")));
+
+        var ticket = route.Submit("intent", _ => completions++);
+        broker.Publish(server, new TestResult(new AuthorityResultHeader("session", ticket.RequestId,
+            AuthorityResultStatus.Accepted, 3, "")));
+        route.Poll();
+
+        Assert.True(ticket.IsCompleted);
+        Assert.Equal(AuthorityClientCompletion.ReplicaApplyFailed, ticket.Outcome.Completion);
+        Assert.Equal("presentation-failed", ticket.Outcome.ReasonCode);
+        Assert.Equal(1, completions);
+    }
+
+    [Fact]
+    public void ProbeFailure_FailsClosedAndDoesNotLeaveTicketPending()
+    {
+        using var broker = new MessageBroker();
+        using var network = new TestNetwork();
+        var server = network.CreatePeer();
+        using var router = new AuthorityRequestRouter(broker, network, new Mock<IPlayerManager>().Object);
+        using var route = router.Register(CreateRoute(() => throw new InvalidOperationException("probe-failure")));
+
+        var ticket = route.Submit("intent");
+        broker.Publish(server, new TestResult(new AuthorityResultHeader("session", ticket.RequestId,
+            AuthorityResultStatus.Accepted, 3, "")));
+        route.Poll();
+
+        Assert.True(ticket.IsCompleted);
+        Assert.Equal(AuthorityClientCompletion.ReplicaApplyFailed, ticket.Outcome.Completion);
+        Assert.Equal("commit-probe-failed", ticket.Outcome.ReasonCode);
+    }
+
     private static AuthorityRoute<string, TestRequest, TestResult> CreateRoute(
         Func<AuthorityCommitProbeResult> probe,
         AuthorityTimeoutPolicy timeout = null,
@@ -96,7 +157,9 @@ public sealed class AuthorityRequestRouterTests
             result => result.Header,
             _ => null,
             request => request.Intent,
-            header => header.SessionId == "session" && header.ExpectedRevision == 2 ? null : "stale",
+            header => header.SessionId == "session" && header.ExpectedRevision == 2
+                ? AuthorityHeaderValidation.Valid
+                : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale"),
             (_, request) => new AuthorityServerReply<TestResult>(new TestResult(new AuthorityResultHeader(
                 request.Header.SessionId, request.Header.RequestId, AuthorityResultStatus.Accepted, 3, "")), true),
             (header, status, reason) => new TestResult(new AuthorityResultHeader(header.SessionId, header.RequestId, status, 0, reason)),

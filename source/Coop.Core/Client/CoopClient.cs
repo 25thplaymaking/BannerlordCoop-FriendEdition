@@ -2,6 +2,7 @@
 using Common.Logging;
 using Common.Messaging;
 using Common.Network;
+using Common.Network.Messages;
 using Common.PacketHandlers;
 using Common.Serialization;
 using Coop.Core.Client.Messages;
@@ -135,6 +136,9 @@ public class CoopClient : CoopNetworkBase, ICoopClient
         if (isConnected == true)
         {
             isConnected = false;
+            // Authority-route tickets are client-owned and cannot rely on the server-only
+            // PlayerDisconnected event to release native waiters.
+            messageBroker.Publish(this, new ClientSessionEnded(disconnectInfo));
             messageBroker.Publish(this, new SendInformationMessage(disconnectInfo.Reason.ToString()));
             messageBroker.Publish(this, new NetworkDisconnected(disconnectInfo));
         }

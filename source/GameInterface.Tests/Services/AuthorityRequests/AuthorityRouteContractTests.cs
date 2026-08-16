@@ -29,7 +29,8 @@ public sealed class AuthorityRouteContractTests
         var route = AuthorityRoute<string, TestRequest, TestResult>.Define(
             "wrong.route", AuthorityRouteKind.Command,
             id => new AuthorityRequestHeader(1, "session", id, 0), (intent, header) => new TestRequest(header, intent),
-            request => request.Header, result => result.Header, _ => null, request => request.Intent, _ => null,
+            request => request.Header, result => result.Header, _ => null, request => request.Intent,
+            _ => AuthorityHeaderValidation.Valid,
             (_, request) => new AuthorityServerReply<TestResult>(new TestResult(new AuthorityResultHeader(
                 request.Header.SessionId, request.Header.RequestId, AuthorityResultStatus.Rejected, 0, "denied")), false),
             (header, status, reason) => new TestResult(new AuthorityResultHeader(header.SessionId, header.RequestId, status, 0, reason)),

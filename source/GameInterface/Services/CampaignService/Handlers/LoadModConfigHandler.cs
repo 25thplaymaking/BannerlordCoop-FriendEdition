@@ -121,13 +121,14 @@ internal class LoadModConfigHandler : IHandler
         return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, requestId, snapshot.Revision);
     }
 
-    private string ValidateRefreshHeader(AuthorityRequestHeader header)
+    private AuthorityHeaderValidation ValidateRefreshHeader(AuthorityRequestHeader header)
     {
-        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot snapshot)) return "config-unavailable";
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot snapshot))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "config-unavailable");
         return header.ProtocolVersion == snapshot.ProtocolVersion &&
             string.Equals(header.SessionId, snapshot.SessionId, StringComparison.Ordinal)
-            ? null
-            : "stale-config-session";
+            ? AuthorityHeaderValidation.Valid
+            : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-config-session");
     }
 
     private AuthorityServerReply<NetworkModConfigQueryResult> ExecuteRefresh(

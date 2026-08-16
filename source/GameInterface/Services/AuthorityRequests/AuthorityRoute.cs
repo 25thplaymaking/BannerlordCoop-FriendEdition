@@ -122,7 +122,7 @@ public sealed class AuthorityRoute<TIntent, TRequest, TResult>
         Func<TResult, AuthorityResultHeader> readResultHeader,
         Func<TRequest, string> validateWireShape,
         Func<TRequest, string> buildCommandKey,
-        Func<AuthorityRequestHeader, string> validateHeader,
+        Func<AuthorityRequestHeader, AuthorityHeaderValidation> validateHeader,
         Func<AuthorityServerContext, TRequest, AuthorityServerReply<TResult>> execute,
         Func<AuthorityRequestHeader, AuthorityResultStatus, string, TResult> createTerminalResult,
         Func<TResult, AuthorityCommitProbeResult> probeClientCommit,
@@ -161,7 +161,7 @@ public sealed class AuthorityRoute<TIntent, TRequest, TResult>
     public Func<TResult, AuthorityResultHeader> ReadResultHeader { get; }
     public Func<TRequest, string> ValidateWireShape { get; }
     public Func<TRequest, string> BuildCommandKey { get; }
-    public Func<AuthorityRequestHeader, string> ValidateHeader { get; }
+    public Func<AuthorityRequestHeader, AuthorityHeaderValidation> ValidateHeader { get; }
     public Func<AuthorityServerContext, TRequest, AuthorityServerReply<TResult>> Execute { get; }
     public Func<AuthorityRequestHeader, AuthorityResultStatus, string, TResult> CreateTerminalResult { get; }
     public Func<TResult, AuthorityCommitProbeResult> ProbeClientCommit { get; }
@@ -182,7 +182,7 @@ public sealed class AuthorityRoute<TIntent, TRequest, TResult>
         Func<TResult, AuthorityResultHeader> readResultHeader,
         Func<TRequest, string> validateWireShape,
         Func<TRequest, string> buildCommandKey,
-        Func<AuthorityRequestHeader, string> validateHeader,
+        Func<AuthorityRequestHeader, AuthorityHeaderValidation> validateHeader,
         Func<AuthorityServerContext, TRequest, AuthorityServerReply<TResult>> execute,
         Func<AuthorityRequestHeader, AuthorityResultStatus, string, TResult> createTerminalResult,
         Func<TResult, AuthorityCommitProbeResult> probeClientCommit,

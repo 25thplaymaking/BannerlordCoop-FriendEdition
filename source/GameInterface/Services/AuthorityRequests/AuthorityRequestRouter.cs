@@ -112,6 +112,7 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
         private readonly Action<MessagePayload<TRequest>> requestHandler;
         private readonly Action<MessagePayload<TResult>> resultHandler;
         private readonly Action<MessagePayload<PlayerDisconnected>> disconnectHandler;
+        private readonly Action<MessagePayload<ClientSessionEnded>> clientSessionEndedHandler;
         private bool disposed;
 
         public RouteRegistration(
@@ -131,9 +132,11 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             requestHandler = HandleRequest;
             resultHandler = HandleResult;
             disconnectHandler = HandlePlayerDisconnected;
+            clientSessionEndedHandler = HandleClientSessionEnded;
             messageBroker.Subscribe(requestHandler);
             messageBroker.Subscribe(resultHandler);
             messageBroker.Subscribe(disconnectHandler);
+            messageBroker.Subscribe(clientSessionEndedHandler);
         }
 
         public string RouteId => route.RouteId;
@@ -175,6 +178,7 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             catch (Exception exception)
             {
                 Logger.Error(exception, "Authority route {Route} could not send request {RequestId}", route.RouteId, requestId);
+                lifecycle.ClientTimedOut(requestId.ToString(), "send-failed");
                 CompletePending(pendingRequest, AuthorityClientCompletion.TimedOut, default, "send-failed");
             }
 
@@ -197,7 +201,10 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
                 lock (sync)
                 {
                     if (pending.TryGetValue(ticket.RequestId, out var request))
+                    {
+                        lifecycle.ClientTimedOut(ticket.RequestId.ToString(), "blocking-deadline");
                         CompletePending(request, AuthorityClientCompletion.TimedOut, default, "blocking-deadline");
+                    }
                 }
             }
 
@@ -217,11 +224,23 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
 
                 if (request.AcceptedResultReceived)
                 {
-                    var probe = route.ProbeClientCommit(request.Result);
+                    AuthorityCommitProbeResult probe;
+                    try
+                    {
+                        probe = route.ProbeClientCommit(request.Result);
+                    }
+                    catch (Exception exception)
+                    {
+                        Logger.Error(exception, "Authority commit probe failed. Route={Route} RequestId={RequestId}",
+                            route.RouteId, request.Header.RequestId);
+                        lifecycle.ReplicaApplyFailed(request.Header.RequestId.ToString(), "commit-probe-failed");
+                        CompletePending(request, AuthorityClientCompletion.ReplicaApplyFailed, request.Result,
+                            "commit-probe-failed");
+                        continue;
+                    }
                     if (probe == AuthorityCommitProbeResult.Applied)
                     {
                         lifecycle.ReplicaApplied(request.Header.RequestId.ToString(), "applied");
-                        lifecycle.ClientCompleted(request.Header.RequestId.ToString(), "accepted");
                         CompletePending(request, AuthorityClientCompletion.Applied, request.Result, null);
                     }
                     else if (probe == AuthorityCommitProbeResult.Invalid || now >= request.ApplyDeadline)
@@ -289,6 +308,7 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             messageBroker.Unsubscribe(requestHandler);
             messageBroker.Unsubscribe(resultHandler);
             messageBroker.Unsubscribe(disconnectHandler);
+            messageBroker.Unsubscribe(clientSessionEndedHandler);
             replayLedger.Clear();
         }
 
@@ -299,6 +319,12 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             replayLedger.Clear(payload.What.PlayerId);
             if (ModInformation.IsClient)
                 CancelAll("network-disconnected");
+        }
+
+        private void HandleClientSessionEnded(MessagePayload<ClientSessionEnded> _)
+        {
+            if (!disposed && ModInformation.IsClient)
+                CancelAll("client-session-ended");
         }
 
         private void HandleResult(MessagePayload<TResult> payload)
@@ -316,11 +342,18 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             PendingRequest request;
             lock (sync)
             {
-                if (!pending.TryGetValue(resultHeader.RequestId, out request) ||
-                    !string.Equals(request.Header.SessionId, resultHeader.SessionId, StringComparison.Ordinal))
+                if (!pending.TryGetValue(resultHeader.RequestId, out request))
                 {
                     Logger.Warning("Ignoring late or mismatched authority result. Route={Route} RequestId={RequestId}",
                         route.RouteId, resultHeader.RequestId);
+                    return;
+                }
+
+                if (!string.Equals(request.Header.SessionId, resultHeader.SessionId, StringComparison.Ordinal))
+                {
+                    Logger.Warning("Authoritative session changed while request was pending. Route={Route} RequestId={RequestId}",
+                        route.RouteId, resultHeader.RequestId);
+                    CancelAll("session-replaced");
                     return;
                 }
 
@@ -358,10 +391,10 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
                 return;
             }
 
-            string headerFailure = route.ValidateHeader(header);
-            if (!string.IsNullOrEmpty(headerFailure))
+            AuthorityHeaderValidation headerValidation = route.ValidateHeader(header);
+            if (!headerValidation.IsValid)
             {
-                SendTerminal(peer, header, route.CreateTerminalResult(header, AuthorityResultStatus.StaleSession, headerFailure));
+                SendTerminal(peer, header, route.CreateTerminalResult(header, headerValidation.Status, headerValidation.ReasonCode));
                 return;
             }
 
@@ -369,6 +402,13 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             if (!string.IsNullOrEmpty(wireFailure))
             {
                 SendTerminal(peer, header, route.CreateTerminalResult(header, AuthorityResultStatus.InvalidRequest, wireFailure));
+                return;
+            }
+
+            Player player = null;
+            if (route.RequireAuthenticatedPlayer && !playerManager.TryGetPlayer(peer, out player))
+            {
+                SendTerminal(peer, header, route.CreateTerminalResult(header, AuthorityResultStatus.Unauthorized, "peer-not-player"));
                 return;
             }
 
@@ -387,11 +427,10 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
                 return;
             }
             if (replay.Decision == AuthorityReplayDecision.InFlight) return;
-
-            Player player = null;
-            if (route.RequireAuthenticatedPlayer && !playerManager.TryGetPlayer(peer, out player))
+            if (replay.Decision == AuthorityReplayDecision.OverCapacity)
             {
-                SendTerminal(peer, header, route.CreateTerminalResult(header, AuthorityResultStatus.Unauthorized, "peer-not-player"));
+                SendTerminal(peer, header, route.CreateTerminalResult(header, AuthorityResultStatus.Unavailable,
+                    "authority-overloaded"));
                 return;
             }
 
@@ -477,21 +516,70 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             string reasonCode)
         {
             lock (sync) pending.Remove(request.Header.RequestId);
-            Complete(request.Ticket, request.Completion, new AuthorityClientOutcome<TResult>(completion, result, reasonCode));
-            if (completion == AuthorityClientCompletion.ReplicaApplyFailed)
+            var outcome = Complete(request.Ticket, request.Completion,
+                new AuthorityClientOutcome<TResult>(completion, result, reasonCode));
+            if (outcome.Completion == AuthorityClientCompletion.ReplicaApplyFailed)
                 request.ServerPeer?.Disconnect();
         }
 
-        private void Complete(
+        private AuthorityClientOutcome<TResult> Complete(
             AuthorityRequestTicket<TResult> ticket,
             Action<AuthorityClientOutcome<TResult>> completion,
             AuthorityClientOutcome<TResult> outcome)
         {
-            if (ticket.IsCompleted) return;
+            if (ticket.IsCompleted) return ticket.Outcome;
+
+            bool accepted = outcome.Completion == AuthorityClientCompletion.Applied;
+            if (!TryRunClientCallback(() => route.PresentTerminalOutcome(outcome), "presentation", ticket.RequestId) && accepted)
+            {
+                lifecycle.ReplicaApplyFailed(ticket.RequestId.ToString(), "presentation-failed");
+                outcome = new AuthorityClientOutcome<TResult>(AuthorityClientCompletion.ReplicaApplyFailed,
+                    outcome.Result, "presentation-failed");
+            }
+
             ticket.Outcome = outcome;
             ticket.IsCompleted = true;
-            route.PresentTerminalOutcome(outcome);
-            completion?.Invoke(outcome);
+            if (outcome.Completion == AuthorityClientCompletion.Applied)
+                lifecycle.ClientCompleted(ticket.RequestId.ToString(), "accepted");
+
+            TryRunClientCallback(() => completion?.Invoke(outcome), "completion", ticket.RequestId);
+            return outcome;
+        }
+
+        private bool TryRunClientCallback(Action callback, string callbackKind, long requestId)
+        {
+            if (callback == null) return true;
+
+            bool succeeded = true;
+            try
+            {
+                Action guarded = () =>
+                {
+                    try { callback(); }
+                    catch (Exception exception)
+                    {
+                        succeeded = false;
+                        Logger.Error(exception,
+                            "Authority {CallbackKind} callback failed. Route={Route} RequestId={RequestId}",
+                            callbackKind, route.RouteId, requestId);
+                    }
+                };
+
+                // Unit fixtures do not boot the engine loop. Production callbacks are always
+                // marshalled; before the loop exists there is no client UI to mutate.
+                if (GameThread.Instance.IsInitialized)
+                    GameThread.Run(guarded, blocking: true, label: $"AuthorityRequest.{route.RouteId}.{callbackKind}");
+                else
+                    guarded();
+            }
+            catch (Exception exception)
+            {
+                succeeded = false;
+                Logger.Error(exception, "Authority {CallbackKind} callback could not run on the game thread. Route={Route} RequestId={RequestId}",
+                    callbackKind, route.RouteId, requestId);
+            }
+
+            return succeeded;
         }
 
         private static TimeSpan Backoff(TimeSpan baseTimeout, int attempt) =>

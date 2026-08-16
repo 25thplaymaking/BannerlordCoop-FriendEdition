@@ -166,20 +166,30 @@ internal class MapEventCreationCoordinator : IHandler
         return null;
     }
 
-    private static string BuildCommandKey(NetworkRequestCreateMapEvent request) =>
-        string.Join("|", request.AttackerId, request.DefenderId, request.ExpectedMapEventId ?? string.Empty,
-            request.ForceRaid, request.ForceSallyOut, request.ForceVolunteers, request.ForceSupplies,
-            request.IsSallyOutAmbush, request.ForceBlockadeAttack, request.ForceBlockadeSallyOutAttack,
-            request.ForceHideoutSendTroops);
-
-    private string ValidateHeader(AuthorityRequestHeader header)
+    private static string BuildCommandKey(NetworkRequestCreateMapEvent request)
     {
-        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot config)) return "authority-config-unavailable";
-        if (header.ProtocolVersion != config.ProtocolVersion || header.ExpectedRevision != config.Revision ||
-            !string.Equals(header.SessionId, config.SessionId, StringComparison.Ordinal))
-            return "stale-config-session";
+        // Length-prefix every variable field so distinct stable-id tuples cannot collide through
+        // a delimiter embedded in an object id.
+        static string Field(string value) => $"{value?.Length ?? -1}:{value ?? string.Empty}";
+        return string.Concat(
+            Field(request.AttackerId), Field(request.DefenderId), Field(request.ExpectedMapEventId),
+            request.ForceRaid ? "1" : "0", request.ForceSallyOut ? "1" : "0",
+            request.ForceVolunteers ? "1" : "0", request.ForceSupplies ? "1" : "0",
+            request.IsSallyOutAmbush ? "1" : "0", request.ForceBlockadeAttack ? "1" : "0",
+            request.ForceBlockadeSallyOutAttack ? "1" : "0", request.ForceHideoutSendTroops ? "1" : "0");
+    }
 
-        return null;
+    private AuthorityHeaderValidation ValidateHeader(AuthorityRequestHeader header)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot config))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "authority-config-unavailable");
+        if (header.ProtocolVersion != config.ProtocolVersion ||
+            !string.Equals(header.SessionId, config.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-config-session");
+        if (header.ExpectedRevision != config.Revision)
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-config-revision");
+
+        return AuthorityHeaderValidation.Valid;
     }
 
     private AuthorityServerReply<NetworkMapEventCreated> ExecuteAuthoritatively(

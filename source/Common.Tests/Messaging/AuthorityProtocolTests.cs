@@ -61,4 +61,16 @@ public class AuthorityProtocolTests
         Assert.Equal("map-event.create", attribute.RouteId);
         Assert.Equal(AuthorityRouteKind.Command, attribute.Kind);
     }
+
+    [Fact]
+    public void HeaderValidation_CannotRepresentAcceptedAsAFailure()
+    {
+        Assert.True(AuthorityHeaderValidation.Valid.IsValid);
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            AuthorityHeaderValidation.Reject(AuthorityResultStatus.Accepted, "not-a-failure"));
+
+        var unavailable = AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "server-not-ready");
+        Assert.False(unavailable.IsValid);
+        Assert.Equal(AuthorityResultStatus.Unavailable, unavailable.Status);
+    }
 }

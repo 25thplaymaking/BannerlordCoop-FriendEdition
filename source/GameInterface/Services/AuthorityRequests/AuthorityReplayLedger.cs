@@ -10,6 +10,7 @@ internal enum AuthorityReplayDecision
     InFlight,
     Completed,
     Conflict,
+    OverCapacity,
 }
 
 internal readonly struct AuthorityReplayInspection<TResult>
@@ -47,8 +48,10 @@ internal sealed class AuthorityReplayLedger<TResult>
         var key = new ReplayKey(peer, sessionId, routeId, requestId);
         if (!entries.TryGetValue(key, out var entry))
         {
+            if (!MakeRoom(peer))
+                return new AuthorityReplayInspection<TResult>(AuthorityReplayDecision.OverCapacity, default);
+
             entries[key] = new Entry(commandKey, ++sequence);
-            Trim(peer, sessionId, routeId);
             return new AuthorityReplayInspection<TResult>(AuthorityReplayDecision.New, default);
         }
 
@@ -85,35 +88,30 @@ internal sealed class AuthorityReplayLedger<TResult>
         entries.Clear();
     }
 
-    private void Trim(NetPeer peer, string sessionId, string routeId)
+    private bool MakeRoom(NetPeer peer)
     {
         int count = 0;
         foreach (var entry in entries)
         {
-            if (ReferenceEquals(entry.Key.Peer, peer) &&
-                string.Equals(entry.Key.SessionId, sessionId, StringComparison.Ordinal) &&
-                string.Equals(entry.Key.RouteId, routeId, StringComparison.Ordinal)) count++;
+            if (ReferenceEquals(entry.Key.Peer, peer)) count++;
         }
 
-        while (count > capacityPerPeer)
+        if (count < capacityPerPeer) return true;
+
+        ReplayKey oldest = default;
+        long oldestAccess = long.MaxValue;
+        foreach (var entry in entries)
         {
-            ReplayKey oldest = default;
-            long oldestAccess = long.MaxValue;
-            foreach (var entry in entries)
-            {
-                if (!ReferenceEquals(entry.Key.Peer, peer) ||
-                    !string.Equals(entry.Key.SessionId, sessionId, StringComparison.Ordinal) ||
-                    !string.Equals(entry.Key.RouteId, routeId, StringComparison.Ordinal) ||
-                    !entry.Value.Completed || entry.Value.LastAccess >= oldestAccess) continue;
+            if (!ReferenceEquals(entry.Key.Peer, peer) || !entry.Value.Completed ||
+                entry.Value.LastAccess >= oldestAccess) continue;
 
-                oldest = entry.Key;
-                oldestAccess = entry.Value.LastAccess;
-            }
-
-            if (oldestAccess == long.MaxValue) return;
-            entries.Remove(oldest);
-            count--;
+            oldest = entry.Key;
+            oldestAccess = entry.Value.LastAccess;
         }
+
+        if (oldestAccess == long.MaxValue) return false;
+        entries.Remove(oldest);
+        return true;
     }
 
     private readonly struct ReplayKey : IEquatable<ReplayKey>

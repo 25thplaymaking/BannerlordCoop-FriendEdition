@@ -23,6 +23,35 @@ public enum AuthorityRouteKind
 }
 
 /// <summary>
+/// An explicit server-side header gate result. A non-valid result can only be a terminal
+/// rejection status; it can never accidentally manufacture an Accepted response.
+/// </summary>
+public readonly struct AuthorityHeaderValidation
+{
+    private AuthorityHeaderValidation(AuthorityResultStatus status, string reasonCode)
+    {
+        if (status == AuthorityResultStatus.Accepted)
+            throw new ArgumentOutOfRangeException(nameof(status), "Accepted is not a header-validation failure.");
+
+        Status = status;
+        ReasonCode = reasonCode;
+    }
+
+    public bool IsValid => ReasonCode == null;
+    public AuthorityResultStatus Status { get; }
+    public string ReasonCode { get; }
+
+    public static AuthorityHeaderValidation Valid => default;
+
+    public static AuthorityHeaderValidation Reject(AuthorityResultStatus status, string reasonCode)
+    {
+        if (string.IsNullOrWhiteSpace(reasonCode))
+            throw new ArgumentException("A stable failure reason is required.", nameof(reasonCode));
+        return new AuthorityHeaderValidation(status, reasonCode);
+    }
+}
+
+/// <summary>
 /// Correlation and optimistic-concurrency data carried by a client-originated authority request.
 /// The route is identified by the typed request message, never by a client-selected method name.
 /// </summary>

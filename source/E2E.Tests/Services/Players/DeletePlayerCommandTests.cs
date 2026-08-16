@@ -2,6 +2,7 @@ using Common.Messaging;
 using Common.Util;
 using E2E.Tests.Environment;
 using E2E.Tests.Environment.Instance;
+using GameInterface.Configuration;
 using GameInterface.Services.MobileParties.Messages.Lifetime;
 using GameInterface.Services.Players;
 using GameInterface.Services.Players.Commands;
@@ -28,6 +29,8 @@ namespace E2E.Tests.Services.Players;
 /// </summary>
 public class DeletePlayerCommandTests : IDisposable
 {
+    private static long nextAuthorityRequestId;
+
     /// <summary>The obituary is a game-content lookup the test harness cannot serve; same
     /// disable as the companion removal tests.</summary>
     private static readonly System.Reflection.MethodBase CreateObituaryMethod =
@@ -91,17 +94,19 @@ public class DeletePlayerCommandTests : IDisposable
         Assert.Single(Client.InternalMessages.GetMessages<PlayerDeleteRequested>());
 
         var request = Assert.Single(Client.NetworkSentMessages.GetMessages<NetworkRequestDeletePlayer>());
-        Assert.Equal(heroId, request.HeroId);
+        Assert.True(request.Header.TryValidate(out var failure), failure);
+        Assert.True(request.Header.RequestId > 0);
     }
 
     [Fact]
     public void ServerDeleteRequest_DeletesPlayerKillsHeroDestroysPartyAndDisconnects()
     {
         var fixture = SetupRegisteredPlayer();
+        var header = CreateAuthorityHeader(Client);
 
         Server.Call(() =>
         {
-            Server.Resolve<IMessageBroker>().Publish(Client.NetPeer, new NetworkRequestDeletePlayer(fixture.HeroId));
+            Server.Resolve<IMessageBroker>().Publish(Client.NetPeer, new NetworkRequestDeletePlayer(header));
         }, new[] { CreateObituaryMethod });
         TestEnvironment.FlushCoalescer();
 
@@ -154,6 +159,7 @@ public class DeletePlayerCommandTests : IDisposable
         // Captivity parks the registered player party with IsActive = false; deletion must not
         // leave that party behind.
         var fixture = SetupRegisteredPlayer();
+        var header = CreateAuthorityHeader(Client);
 
         Server.Call(() =>
         {
@@ -163,7 +169,7 @@ public class DeletePlayerCommandTests : IDisposable
 
         Server.Call(() =>
         {
-            Server.Resolve<IMessageBroker>().Publish(Client.NetPeer, new NetworkRequestDeletePlayer(fixture.HeroId));
+            Server.Resolve<IMessageBroker>().Publish(Client.NetPeer, new NetworkRequestDeletePlayer(header));
         }, new[] { CreateObituaryMethod });
         TestEnvironment.FlushCoalescer();
 
@@ -179,6 +185,7 @@ public class DeletePlayerCommandTests : IDisposable
     public void ServerDeleteRequest_WhileBesieging_IsDeniedAndChangesNothing()
     {
         var fixture = SetupRegisteredPlayer();
+        var header = CreateAuthorityHeader(Client);
 
         Server.Call(() =>
         {
@@ -188,15 +195,15 @@ public class DeletePlayerCommandTests : IDisposable
 
         Server.Call(() =>
         {
-            Server.Resolve<IMessageBroker>().Publish(Client.NetPeer, new NetworkRequestDeletePlayer(fixture.HeroId));
+            Server.Resolve<IMessageBroker>().Publish(Client.NetPeer, new NetworkRequestDeletePlayer(header));
         });
 
-        var denial = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkDeletePlayerDenied>());
-        Assert.Contains("battle or siege", denial.Reason);
+        var denial = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkPlayerSelfDeleteResult>());
+        Assert.Equal(AuthorityResultStatus.Rejected, denial.Header.Status);
+        Assert.Equal("self-delete-state-active", denial.Header.ReasonCode);
+        Assert.Equal(header.RequestId, denial.Header.RequestId);
 
-        // The requester surfaced the denial and stays connected with everything intact.
-        var denied = Assert.Single(Client.InternalMessages.GetMessages<PlayerDeleteDenied>());
-        Assert.Contains("battle or siege", denied.Reason);
+        // The typed route surfaces the terminal and leaves the requester connected with everything intact.
         Assert.Equal(ConnectionState.Connected, Client.NetPeer.ConnectionState);
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkPlayerRemoved>());
         Server.Call(() =>
@@ -214,14 +221,17 @@ public class DeletePlayerCommandTests : IDisposable
         // Registered player, but its peer was never connected — the request arrives from a
         // connection the server cannot resolve to a player (e.g. mid-join).
         var fixture = SetupRegisteredPlayer(connectPeer: false);
+        var header = CreateAuthorityHeader(Client);
 
         Server.Call(() =>
         {
-            Server.Resolve<IMessageBroker>().Publish(Client.NetPeer, new NetworkRequestDeletePlayer(fixture.HeroId));
+            Server.Resolve<IMessageBroker>().Publish(Client.NetPeer, new NetworkRequestDeletePlayer(header));
         });
 
-        var denial = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkDeletePlayerDenied>());
-        Assert.Contains("No registered player", denial.Reason);
+        var denial = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkPlayerSelfDeleteResult>());
+        Assert.Equal(AuthorityResultStatus.Unauthorized, denial.Header.Status);
+        Assert.Equal("peer-not-player", denial.Header.ReasonCode);
+        Assert.Equal(header.RequestId, denial.Header.RequestId);
         Assert.Equal(ConnectionState.Connected, Client.NetPeer.ConnectionState);
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkPlayerRemoved>());
         Server.Call(() =>
@@ -249,6 +259,14 @@ public class DeletePlayerCommandTests : IDisposable
     }
 
     private record PlayerFixture(string ControllerId, string HeroId, string CharacterId, string PartyId, string ClanId);
+
+    private static AuthorityRequestHeader CreateAuthorityHeader(EnvironmentInstance client)
+    {
+        var authority = client.Resolve<IModConfigAuthority>();
+        Assert.True(authority.TryGetCurrent(out ModConfigSnapshot snapshot));
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId,
+            System.Threading.Interlocked.Increment(ref nextAuthorityRequestId), snapshot.Revision);
+    }
 
     /// <summary>
     /// Registers a hero/party pair as a player on the server and on both clients (the requester

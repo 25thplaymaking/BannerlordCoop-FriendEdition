@@ -476,6 +476,7 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
                         <StackPanel Grid.Row="0" Margin="0,0,0,12">
@@ -528,7 +529,11 @@
                             <Button x:Name="RosterRefreshButton" Grid.Column="4" Style="{StaticResource GhostButton}"
                                     Content="REFRESH" Height="30" ToolTip="Fetch the latest campaign ledger" />
                         </Grid>
-                        <DataGrid x:Name="RosterGrid" Grid.Row="3" IsReadOnly="True" AutoGenerateColumns="False"
+                        <TextBlock x:Name="RosterDetailText" Grid.Row="3" Margin="0,0,0,8"
+                                   FontFamily="{StaticResource Dispatch}" FontSize="10.5"
+                                   Foreground="{StaticResource Steel}"
+                                   Text="Select a lord to view culture, location, and clan tier." />
+                        <DataGrid x:Name="RosterGrid" Grid.Row="4" IsReadOnly="True" AutoGenerateColumns="False"
                                   CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column"
                                   GridLinesVisibility="Horizontal" Background="#99140F0B"
                                   Foreground="{StaticResource Parchment}" BorderBrush="#55C9A24B"

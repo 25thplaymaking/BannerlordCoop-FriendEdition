@@ -34,6 +34,90 @@
       "tests": [
         "MercenaryStockHandlerTests.Handle_CampaignReady_Client_RequestsStockSync"
       ]
+    },
+    {
+      "messageType": "GameInterface.Services.Armies.Audit.RequestArmyAudit",
+      "disposition": "BootstrapQuery",
+      "reason": "read-only-cross-peer-army-diagnostic-query",
+      "owner": "GameInterface.Services.Armies.Audit.RequestArmyAudit",
+      "tests": ["LegacyRequestDispositionContractTests.AuditRequests_AreReadOnlyQueryContractsWithoutAuthorityRoutes"]
+    },
+    {
+      "messageType": "GameInterface.Services.Heroes.Audit.RequestHeroAudit",
+      "disposition": "BootstrapQuery",
+      "reason": "read-only-cross-peer-hero-diagnostic-query",
+      "owner": "GameInterface.Services.Heroes.Audit.HeroAuditor",
+      "tests": ["LegacyRequestDispositionContractTests.AuditRequests_AreReadOnlyQueryContractsWithoutAuthorityRoutes"]
+    },
+    {
+      "messageType": "GameInterface.Services.MobileParties.Audit.RequestMobilePartyAudit",
+      "disposition": "BootstrapQuery",
+      "reason": "read-only-cross-peer-mobile-party-diagnostic-query",
+      "owner": "GameInterface.Services.MobileParties.Audit.MobilePartyAuditor",
+      "tests": ["LegacyRequestDispositionContractTests.AuditRequests_AreReadOnlyQueryContractsWithoutAuthorityRoutes"]
+    },
+    {
+      "messageType": "GameInterface.Services.MobileParties.Messages.NetworkRequestMercenaryStockAudit",
+      "disposition": "BootstrapQuery",
+      "reason": "read-only-mercenary-stock-diagnostic-query",
+      "owner": "GameInterface.Services.MobileParties.Handlers.MercenaryStockHandler",
+      "tests": ["LegacyRequestDispositionContractTests.AuditRequests_AreReadOnlyQueryContractsWithoutAuthorityRoutes"]
+    },
+    {
+      "messageType": "GameInterface.Services.SettlementComponents.Audit.RequestSettlementComponentAudit",
+      "disposition": "BootstrapQuery",
+      "reason": "read-only-settlement-component-diagnostic-query",
+      "owner": "GameInterface.Services.SettlementComponents.Audit.SettlementComponentAuditor",
+      "tests": ["LegacyRequestDispositionContractTests.AuditRequests_AreReadOnlyQueryContractsWithoutAuthorityRoutes"]
+    },
+    {
+      "messageType": "GameInterface.Services.Settlements.Audit.RequestSettlementAudit",
+      "disposition": "BootstrapQuery",
+      "reason": "read-only-settlement-diagnostic-query",
+      "owner": "GameInterface.Services.Settlements.Audit.SettlementAuditor",
+      "tests": ["LegacyRequestDispositionContractTests.AuditRequests_AreReadOnlyQueryContractsWithoutAuthorityRoutes"]
+    },
+    {
+      "messageType": "Coop.Core.Client.Services.Settlements.Messages.NetworkRequestSettlementAudit",
+      "disposition": "BootstrapQuery",
+      "reason": "read-only-legacy-settlement-diagnostic-query-contract",
+      "owner": "Coop.Core.Client.Services.Settlements.Messages.NetworkRequestSettlementAudit",
+      "tests": ["LegacyRequestDispositionContractTests.AuditRequests_AreReadOnlyQueryContractsWithoutAuthorityRoutes"]
+    },
+    {
+      "messageType": "GameInterface.Services.Heroes.Messages.RomanceFlow.NetworkRomanceRequestRejected",
+      "disposition": "Replication",
+      "reason": "server-rejection-result-replication",
+      "owner": "GameInterface.Services.Heroes.Handlers.RomanceHandler",
+      "tests": ["LegacyRequestDispositionContractTests.RejectionMessages_AreServerResultReplicationContracts"]
+    },
+    {
+      "messageType": "GameInterface.Services.Tournaments.Messages.NetworkTournamentRequestRejected",
+      "disposition": "Replication",
+      "reason": "server-rejection-result-replication",
+      "owner": "GameInterface.Services.Tournaments.Handlers.TournamentSessionHandler",
+      "tests": ["LegacyRequestDispositionContractTests.RejectionMessages_AreServerResultReplicationContracts"]
+    },
+    {
+      "messageType": "GameInterface.Services.UI.Messages.AttemptHost",
+      "disposition": "Internal",
+      "reason": "local-ui-host-process-control",
+      "owner": "Coop.Core.CoopartiveMultiplayerExperience",
+      "tests": ["LegacyRequestDispositionContractTests.HostJoinAndMapEventUpdateRequests_AreLocalBrokerControls"]
+    },
+    {
+      "messageType": "GameInterface.Services.UI.Messages.AttemptJoin",
+      "disposition": "Internal",
+      "reason": "local-ui-connect-process-control",
+      "owner": "Coop.Core.CoopartiveMultiplayerExperience",
+      "tests": ["LegacyRequestDispositionContractTests.HostJoinAndMapEventUpdateRequests_AreLocalBrokerControls"]
+    },
+    {
+      "messageType": "GameInterface.Services.MapEventParties.Messages.RequestMapEventPartyUpdate",
+      "disposition": "Internal",
+      "reason": "local-map-event-party-update-broker-trigger",
+      "owner": "GameInterface.Services.MapEventParties.Handlers.MapEventPartyHandler",
+      "tests": ["LegacyRequestDispositionContractTests.HostJoinAndMapEventUpdateRequests_AreLocalBrokerControls"]
     }
   ],
   "bypassExemptions": []

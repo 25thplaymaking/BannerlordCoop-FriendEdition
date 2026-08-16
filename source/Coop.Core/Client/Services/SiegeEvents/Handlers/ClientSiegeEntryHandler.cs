@@ -521,8 +521,9 @@ internal class ClientSiegeEntryHandler : IHandler
 
     private static bool IsExpectedBreakResult(NetworkRequestBreakSiege request,
         NetworkBreakSiegeApproved result) =>
-        result.Outcome == (result.Header.Status == AuthorityResultStatus.Accepted
-            ? SiegeBreakOutcome.Applied : SiegeBreakOutcome.Rejected) &&
+        (result.Header.Status == AuthorityResultStatus.Accepted
+            ? result.Outcome is SiegeBreakOutcome.Applied or SiegeBreakOutcome.AlreadyLeft
+            : result.Outcome == SiegeBreakOutcome.Rejected) &&
         string.Equals(request.PartyId, result.PartyId, StringComparison.Ordinal) &&
         request.FinishLocalMenus == result.FinishLocalMenus;
 

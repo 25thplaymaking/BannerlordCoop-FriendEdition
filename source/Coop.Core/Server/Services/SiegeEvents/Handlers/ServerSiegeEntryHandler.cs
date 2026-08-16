@@ -798,7 +798,23 @@ internal class ServerSiegeEntryHandler : IHandler
             if (party.MapEvent != null)
                 return RejectBreak(context, request, "invalid-battle-phase");
             if (party.BesiegerCamp == null)
-                return RejectBreak(context, request, "not-siege-participant");
+            {
+                // The authority state is already clear, but a delayed replica can still have its
+                // local camp reference. Publish the normal leave replication as a correlated
+                // proof before accepting the idempotent request; do not re-run the native removal.
+                if (!objectManager.TryGetId(party.Party, out var partyBaseId))
+                    return FailedBreak(context, request, "siege-break-reconciliation-unavailable");
+
+                stage = "publish-already-left-proof";
+                network.SendAll(new NetworkPartyLeftBattle(
+                    partyBaseId,
+                    leaveSiege: true,
+                    finishLocalMenus: false,
+                    context.Header.SessionId,
+                    context.Header.RequestId,
+                    mapEventId: null));
+                return AlreadyLeftBreak(context, request);
+            }
 
             var camp = party.BesiegerCamp;
             stage = "remove-party-from-siege-camp";
@@ -839,6 +855,12 @@ internal class ServerSiegeEntryHandler : IHandler
         bool siegeContinues) =>
         new(CreateBreakResult(context.Header, request, AuthorityResultStatus.Accepted, null,
                 SiegeBreakOutcome.Applied, battleLeaveApplied, siegeContinues), statePublished: true);
+
+    private static AuthorityServerReply<NetworkBreakSiegeApproved> AlreadyLeftBreak(
+        AuthorityServerContext context,
+        NetworkRequestBreakSiege request) =>
+        new(CreateBreakResult(context.Header, request, AuthorityResultStatus.Accepted, null,
+                SiegeBreakOutcome.AlreadyLeft, battleLeaveApplied: false, siegeContinues: false), statePublished: true);
 
     private static AuthorityServerReply<NetworkBreakSiegeApproved> FailedBreak(
         AuthorityServerContext context,

@@ -1,10 +1,12 @@
 ﻿using Common.Util;
 using Common.Network;
+using Common.Messaging;
 using Coop.Core.Client.Services.SiegeEvents.Messages;
 using Coop.Core.Server.Services.SiegeEvents.Messages;
 using E2E.Tests.Environment;
 using E2E.Tests.Environment.Instance;
 using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Armies.Messages;
 using GameInterface.Services.Armies.Patches;
 using GameInterface.Services.MapEvents.Messages.Leave;
@@ -186,10 +188,12 @@ public class SiegeLeaveMenuTests : IDisposable
     {
         var leavingClient = Clients.First();
         var (partyId, _) = SetupBesiegingPlayerParty(leavingClient);
+        string partyBaseId = null;
 
         Server.Call(() =>
         {
             Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(partyId, out var party));
+            Assert.True(Server.ObjectManager.TryGetId(party.Party, out partyBaseId));
             party._besiegerCamp = null;
         });
 
@@ -203,9 +207,16 @@ public class SiegeLeaveMenuTests : IDisposable
         leavingClient.Call(InvokePatchedEncounterLeave, disabledMethods);
 
         var approval = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkBreakSiegeApproved>());
+        Assert.Equal(AuthorityResultStatus.Accepted, approval.Header.Status);
         Assert.Equal(SiegeBreakOutcome.AlreadyLeft, approval.Outcome);
         Assert.True(approval.FinishLocalMenus);
         Assert.False(approval.BattleLeaveApplied);
+        var leaveProof = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkPartyLeftBattle>());
+        Assert.Equal(partyBaseId, leaveProof.PartyId);
+        Assert.True(leaveProof.LeaveSiege);
+        Assert.False(leaveProof.FinishLocalMenus);
+        Assert.Equal(approval.Header.SessionId, leaveProof.SessionId);
+        Assert.Equal(approval.Header.RequestId, leaveProof.AuthorityRequestId);
         AssertBesiegerCamp(Server, partyId, expectCamp: false);
         AssertBesiegerCamp(leavingClient, partyId, expectCamp: false);
         Assert.Equal(1, menuExit.CountFor(leavingClient));

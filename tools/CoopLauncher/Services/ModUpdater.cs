@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
@@ -27,6 +28,14 @@ public readonly record struct UpdateResult(UpdateOutcome Outcome, string Message
 public sealed class ModUpdater : IModUpdateService
 {
     private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromMinutes(30) };
+    private static readonly TimeSpan PayloadIdleTimeout = TimeSpan.FromSeconds(45);
+    private static readonly IReadOnlyList<TimeSpan> PayloadRetryBackoff =
+    [
+        TimeSpan.FromSeconds(1),
+        TimeSpan.FromSeconds(3),
+        TimeSpan.FromSeconds(7),
+        TimeSpan.FromSeconds(15),
+    ];
 
     private readonly LauncherConfig _config;
     private readonly HttpClient _http;
@@ -264,26 +273,66 @@ public sealed class ModUpdater : IModUpdateService
         for (int index = 0; index < parts.Length; index++)
         {
             UpdatePart part = parts[index];
-            using var resp = await _http.GetAsync(part.Url, HttpCompletionOption.ResponseHeadersRead);
-            resp.EnsureSuccessStatusCode();
-            if (resp.Content.Headers.ContentLength is long responseBytes && responseBytes != part.Bytes)
-                throw new InvalidDataException(
-                    $"{label} part {index + 1} length was {responseBytes}, expected {part.Bytes}");
-
-            await using Stream src = await resp.Content.ReadAsStreamAsync();
             using IncrementalHash partHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             long partRead = 0;
-            int read;
-            while ((read = await src.ReadAsync(buffer)) > 0)
+
+            for (int attempt = 0; partRead < part.Bytes; attempt++)
             {
-                await dst.WriteAsync(buffer.AsMemory(0, read));
-                partHash.AppendData(buffer, 0, read);
-                partRead += read;
-                long received = completed + partRead;
-                progress(
-                    received / (double)total,
-                    $"Downloading {label}… part {index + 1} / {parts.Length}, " +
-                    $"{received / 1_048_576.0:0} / {total / 1_048_576.0:0} MB");
+                try
+                {
+                    using var request = new HttpRequestMessage(HttpMethod.Get, part.Url);
+                    if (partRead > 0)
+                        request.Headers.Range = new RangeHeaderValue(partRead, null);
+
+                    using var requestTimeout = new CancellationTokenSource(PayloadIdleTimeout);
+                    using HttpResponseMessage response = await _http.SendAsync(
+                        request, HttpCompletionOption.ResponseHeadersRead, requestTimeout.Token);
+                    response.EnsureSuccessStatusCode();
+
+                    long remaining = part.Bytes - partRead;
+                    if (partRead > 0)
+                    {
+                        ContentRangeHeaderValue? range = response.Content.Headers.ContentRange;
+                        if (response.StatusCode != HttpStatusCode.PartialContent ||
+                            range?.From != partRead || range.Length != part.Bytes)
+                            throw new InvalidDataException(
+                                $"{label} part {index + 1} did not honor byte-range resume at {partRead}");
+                    }
+                    if (response.Content.Headers.ContentLength is long responseBytes && responseBytes != remaining)
+                        throw new InvalidDataException(
+                            $"{label} part {index + 1} length was {responseBytes}, expected {remaining}");
+
+                    await using Stream src = await response.Content.ReadAsStreamAsync();
+                    while (partRead < part.Bytes)
+                    {
+                        using var readTimeout = new CancellationTokenSource(PayloadIdleTimeout);
+                        int read = await src.ReadAsync(buffer.AsMemory(0,
+                            (int)Math.Min(buffer.Length, part.Bytes - partRead)), readTimeout.Token);
+                        if (read == 0) break;
+                        await dst.WriteAsync(buffer.AsMemory(0, read));
+                        partHash.AppendData(buffer, 0, read);
+                        partRead += read;
+                        long received = completed + partRead;
+                        progress(
+                            received / (double)total,
+                            $"Downloading {label}… part {index + 1} / {parts.Length}, " +
+                            $"{received / 1_048_576.0:0} / {total / 1_048_576.0:0} MB");
+                    }
+
+                    if (partRead < part.Bytes)
+                        throw new IOException(
+                            $"{label} part {index + 1} ended at {partRead} of {part.Bytes} bytes");
+                }
+                catch (Exception exception) when (
+                    IsTransientPayloadFailure(exception) && attempt < PayloadRetryBackoff.Count)
+                {
+                    TimeSpan delay = PayloadRetryBackoff[attempt];
+                    progress(
+                        (completed + partRead) / (double)total,
+                        $"{label} connection paused; resuming part {index + 1} / {parts.Length} " +
+                        $"from {partRead / 1_048_576.0:0} MB in {delay.TotalSeconds:0}s…");
+                    await _retryDelay(delay);
+                }
             }
 
             if (partRead != part.Bytes)
@@ -295,6 +344,17 @@ public sealed class ModUpdater : IModUpdateService
             completed += partRead;
         }
     }
+
+    private static bool IsTransientPayloadFailure(Exception exception) => exception switch
+    {
+        OperationCanceledException => true,
+        InvalidDataException => false,
+        IOException => true,
+        HttpRequestException { StatusCode: null } => true,
+        HttpRequestException { StatusCode: HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests } => true,
+        HttpRequestException http when (int?)http.StatusCode >= 500 => true,
+        _ => false,
+    };
 
     internal static bool IsManifestValid(UpdateManifest? manifest)
     {

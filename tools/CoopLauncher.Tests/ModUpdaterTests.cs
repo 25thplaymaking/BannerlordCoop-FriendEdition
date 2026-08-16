@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -220,6 +221,46 @@ public sealed class ModUpdaterTests
             "installed-kept",
             File.ReadAllText(Path.Combine(fixture.Modules, "Harmony", "current.dll")));
         Assert.False(File.Exists(Path.Combine(fixture.Modules, "coop-suite-version.txt")));
+    }
+
+    [Fact]
+    public async Task MultipartSuite_ResumesInterruptedPartWithVerifiedRange()
+    {
+        using var fixture = new UpdateFixture();
+        fixture.WriteInstalled("Coop", "installed-version.txt", "2.0");
+        byte[] suiteZip = CreateZipBytes(("Harmony/current.dll", new string('x', 4096)));
+        UpdateManifest suiteManifest = MultipartManifest("2.0", suiteZip, suiteZip);
+        int cutoff = suiteZip.Length / 3;
+        int payloadAttempts = 0;
+        using var http = new HttpClient(new StubHandler(request =>
+        {
+            string path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("suite.json")) return JsonResponse(suiteManifest);
+            if (path.EndsWith("client.json"))
+                return JsonResponse(Manifest("2.0", "client.zip", new string('a', 64)));
+
+            payloadAttempts++;
+            if (payloadAttempts == 1)
+                return InterruptedBytesResponse(suiteZip, cutoff);
+
+            RangeItemHeaderValue range = Assert.Single(request.Headers.Range!.Ranges);
+            Assert.Equal((long)cutoff, range.From);
+            return PartialBytesResponse(suiteZip, cutoff);
+        }));
+        var updater = new ModUpdater(new LauncherConfig
+        {
+            SuiteManifestUrl = "https://updates.example/suite.json",
+            UpdateManifestUrl = "https://updates.example/client.json",
+        }, http, _ => Task.CompletedTask);
+        ModUpdateCheck check = await updater.CheckAsync(fixture.Modules);
+
+        UpdateResult result = await updater.InstallAsync(fixture.Modules, check, (_, _, _) => { });
+
+        Assert.Equal(UpdateOutcome.Updated, result.Outcome);
+        Assert.Equal(2, payloadAttempts);
+        Assert.Equal(
+            new string('x', 4096),
+            File.ReadAllText(Path.Combine(fixture.Modules, "Harmony", "current.dll")));
     }
 
     [Fact]
@@ -470,6 +511,21 @@ public sealed class ModUpdaterTests
         Content = new ByteArrayContent(bytes),
     };
 
+    private static HttpResponseMessage InterruptedBytesResponse(byte[] bytes, int cutoff)
+    {
+        var content = new StreamContent(new InterruptingStream(bytes, cutoff));
+        content.Headers.ContentLength = bytes.LongLength;
+        return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+    }
+
+    private static HttpResponseMessage PartialBytesResponse(byte[] bytes, int start)
+    {
+        byte[] remaining = bytes[start..];
+        var content = new ByteArrayContent(remaining);
+        content.Headers.ContentRange = new ContentRangeHeaderValue(start, bytes.Length - 1, bytes.Length);
+        return new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = content };
+    }
+
     private static byte[] CreateZipBytes(params (string Path, string Contents)[] entries)
     {
         using var stream = new MemoryStream();
@@ -527,5 +583,33 @@ public sealed class ModUpdaterTests
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken) =>
             Task.FromResult(response(request));
+    }
+
+    private sealed class InterruptingStream(byte[] bytes, int cutoff) : Stream
+    {
+        private readonly MemoryStream inner = new(bytes, writable: false);
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => bytes.LongLength;
+        public override long Position { get => inner.Position; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+        public override int Read(Span<byte> buffer)
+        {
+            if (inner.Position >= cutoff) throw new IOException("simulated connection drop");
+            return inner.Read(buffer[..Math.Min(buffer.Length, cutoff - (int)inner.Position)]);
+        }
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(Read(buffer.Span));
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
+        }
     }
 }

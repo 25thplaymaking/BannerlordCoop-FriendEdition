@@ -163,7 +163,7 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             this.nextRequestId = nextRequestId;
             this.unregister = unregister;
             replayLedger = new AuthorityReplayLedger<TResult>(replayLedgerCapacityPerPeer);
-            lifecycle = new AuthorityRequestLifecycle(route.RouteId, Logger);
+            lifecycle = new AuthorityRequestLifecycle(route.RouteId, route.Kind == AuthorityRouteKind.Command, Logger);
 
             requestHandler = HandleRequest;
             resultHandler = HandleResult;

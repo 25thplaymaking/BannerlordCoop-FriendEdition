@@ -74,6 +74,14 @@ public class AuthorityRequestLifecycleTests
         Assert.True(lifecycle.TryGetSnapshot("request-6", out var snapshot));
         Assert.Equal(AuthorityRequestPhase.ServerAdmitted, snapshot.Phase);
         Assert.False(snapshot.IsTerminal);
+
+        lifecycle.MutationCommitted("request-6", "Accepted");
+        lifecycle.StatePublished("request-6", "Revision:9");
+        lifecycle.ReplySent("request-6", "Accepted");
+
+        Assert.True(lifecycle.TryGetSnapshot("request-6", out var replied));
+        Assert.Equal(AuthorityRequestPhase.ReplySent, replied.Phase);
+        Assert.True(replied.IsTerminal);
     }
 
     [Fact]
@@ -96,5 +104,19 @@ public class AuthorityRequestLifecycleTests
         Assert.True(lifecycle.TryGetSnapshot("request-7", out var completed));
         Assert.Equal(AuthorityRequestPhase.Completed, completed.Phase);
         Assert.True(completed.IsTerminal);
+    }
+
+    [Fact]
+    public void BootstrapQuery_CanReplyAfterAdmissionWithoutStatePublication()
+    {
+        var lifecycle = new AuthorityRequestLifecycle("mod-config.query", requiresStatePublication: false);
+
+        lifecycle.BeginServer("request-8");
+        lifecycle.ServerAdmitted("request-8");
+        lifecycle.ReplySent("request-8", "Accepted");
+
+        Assert.True(lifecycle.TryGetSnapshot("request-8", out var snapshot));
+        Assert.Equal(AuthorityRequestPhase.ReplySent, snapshot.Phase);
+        Assert.True(snapshot.IsTerminal);
     }
 }

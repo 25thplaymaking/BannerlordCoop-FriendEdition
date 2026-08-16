@@ -76,15 +76,30 @@ public sealed class AuthorityRequestLifecycle
     private readonly string route;
     private readonly ILogger logger;
     private readonly int capacity;
+    private readonly bool requiresStatePublication;
     private readonly ConcurrentDictionary<string, Entry> entries = new ConcurrentDictionary<string, Entry>();
     private readonly ConcurrentQueue<string> insertionOrder = new ConcurrentQueue<string>();
 
     public AuthorityRequestLifecycle(string route, ILogger logger = null, int capacity = DefaultCapacity)
+        : this(route, requiresStatePublication: true, logger, capacity)
+    {
+    }
+
+    /// <summary>
+    /// Creates a lifecycle for either a mutating command, which must publish state before its
+    /// reply, or a non-mutating bootstrap query, which can reply directly after admission.
+    /// </summary>
+    public AuthorityRequestLifecycle(
+        string route,
+        bool requiresStatePublication,
+        ILogger logger = null,
+        int capacity = DefaultCapacity)
     {
         if (string.IsNullOrWhiteSpace(route)) throw new ArgumentException("A route name is required.", nameof(route));
         if (capacity < 1) throw new ArgumentOutOfRangeException(nameof(capacity));
 
         this.route = route;
+        this.requiresStatePublication = requiresStatePublication;
         this.logger = logger;
         this.capacity = capacity;
     }
@@ -195,7 +210,7 @@ public sealed class AuthorityRequestLifecycle
             return;
         }
 
-        if (!entry.TryUpdate(phase, outcome, out var startedUtc))
+        if (!entry.TryUpdate(phase, outcome, requiresStatePublication, out var startedUtc))
         {
             logger?.Warning(
                 "AuthorityRoute ignored {Phase} after terminal state. Route={Route} RequestId={RequestId} Outcome={Outcome}",
@@ -239,9 +254,26 @@ public sealed class AuthorityRequestLifecycle
         phase == AuthorityRequestPhase.PublicationFailed ||
         phase == AuthorityRequestPhase.ExecutionFailed;
 
-    internal static bool CanTransition(AuthorityRequestPhase current, AuthorityRequestPhase next)
+    internal static bool CanTransition(AuthorityRequestPhase current, AuthorityRequestPhase next) =>
+        CanTransition(current, next, requiresStatePublication: true);
+
+    internal static bool CanTransition(
+        AuthorityRequestPhase current,
+        AuthorityRequestPhase next,
+        bool requiresStatePublication)
     {
         if (current == next || IsTerminal(current)) return false;
+
+        // These terminal observations carry ordering guarantees. Keep them out of
+        // the generic terminal-failure allowance below so a lifecycle cannot claim
+        // a reply was sent before state publication, or completion before a client
+        // replica observed the committed state.
+        if (next == AuthorityRequestPhase.ReplySent)
+            return current == AuthorityRequestPhase.StatePublished ||
+                current == AuthorityRequestPhase.ServerRejected ||
+                (!requiresStatePublication && current == AuthorityRequestPhase.ServerAdmitted);
+        if (next == AuthorityRequestPhase.Completed)
+            return current == AuthorityRequestPhase.ReplicaApplied;
 
         switch (current)
         {
@@ -264,7 +296,6 @@ public sealed class AuthorityRequestLifecycle
                     next == AuthorityRequestPhase.ServerResolved || IsTerminal(next);
             case AuthorityRequestPhase.ServerAdmitted:
                 return next == AuthorityRequestPhase.MutationCommitted ||
-                    next == AuthorityRequestPhase.ReplySent ||
                     next == AuthorityRequestPhase.ServerRejected || IsTerminal(next);
             case AuthorityRequestPhase.MutationCommitted:
                 return next == AuthorityRequestPhase.StatePublished || IsTerminal(next);
@@ -306,12 +337,16 @@ public sealed class AuthorityRequestLifecycle
         public DateTime UpdatedUtc { get; private set; }
         public bool IsTerminal => AuthorityRequestLifecycle.IsTerminal(Phase);
 
-        public bool TryUpdate(AuthorityRequestPhase phase, string outcome, out DateTime startedUtc)
+        public bool TryUpdate(
+            AuthorityRequestPhase phase,
+            string outcome,
+            bool requiresStatePublication,
+            out DateTime startedUtc)
         {
             lock (sync)
             {
                 startedUtc = StartedUtc;
-                if (!AuthorityRequestLifecycle.CanTransition(Phase, phase)) return false;
+                if (!AuthorityRequestLifecycle.CanTransition(Phase, phase, requiresStatePublication)) return false;
 
                 Phase = phase;
                 Outcome = outcome;

@@ -4,8 +4,10 @@ using Common.Messaging;
 using Common.Network;
 using Common.Util;
 using GameInterface.Configuration;
+using GameInterface.Services.CampaignService.Messages;
 using GameInterface.Registry.Messages;
 using GameInterface.Services.Barters;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
 using GameInterface.Services.WorkshopMods.Core;
@@ -48,6 +50,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
     private readonly IPlayerManager playerManager;
     private readonly IModConfigAuthority configAuthority;
     private readonly IWorkshopCapabilityRegistry capabilityRegistry;
+    private readonly IAuthorityRouteHandle<FourberieSnapshotIntent, NetworkFourberieStateQueryResult> snapshotRoute;
     private readonly Harmony harmony;
     private readonly FourberieRevisionGate revisionGate = new FourberieRevisionGate();
     private readonly object snapshotSync = new object();
@@ -67,6 +70,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
     private long nextRequestId;
     private bool compatible;
     private bool stateReady;
+    private bool objectsRegistered;
     private FourberieOperationExecutor operationExecutor;
     private (FourberieMethodSpec Spec, MethodInfo Original, MethodInfo Prefix, MethodInfo Postfix)[] expectedGuards;
 
@@ -77,7 +81,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         IPlayerManager playerManager,
         IModConfigAuthority configAuthority,
         IWorkshopCapabilityRegistry capabilityRegistry,
-        Harmony _)
+        Harmony harmonyDependency,
+        IAuthorityRequestRouter authorityRequestRouter)
     {
         this.messageBroker = messageBroker;
         this.network = network;
@@ -90,22 +95,47 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         compatible = TryInstall();
         if (compatible) FourberiePatchRuntime.Current = this;
 
+        // Register before the result subscriber: the router records an Accepted result first,
+        // then this handler applies its snapshot, and the update loop probes readiness.
+        snapshotRoute = authorityRequestRouter.Register(
+            AuthorityRoute<FourberieSnapshotIntent, NetworkRequestFourberieState,
+                NetworkFourberieStateQueryResult>.Define(
+                "workshop.fourberie.snapshot", AuthorityRouteKind.BootstrapQuery,
+                CreateSnapshotHeader,
+                (_, header) => new NetworkRequestFourberieState(header),
+                request => request.Header,
+                result => result.Header,
+                request => request.Header.TryValidate(out _) ? null : "invalid-fourberie-snapshot-query",
+                request => "snapshot:" + request.Header.SessionId + ":" + request.Header.ExpectedRevision,
+                ValidateSnapshotHeader,
+                ExecuteSnapshotQuery,
+                CreateSnapshotTerminal,
+                ProbeSnapshotApplied,
+                _ => { },
+                PresentSnapshotTerminal,
+                configAuthority.IsTrustedServer,
+                AuthorityTimeoutPolicy.BootstrapQuery,
+                requireAuthenticatedPlayer: false));
+
         messageBroker.Subscribe<AllGameObjectsRegistered>(HandleAllGameObjectsRegistered);
-        messageBroker.Subscribe<NetworkRequestFourberieState>(HandleStateRequest);
         messageBroker.Subscribe<NetworkRequestFourberieOperation>(HandleOperationRequest);
         messageBroker.Subscribe<NetworkFourberieOperationResult>(HandleOperationResult);
         messageBroker.Subscribe<NetworkFourberieContractProposal>(HandleContractProposal);
         messageBroker.Subscribe<NetworkFourberieState>(HandleState);
+        messageBroker.Subscribe<NetworkFourberieStateQueryResult>(HandleStateQueryResult);
+        messageBroker.Subscribe<HostModConfigAccepted>(HandleHostModConfigAccepted);
     }
 
     public void Dispose()
     {
         messageBroker.Unsubscribe<AllGameObjectsRegistered>(HandleAllGameObjectsRegistered);
-        messageBroker.Unsubscribe<NetworkRequestFourberieState>(HandleStateRequest);
         messageBroker.Unsubscribe<NetworkRequestFourberieOperation>(HandleOperationRequest);
         messageBroker.Unsubscribe<NetworkFourberieOperationResult>(HandleOperationResult);
         messageBroker.Unsubscribe<NetworkFourberieContractProposal>(HandleContractProposal);
         messageBroker.Unsubscribe<NetworkFourberieState>(HandleState);
+        messageBroker.Unsubscribe<NetworkFourberieStateQueryResult>(HandleStateQueryResult);
+        messageBroker.Unsubscribe<HostModConfigAccepted>(HandleHostModConfigAccepted);
+        snapshotRoute.Dispose();
         if (ReferenceEquals(FourberiePatchRuntime.Current, this)) FourberiePatchRuntime.Current = null;
     }
 
@@ -785,16 +815,77 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         operationExecutor?.Reset();
         nextRequestId = 0;
         lock (snapshotSync) revisionGate.Reset();
-        stateReady = true;
+        objectsRegistered = true;
+        stateReady = !ModInformation.IsClient;
         if (ModInformation.IsClient)
         {
-            network.SendAll(new NetworkRequestFourberieState());
+            StartSnapshotBootstrap();
             return;
         }
 
         serverRevision = 0;
         lastPublishedFingerprint = null;
         SendSnapshotOrAbort(peer: null, onlyIfChanged: false);
+    }
+
+    private void HandleHostModConfigAccepted(MessagePayload<HostModConfigAccepted> payload)
+    {
+        if (payload?.What.Snapshot == null || !configAuthority.IsCurrent(payload.What.Snapshot)) return;
+        StartSnapshotBootstrap();
+    }
+
+    private void StartSnapshotBootstrap()
+    {
+        if (!compatible || !objectsRegistered || !ModInformation.IsClient || stateReady ||
+            !configAuthority.TryGetCurrent(out _)) return;
+        snapshotRoute.Submit(default);
+    }
+
+    private AuthorityRequestHeader CreateSnapshotHeader(long requestId)
+    {
+        if (!configAuthority.TryGetCurrent(out var config)) return default;
+        return new AuthorityRequestHeader(config.ProtocolVersion, config.SessionId, requestId, config.Revision);
+    }
+
+    private AuthorityHeaderValidation ValidateSnapshotHeader(AuthorityRequestHeader header)
+    {
+        if (!compatible || !stateReady || !configAuthority.TryGetCurrent(out var config))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "fourberie-snapshot-unavailable");
+        if (header.ProtocolVersion != config.ProtocolVersion || !string.Equals(header.SessionId, config.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-config-session");
+        return header.ExpectedRevision == config.Revision
+            ? AuthorityHeaderValidation.Valid
+            : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-config-revision");
+    }
+
+    private AuthorityServerReply<NetworkFourberieStateQueryResult> ExecuteSnapshotQuery(
+        AuthorityServerContext context, NetworkRequestFourberieState _)
+    {
+        if (!TryCaptureSnapshot(out var snapshot, out var failure))
+        {
+            Logger.Warning("Fourberie snapshot query is unavailable: {Failure}", failure);
+            return new AuthorityServerReply<NetworkFourberieStateQueryResult>(
+                CreateSnapshotTerminal(context.Header, AuthorityResultStatus.Unavailable, "fourberie-snapshot-unavailable"), false);
+        }
+        return new AuthorityServerReply<NetworkFourberieStateQueryResult>(
+            new NetworkFourberieStateQueryResult(context.Header, AuthorityResultStatus.Accepted, snapshot, null), true);
+    }
+
+    private static NetworkFourberieStateQueryResult CreateSnapshotTerminal(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reasonCode) =>
+        new NetworkFourberieStateQueryResult(header, status, null, reasonCode);
+
+    private AuthorityCommitProbeResult ProbeSnapshotApplied(NetworkFourberieStateQueryResult result) =>
+        stateReady && result.Snapshot != null && revisionGate.Revision == result.Header.CommittedRevision
+            ? AuthorityCommitProbeResult.Applied
+            : AuthorityCommitProbeResult.Pending;
+
+    private void PresentSnapshotTerminal(AuthorityClientOutcome<NetworkFourberieStateQueryResult> outcome)
+    {
+        if (outcome.Completion == AuthorityClientCompletion.Applied) return;
+        stateReady = false;
+        Logger.Warning("Fourberie snapshot bootstrap ended without readiness. Completion={Completion} Reason={Reason}",
+            outcome.Completion, outcome.ReasonCode);
     }
 
     private bool CanUseGameplayRoute(out ModConfigSnapshot config)
@@ -1278,6 +1369,30 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             context: nameof(FourberieCompatibilityHandler));
     }
 
+    private void HandleStateQueryResult(MessagePayload<NetworkFourberieStateQueryResult> payload)
+    {
+        if (!compatible || !ModInformation.IsClient || payload?.Who is not NetPeer serverPeer ||
+            !configAuthority.IsTrustedServer(serverPeer) ||
+            payload.What.Header.Status != AuthorityResultStatus.Accepted || payload.What.Snapshot == null)
+            return;
+
+        GameThread.RunSafe(
+            () =>
+            {
+                if (TryApplySnapshot(payload.What.Snapshot, out var failure))
+                {
+                    stateReady = true;
+                    TryShowContractProposal();
+                    return;
+                }
+                stateReady = false;
+                Logger.Fatal("Disconnecting from the Coop server because Fourberie state could not be accepted: {Failure}",
+                    failure);
+                serverPeer.Disconnect();
+            },
+            context: nameof(FourberieCompatibilityHandler));
+    }
+
     private void SendSnapshotOrAbort(NetPeer peer, bool onlyIfChanged)
     {
         if (!FourberieCanonicalState.TryCapture(
@@ -1339,6 +1454,39 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             serverRevision = nextRevision;
             lastPublishedFingerprint = stateFingerprint;
         }
+    }
+
+    private bool TryCaptureSnapshot(out NetworkFourberieState snapshot, out string failure)
+    {
+        snapshot = null;
+        if (!FourberieCanonicalState.TryCapture(
+                assembly,
+                objectManager,
+                out var entries,
+                out var stateFingerprint,
+                out failure))
+        {
+            failure = "could not capture Fourberie server state: " + failure;
+            return false;
+        }
+
+        bool changed = !string.Equals(lastPublishedFingerprint, stateFingerprint, StringComparison.OrdinalIgnoreCase);
+        long revision = serverRevision;
+        if (changed && lastPublishedFingerprint != null) revision++;
+        snapshot = new NetworkFourberieState(
+            FourberieCompatibilityManifest.AdapterVersion,
+            revision,
+            configurationFingerprint,
+            stateFingerprint,
+            entries);
+        if (!FourberieStateCodec.TryValidate(snapshot, out failure))
+        {
+            failure = "captured Fourberie server state was invalid: " + failure;
+            return false;
+        }
+
+        failure = null;
+        return true;
     }
 
     private bool TryApplySnapshot(NetworkFourberieState snapshot, out string rejection)
@@ -1447,4 +1595,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             "The Coop session cannot continue without authoritative Fourberie state: " + failure);
     }
 
+}
+
+internal readonly struct FourberieSnapshotIntent
+{
 }

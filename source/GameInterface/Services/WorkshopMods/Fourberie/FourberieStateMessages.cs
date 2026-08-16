@@ -10,9 +10,50 @@ using System.Text;
 
 namespace GameInterface.Services.WorkshopMods.Fourberie;
 
+[AuthorityRoute("workshop.fourberie.snapshot", AuthorityRouteKind.BootstrapQuery)]
 [ProtoContract(SkipConstructor = true)]
 internal readonly struct NetworkRequestFourberieState : ICommand
 {
+    [ProtoMember(1)] public readonly int ProtocolVersion;
+    [ProtoMember(2)] public readonly string SessionId;
+    [ProtoMember(3)] public readonly long AuthorityRequestId;
+    [ProtoMember(4)] public readonly long ExpectedRevision;
+
+    public NetworkRequestFourberieState(AuthorityRequestHeader header)
+    {
+        ProtocolVersion = header.ProtocolVersion;
+        SessionId = header.SessionId;
+        AuthorityRequestId = header.RequestId;
+        ExpectedRevision = header.ExpectedRevision;
+    }
+
+    public AuthorityRequestHeader Header =>
+        new AuthorityRequestHeader(ProtocolVersion, SessionId, AuthorityRequestId, ExpectedRevision);
+}
+
+[ProtoContract(SkipConstructor = true)]
+internal readonly struct NetworkFourberieStateQueryResult : IEvent
+{
+    [ProtoMember(1)] public readonly NetworkFourberieState Snapshot;
+    [ProtoMember(2)] public readonly string SessionId;
+    [ProtoMember(3)] public readonly long AuthorityRequestId;
+    [ProtoMember(4)] public readonly AuthorityResultStatus Status;
+    [ProtoMember(5)] public readonly long CommittedRevision;
+    [ProtoMember(6)] public readonly string ReasonCode;
+
+    public NetworkFourberieStateQueryResult(
+        AuthorityRequestHeader request, AuthorityResultStatus status, NetworkFourberieState snapshot, string reasonCode)
+    {
+        Snapshot = snapshot;
+        SessionId = request.SessionId;
+        AuthorityRequestId = request.RequestId;
+        Status = status;
+        CommittedRevision = snapshot?.Revision ?? request.ExpectedRevision;
+        ReasonCode = reasonCode;
+    }
+
+    public AuthorityResultHeader Header =>
+        new AuthorityResultHeader(SessionId, AuthorityRequestId, Status, CommittedRevision, ReasonCode);
 }
 
 [ProtoContract]

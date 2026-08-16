@@ -240,11 +240,24 @@ public class SiegeLeaveMenuTests : IDisposable
         using var menuExit = new GameMenuExitToLastCounter();
         leavingClient.Call(InvokePatchedPassiveArmySiegeLeave, disabledMethods);
 
-        var armyRemoval = Assert.Single(leavingClient.NetworkSentMessages.GetMessages<NetworkRemovePartyInArmy>());
+        // The client no longer emits the legacy replication command. It submits the typed authority
+        // request, and the server's correlated result plus server-originated replication prove the
+        // canonical removal before this leave flow continues into siege.break.
+        var leaveRequest = Assert.Single(leavingClient.NetworkSentMessages.GetMessages<RequestLeaveArmy>());
+        Assert.Equal(armyId, leaveRequest.ArmyId);
+        var leaveResult = Assert.Single(Server.NetworkSentMessages.GetMessages<ArmyAuthorityResult>());
+        Assert.Equal(armyId, leaveResult.ArmyId);
+        Assert.Equal(partyId, leaveResult.PartyId);
+        Assert.Equal(AuthorityResultStatus.Accepted, leaveResult.Header.Status);
+        Assert.Equal(leaveRequest.Header.SessionId, leaveResult.Header.SessionId);
+        Assert.Equal(leaveRequest.Header.RequestId, leaveResult.Header.RequestId);
+        Assert.Equal(leaveRequest.Header.ExpectedRevision, leaveResult.Header.CommittedRevision);
+
+        var armyRemoval = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkRemovePartyInArmy>());
         Assert.Equal(armyId, armyRemoval.ArmyId);
         Assert.Equal(partyId, armyRemoval.MobilePartyId);
         Assert.Equal(partyId, armyRemoval.ClientMobilePartyId);
-        Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkRemovePartyInArmy>());
+        Assert.Empty(leavingClient.NetworkSentMessages.GetMessages<NetworkRemovePartyInArmy>());
 
         var request = Assert.Single(leavingClient.NetworkSentMessages.GetMessages<NetworkRequestBreakSiege>());
         Assert.Equal(partyId, request.PartyId);

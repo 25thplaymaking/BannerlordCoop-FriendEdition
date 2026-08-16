@@ -33,7 +33,9 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
     private readonly INetwork network;
     private readonly IPlayerManager playerManager;
     private readonly int replayLedgerCapacityPerPeer;
-    private readonly List<IDisposable> registrations = new List<IDisposable>();
+    // The router owns each route subscription for precisely its DI lifetime. Keeping the
+    // registration interface here also lets an individually disposed route stop being polled.
+    private readonly List<IAuthorityRegistration> registrations = new List<IAuthorityRegistration>();
     private long nextRequestId;
     private bool disposed;
 
@@ -68,24 +70,25 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
                 $"Authority route {route.RouteId} must match {typeof(TRequest).Name}'s AuthorityRouteAttribute.");
         }
 
-        if (registrations.OfType<IAuthorityRegistration>().Any(registration =>
+        if (registrations.Any(registration =>
                 string.Equals(registration.RouteId, route.RouteId, StringComparison.Ordinal)))
             throw new InvalidOperationException($"Authority route {route.RouteId} is already registered.");
 
-        var registration = new RouteRegistration<TIntent, TRequest, TResult>(
+        RouteRegistration<TIntent, TRequest, TResult> registration = null;
+        registration = new RouteRegistration<TIntent, TRequest, TResult>(
             route,
             messageBroker,
             network,
             playerManager,
             NextRequestId,
-            replayLedgerCapacityPerPeer);
+            replayLedgerCapacityPerPeer,
+            () => registrations.Remove(registration));
         registrations.Add(registration);
         return registration;
     }
 
     public bool IsRegistered(string routeId, AuthorityRouteKind kind) =>
         !string.IsNullOrWhiteSpace(routeId) && !disposed && registrations
-            .OfType<IAuthorityRegistration>()
             .Any(registration => string.Equals(registration.RouteId, routeId, StringComparison.Ordinal) &&
                                  registration.Kind == kind);
 
@@ -94,7 +97,7 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
     public void Update(TimeSpan frameTime)
     {
         if (disposed || ModInformation.IsServer) return;
-        foreach (var registration in registrations.OfType<IAuthorityRegistration>().ToArray())
+        foreach (var registration in registrations.ToArray())
             registration.Poll();
     }
 
@@ -116,7 +119,7 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
         return Interlocked.Increment(ref nextRequestId);
     }
 
-    private interface IAuthorityRegistration
+    private interface IAuthorityRegistration : IDisposable
     {
         string RouteId { get; }
         AuthorityRouteKind Kind { get; }
@@ -133,6 +136,7 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
         private readonly INetwork network;
         private readonly IPlayerManager playerManager;
         private readonly Func<long> nextRequestId;
+        private readonly Action unregister;
         private readonly AuthorityRequestLifecycle lifecycle;
         private readonly AuthorityReplayLedger<TResult> replayLedger;
         private readonly Dictionary<long, PendingRequest> pending = new Dictionary<long, PendingRequest>();
@@ -149,13 +153,15 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             INetwork network,
             IPlayerManager playerManager,
             Func<long> nextRequestId,
-            int replayLedgerCapacityPerPeer)
+            int replayLedgerCapacityPerPeer,
+            Action unregister)
         {
             this.route = route;
             this.messageBroker = messageBroker;
             this.network = network;
             this.playerManager = playerManager;
             this.nextRequestId = nextRequestId;
+            this.unregister = unregister;
             replayLedger = new AuthorityReplayLedger<TResult>(replayLedgerCapacityPerPeer);
             lifecycle = new AuthorityRequestLifecycle(route.RouteId, Logger);
 
@@ -341,6 +347,7 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             messageBroker.Unsubscribe(disconnectHandler);
             messageBroker.Unsubscribe(clientSessionEndedHandler);
             replayLedger.Clear();
+            unregister?.Invoke();
         }
 
         private void HandlePlayerDisconnected(MessagePayload<PlayerDisconnected> payload)

@@ -1,7 +1,9 @@
 using Common;
 using Common.Messaging;
+using Common.Network;
 using Common.Network.Messages;
 using Coop.Tests.Mocks;
+using Autofac;
 using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Players;
 using GameInterface.Services.Players.Data;
@@ -101,6 +103,42 @@ public sealed class AuthorityRequestRouterTests
         Assert.True(router.IsRegistered("test.route", AuthorityRouteKind.Command));
         Assert.False(router.IsRegistered("test.route", AuthorityRouteKind.BootstrapQuery));
         Assert.False(router.IsRegistered("unknown", AuthorityRouteKind.Command));
+    }
+
+    [Fact]
+    public void LifetimeScopedRouter_PollsTheResolvedInstanceAndUnregistersDisposedRoutes()
+    {
+        using var broker = new MessageBroker();
+        using var network = new TestNetwork();
+        var server = network.CreatePeer();
+        var builder = new ContainerBuilder();
+        builder.RegisterInstance(broker).As<IMessageBroker>();
+        builder.RegisterInstance(network).As<INetwork>();
+        builder.RegisterInstance(new Mock<IPlayerManager>().Object).As<IPlayerManager>();
+        builder.RegisterType<AuthorityRequestRouter>().As<IAuthorityRequestRouter>().InstancePerLifetimeScope();
+        using var container = builder.Build();
+        using var scope = container.BeginLifetimeScope();
+
+        var firstResolution = scope.Resolve<IAuthorityRequestRouter>();
+        var secondResolution = scope.Resolve<IAuthorityRequestRouter>();
+        Assert.Same(firstResolution, secondResolution);
+
+        using var route = firstResolution.Register(CreateRoute(() => AuthorityCommitProbeResult.Pending,
+            new AuthorityTimeoutPolicy(TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1), 1)));
+        route.Submit("intent");
+        Thread.Sleep(10);
+        secondResolution.Update(TimeSpan.Zero);
+
+        Assert.Equal(2, network.GetPeerMessagesFromType<TestRequest>(server).Count());
+        Assert.True(firstResolution.IsRegistered("test.route", AuthorityRouteKind.Command));
+
+        route.Dispose();
+
+        Assert.False(secondResolution.IsRegistered("test.route", AuthorityRouteKind.Command));
+        broker.Publish(server, new TestResult(new AuthorityResultHeader("session", 1,
+            AuthorityResultStatus.Rejected, 0, "late-result")));
+        secondResolution.Update(TimeSpan.Zero);
+        Assert.Equal(2, network.GetPeerMessagesFromType<TestRequest>(server).Count());
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 ﻿using Common.Util;
 using Coop.Core.Client.Services.MobileParties.Messages;
 using Common.Messaging;
+using Common.Tests.Utils;
 using Coop.Core.Server.Services.MobileParties.Messages;
 using Coop.IntegrationTests.Environment;
 using Coop.IntegrationTests.Environment.Instance;
@@ -382,14 +383,44 @@ namespace Coop.IntegrationTests.MobileParties
             RegisterPartyForClient(client1, party, "party1");
             TestEnvironment.RegisterObjectInNetwork(settlement, "settlement1");
             TestEnvironment.Server.NetworkSentMessages.Clear();
+            var router = client1.Resolve<TestNetworkRouter>();
+            router.IsMessageRoutingEnabled = false;
             GameThreadTestRunner.Run(() =>
                 client1.SimulateMessage(
                     this,
                     new StartSettlementEncounterAttempted(party, settlement)));
+            var request = client1.NetworkSentMessages
+                .GetMessages<NetworkRequestStartSettlementEncounter>().Single();
+            TestEnvironment.Server.NetworkSentMessages.Clear();
+            Assert.Equal(
+                1,
+                TestEnvironment.Server.Resolve<TestMessageBroker>()
+                    .GetSubscriberCountForType<NetworkRequestStartSettlementEncounter>());
+            router.IsMessageRoutingEnabled = true;
+            GameThreadTestRunner.Run(() =>
+                TestEnvironment.Server.SimulateMessage(client1.NetPeer, request));
+            Assert.Equal(
+                1,
+                TestEnvironment.Server.InternalMessages
+                    .GetMessageCount<NetworkRequestStartSettlementEncounter>());
 
             TestEnvironment.Server.Resolve<Mock<ISettlementInterface>>()
                 .Verify(s => s.PartyEnterSettlement(It.IsAny<MobileParty>(), It.IsAny<Settlement>()), Times.Never);
-            Assert.Equal(1, TestEnvironment.Server.NetworkSentMessages.GetMessageCount<NetworkStartSettlementEncounter>());
+            var correlatedResults = TestEnvironment.Server.NetworkSentMessages
+                .GetMessages<NetworkStartSettlementEncounter>()
+                .Where(result => result.Header.SessionId == request.Header.SessionId &&
+                                 result.Header.RequestId == request.Header.RequestId)
+                .ToArray();
+            Assert.NotEmpty(correlatedResults);
+            Assert.All(
+                correlatedResults,
+                result =>
+                {
+                    Assert.Equal(AuthorityResultStatus.Accepted, result.Header.Status);
+                    Assert.Equal(SettlementEncounterStartMode.EnteredSettlement, result.Mode);
+                    Assert.Equal("party1", result.PartyId);
+                    Assert.Equal("settlement1", result.SettlementId);
+                });
             Assert.Equal(0, TestEnvironment.Server.NetworkSentMessages.GetMessageCount<NetworkPartyEnterSettlement>());
         }
 

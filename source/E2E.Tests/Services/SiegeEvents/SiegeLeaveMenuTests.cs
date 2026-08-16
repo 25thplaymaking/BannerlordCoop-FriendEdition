@@ -203,6 +203,10 @@ public class SiegeLeaveMenuTests : IDisposable
             .Where(method => method.DeclaringType != typeof(GameMenu) ||
                 method.Name != nameof(GameMenu.ExitToLast))
             .ToList();
+        // This regression covers the encounter-menu leave funnel in its menu-owned shape. The
+        // shared E2E campaign can retain a prior encounter, which correctly uses a different
+        // continuation (PlayerEncounter.Finish) and would not exercise this menu exit contract.
+        leavingClient.Call(() => Campaign.Current.PlayerEncounter = null);
         using var menuExit = new GameMenuExitToLastCounter();
         leavingClient.Call(InvokePatchedEncounterLeave, disabledMethods);
 

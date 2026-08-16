@@ -25,6 +25,7 @@ using Moq;
 using Newtonsoft.Json;
 using System.Reflection;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.Core;
 using TaleWorlds.Localization;
 using TaleWorlds.ObjectSystem;
@@ -148,10 +149,18 @@ public class E2ETestEnvironment : IDisposable
         client.Call(() => client.Resolve<IControllerIdProvider>().SetControllerId(controllerId));
         Server.Call(() =>
         {
+            if (!Server.ObjectManager.TryGetObject<MobileParty>(mobilePartyId, out var party) ||
+                party.LeaderHero == null ||
+                !Server.ObjectManager.TryGetId(party.LeaderHero, out var heroId))
+            {
+                throw new InvalidOperationException(
+                    "The E2E controlled party must have a registered leader hero.");
+            }
+
             IPlayerManager players = Server.Resolve<IPlayerManager>();
             var player = new Player(
                 controllerId,
-                heroId: null,
+                heroId,
                 mobilePartyId: mobilePartyId,
                 clanId: null,
                 characterObjectId: null);
@@ -161,6 +170,7 @@ public class E2ETestEnvironment : IDisposable
             players.SetPeer(controllerId, client.NetPeer);
             if (!players.TryGetPlayer(client.NetPeer, out Player connected) ||
                 !string.Equals(connected.MobilePartyId, mobilePartyId, StringComparison.Ordinal) ||
+                !string.Equals(connected.HeroId, heroId, StringComparison.Ordinal) ||
                 !players.IsConnected(connected))
             {
                 throw new InvalidOperationException(

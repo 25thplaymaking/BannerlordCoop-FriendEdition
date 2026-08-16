@@ -23,6 +23,7 @@ internal readonly struct UpdatePartyBehaviorOnSelection : ICommand
 }
 
 [ProtoContract(SkipConstructor = true)]
+[AuthorityRoute("clan.autorecruit.set", AuthorityRouteKind.Command)]
 internal readonly struct ChangeAutoRecruitForSettlement : ICommand
 {
     [ProtoMember(1)]
@@ -31,12 +32,21 @@ internal readonly struct ChangeAutoRecruitForSettlement : ICommand
     [ProtoMember(2)]
     public readonly bool Value;
 
+    [ProtoMember(3)]
+    public readonly AuthorityRequestHeader Header;
+
     public ChangeAutoRecruitForSettlement(
         string homeSettlementId,
         bool value)
+        : this(homeSettlementId, value, default)
+    {
+    }
+
+    public ChangeAutoRecruitForSettlement(string homeSettlementId, bool value, AuthorityRequestHeader header)
     {
         HomeSettlementId = homeSettlementId;
         Value = value;
+        Header = header;
     }
 }
 
@@ -55,5 +65,20 @@ internal readonly struct ChangeAutoRecruitForSettlementClients : ICommand
     {
         HomeSettlementId = homeSettlementId;
         Value = value;
+    }
+}
+
+[ProtoContract(SkipConstructor = true)]
+internal readonly struct AutoRecruitChangeResult : ICommand
+{
+    [ProtoMember(1)] public readonly string HomeSettlementId;
+    [ProtoMember(2)] public readonly bool Value;
+    [ProtoMember(3)] public readonly AuthorityResultHeader Header;
+
+    public AutoRecruitChangeResult(string homeSettlementId, bool value, AuthorityResultHeader header)
+    {
+        HomeSettlementId = homeSettlementId;
+        Value = value;
+        Header = header;
     }
 }

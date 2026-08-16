@@ -118,6 +118,7 @@ public partial class MainWindow : Window
         RosterStatusPicker.SelectionChanged += (_, _) => ApplyRosterFilters();
         RosterSortPicker.SelectionChanged += (_, _) => ApplyRosterFilters();
         RosterRefreshButton.Click += async (_, _) => await LoadRosterAsync();
+        RosterGrid.SelectionChanged += (_, _) => ShowSelectedLordDetails();
         OptionsTab.Checked += (_, _) => ShowPanel(OptionsPanel);
         WireOptions();
 
@@ -864,7 +865,21 @@ public partial class MainWindow : Window
 
     private void PromptForPendingCrashReport()
     {
-        CrashReportCandidate? candidate = CrashReportLocator.FindPending(_settings.LastSubmittedCrashReport);
+        // Existing installations can have a long archive of diagnostics produced before this
+        // guided flow existed. Baseline it once; only later bundles are actionable.
+        if (!_settings.CrashReportScanInitialized)
+        {
+            CrashReportCandidate? latest = CrashReportLocator.FindLatest();
+            _settings.CrashReportScanInitialized = true;
+            if (latest is not null)
+                _settings.CrashReportWatermarkUtcTicks = latest.CreatedUtc.Ticks;
+            _settings.Save(LauncherSettings.DefaultPath);
+            return;
+        }
+
+        CrashReportCandidate? candidate = CrashReportLocator.FindPending(
+            _settings.LastSubmittedCrashReport,
+            _settings.CrashReportWatermarkUtcTicks);
         if (candidate is null) return;
 
         _pendingCrashReport = candidate;
@@ -875,7 +890,12 @@ public partial class MainWindow : Window
             "Calradia Co-op — crash report ready",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning);
-        if (choice != MessageBoxResult.Yes) return;
+        if (choice != MessageBoxResult.Yes)
+        {
+            _settings.CrashReportWatermarkUtcTicks = candidate.CreatedUtc.Ticks;
+            _settings.Save(LauncherSettings.DefaultPath);
+            return;
+        }
 
         OptionsTab.IsChecked = true;
         ShowPanel(OptionsPanel);
@@ -994,6 +1014,15 @@ public partial class MainWindow : Window
             .ThenBy(lord => lord.Name, StringComparer.OrdinalIgnoreCase)
             .Select((lord, index) => new RankedLordStats(lord, index + 1))
             .ToArray();
+        RosterDetailText.Text = "Select a lord to view culture, location, and clan tier.";
+    }
+
+    private void ShowSelectedLordDetails()
+    {
+        if (RosterGrid.SelectedItem is not RankedLordStats lord) return;
+        RosterDetailText.Text =
+            $"{lord.Name}  •  {lord.Controller}  •  tier {lord.ClanTier}  •  {lord.Culture}  •  " +
+            $"{lord.Location}  •  {lord.Status} / {lord.CurrentAction}";
     }
 
     private static string SelectedTag(ComboBox? picker, string fallback)
@@ -1104,13 +1133,15 @@ public partial class MainWindow : Window
             Controller = Display(source.Controller, "AI");
             Clan = source.Clan;
             Kingdom = source.Kingdom;
+            Culture = source.Culture;
+            Location = source.Location;
+            ClanTier = source.ClanTier;
             Status = Display(source.Status, "Active");
             CurrentAction = Display(source.CurrentAction, "Unknown");
             Level = source.Level;
             Gold = source.Gold;
             Renown = source.Renown;
             Influence = source.Influence;
-            ClanTier = source.ClanTier;
             PartySize = source.PartySize;
             Fiefs = source.Fiefs;
             Online = source.Online;
@@ -1120,13 +1151,15 @@ public partial class MainWindow : Window
         public string Controller { get; }
         public string Clan { get; }
         public string Kingdom { get; }
+        public string Culture { get; }
+        public string Location { get; }
+        public int ClanTier { get; }
         public string Status { get; }
         public string CurrentAction { get; }
         public int Level { get; }
         public int Gold { get; }
         public int Renown { get; }
         public int Influence { get; }
-        public int ClanTier { get; }
         public int PartySize { get; }
         public int Fiefs { get; }
         public bool Online { get; }

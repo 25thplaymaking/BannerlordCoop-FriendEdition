@@ -40,6 +40,8 @@ public sealed class LauncherSettingsTests : IDisposable
             VerboseLogging = true,
             ReportClientId = "5f98966d-15c1-4640-bf87-cdfa26fa3e74",
             LastSubmittedCrashReport = "2026-08-15_18-42-05_client_1234_deadbeef",
+            CrashReportScanInitialized = true,
+            CrashReportWatermarkUtcTicks = 638908263000000000L,
         };
         settings.Save(SettingsPath);
 
@@ -53,6 +55,8 @@ public sealed class LauncherSettingsTests : IDisposable
         Assert.True(loaded.VerboseLogging);
         Assert.Equal(settings.ReportClientId, loaded.ReportClientId);
         Assert.Equal(settings.LastSubmittedCrashReport, loaded.LastSubmittedCrashReport);
+        Assert.True(loaded.CrashReportScanInitialized);
+        Assert.Equal(settings.CrashReportWatermarkUtcTicks, loaded.CrashReportWatermarkUtcTicks);
     }
 
     [Fact]

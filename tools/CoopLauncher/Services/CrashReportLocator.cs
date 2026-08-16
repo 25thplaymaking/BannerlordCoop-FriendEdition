@@ -3,7 +3,12 @@ using System.IO;
 namespace CoopLauncher.Services;
 
 /// <summary>Finds the bundle already prepared by the in-game crash reporter; it never collects a dump itself.</summary>
-public sealed record CrashReportCandidate(string Id, string DirectoryPath, string ZipPath, string Summary);
+public sealed record CrashReportCandidate(
+    string Id,
+    string DirectoryPath,
+    string ZipPath,
+    string Summary,
+    DateTime CreatedUtc);
 
 public static class CrashReportLocator
 {
@@ -11,7 +16,23 @@ public static class CrashReportLocator
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
         "Mount and Blade II Bannerlord", "Coop Crash Reports");
 
-    public static CrashReportCandidate? FindPending(string lastSubmittedId)
+    public static CrashReportCandidate? FindLatest()
+    {
+        try
+        {
+            if (!Directory.Exists(Root)) return null;
+            return Directory.EnumerateDirectories(Root)
+                .Select(CreateCandidate)
+                .OrderByDescending(candidate => File.GetLastWriteTimeUtc(candidate!.ZipPath))
+                .FirstOrDefault();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static CrashReportCandidate? FindPending(string lastSubmittedId, long newerThanUtcTicks)
     {
         try
         {
@@ -19,8 +40,9 @@ public static class CrashReportLocator
             return Directory.EnumerateDirectories(Root)
                 .Select(CreateCandidate)
                 .Where(candidate => candidate is not null &&
+                    candidate.CreatedUtc.Ticks > newerThanUtcTicks &&
                     !string.Equals(candidate.Id, lastSubmittedId, StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(candidate => File.GetLastWriteTimeUtc(candidate!.ZipPath))
+                .OrderByDescending(candidate => candidate!.CreatedUtc)
                 .FirstOrDefault();
         }
         catch
@@ -49,6 +71,11 @@ public static class CrashReportLocator
             // A locked report remains reportable as a bundle; the summary is only convenience text.
         }
 
-        return new CrashReportCandidate(Path.GetFileName(directory), directory, zip, summary);
+        return new CrashReportCandidate(
+            Path.GetFileName(directory),
+            directory,
+            zip,
+            summary,
+            File.GetLastWriteTimeUtc(zip));
     }
 }

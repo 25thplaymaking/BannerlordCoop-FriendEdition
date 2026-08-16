@@ -43,6 +43,15 @@ public sealed class LauncherSettings
     /// <summary>Most recently submitted crash bundle directory; prevents repeat prompts for the same crash.</summary>
     public string LastSubmittedCrashReport { get; set; } = "";
 
+    /// <summary>
+    /// Records that this launcher installation has inspected the pre-existing local crash archive.
+    /// It prevents an upgrade from presenting historical bundles as new crashes.
+    /// </summary>
+    public bool CrashReportScanInitialized { get; set; }
+
+    /// <summary>UTC ticks of the newest locally dismissed crash bundle.</summary>
+    public long CrashReportWatermarkUtcTicks { get; set; }
+
     public string GetOrCreateReportClientId()
     {
         if (!Guid.TryParse(ReportClientId, out _))

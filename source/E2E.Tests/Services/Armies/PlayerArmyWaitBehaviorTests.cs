@@ -102,6 +102,7 @@ public class PlayerArmyWaitBehaviorTests : IDisposable
         var client = TestEnvironment.Clients.First();
 
         var clientPartyId = TestEnvironment.CreateRegisteredObject<MobileParty>();
+        string? clientHeroId = null;
         string? armyId = null;
 
         server.Call(() =>
@@ -112,18 +113,23 @@ public class PlayerArmyWaitBehaviorTests : IDisposable
             Assert.True(server.ObjectManager.TryGetId(army, out armyId));
 
             Assert.True(server.ObjectManager.TryGetObject<MobileParty>(clientPartyId, out var clientParty));
+            Assert.True(server.ObjectManager.TryGetId(clientParty.LeaderHero, out clientHeroId));
             army._parties.Add(clientParty);
             clientParty._army = army;
         });
 
+        Assert.False(string.IsNullOrWhiteSpace(clientHeroId));
+
         // Register the client as the controlling player so the server's removal authority
-        // guard recognizes the leaver as removing its own party.
+        // guard recognizes the leaver as the leader of its own party.  Party ownership is
+        // server-derived from both the registered party id and hero id; omitting the latter
+        // intentionally fails closed as army-actor-missing.
         client.Call(() => client.Resolve<IControllerIdProvider>().SetControllerId("PlayerOne"));
         server.Call(() =>
         {
             var playerManager = server.Resolve<IPlayerManager>();
             Assert.True(playerManager.AddPlayer(
-                new Player("PlayerOne", heroId: null, clientPartyId, clanId: null, characterObjectId: null)));
+                new Player("PlayerOne", clientHeroId, clientPartyId, clanId: null, characterObjectId: null)));
             playerManager.SetPeer("PlayerOne", client.NetPeer);
         });
 

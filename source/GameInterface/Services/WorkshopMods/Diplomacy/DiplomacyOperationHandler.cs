@@ -692,7 +692,8 @@ internal sealed class DiplomacyOperationHandler : IHandler, IDiplomacyPatchRunti
         return stateReady && runtime.IsAvailable && configAuthority.TryGetCurrent(out config) &&
                authorityRequestRouter.IsRegistered("workshop.diplomacy.gameplay", AuthorityRouteKind.Command) &&
                authorityRequestRouter.IsRegistered("workshop.diplomacy.snapshot", AuthorityRouteKind.BootstrapQuery) &&
-               (!ModInformation.IsClient || (compatibilityHandler?.SnapshotReadiness == WorkshopSnapshotReadiness.Ready &&
+               (!ModInformation.IsClient || (compatibilityHandler != null &&
+                   compatibilityHandler.SnapshotReadiness == WorkshopSnapshotReadiness.Ready &&
                    string.Equals(compatibilityHandler.SnapshotSessionId, config.SessionId, StringComparison.Ordinal)));
     }
 

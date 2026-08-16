@@ -372,11 +372,12 @@ internal sealed class DiplomacyCapabilitySource : IWorkshopCapabilitySource
             : new ModOptions(modConfig.Data.ModOptions ?? new ModOptionsData());
         bool optionEnabled = options.IsWorkshopModuleEnabled(ModuleId);
         bool snapshotRouteReady = authorityRequestRouter?.IsRegistered("workshop.diplomacy.snapshot",
-            AuthorityRouteKind.BootstrapQuery);
+            AuthorityRouteKind.BootstrapQuery) == true;
         bool gameplayRouteReady = authorityRequestRouter?.IsRegistered("workshop.diplomacy.gameplay",
-            AuthorityRouteKind.Command);
+            AuthorityRouteKind.Command) == true;
         bool snapshotCurrent = configAuthority != null && configAuthority.TryGetCurrent(out var config) &&
-            (!ModInformation.IsClient || (compatibilityHandler.SnapshotReadiness == WorkshopSnapshotReadiness.Ready &&
+            (!ModInformation.IsClient || (compatibilityHandler != null &&
+                compatibilityHandler.SnapshotReadiness == WorkshopSnapshotReadiness.Ready &&
                 string.Equals(compatibilityHandler.SnapshotSessionId, config.SessionId, StringComparison.Ordinal)));
         bool enabled = optionEnabled && snapshotRouteReady && gameplayRouteReady && snapshotCurrent;
         yield return new WorkshopCapability(

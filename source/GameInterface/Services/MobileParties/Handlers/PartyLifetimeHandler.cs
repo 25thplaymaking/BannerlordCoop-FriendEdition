@@ -33,7 +33,6 @@ internal class PartyLifetimeHandler : IHandler
         messageBroker.Subscribe<NetworkApplyDestroyParty>(Handle_DestroyParty);
 
         messageBroker.Subscribe<DestroyPartyRequested>(Handle_DestroyPartyRequested);
-        messageBroker.Subscribe<NetworkRequestDestroyParty>(Handle_NetworkRequestDestroyParty);
 
         messageBroker.Subscribe<PartyDisbanded>(Handle_PartyDisbanded);
         messageBroker.Subscribe<NetworkPartyDisbanded>(Handle_NetworkPartyDisbanded);
@@ -45,7 +44,6 @@ internal class PartyLifetimeHandler : IHandler
         messageBroker.Unsubscribe<NetworkApplyDestroyParty>(Handle_DestroyParty);
 
         messageBroker.Unsubscribe<DestroyPartyRequested>(Handle_DestroyPartyRequested);
-        messageBroker.Unsubscribe<NetworkRequestDestroyParty>(Handle_NetworkRequestDestroyParty);
 
         messageBroker.Unsubscribe<PartyDisbanded>(Handle_PartyDisbanded);
         messageBroker.Unsubscribe<NetworkPartyDisbanded>(Handle_NetworkPartyDisbanded);
@@ -127,19 +125,12 @@ internal class PartyLifetimeHandler : IHandler
 
     internal void Handle_DestroyPartyRequested(MessagePayload<DestroyPartyRequested> payload)
     {
-        var destroyerParty = payload.What.DestroyerParty;
-        var defeatedParty = payload.What.DefeatedParty;
+        // DestroyPartyApplied is the server-native replication point. A client-side generic
+        // destroy request would let it nominate arbitrary parties, so this former producer is
+        // intentionally a no-op rather than a second authority path.
+        Logger.Warning("Ignoring deprecated client destroy-party request; native server destruction is Internal.");
+        return;
 
-        // The defeated party can be a client-local object with no network id — e.g. a quest-spawned
-        // party the server never registered. Those are destroyed locally only and have nothing for
-        // the server to replicate, so skip silently (no logging) rather than reporting a missing id.
-        if (!objectManager.TryGetId(defeatedParty, out var defeatedPartyId))
-            return;
-
-        if (!objectManager.TryGetIdWithLogging(destroyerParty, out var destroyerPartyId))
-            return;
-
-        network.SendAll(new NetworkRequestDestroyParty(destroyerPartyId, defeatedPartyId));
     }
 
     internal void Handle_NetworkRequestDestroyParty(MessagePayload<NetworkRequestDestroyParty> payload)

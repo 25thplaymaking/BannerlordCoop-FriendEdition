@@ -1733,7 +1733,7 @@ function New-ManifestDocuments {
         '6. In the launcher, activate only entries marked ACTIVE in CLIENT-LOAD-ORDER.txt. Framework/gameplay originals marked STAGED-INACTIVE remain feature-blocked.',
         '',
         'Dedicated/headless server:',
-        '7. Stage the complete package so its receipt and hashes are available, then follow SERVER-ACTIVATION.txt. Use the exact seven-entry production server order recorded there; do not add guarded, never-active, or otherwise unreviewed modules.',
+        ("7. Stage the complete package so its receipt and hashes are available, then follow SERVER-ACTIVATION.txt. Use the exact {0}-entry production server order recorded there; do not add guarded, never-active, or otherwise unreviewed modules." -f @($serverPolicy.exactActiveModuleOrder).Count),
         '8. Run the Windows or Linux server preflight against the staged server root, launch module order, and resolved runtime CoopData/mod-config.json. It must report the runtime path/fingerprint and semantic difficulty.birthAndDeath=true; the staged default alone is not runtime evidence. A failure blocks launch.',
         '9. Compare SHA256SUMS.txt when diagnosing a mismatch.',
         '',
@@ -1765,10 +1765,13 @@ function New-ManifestDocuments {
     $serverLines.Add('')
     $serverLines.Add("Canonical Harmony policy: $($serverPolicy.canonicalHarmonyPolicy)")
     $serverLines.Add("Exact production order: $(@($serverPolicy.exactActiveModuleOrder) -join ' -> ')")
+    $serverActivePowerShell = @($serverPolicy.exactActiveModuleOrder | ForEach-Object { "'$([string]$_)'" }) -join ','
+    $serverActiveCsv = @($serverPolicy.exactActiveModuleOrder | ForEach-Object { [string]$_ }) -join ','
+    $serverActiveCount = @($serverPolicy.exactActiveModuleOrder).Count
     $serverLines.Add('Before launch, run:')
-    $serverLines.Add("  Windows: .\Verify-ServerHarmony.ps1 -ServerRoot 'C:\path\to\server\engine' -RuntimeModConfigPath 'C:\path\to\CoopData\mod-config.json' -ActiveModuleIds @('Bannerlord.Harmony','Native','SandBoxCore','CustomBattle','Sandbox','StoryMode','Coop') -NonInteractive")
-    $serverLines.Add("  Linux:   python3 ./Verify-ServerHarmony.py --server-root '/path/to/server/engine' --runtime-mod-config '/path/to/CoopData/mod-config.json' --active-modules 'Bannerlord.Harmony,Native,SandBoxCore,CustomBattle,Sandbox,StoryMode,Coop'")
-    $serverLines.Add('The production launch list must exactly match the seven-entry order above. Bannerlord.Harmony precedes Native and Coop; no extra module is accepted. Preflight rejects stale Coop/other 0Harmony copies and does not modify or start the server.')
+    $serverLines.Add("  Windows: .\Verify-ServerHarmony.ps1 -ServerRoot 'C:\path\to\server\engine' -RuntimeModConfigPath 'C:\path\to\CoopData\mod-config.json' -ActiveModuleIds @($serverActivePowerShell) -NonInteractive")
+    $serverLines.Add("  Linux:   python3 ./Verify-ServerHarmony.py --server-root '/path/to/server/engine' --runtime-mod-config '/path/to/CoopData/mod-config.json' --active-modules '$serverActiveCsv'")
+    $serverLines.Add("The production launch list must exactly match the $serverActiveCount-entry order above. Bannerlord.Harmony precedes Native and Coop; no extra module is accepted. Preflight rejects stale Coop/other 0Harmony copies and does not modify or start the server.")
     $serverLines.Add('')
     $serverLines.Add('Never activate on headless:')
     foreach ($id in @($serverPolicy.neverActivateModuleIds)) { $serverLines.Add("- $id") }

@@ -304,6 +304,11 @@ try {
     Assert-True (Test-Path -LiteralPath (Join-Path $output 'SERVER-ACTIVATION.txt')) 'role-aware server activation guidance must be shipped'
     $clientPolicyText = Get-Content -LiteralPath (Join-Path $output 'CLIENT-LOAD-ORDER.txt') -Raw
     Assert-True ($clientPolicyText -match '\[ACTIVE\]\s+Canonical\.Harmony' -and $clientPolicyText -match '\[STAGED-INACTIVE\]\s+Gameplay\.Mod') 'client instructions must distinguish active from staged-inactive modules'
+    $serverPolicyText = Get-Content -LiteralPath (Join-Path $output 'SERVER-ACTIVATION.txt') -Raw
+    Assert-True ($serverPolicyText -match "-ActiveModuleIds @\('Canonical\.Harmony','Coop'\)" -and
+        $serverPolicyText -match "--active-modules 'Canonical\.Harmony,Coop'" -and
+        $serverPolicyText -match 'exactly match the 2-entry order') 'server instructions must render the exact configured active order in both preflight examples'
+    Assert-True ($serverPolicyText -notmatch 'seven-entry') 'server instructions must not retain a stale fixed-size activation claim'
     Assert-True (Test-Path -LiteralPath (Join-Path $output 'Verify-ServerHarmony.ps1')) 'server Harmony preflight must be shipped'
     Assert-True (Test-Path -LiteralPath (Join-Path $output 'Verify-ServerHarmony.py')) 'cross-platform server Harmony preflight must be shipped'
     Assert-True (Test-Path -LiteralPath (Join-Path $output 'SERVER-HARMONY.json')) 'pinned server Harmony expectation must be shipped'

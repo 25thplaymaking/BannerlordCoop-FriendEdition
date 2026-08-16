@@ -113,6 +113,7 @@
     <Compile Include="Server\Services\Kingdoms\Messages\NetworkKingdomDecisionResolved.cs" />
     <Compile Include="Server\Services\Kingdoms\Messages\NetworkRequestCreateKingdom.cs" />
     <Compile Include="Server\Services\Kingdoms\Messages\NetworkPlayerKingdomCreated.cs" />
+    <Compile Include="Server\Services\Kingdoms\Messages\NetworkKingdomAuthorityResults.cs" />
   </ItemGroup>
   <ItemGroup>
 	  <Reference Include="SandBox.View">

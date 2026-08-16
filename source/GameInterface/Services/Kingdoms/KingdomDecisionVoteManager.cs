@@ -41,12 +41,12 @@ namespace GameInterface.Services.Kingdoms
         void UnregisterDecisionItem(DecisionItemBaseVM decisionItem);
         bool HandleVoteRequest(string controllerId, KingdomDecisionVoteData voteData);
         void HandlePlayerDisconnected(string controllerId);
-        void ApplyRemoteVote(string clanId, KingdomDecisionVoteData voteData);
+        bool ApplyRemoteVote(string clanId, KingdomDecisionVoteData voteData);
         bool TryResolveDecision(KingdomDecision decision, bool force);
         bool HasEligiblePlayerClan(KingdomDecision decision);
         bool TryPublishFinalVoteForElection(KingdomElection election);
         IReadOnlyList<KingdomDecisionVoteManager.KingdomDecisionDebugInfo> GetDecisionDebugInfo(Kingdom kingdom);
-        void ApplyResolved(
+        bool ApplyResolved(
             string kingdomId,
             int decisionIndex,
             int outcomeIndex,
@@ -166,7 +166,12 @@ namespace GameInterface.Services.Kingdoms
         {
             if (!TryCreateVoteData(decisionOption, out KingdomDecisionVoteData voteData)) return false;
 
-            TryApplyLocalVote(decisionOption.Decision, voteData);
+            // Network clients do not mutate their vote state optimistically. The authority route applies
+            // the vote once on the server and the correlated canonical broadcast is the only client commit.
+            if (!ModInformation.IsClient)
+            {
+                TryApplyLocalVote(decisionOption.Decision, voteData);
+            }
             MessageBroker.Instance.Publish(decisionOption, new KingdomDecisionVoteRequested(voteData));
             return true;
         }
@@ -186,13 +191,16 @@ namespace GameInterface.Services.Kingdoms
                 return false;
             }
 
-            TryApplyLocalVote(decisionItem.KingdomDecisionMaker._decision, voteData);
+            if (!ModInformation.IsClient)
+            {
+                TryApplyLocalVote(decisionItem.KingdomDecisionMaker._decision, voteData);
+            }
             MessageBroker.Instance.Publish(decisionItem, new KingdomDecisionVoteRequested(voteData));
-            if (decisionItem.KingdomDecisionMaker?._decision != null)
+            if (!ModInformation.IsClient && decisionItem.KingdomDecisionMaker?._decision != null)
             {
                 LocalSubmittedDecisions.Add(decisionItem.KingdomDecisionMaker._decision);
+                MarkLocalVoteSubmitted(decisionItem);
             }
-            MarkLocalVoteSubmitted(decisionItem);
             return true;
         }
 
@@ -304,20 +312,31 @@ namespace GameInterface.Services.Kingdoms
             }
         }
 
-        public void ApplyRemoteVote(string clanId, KingdomDecisionVoteData voteData)
+        public bool ApplyRemoteVote(string clanId, KingdomDecisionVoteData voteData)
         {
-            if (string.IsNullOrEmpty(clanId) || voteData == null) return;
+            if (string.IsNullOrEmpty(clanId) || voteData == null) return false;
             voteData = NormalizeVoteData(voteData);
             if (!TryGetDecision(voteData, out KingdomDecision decision) ||
                 !TryGetClan(clanId, decision.Kingdom, out Clan clan))
             {
                 QueuePendingRemoteVote(clanId, voteData);
-                return;
+                return false;
             }
 
             KingdomDecisionVoteState state = GetOrCreateState(decision);
             ReconcileEligibility(state);
-            ApplyVote(state, clanId, clan, voteData);
+            bool applied = ApplyVote(state, clanId, clan, voteData);
+            if (applied && voteData.IsFinal && ReferenceEquals(clan, Clan.PlayerClan))
+            {
+                LocalSubmittedDecisions.Add(decision);
+                foreach (DecisionItemBaseVM item in ActiveDecisionItems
+                             .Where(item => ReferenceEquals(item?.KingdomDecisionMaker?._decision, decision))
+                             .ToList())
+                {
+                    MarkLocalVoteSubmitted(item);
+                }
+            }
+            return applied;
         }
 
         public bool TryResolveDecision(KingdomDecision decision, bool force)
@@ -366,9 +385,15 @@ namespace GameInterface.Services.Kingdoms
                 true,
                 outcomeKey);
 
-            TryApplyLocalVote(decision, voteData);
+            if (!ModInformation.IsClient)
+            {
+                TryApplyLocalVote(decision, voteData);
+            }
             MessageBroker.Instance.Publish(election, new KingdomDecisionVoteRequested(voteData));
-            LocalSubmittedDecisions.Add(decision);
+            if (!ModInformation.IsClient)
+            {
+                LocalSubmittedDecisions.Add(decision);
+            }
             return true;
         }
 
@@ -390,7 +415,7 @@ namespace GameInterface.Services.Kingdoms
             return decisionInfos;
         }
 
-        public void ApplyResolved(
+        public bool ApplyResolved(
             string kingdomId,
             int decisionIndex,
             int outcomeIndex,
@@ -401,7 +426,7 @@ namespace GameInterface.Services.Kingdoms
             if (!TryGetDecision(kingdomId, decisionIndex, out KingdomDecision decision))
             {
                 PublishDecisionNotification(notificationText);
-                return;
+                return false;
             }
             KingdomDecisionVoteState state = GetOrCreateState(decision);
             var voteData = new KingdomDecisionVoteData(
@@ -415,12 +440,13 @@ namespace GameInterface.Services.Kingdoms
             if (!outcomeResolver.TryGetOutcome(voteData, state.Election, objectManager, out DecisionOutcome outcome))
             {
                 PublishDecisionNotification(notificationText);
-                return;
+                return false;
             }
 
             CampaignEventDispatcher.Instance.OnKingdomDecisionConcluded(decision, outcome, isPlayerDecision);
             PublishDecisionNotification(notificationText);
             ClearDecisionState(kingdomId, decisionIndex);
+            return true;
         }
 
         public void ClearDecisionState(string kingdomId, int decisionIndex)
@@ -871,6 +897,15 @@ namespace GameInterface.Services.Kingdoms
         {
             if (!TryGetSupportWeight(voteData.SupportWeight, out Supporter.SupportWeights supportWeight)) return false;
 
+            DecisionOutcome selectedOutcome = null;
+            if (!voteData.IsAbstain &&
+                !outcomeResolver.TryGetOutcome(voteData, election, objectManager, out selectedOutcome))
+            {
+                // Resolve the requested outcome before ResetClanSupport. A malformed/stale outcome must
+                // not erase an already-canonical vote and then report failure.
+                return false;
+            }
+
             Supporter supporter = new Supporter(clan);
             supporter.SupportWeight = supportWeight;
             if (resetExisting)
@@ -886,11 +921,6 @@ namespace GameInterface.Services.Kingdoms
                 }
                 election.DetermineOfficialSupport();
                 return true;
-            }
-
-            if (!outcomeResolver.TryGetOutcome(voteData, election, objectManager, out DecisionOutcome selectedOutcome))
-            {
-                return false;
             }
 
             if (election._chooser == clan && election._decision.IsKingsVoteAllowed)

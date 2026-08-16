@@ -18,6 +18,14 @@ namespace Coop.Core.Server.Services.Kingdoms.Messages
         public string OutcomeKey { get; }
         [ProtoMember(6)]
         public string NotificationText { get; }
+        [ProtoMember(7)]
+        public string SessionId { get; }
+        [ProtoMember(8)]
+        public long AuthorityRequestId { get; }
+        [ProtoMember(9)]
+        public long CommittedRevision { get; }
+        [ProtoMember(10)]
+        public string AuthorityControllerId { get; }
 
         public NetworkKingdomDecisionResolved(string kingdomId, int decisionIndex, int outcomeIndex, bool isPlayerDecision)
             : this(kingdomId, decisionIndex, outcomeIndex, isPlayerDecision, null)
@@ -25,7 +33,7 @@ namespace Coop.Core.Server.Services.Kingdoms.Messages
         }
 
         public NetworkKingdomDecisionResolved(string kingdomId, int decisionIndex, int outcomeIndex, bool isPlayerDecision, string outcomeKey)
-            : this(kingdomId, decisionIndex, outcomeIndex, isPlayerDecision, outcomeKey, null)
+            : this(kingdomId, decisionIndex, outcomeIndex, isPlayerDecision, outcomeKey, null, null, default)
         {
         }
 
@@ -35,7 +43,9 @@ namespace Coop.Core.Server.Services.Kingdoms.Messages
             int outcomeIndex,
             bool isPlayerDecision,
             string outcomeKey,
-            string notificationText)
+            string notificationText,
+            string authorityControllerId = null,
+            AuthorityRequestHeader correlation = default)
         {
             KingdomId = kingdomId;
             DecisionIndex = decisionIndex;
@@ -43,6 +53,10 @@ namespace Coop.Core.Server.Services.Kingdoms.Messages
             IsPlayerDecision = isPlayerDecision;
             OutcomeKey = outcomeKey;
             NotificationText = notificationText;
+            SessionId = correlation.SessionId;
+            AuthorityRequestId = correlation.RequestId;
+            CommittedRevision = correlation.ExpectedRevision;
+            AuthorityControllerId = authorityControllerId;
         }
     }
 }

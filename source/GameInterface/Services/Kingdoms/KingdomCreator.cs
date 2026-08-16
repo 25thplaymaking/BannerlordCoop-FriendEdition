@@ -38,7 +38,8 @@ public interface IKingdomCreator
         CultureObject culture,
         string controllerId,
         out string kingdomId,
-        out string error);
+        out string error,
+        bool allowCoopFallback = true);
 }
 
 internal class KingdomCreator : IKingdomCreator
@@ -65,7 +66,8 @@ internal class KingdomCreator : IKingdomCreator
         CultureObject culture,
         string controllerId,
         out string kingdomId,
-        out string error)
+        out string error,
+        bool allowCoopFallback = true)
     {
         kingdomId = null;
 
@@ -117,6 +119,12 @@ internal class KingdomCreator : IKingdomCreator
         }
         catch (Exception e)
         {
+            if (!allowCoopFallback)
+            {
+                error = "native kingdom creation failed";
+                Logger.Error(e, "Strict authoritative kingdom creation failed for {KingdomName}.", kingdomName);
+                return false;
+            }
             Logger.Warning(
                 e,
                 "Native kingdom creation failed for {KingdomName}; falling back to coop kingdom state creation.",
@@ -124,8 +132,11 @@ internal class KingdomCreator : IKingdomCreator
         }
 
         Kingdom kingdom = rulingClan.Kingdom ?? campaignObjectManager.Kingdoms
-            .FirstOrDefault(existing => existing?.RulingClan == rulingClan && existing.Name?.ToString() == kingdomName)
-            ?? CreateCoopKingdom(name, culture, rulingClan);
+            .FirstOrDefault(existing => existing?.RulingClan == rulingClan && existing.Name?.ToString() == kingdomName);
+        if (kingdom == null && allowCoopFallback)
+        {
+            kingdom = CreateCoopKingdom(name, culture, rulingClan);
+        }
 
         if (kingdom == null)
         {

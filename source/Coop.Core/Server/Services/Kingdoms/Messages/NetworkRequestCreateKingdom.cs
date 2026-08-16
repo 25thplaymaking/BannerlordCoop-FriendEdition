@@ -4,6 +4,7 @@ using ProtoBuf;
 namespace Coop.Core.Server.Services.Kingdoms.Messages;
 
 [ProtoContract(SkipConstructor = true)]
+[AuthorityRoute("kingdom.create", AuthorityRouteKind.Command)]
 public class NetworkRequestCreateKingdom : ICommand
 {
     [ProtoMember(1)]
@@ -16,9 +17,11 @@ public class NetworkRequestCreateKingdom : ICommand
     public string PartyId { get; }
     [ProtoMember(5)]
     public string SettlementId { get; }
+    [ProtoMember(6)]
+    public AuthorityRequestHeader Header { get; }
 
     public NetworkRequestCreateKingdom(string controllerId, string kingdomName, string cultureId)
-        : this(controllerId, kingdomName, cultureId, null, null)
+        : this(controllerId, kingdomName, cultureId, null, null, default)
     {
     }
 
@@ -27,12 +30,14 @@ public class NetworkRequestCreateKingdom : ICommand
         string kingdomName,
         string cultureId,
         string partyId,
-        string settlementId)
+        string settlementId,
+        AuthorityRequestHeader header = default)
     {
         ControllerId = controllerId;
         KingdomName = kingdomName;
         CultureId = cultureId;
         PartyId = partyId;
         SettlementId = settlementId;
+        Header = header;
     }
 }

@@ -20,9 +20,15 @@ public class NetworkPlayerKingdomCreated : ICommand
     public string SettlementId { get; }
     [ProtoMember(7)]
     public string CultureId { get; }
+    [ProtoMember(8)]
+    public string SessionId { get; }
+    [ProtoMember(9)]
+    public long AuthorityRequestId { get; }
+    [ProtoMember(10)]
+    public long CommittedRevision { get; }
 
     public NetworkPlayerKingdomCreated(string controllerId, string kingdomId, string kingdomName, string clanId)
-        : this(controllerId, kingdomId, kingdomName, clanId, null, null, null)
+        : this(controllerId, kingdomId, kingdomName, clanId, null, null, null, default)
     {
     }
 
@@ -33,7 +39,7 @@ public class NetworkPlayerKingdomCreated : ICommand
         string clanId,
         string partyId,
         string settlementId)
-        : this(controllerId, kingdomId, kingdomName, clanId, partyId, settlementId, null)
+        : this(controllerId, kingdomId, kingdomName, clanId, partyId, settlementId, null, default)
     {
     }
 
@@ -44,7 +50,8 @@ public class NetworkPlayerKingdomCreated : ICommand
         string clanId,
         string partyId,
         string settlementId,
-        string cultureId)
+        string cultureId,
+        AuthorityRequestHeader correlation = default)
     {
         ControllerId = controllerId;
         KingdomId = kingdomId;
@@ -53,5 +60,8 @@ public class NetworkPlayerKingdomCreated : ICommand
         PartyId = partyId;
         SettlementId = settlementId;
         CultureId = cultureId;
+        SessionId = correlation.SessionId;
+        AuthorityRequestId = correlation.RequestId;
+        CommittedRevision = correlation.ExpectedRevision;
     }
 }

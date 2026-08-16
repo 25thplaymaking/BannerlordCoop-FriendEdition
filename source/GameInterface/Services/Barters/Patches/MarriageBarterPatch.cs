@@ -1,5 +1,6 @@
 ﻿using Common;
 using Common.Network;
+using Common.Messaging;
 using GameInterface.Policies;
 using GameInterface.Services.Barters.Handlers;
 using GameInterface.Services.Barters.Messages;
@@ -85,7 +86,7 @@ internal static class MarriageBarterPatch
 
         requestPending = true;
         pendingUiActive = true;
-        if (!MarriageBarterHandler.TryCommit(new MarriageBarterCommitIntent(pendingRequestId, pendingLeaseId,
+        if (!MarriageBarterHandler.TryCommit(new MarriageBarterHandler.MarriageBarterCommitIntent(pendingRequestId, pendingLeaseId,
                 pendingCounterpartyHeroId, pendingContext, pendingContextId, pendingHeroBeingProposedToId,
                 pendingProposingHeroId, terms.ToArray())))
         {
@@ -216,7 +217,7 @@ internal static class MarriageBarterPatch
         pendingProposingHeroId = proposingHeroId;
         pendingContext = context;
         pendingContextId = contextId;
-        authorizationPending = MarriageBarterHandler.TryAuthorize(new MarriageBarterAuthorizeIntent(requestId,
+        authorizationPending = MarriageBarterHandler.TryAuthorize(new MarriageBarterHandler.MarriageBarterAuthorizeIntent(requestId,
             counterpartyHeroId, context, contextId, heroBeingProposedToId, proposingHeroId));
         if (!authorizationPending)
         {

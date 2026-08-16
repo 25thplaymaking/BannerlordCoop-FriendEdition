@@ -47,10 +47,12 @@ public sealed class SeparatismCampaignFlowTests : IDisposable
 
         var result = Assert.Single(
             Server.NetworkSentMessages.GetMessages<NetworkSeparatismRecruitmentResult>());
-        Assert.Equal(SeparatismRecruitmentStatus.Accepted, result.Status);
-        Assert.Equal(request.RequestId, result.RequestId);
+        Assert.Equal(AuthorityResultStatus.Accepted, result.Header.Status);
+        Assert.Equal(request.Header.RequestId, result.Header.RequestId);
         Assert.Equal(fixture.Context.RebelClanId, result.TargetClanId);
-        Assert.True(result.Revision >= request.ExpectedRevision);
+        Assert.Equal(fixture.Context.SourceKingdomId, result.ExpectedKingdomId);
+        Assert.Equal(fixture.Context.SourceKingdomId, result.CommittedKingdomId);
+        Assert.True(result.CommittedFactionChangeTicks >= request.ExpectedFactionChangeTicks);
 
         foreach (var instance in new[] { Server }.Concat(Clients))
         {
@@ -79,8 +81,8 @@ public sealed class SeparatismCampaignFlowTests : IDisposable
         Assert.Equal(2, results.Length);
         Assert.All(results, result =>
         {
-            Assert.Equal(SeparatismRecruitmentStatus.Accepted, result.Status);
-            Assert.Equal(results[0].Revision, result.Revision);
+            Assert.Equal(AuthorityResultStatus.Accepted, result.Header.Status);
+            Assert.Equal(results[0].CommittedFactionChangeTicks, result.CommittedFactionChangeTicks);
         });
 
         Server.Call(() =>
@@ -92,14 +94,27 @@ public sealed class SeparatismCampaignFlowTests : IDisposable
     }
 
     [Fact]
+    public void FallenClanRecruitment_NewRequestAfterCommit_IsStaleBecauseTheTargetIsNoLongerFallen()
+    {
+        var fixture = CreateFallenClanRecruitmentFixture();
+        Server.SimulateMessage(fixture.Client.NetPeer, CreateRecruitmentRequest(fixture, requestId: 10));
+        Server.NetworkSentMessages.Clear();
+
+        Server.SimulateMessage(fixture.Client.NetPeer, CreateRecruitmentRequest(fixture, requestId: 11));
+
+        var result = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkSeparatismRecruitmentResult>());
+        Assert.Equal(AuthorityResultStatus.StaleState, result.Header.Status);
+        Assert.Equal("target-changed", result.Header.ReasonCode);
+    }
+
+    [Fact]
     public void FallenClanRecruitment_RejectsAStaleMembershipRevisionWithoutMutation()
     {
         var fixture = CreateFallenClanRecruitmentFixture();
         var request = CreateRecruitmentRequest(fixture, requestId: 2);
         request = new NetworkRequestSeparatismRecruitment(
-            request.SessionId,
-            request.RequestId,
-            request.ExpectedRevision + 1,
+            request.Header,
+            request.ExpectedFactionChangeTicks + 1,
             request.ExpectedKingdomId,
             request.TargetClanId,
             request.TargetHeroId);
@@ -108,7 +123,7 @@ public sealed class SeparatismCampaignFlowTests : IDisposable
 
         var result = Assert.Single(
             Server.NetworkSentMessages.GetMessages<NetworkSeparatismRecruitmentResult>());
-        Assert.Equal(SeparatismRecruitmentStatus.StaleState, result.Status);
+        Assert.Equal(AuthorityResultStatus.StaleState, result.Header.Status);
         Server.Call(() => Assert.Null(Get<Clan>(Server, fixture.Context.RebelClanId).Kingdom));
     }
 
@@ -122,7 +137,7 @@ public sealed class SeparatismCampaignFlowTests : IDisposable
 
         var result = Assert.Single(
             Server.NetworkSentMessages.GetMessages<NetworkSeparatismRecruitmentResult>());
-        Assert.Equal(SeparatismRecruitmentStatus.Unauthorized, result.Status);
+        Assert.Equal(AuthorityResultStatus.Unauthorized, result.Header.Status);
         Server.Call(() => Assert.Null(Get<Clan>(Server, fixture.Context.RebelClanId).Kingdom));
     }
 
@@ -607,9 +622,10 @@ public sealed class SeparatismCampaignFlowTests : IDisposable
             Server,
             fixture.Context.RebelClanId).LastFactionChangeTime.NumTicks);
 
+        ModConfigSnapshot config = null;
+        Server.Call(() => Assert.True(Server.Resolve<IModConfigAuthority>().TryGetCurrent(out config)));
         return new NetworkRequestSeparatismRecruitment(
-            fixture.SessionId,
-            requestId,
+            new AuthorityRequestHeader(config.ProtocolVersion, fixture.SessionId, requestId, config.Revision),
             revision,
             fixture.Context.SourceKingdomId,
             fixture.Context.RebelClanId,

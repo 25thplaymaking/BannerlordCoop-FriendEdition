@@ -1,233 +1,122 @@
 using Common.Messaging;
 using ProtoBuf;
 using System;
-using System.Collections.Generic;
 using System.Linq;
 
 namespace GameInterface.Services.Separatism;
 
 [ProtoContract(SkipConstructor = true)]
+[AuthorityRoute(SeparatismRecruitmentProtocol.RouteId, AuthorityRouteKind.Command)]
 internal readonly struct NetworkRequestSeparatismRecruitment : ICommand
 {
-    [ProtoMember(1)] public readonly string SessionId;
-    [ProtoMember(2)] public readonly long RequestId;
-    [ProtoMember(3)] public readonly long ExpectedRevision;
-    [ProtoMember(4)] public readonly string ExpectedKingdomId;
-    [ProtoMember(5)] public readonly string TargetClanId;
-    [ProtoMember(6)] public readonly string TargetHeroId;
+    [ProtoMember(1)] public readonly int ProtocolVersion;
+    [ProtoMember(2)] public readonly string SessionId;
+    [ProtoMember(3)] public readonly long AuthorityRequestId;
+    [ProtoMember(4)] public readonly long ExpectedConfigRevision;
+    [ProtoMember(5)] public readonly long ExpectedFactionChangeTicks;
+    [ProtoMember(6)] public readonly string ExpectedKingdomId;
+    [ProtoMember(7)] public readonly string TargetClanId;
+    [ProtoMember(8)] public readonly string TargetHeroId;
+    [ProtoMember(9)] public readonly string CommandDigest;
 
-    public NetworkRequestSeparatismRecruitment(
-        string sessionId,
-        long requestId,
-        long expectedRevision,
-        string expectedKingdomId,
-        string targetClanId,
-        string targetHeroId)
+    public NetworkRequestSeparatismRecruitment(AuthorityRequestHeader header, long expectedFactionChangeTicks,
+        string expectedKingdomId, string targetClanId, string targetHeroId)
     {
-        SessionId = sessionId;
-        RequestId = requestId;
-        ExpectedRevision = expectedRevision;
+        ProtocolVersion = header.ProtocolVersion;
+        SessionId = header.SessionId;
+        AuthorityRequestId = header.RequestId;
+        ExpectedConfigRevision = header.ExpectedRevision;
+        ExpectedFactionChangeTicks = expectedFactionChangeTicks;
         ExpectedKingdomId = expectedKingdomId;
         TargetClanId = targetClanId;
         TargetHeroId = targetHeroId;
+        CommandDigest = SeparatismRecruitmentProtocol.CommandDigest(
+            header, expectedFactionChangeTicks, expectedKingdomId, targetClanId, targetHeroId);
     }
-}
 
-internal enum SeparatismRecruitmentStatus
-{
-    Accepted = 0,
-    Malformed = 1,
-    Unavailable = 2,
-    Unauthorized = 3,
-    StaleSession = 4,
-    StaleState = 5,
-    IneligibleActor = 6,
-    IneligibleTarget = 7,
-    AtWar = 8,
-    Failed = 9,
-    StaleRequest = 10,
-    ConflictingRequest = 11,
+    public AuthorityRequestHeader Header => new(
+        ProtocolVersion, SessionId, AuthorityRequestId, ExpectedConfigRevision);
 }
 
 [ProtoContract(SkipConstructor = true)]
-internal readonly struct NetworkSeparatismRecruitmentResult : ICommand
+internal readonly struct NetworkSeparatismRecruitmentResult : IMessage
 {
-    [ProtoMember(1)] public readonly string SessionId;
-    [ProtoMember(2)] public readonly long RequestId;
-    [ProtoMember(3)] public readonly SeparatismRecruitmentStatus Status;
-    [ProtoMember(4)] public readonly string TargetClanId;
-    [ProtoMember(5)] public readonly long Revision;
+    [ProtoMember(1)] public readonly AuthorityResultHeader Header;
+    [ProtoMember(2)] public readonly string CommandDigest;
+    [ProtoMember(3)] public readonly string ExpectedKingdomId;
+    [ProtoMember(4)] public readonly string CommittedKingdomId;
+    [ProtoMember(5)] public readonly string TargetClanId;
+    [ProtoMember(6)] public readonly string TargetHeroId;
+    [ProtoMember(7)] public readonly long ExpectedFactionChangeTicks;
+    [ProtoMember(8)] public readonly long CommittedFactionChangeTicks;
 
-    public NetworkSeparatismRecruitmentResult(
-        string sessionId,
-        long requestId,
-        SeparatismRecruitmentStatus status,
-        string targetClanId,
-        long revision)
+    public NetworkSeparatismRecruitmentResult(AuthorityResultHeader header, string commandDigest,
+        string expectedKingdomId, string committedKingdomId, string targetClanId, string targetHeroId,
+        long expectedFactionChangeTicks, long committedFactionChangeTicks)
     {
-        SessionId = sessionId;
-        RequestId = requestId;
-        Status = status;
+        Header = header;
+        CommandDigest = commandDigest;
+        ExpectedKingdomId = expectedKingdomId;
+        CommittedKingdomId = committedKingdomId;
         TargetClanId = targetClanId;
-        Revision = revision;
+        TargetHeroId = targetHeroId;
+        ExpectedFactionChangeTicks = expectedFactionChangeTicks;
+        CommittedFactionChangeTicks = committedFactionChangeTicks;
     }
 }
 
 internal static class SeparatismRecruitmentProtocol
 {
+    internal const string RouteId = "workshop.separatism.recruit-fallen-clan";
     internal const int MaximumObjectIdLength = 256;
+    internal const int MaximumDigestLength = 2048;
 
-    internal static bool IsRequestShapeValid(NetworkRequestSeparatismRecruitment request) =>
-        IsSessionId(request.SessionId) &&
-        request.RequestId > 0 &&
-        request.ExpectedRevision >= 0 &&
-        IsIdentifier(request.ExpectedKingdomId) &&
-        IsIdentifier(request.TargetClanId) &&
-        IsIdentifier(request.TargetHeroId);
+    internal static string ValidateRequest(NetworkRequestSeparatismRecruitment request)
+    {
+        if (request.ExpectedFactionChangeTicks < 0 || !IsIdentifier(request.ExpectedKingdomId) ||
+            !IsIdentifier(request.TargetClanId) || !IsIdentifier(request.TargetHeroId))
+            return "invalid-recruitment-fields";
+
+        return string.Equals(request.CommandDigest, CommandDigest(
+                request.Header, request.ExpectedFactionChangeTicks, request.ExpectedKingdomId,
+                request.TargetClanId, request.TargetHeroId), StringComparison.Ordinal)
+            ? null : "invalid-command-digest";
+    }
 
     internal static bool IsResultShapeValid(NetworkSeparatismRecruitmentResult result) =>
-        IsSessionId(result.SessionId) &&
-        result.RequestId > 0 &&
-        Enum.IsDefined(typeof(SeparatismRecruitmentStatus), result.Status) &&
-        IsIdentifier(result.TargetClanId) &&
-        result.Revision >= 0;
+        result.Header.TryValidate(out _) && IsDigest(result.CommandDigest) &&
+        IsOptionalIdentifier(result.ExpectedKingdomId) && IsOptionalIdentifier(result.CommittedKingdomId) &&
+        IsOptionalIdentifier(result.TargetClanId) && IsOptionalIdentifier(result.TargetHeroId) &&
+        result.ExpectedFactionChangeTicks >= 0 && result.CommittedFactionChangeTicks >= 0;
 
-    internal static bool SameCommand(
-        NetworkRequestSeparatismRecruitment left,
-        NetworkRequestSeparatismRecruitment right) =>
-        left.RequestId == right.RequestId &&
-        left.ExpectedRevision == right.ExpectedRevision &&
-        string.Equals(left.SessionId, right.SessionId, StringComparison.Ordinal) &&
-        string.Equals(left.ExpectedKingdomId, right.ExpectedKingdomId, StringComparison.Ordinal) &&
-        string.Equals(left.TargetClanId, right.TargetClanId, StringComparison.Ordinal) &&
-        string.Equals(left.TargetHeroId, right.TargetHeroId, StringComparison.Ordinal);
+    internal static string CommandDigest(AuthorityRequestHeader header, long expectedFactionChangeTicks,
+        string expectedKingdomId, string targetClanId, string targetHeroId) => string.Concat(
+            "v1|", header.ProtocolVersion, "|", Part(header.SessionId), "|", header.ExpectedRevision, "|",
+            expectedFactionChangeTicks, "|", Part(expectedKingdomId), "|", Part(targetClanId), "|", Part(targetHeroId));
 
-    private static bool IsSessionId(string value) =>
-        value != null &&
-        value.Length == 32 &&
-        Guid.TryParseExact(value, "N", out _);
+    internal static string StructuralKey(NetworkRequestSeparatismRecruitment request) => string.Concat(
+        Part(request.CommandDigest), "|", request.ProtocolVersion, "|", Part(request.SessionId), "|",
+        request.ExpectedConfigRevision, "|", request.ExpectedFactionChangeTicks, "|",
+        Part(request.ExpectedKingdomId), "|", Part(request.TargetClanId), "|", Part(request.TargetHeroId));
 
-    private static bool IsIdentifier(string value) =>
-        !string.IsNullOrWhiteSpace(value) &&
-        value.Length <= MaximumObjectIdLength &&
-        !value.Any(char.IsControl);
-}
-
-internal enum SeparatismReplayDecision
-{
-    New,
-    Replay,
-    Conflict,
-    Stale,
-}
-
-internal sealed class SeparatismRequestReplayLedger<TKey>
-{
-    private sealed class ControllerRequests
-    {
-        public readonly Dictionary<long, Entry> Entries = new();
-        public readonly Queue<long> Order = new();
-        public long HighestRequestId;
-    }
-
-    private readonly struct Entry
-    {
-        public readonly NetworkRequestSeparatismRecruitment Request;
-        public readonly NetworkSeparatismRecruitmentResult Result;
-
-        public Entry(
-            NetworkRequestSeparatismRecruitment request,
-            NetworkSeparatismRecruitmentResult result)
-        {
-            Request = request;
-            Result = result;
-        }
-    }
-
-    private readonly object gate = new();
-    private readonly Dictionary<TKey, ControllerRequests> controllers = new();
-    private readonly int capacityPerController;
-
-    public SeparatismRequestReplayLedger(int capacityPerController)
-    {
-        if (capacityPerController < 1)
-            throw new ArgumentOutOfRangeException(nameof(capacityPerController));
-        this.capacityPerController = capacityPerController;
-    }
-
-    public SeparatismReplayDecision Inspect(
-        TKey controller,
-        NetworkRequestSeparatismRecruitment request,
-        out NetworkSeparatismRecruitmentResult result)
-    {
-        lock (gate)
-        {
-            result = default;
-            if (!controllers.TryGetValue(controller, out var requests))
-                return SeparatismReplayDecision.New;
-
-            if (requests.Entries.TryGetValue(request.RequestId, out var entry))
-            {
-                if (!SeparatismRecruitmentProtocol.SameCommand(entry.Request, request))
-                    return SeparatismReplayDecision.Conflict;
-
-                result = entry.Result;
-                return SeparatismReplayDecision.Replay;
-            }
-
-            return request.RequestId <= requests.HighestRequestId
-                ? SeparatismReplayDecision.Stale
-                : SeparatismReplayDecision.New;
-        }
-    }
-
-    public void Record(
-        TKey controller,
-        NetworkRequestSeparatismRecruitment request,
-        NetworkSeparatismRecruitmentResult result)
-    {
-        lock (gate)
-        {
-            if (!controllers.TryGetValue(controller, out var requests))
-            {
-                requests = new ControllerRequests();
-                controllers.Add(controller, requests);
-            }
-
-            if (requests.Entries.ContainsKey(request.RequestId)) return;
-            requests.Entries.Add(request.RequestId, new Entry(request, result));
-            requests.Order.Enqueue(request.RequestId);
-            requests.HighestRequestId = Math.Max(requests.HighestRequestId, request.RequestId);
-
-            while (requests.Order.Count > capacityPerController)
-                requests.Entries.Remove(requests.Order.Dequeue());
-        }
-    }
+    private static string Part(string value) => string.Concat(value?.Length ?? -1, ":", value ?? string.Empty);
+    private static bool IsDigest(string value) => !string.IsNullOrWhiteSpace(value) &&
+        value.Length <= MaximumDigestLength && !value.Any(char.IsControl);
+    private static bool IsOptionalIdentifier(string value) => value == null || IsIdentifier(value);
+    private static bool IsIdentifier(string value) => !string.IsNullOrWhiteSpace(value) &&
+        value.Length <= MaximumObjectIdLength && !value.Any(char.IsControl);
 }
 
 internal static class SeparatismConversationPolicy
 {
-    internal static bool CanOfferFallenClanRecruitment(
-        bool capabilityEnabled,
-        bool actorHasKingdom,
-        bool actorIsKingdomRuler,
-        bool targetExists,
-        bool targetHasNoKingdom,
-        bool targetIsNotMinorFaction,
-        bool targetIsFactionLeader,
-        bool factionsAreAtPeace) =>
-        capabilityEnabled &&
-        actorHasKingdom &&
-        actorIsKingdomRuler &&
-        targetExists &&
-        targetHasNoKingdom &&
-        targetIsNotMinorFaction &&
-        targetIsFactionLeader &&
-        factionsAreAtPeace;
+    internal static bool CanOfferFallenClanRecruitment(bool capabilityEnabled, bool actorHasKingdom,
+        bool actorIsKingdomRuler, bool targetExists, bool targetHasNoKingdom, bool targetIsNotMinorFaction,
+        bool targetIsFactionLeader, bool factionsAreAtPeace) => capabilityEnabled && actorHasKingdom &&
+        actorIsKingdomRuler && targetExists && targetHasNoKingdom && targetIsNotMinorFaction &&
+        targetIsFactionLeader && factionsAreAtPeace;
 }
 
 internal static class SeparatismCapabilityPolicy
 {
-    internal static bool AllowRecruitment(bool optionEnabled, bool routeReady) =>
-        optionEnabled && routeReady;
+    internal static bool AllowRecruitment(bool optionEnabled, bool routeReady) => optionEnabled && routeReady;
 }

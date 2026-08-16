@@ -172,11 +172,14 @@
       "disposition": "ServerCommand",
       "owner": "GameInterface.Services.Separatism.SeparatismRecruitmentHandler",
       "capability": "RecruitFallenClan",
+      "routeId": "workshop.separatism.recruit-fallen-clan",
       "tests": [
-        "SeparatismRecruitmentTests.RecruitmentRequest_RoundTripsEveryAuthorityPrecondition",
-        "SeparatismRecruitmentTests.RequestLedger_ReplaysExactDuplicates_AndRejectsConflictsOrOlderWork",
+        "SeparatismRecruitmentTests.RecruitmentRequest_RoundTripsHeaderDigestAndEverySemanticPrecondition",
+        "SeparatismRecruitmentTests.RecruitmentRequest_UsesDistinctDigestAndStructuralKeyForSemanticChanges",
+        "SeparatismRecruitmentTests.RecruitmentResult_RoundTripsExactCommitProof",
         "SeparatismCampaignFlowTests.FallenClanRecruitment_UsesTheAuthenticatedRuler_AndSynchronizesEveryPeer",
         "SeparatismCampaignFlowTests.FallenClanRecruitment_ExactDuplicateReplaysTheResultWithoutASecondTransition",
+        "SeparatismCampaignFlowTests.FallenClanRecruitment_NewRequestAfterCommit_IsStaleBecauseTheTargetIsNoLongerFallen",
         "SeparatismCampaignFlowTests.FallenClanRecruitment_RejectsAStaleMembershipRevisionWithoutMutation",
         "SeparatismCampaignFlowTests.FallenClanRecruitment_UnmappedPeerCannotChooseAnActorOrMutateTheTarget",
         "SeparatismCampaignFlowTests.FallenClanRecruitment_FailedMembershipCommitRestoresTheIndependentClan"

@@ -1,18 +1,15 @@
 using Common;
 using Common.Logging;
 using Common.Messaging;
-using Common.Network;
 using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
-using GameInterface.Services.Players.Data;
 using GameInterface.Services.WorkshopMods.Core;
 using LiteNetLib;
 using Serilog;
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Threading;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.Core;
 using TaleWorlds.Localization;
@@ -23,282 +20,265 @@ internal sealed class SeparatismRecruitmentHandler : IHandler
 {
     internal const string ModuleId = "Separatism";
     internal const string Operation = "RecruitFallenClan";
-    internal const bool RouteReady = true;
-
     private static readonly ILogger Logger = LogManager.GetLogger<SeparatismRecruitmentHandler>();
 
-    private readonly IMessageBroker messageBroker;
-    private readonly INetwork network;
     private readonly IObjectManager objectManager;
     private readonly IPlayerManager playerManager;
     private readonly ISeparatismCampaignService service;
     private readonly IModConfigAuthority configAuthority;
     private readonly IWorkshopCapabilityRegistry capabilityRegistry;
-    // Scope request numbers to the connection so a restarted client can reconnect with a fresh
-    // sequence while duplicate deliveries on the same authenticated connection remain idempotent.
-    private readonly SeparatismRequestReplayLedger<NetPeer> requestLedger = new(64);
-    private readonly ConcurrentDictionary<long, string> pendingClientRequests = new();
-    private long nextClientRequestId;
+    private readonly IAuthorityRequestRouter authorityRequestRouter;
+    private readonly IAuthorityRouteHandle<RecruitmentIntent, NetworkSeparatismRecruitmentResult> route;
 
-    public SeparatismRecruitmentHandler(
-        IMessageBroker messageBroker,
-        INetwork network,
-        IObjectManager objectManager,
-        IPlayerManager playerManager,
-        ISeparatismCampaignService service,
-        IModConfigAuthority configAuthority,
-        IWorkshopCapabilityRegistry capabilityRegistry)
+    public SeparatismRecruitmentHandler(IObjectManager objectManager, IPlayerManager playerManager,
+        ISeparatismCampaignService service, IModConfigAuthority configAuthority,
+        IWorkshopCapabilityRegistry capabilityRegistry, IAuthorityRequestRouter authorityRequestRouter)
     {
-        this.messageBroker = messageBroker;
-        this.network = network;
         this.objectManager = objectManager;
         this.playerManager = playerManager;
         this.service = service;
         this.configAuthority = configAuthority;
         this.capabilityRegistry = capabilityRegistry;
-
-        messageBroker.Subscribe<NetworkRequestSeparatismRecruitment>(HandleRequest);
-        messageBroker.Subscribe<NetworkSeparatismRecruitmentResult>(HandleResult);
+        this.authorityRequestRouter = authorityRequestRouter;
+        route = authorityRequestRouter.Register(
+            AuthorityRoute<RecruitmentIntent, NetworkRequestSeparatismRecruitment,
+                NetworkSeparatismRecruitmentResult>.Define(
+                SeparatismRecruitmentProtocol.RouteId, AuthorityRouteKind.Command, CreateHeader,
+                (intent, header) => new NetworkRequestSeparatismRecruitment(header, intent.ExpectedFactionChangeTicks,
+                    intent.ExpectedKingdomId, intent.TargetClanId, intent.TargetHeroId),
+                request => request.Header, result => result.Header, SeparatismRecruitmentProtocol.ValidateRequest,
+                SeparatismRecruitmentProtocol.StructuralKey, ValidateHeader, Execute, CreateTerminalResult,
+                ProbeClientCommit, _ => { }, PresentTerminalOutcome, configAuthority.IsTrustedServer,
+                AuthorityTimeoutPolicy.CampaignMutation, failClosedOnApplyFailure: true,
+                isExpectedClientResult: IsExpectedResult));
     }
 
-    public void Dispose()
-    {
-        messageBroker.Unsubscribe<NetworkRequestSeparatismRecruitment>(HandleRequest);
-        messageBroker.Unsubscribe<NetworkSeparatismRecruitmentResult>(HandleResult);
-    }
+    public void Dispose() => route.Dispose();
+
+    internal bool IsRouteReady => authorityRequestRouter.IsRegistered(
+        SeparatismRecruitmentProtocol.RouteId, AuthorityRouteKind.Command) &&
+        configAuthority.TryGetCurrent(out var config) && capabilityRegistry.IsReadyFor(config.SessionId);
 
     internal bool TryRequest(Hero actor, Hero target)
     {
-        if (!ModInformation.IsClient ||
-            !capabilityRegistry.IsEnabled(ModuleId, Operation) ||
-            !configAuthority.TryGetCurrent(out var config) ||
-            !CanOffer(actor, target) ||
-            !objectManager.TryGetId(actor.Clan.Kingdom, out var kingdomId) ||
-            !objectManager.TryGetId(target.Clan, out var targetClanId) ||
-            !objectManager.TryGetId(target, out var targetHeroId))
+        if (!ModInformation.IsClient || !IsRouteReady || !capabilityRegistry.IsEnabled(ModuleId, Operation) ||
+            !CanOffer(actor, target) || !objectManager.TryGetId(actor.Clan.Kingdom, out var kingdomId) ||
+            !objectManager.TryGetId(target.Clan, out var targetClanId) || !objectManager.TryGetId(target, out var targetHeroId))
             return false;
 
-        long requestId = Interlocked.Increment(ref nextClientRequestId);
-        var request = new NetworkRequestSeparatismRecruitment(
-            config.SessionId,
-            requestId,
-            target.Clan.LastFactionChangeTime.NumTicks,
-            kingdomId,
-            targetClanId,
-            targetHeroId);
-        if (!pendingClientRequests.TryAdd(requestId, targetClanId)) return false;
-
-        network.SendAll(request);
+        route.Submit(new RecruitmentIntent(target.Clan.LastFactionChangeTime.NumTicks, kingdomId, targetClanId, targetHeroId));
         return true;
     }
+
+    private AuthorityRequestHeader CreateHeader(long requestId)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot config)) return default;
+        return new AuthorityRequestHeader(config.ProtocolVersion, config.SessionId, requestId, config.Revision);
+    }
+
+    private AuthorityHeaderValidation ValidateHeader(AuthorityRequestHeader header)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot current))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "config-unavailable");
+        if (header.ProtocolVersion != current.ProtocolVersion)
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.InvalidRequest, "unsupported-protocol");
+        if (!string.Equals(header.SessionId, current.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-session");
+        return header.ExpectedRevision == current.Revision ? AuthorityHeaderValidation.Valid :
+            AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-config");
+    }
+
+    private AuthorityServerReply<NetworkSeparatismRecruitmentResult> Execute(
+        AuthorityServerContext context, NetworkRequestSeparatismRecruitment request)
+    {
+        if (!capabilityRegistry.IsEnabled(ModuleId, Operation))
+            return Reject(context.Header, request, AuthorityResultStatus.Unavailable, "capability-unavailable");
+        if (!objectManager.TryGetObject<Hero>(context.Player.HeroId, out var actor) ||
+            !objectManager.TryGetObject<Clan>(context.Player.ClanId, out var actorClan) || actor.Clan != actorClan)
+            return Reject(context.Header, request, AuthorityResultStatus.Unauthorized, "actor-mismatch");
+
+        Kingdom actorKingdom = actorClan.Kingdom;
+        if (actorKingdom == null || actorKingdom.Leader != actor || actorKingdom.RulingClan != actorClan ||
+            !objectManager.TryGetId(actorKingdom, out var actorKingdomId))
+            return Reject(context.Header, request, AuthorityResultStatus.Rejected, "actor-ineligible");
+        if (!string.Equals(actorKingdomId, request.ExpectedKingdomId, StringComparison.Ordinal))
+            return Reject(context.Header, request, AuthorityResultStatus.StaleState, "kingdom-changed");
+        if (!objectManager.TryGetObject<Clan>(request.TargetClanId, out var targetClan) ||
+            !objectManager.TryGetObject<Hero>(request.TargetHeroId, out var targetHero) ||
+            targetClan.Leader != targetHero || targetHero.Clan != targetClan)
+            return Reject(context.Header, request, AuthorityResultStatus.Rejected, "target-ineligible");
+
+        long currentTicks = targetClan.LastFactionChangeTime.NumTicks;
+        if (currentTicks != request.ExpectedFactionChangeTicks || targetClan.Kingdom != null)
+            return Result(context.Header, request, AuthorityResultStatus.StaleState, "target-changed", actorKingdomId,
+                targetClan.Kingdom == actorKingdom ? actorKingdomId : null, currentTicks, false);
+        if (targetClan.IsMinorFaction || targetHero.MapFaction?.Leader != targetHero)
+            return Reject(context.Header, request, AuthorityResultStatus.Rejected, "target-ineligible");
+        if (FactionManager.IsAtWarAgainstFaction(targetHero.MapFaction, actor.MapFaction))
+            return Reject(context.Header, request, AuthorityResultStatus.Rejected, "at-war");
+
+        try
+        {
+            bool applied = service.TryRecruitFallenClan(actor, targetClan);
+            long committedTicks = targetClan.LastFactionChangeTime.NumTicks;
+            bool exactCommitted = targetClan.Kingdom == actorKingdom && actorKingdom.Clans.Contains(targetClan) &&
+                targetClan.Leader == targetHero && targetHero.Clan == targetClan;
+            if (applied && exactCommitted)
+                return Result(context.Header, request, AuthorityResultStatus.Accepted, null, actorKingdomId,
+                    actorKingdomId, committedTicks, true);
+            if (!applied && targetClan.Kingdom == null && !actorKingdom.Clans.Contains(targetClan) &&
+                committedTicks == request.ExpectedFactionChangeTicks)
+                return Result(context.Header, request, AuthorityResultStatus.ExecutionFailed, "recruitment-failed",
+                    actorKingdomId, null, committedTicks, false);
+            return IsolateAfterAmbiguousMutation(context, request, actorKingdomId, targetClan,
+                "membership-postcondition", null);
+        }
+        catch (Exception exception)
+        {
+            // The service only lets an exception escape when its rollback path itself failed. The
+            // observable membership can look restored while an internal collection/publication is
+            // not, so this remains fail-closed rather than treating it as a normal rejection.
+            return IsolateAfterAmbiguousMutation(context, request, actorKingdomId, targetClan,
+                "recruitment-rollback-threw", exception);
+        }
+    }
+
+    private AuthorityServerReply<NetworkSeparatismRecruitmentResult> IsolateAfterAmbiguousMutation(
+        AuthorityServerContext context, NetworkRequestSeparatismRecruitment request, string actorKingdomId,
+        Clan targetClan, string stage, Exception exception)
+    {
+        Logger.Fatal(exception, "Ambiguous Separatism recruitment mutation; disconnecting campaign peers. Route={Route} RequestId={RequestId} Stage={Stage}",
+            context.RouteId, context.Header.RequestId, stage);
+        foreach (var player in playerManager.Players)
+        {
+            if (!playerManager.IsConnected(player) || !playerManager.TryGetPeer(player.ControllerId, out var peer)) continue;
+            try { peer.Disconnect(); }
+            catch (Exception disconnectException)
+            {
+                Logger.Fatal(disconnectException, "Could not isolate peer after Separatism mutation ambiguity. Route={Route} RequestId={RequestId}",
+                    context.RouteId, context.Header.RequestId);
+            }
+        }
+        return new AuthorityServerReply<NetworkSeparatismRecruitmentResult>(
+            CreateResult(context.Header, request, AuthorityResultStatus.ExecutionFailed, "recruitment-isolated",
+                actorKingdomId, targetClan.Kingdom == null ? null : actorKingdomId,
+                targetClan.LastFactionChangeTime.NumTicks), false, suppressReply: true);
+    }
+
+    private AuthorityCommitProbeResult ProbeClientCommit(NetworkSeparatismRecruitmentResult result)
+    {
+        if (!SeparatismRecruitmentProtocol.IsResultShapeValid(result) || result.Header.Status != AuthorityResultStatus.Accepted ||
+            !configAuthority.TryGetCurrent(out ModConfigSnapshot config) ||
+            !string.Equals(config.SessionId, result.Header.SessionId, StringComparison.Ordinal) ||
+            config.Revision != result.Header.CommittedRevision ||
+            !string.Equals(result.ExpectedKingdomId, result.CommittedKingdomId, StringComparison.Ordinal) ||
+            !objectManager.TryGetObject<Kingdom>(result.CommittedKingdomId, out var kingdom) ||
+            !objectManager.TryGetObject<Clan>(result.TargetClanId, out var clan) ||
+            !objectManager.TryGetObject<Hero>(result.TargetHeroId, out var hero))
+            return AuthorityCommitProbeResult.Invalid;
+
+        return clan.Kingdom == kingdom && kingdom.Clans.Contains(clan) && clan.Leader == hero && hero.Clan == clan &&
+               clan.LastFactionChangeTime.NumTicks == result.CommittedFactionChangeTicks
+            ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+    }
+
+    private static bool IsExpectedResult(NetworkRequestSeparatismRecruitment request,
+        NetworkSeparatismRecruitmentResult result) => SeparatismRecruitmentProtocol.IsResultShapeValid(result) &&
+        request.AuthorityRequestId == result.Header.RequestId &&
+        string.Equals(request.SessionId, result.Header.SessionId, StringComparison.Ordinal) &&
+        request.ExpectedConfigRevision == result.Header.CommittedRevision &&
+        string.Equals(request.CommandDigest, result.CommandDigest, StringComparison.Ordinal) &&
+        string.Equals(request.ExpectedKingdomId, result.ExpectedKingdomId, StringComparison.Ordinal) &&
+        string.Equals(request.ExpectedKingdomId, result.CommittedKingdomId, StringComparison.Ordinal) &&
+        string.Equals(request.TargetClanId, result.TargetClanId, StringComparison.Ordinal) &&
+        string.Equals(request.TargetHeroId, result.TargetHeroId, StringComparison.Ordinal) &&
+        request.ExpectedFactionChangeTicks == result.ExpectedFactionChangeTicks;
+
+    private void PresentTerminalOutcome(AuthorityClientOutcome<NetworkSeparatismRecruitmentResult> outcome) =>
+        GameThread.RunSafe(() => MBInformationManager.AddQuickInformation(outcome.Applied
+            ? new TextObject("{=coop_separatism_recruitment_accepted}The fallen clan has sworn allegiance to your kingdom.")
+            : FailureText(outcome.ReasonCode)), context: nameof(SeparatismRecruitmentHandler));
+
+    private static TextObject FailureText(string reasonCode) => reasonCode switch
+    {
+        "at-war" => new TextObject("{=coop_separatism_recruitment_war}The clan cannot join while your factions are at war."),
+        "stale-config" or "kingdom-changed" or "target-changed" => new TextObject("{=coop_separatism_recruitment_stale}The clan's situation changed before the agreement could be completed."),
+        _ => new TextObject("{=coop_separatism_recruitment_failed}The fallen clan could not join your kingdom."),
+    };
+
+    private static AuthorityServerReply<NetworkSeparatismRecruitmentResult> Reject(AuthorityRequestHeader header,
+        NetworkRequestSeparatismRecruitment request, AuthorityResultStatus status, string reasonCode) =>
+        Result(header, request, status, reasonCode, request.ExpectedKingdomId, null,
+            request.ExpectedFactionChangeTicks, false);
+
+    private static AuthorityServerReply<NetworkSeparatismRecruitmentResult> Result(AuthorityRequestHeader header,
+        NetworkRequestSeparatismRecruitment request, AuthorityResultStatus status, string reasonCode,
+        string expectedKingdomId, string committedKingdomId, long committedTicks, bool statePublished) =>
+        new(CreateResult(header, request, status, reasonCode, expectedKingdomId, committedKingdomId, committedTicks), statePublished);
+
+    private static NetworkSeparatismRecruitmentResult CreateResult(AuthorityRequestHeader header,
+        NetworkRequestSeparatismRecruitment request, AuthorityResultStatus status, string reasonCode,
+        string expectedKingdomId, string committedKingdomId, long committedTicks) =>
+        new(new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reasonCode),
+            request.CommandDigest, expectedKingdomId, committedKingdomId, request.TargetClanId, request.TargetHeroId,
+            request.ExpectedFactionChangeTicks, Math.Max(0, committedTicks));
+
+    private static NetworkSeparatismRecruitmentResult CreateTerminalResult(AuthorityRequestHeader header,
+        AuthorityResultStatus status, string reasonCode) => new(new AuthorityResultHeader(
+            header.SessionId, header.RequestId, status, header.ExpectedRevision, reasonCode),
+            "terminal", null, null, null, null, 0, 0);
 
     private bool CanOffer(Hero actor, Hero target)
     {
         Kingdom actorKingdom = actor?.Clan?.Kingdom;
         Clan targetClan = target?.Clan;
-        return SeparatismConversationPolicy.CanOfferFallenClanRecruitment(
-            capabilityRegistry.IsEnabled(ModuleId, Operation),
-            actorKingdom != null,
-            actorKingdom?.Leader == actor,
-            target != null && targetClan != null,
-            targetClan?.Kingdom == null,
-            targetClan?.IsMinorFaction == false,
-            target?.MapFaction?.Leader == target,
-            target != null && actor != null &&
-                !FactionManager.IsAtWarAgainstFaction(target.MapFaction, actor.MapFaction));
+        return SeparatismConversationPolicy.CanOfferFallenClanRecruitment(true, actorKingdom != null,
+            actorKingdom?.Leader == actor, target != null && targetClan != null, targetClan?.Kingdom == null,
+            targetClan?.IsMinorFaction == false, target?.MapFaction?.Leader == target,
+            target != null && actor != null && !FactionManager.IsAtWarAgainstFaction(target.MapFaction, actor.MapFaction));
     }
 
-    private void HandleRequest(MessagePayload<NetworkRequestSeparatismRecruitment> payload)
+    private readonly struct RecruitmentIntent
     {
-        if (ModInformation.IsClient || payload?.Who is not NetPeer peer) return;
-        NetworkRequestSeparatismRecruitment request = payload.What;
-
-        if (!SeparatismRecruitmentProtocol.IsRequestShapeValid(request))
+        public RecruitmentIntent(long expectedFactionChangeTicks, string expectedKingdomId, string targetClanId,
+            string targetHeroId)
         {
-            Logger.Warning("Rejected malformed Separatism recruitment request from peer {Peer}", peer.Id);
-            peer.Disconnect();
-            return;
+            ExpectedFactionChangeTicks = expectedFactionChangeTicks;
+            ExpectedKingdomId = expectedKingdomId;
+            TargetClanId = targetClanId;
+            TargetHeroId = targetHeroId;
         }
 
-        if (!configAuthority.TryGetCurrent(out var config))
-        {
-            Send(peer, request, SeparatismRecruitmentStatus.Unavailable, request.ExpectedRevision);
-            return;
-        }
-        if (!string.Equals(config.SessionId, request.SessionId, StringComparison.Ordinal))
-        {
-            Send(peer, request, SeparatismRecruitmentStatus.StaleSession, request.ExpectedRevision, config.SessionId);
-            return;
-        }
-        if (!playerManager.TryGetPlayer(peer, out _))
-        {
-            Send(peer, request, SeparatismRecruitmentStatus.Unauthorized, request.ExpectedRevision);
-            return;
-        }
-        if (!capabilityRegistry.IsEnabled(ModuleId, Operation))
-        {
-            Send(peer, request, SeparatismRecruitmentStatus.Unavailable, request.ExpectedRevision);
-            return;
-        }
-
-        GameThread.RunSafe(
-            () => ProcessRequest(peer, request),
-            context: nameof(SeparatismRecruitmentHandler));
+        public long ExpectedFactionChangeTicks { get; }
+        public string ExpectedKingdomId { get; }
+        public string TargetClanId { get; }
+        public string TargetHeroId { get; }
     }
-
-    private void ProcessRequest(
-        NetPeer peer,
-        NetworkRequestSeparatismRecruitment request)
-    {
-        if (!configAuthority.TryGetCurrent(out var config))
-        {
-            Send(peer, request, SeparatismRecruitmentStatus.Unavailable, request.ExpectedRevision);
-            return;
-        }
-        if (!string.Equals(config.SessionId, request.SessionId, StringComparison.Ordinal))
-        {
-            Send(peer, request, SeparatismRecruitmentStatus.StaleSession, request.ExpectedRevision, config.SessionId);
-            return;
-        }
-        if (!capabilityRegistry.IsEnabled(ModuleId, Operation))
-        {
-            Send(peer, request, SeparatismRecruitmentStatus.Unavailable, request.ExpectedRevision);
-            return;
-        }
-        if (!playerManager.TryGetPlayer(peer, out var player))
-        {
-            Send(peer, request, SeparatismRecruitmentStatus.Unauthorized, request.ExpectedRevision);
-            return;
-        }
-
-        switch (requestLedger.Inspect(peer, request, out var replay))
-        {
-            case SeparatismReplayDecision.Replay:
-                network.Send(peer, replay);
-                return;
-            case SeparatismReplayDecision.Conflict:
-                Send(peer, request, SeparatismRecruitmentStatus.ConflictingRequest, request.ExpectedRevision);
-                return;
-            case SeparatismReplayDecision.Stale:
-                Send(peer, request, SeparatismRecruitmentStatus.StaleRequest, request.ExpectedRevision);
-                return;
-        }
-
-        SeparatismRecruitmentStatus status = ValidateAndApply(player, request, out long revision);
-        var result = new NetworkSeparatismRecruitmentResult(
-            request.SessionId,
-            request.RequestId,
-            status,
-            request.TargetClanId,
-            Math.Max(0, revision));
-        requestLedger.Record(peer, request, result);
-        network.Send(peer, result);
-    }
-
-    private SeparatismRecruitmentStatus ValidateAndApply(
-        Player player,
-        NetworkRequestSeparatismRecruitment request,
-        out long revision)
-    {
-        revision = request.ExpectedRevision;
-        if (!objectManager.TryGetObject<Hero>(player.HeroId, out var actor) ||
-            !objectManager.TryGetObject<Clan>(player.ClanId, out var actorClan) ||
-            actor.Clan != actorClan)
-            return SeparatismRecruitmentStatus.Unauthorized;
-
-        Kingdom actorKingdom = actorClan.Kingdom;
-        if (actorKingdom == null ||
-            actorKingdom.Leader != actor ||
-            actorKingdom.RulingClan != actorClan ||
-            !objectManager.TryGetId(actorKingdom, out var actorKingdomId))
-            return SeparatismRecruitmentStatus.IneligibleActor;
-        if (!string.Equals(actorKingdomId, request.ExpectedKingdomId, StringComparison.Ordinal))
-            return SeparatismRecruitmentStatus.StaleState;
-
-        if (!objectManager.TryGetObject<Clan>(request.TargetClanId, out var targetClan) ||
-            !objectManager.TryGetObject<Hero>(request.TargetHeroId, out var targetHero) ||
-            targetClan.Leader != targetHero ||
-            targetHero.Clan != targetClan)
-            return SeparatismRecruitmentStatus.IneligibleTarget;
-
-        revision = targetClan.LastFactionChangeTime.NumTicks;
-        if (revision != request.ExpectedRevision || targetClan.Kingdom != null)
-            return SeparatismRecruitmentStatus.StaleState;
-        if (targetClan.IsMinorFaction || targetHero.MapFaction?.Leader != targetHero)
-            return SeparatismRecruitmentStatus.IneligibleTarget;
-        if (FactionManager.IsAtWarAgainstFaction(targetHero.MapFaction, actor.MapFaction))
-            return SeparatismRecruitmentStatus.AtWar;
-
-        bool accepted = service.TryRecruitFallenClan(actor, targetClan);
-        revision = targetClan.LastFactionChangeTime.NumTicks;
-        return accepted
-            ? SeparatismRecruitmentStatus.Accepted
-            : SeparatismRecruitmentStatus.Failed;
-    }
-
-    private void HandleResult(MessagePayload<NetworkSeparatismRecruitmentResult> payload)
-    {
-        if (!ModInformation.IsClient ||
-            payload?.Who is not NetPeer serverPeer ||
-            !configAuthority.IsTrustedServer(serverPeer) ||
-            !SeparatismRecruitmentProtocol.IsResultShapeValid(payload.What) ||
-            !configAuthority.TryGetCurrent(out var config) ||
-            !string.Equals(config.SessionId, payload.What.SessionId, StringComparison.Ordinal) ||
-            !pendingClientRequests.TryRemove(payload.What.RequestId, out var targetClanId) ||
-            !string.Equals(targetClanId, payload.What.TargetClanId, StringComparison.Ordinal))
-            return;
-
-        NetworkSeparatismRecruitmentResult result = payload.What;
-        GameThread.RunSafe(
-            () => MBInformationManager.AddQuickInformation(ResultText(result.Status)),
-            context: nameof(SeparatismRecruitmentHandler));
-    }
-
-    private void Send(
-        NetPeer peer,
-        NetworkRequestSeparatismRecruitment request,
-        SeparatismRecruitmentStatus status,
-        long revision,
-        string sessionId = null) =>
-        network.Send(peer, new NetworkSeparatismRecruitmentResult(
-            sessionId ?? request.SessionId,
-            request.RequestId,
-            status,
-            request.TargetClanId,
-            Math.Max(0, revision)));
-
-    private static TextObject ResultText(SeparatismRecruitmentStatus status) => status switch
-    {
-        SeparatismRecruitmentStatus.Accepted =>
-            new TextObject("{=coop_separatism_recruitment_accepted}The fallen clan has sworn allegiance to your kingdom."),
-        SeparatismRecruitmentStatus.StaleState or SeparatismRecruitmentStatus.StaleRequest =>
-            new TextObject("{=coop_separatism_recruitment_stale}The clan's situation changed before the agreement could be completed."),
-        SeparatismRecruitmentStatus.AtWar =>
-            new TextObject("{=coop_separatism_recruitment_war}The clan cannot join while your factions are at war."),
-        _ => new TextObject("{=coop_separatism_recruitment_failed}The fallen clan could not join your kingdom."),
-    };
 }
 
 internal sealed class SeparatismCapabilitySource : IWorkshopCapabilitySource
 {
     private readonly IModConfig modConfig;
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRequestRouter authorityRequestRouter;
 
-    public SeparatismCapabilitySource(IModConfig modConfig)
+    public SeparatismCapabilitySource(IModConfig modConfig, IModConfigAuthority configAuthority,
+        IAuthorityRequestRouter authorityRequestRouter)
     {
         this.modConfig = modConfig;
+        this.configAuthority = configAuthority;
+        this.authorityRequestRouter = authorityRequestRouter;
     }
 
     public IEnumerable<WorkshopCapability> CaptureCapabilities()
     {
         SeparatismOptionsData data = modConfig.Data?.ModOptions?.Separatism;
         bool optionEnabled = data?.Enabled ?? ModConfigProvider.ModOptions.Separatism.Enabled;
-        bool enabled = SeparatismCapabilityPolicy.AllowRecruitment(
-            optionEnabled,
-            SeparatismRecruitmentHandler.RouteReady);
-        yield return new WorkshopCapability(
-            SeparatismRecruitmentHandler.ModuleId,
-            SeparatismRecruitmentHandler.Operation,
-            enabled,
+        bool routeReady = authorityRequestRouter.IsRegistered(SeparatismRecruitmentProtocol.RouteId,
+            AuthorityRouteKind.Command) && configAuthority.TryGetCurrent(out _);
+        bool enabled = SeparatismCapabilityPolicy.AllowRecruitment(optionEnabled, routeReady);
+        yield return new WorkshopCapability(SeparatismRecruitmentHandler.ModuleId,
+            SeparatismRecruitmentHandler.Operation, enabled,
             enabled ? string.Empty : "Separatism is disabled or its authoritative recruitment route is unavailable.");
     }
 }

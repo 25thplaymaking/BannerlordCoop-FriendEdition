@@ -4,6 +4,7 @@ using Coop.Core.Client.Services.SiegeEvents.Messages;
 using Coop.Core.Server.Services.SiegeEvents.Messages;
 using E2E.Tests.Environment;
 using E2E.Tests.Environment.Instance;
+using GameInterface.Configuration;
 using GameInterface.Services.Armies.Messages;
 using GameInterface.Services.Armies.Patches;
 using GameInterface.Services.MapEvents.Messages.Leave;
@@ -42,6 +43,7 @@ namespace E2E.Tests.Services.SiegeEvents;
 public class SiegeLeaveMenuTests : IDisposable
 {
     private E2ETestEnvironment TestEnvironment { get; }
+    private ModConfigSnapshot AuthorityConfig { get; }
     private EnvironmentInstance Server => TestEnvironment.Server;
     private IEnumerable<EnvironmentInstance> Clients => TestEnvironment.Clients;
     private IEnumerable<EnvironmentInstance> AllEnvironmentInstances => Clients.Append(Server);
@@ -49,6 +51,7 @@ public class SiegeLeaveMenuTests : IDisposable
     public SiegeLeaveMenuTests(ITestOutputHelper output)
     {
         TestEnvironment = new E2ETestEnvironment(output);
+        AuthorityConfig = TestEnvironment.CompleteAuthorityHandshake();
     }
 
     public void Dispose()
@@ -95,6 +98,9 @@ public class SiegeLeaveMenuTests : IDisposable
         var request = Assert.Single(leavingClient.NetworkSentMessages.GetMessages<NetworkRequestBreakSiege>());
         Assert.Equal(partyId, request.PartyId);
         Assert.True(request.FinishLocalMenus);
+        Assert.Equal(AuthorityConfig.ProtocolVersion, request.Header.ProtocolVersion);
+        Assert.Equal(AuthorityConfig.SessionId, request.Header.SessionId);
+        Assert.Equal(AuthorityConfig.Revision, request.Header.ExpectedRevision);
         Assert.Empty(Clients.Last().NetworkSentMessages.GetMessages<NetworkRequestBreakSiege>());
 
         // The server approved the request and cleared the camp authoritatively...

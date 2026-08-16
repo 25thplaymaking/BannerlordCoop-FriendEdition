@@ -1,6 +1,8 @@
 ﻿using Common.Util;
 using E2E.Tests.Environment;
 using E2E.Tests.Util;
+using GameInterface.Configuration;
+using GameInterface.Services.Armies.Messages;
 using GameInterface.Services.Armies.Patches;
 using GameInterface.Services.Entity;
 using GameInterface.Services.Players;
@@ -19,10 +21,12 @@ namespace E2E.Tests.Services.Armies;
 public class PlayerArmyWaitBehaviorTests : IDisposable
 {
     private E2ETestEnvironment TestEnvironment { get; }
+    private ModConfigSnapshot AuthorityConfig { get; }
 
     public PlayerArmyWaitBehaviorTests(ITestOutputHelper output)
     {
         TestEnvironment = new E2ETestEnvironment(output);
+        AuthorityConfig = TestEnvironment.CompleteAuthorityHandshake();
     }
 
     public void Dispose()
@@ -142,6 +146,12 @@ public class PlayerArmyWaitBehaviorTests : IDisposable
             Assert.Null(clientParty._army);
             Assert.DoesNotContain(clientParty, army._parties);
         });
+
+        var request = Assert.Single(client.NetworkSentMessages.GetMessages<RequestLeaveArmy>());
+        Assert.Equal(armyId, request.ArmyId);
+        Assert.Equal(AuthorityConfig.ProtocolVersion, request.Header.ProtocolVersion);
+        Assert.Equal(AuthorityConfig.SessionId, request.Header.SessionId);
+        Assert.Equal(AuthorityConfig.Revision, request.Header.ExpectedRevision);
 
         server.Call(() =>
         {

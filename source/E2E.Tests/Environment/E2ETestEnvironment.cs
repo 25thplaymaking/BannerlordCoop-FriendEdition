@@ -1,5 +1,6 @@
 ﻿using Common;
 using Common.Logging;
+using Common.Messaging;
 using Common.Network;
 using Common.Network.Coalescing;
 using Common.Tests.Utils;
@@ -9,6 +10,9 @@ using E2E.Tests.Environment.Instance;
 using E2E.Tests.Util;
 using GameInterface;
 using GameInterface.AutoSync;
+using GameInterface.Configuration;
+using GameInterface.Services.CampaignService.Handlers;
+using GameInterface.Services.GameState.Messages;
 using GameInterface.Services.MapEvents;
 using GameInterface.Services.MapEvents.PlayerPartyInteractions;
 using GameInterface.Services.Players;
@@ -126,6 +130,51 @@ public class E2ETestEnvironment : IDisposable
                 playerManager.IsConnected(player),
                 $"Player '{controllerId}' was not connected to the supplied client peer.");
         });
+    }
+
+    /// <summary>
+    /// Completes the same host-configuration barrier required before a client can submit an
+    /// authority request. E2E scenarios that exercise routed campaign actions opt in explicitly,
+    /// keeping connection-barrier scenarios free to test the pre-acceptance state.
+    /// </summary>
+    public ModConfigSnapshot CompleteAuthorityHandshake()
+    {
+        foreach (EnvironmentInstance client in Clients)
+        {
+            client.Call(() =>
+            {
+                IModConfigAuthority authority = client.Resolve<IModConfigAuthority>();
+                if (!authority.TryBindTrustedServer(Server.NetPeer, out string bindFailure))
+                    throw new InvalidOperationException("Unable to bind the E2E server as trusted: " + bindFailure);
+            });
+        }
+
+        ModConfigSnapshot accepted = null;
+        Server.Call(() =>
+        {
+            Server.Resolve<LoadModConfigHandler>().Handle_CampaignReady(
+                new MessagePayload<CampaignReady>(this, new CampaignReady()));
+
+            if (!Server.Resolve<IModConfigAuthority>().TryGetCurrent(out accepted))
+                throw new InvalidOperationException("The E2E server did not initialize an authoritative mod-config snapshot.");
+        });
+
+        foreach (EnvironmentInstance client in Clients)
+        {
+            client.Call(() =>
+            {
+                if (!client.Resolve<IModConfigAuthority>().TryGetCurrent(out ModConfigSnapshot current) ||
+                    !string.Equals(current.SessionId, accepted.SessionId, StringComparison.Ordinal) ||
+                    current.ProtocolVersion != accepted.ProtocolVersion ||
+                    current.Revision != accepted.Revision)
+                {
+                    throw new InvalidOperationException(
+                        "The E2E client did not accept the server's authoritative mod-config snapshot.");
+                }
+            });
+        }
+
+        return accepted;
     }
 
     public void Dispose()

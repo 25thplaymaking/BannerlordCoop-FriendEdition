@@ -2,7 +2,10 @@ using Common;
 using Common.Logging;
 using Common.Messaging;
 using Common.Network;
+using GameInterface.Configuration;
 using GameInterface.Registry.Messages;
+using GameInterface.Services.AuthorityRequests;
+using GameInterface.Services.CampaignService.Messages;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
 using GameInterface.Services.Barters;
@@ -38,6 +41,8 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
     private readonly INetwork network;
     private readonly IObjectManager objectManager;
     private readonly IPlayerManager playerManager;
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRouteHandle<PlayerSettlementSnapshotIntent, NetworkPlayerSettlementStateQueryResult> snapshotRoute;
     private readonly Harmony adapterHarmony;
     private readonly HashSet<string> notifiedMethods = new HashSet<string>(StringComparer.Ordinal);
     private readonly PlayerSettlementRevisionGate revisionGate = new PlayerSettlementRevisionGate();
@@ -54,6 +59,7 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
     private long serverRevision;
     private bool compatible;
     private bool objectRegistrationValidated;
+    private bool snapshotReady;
     private long nextConstructionRequestId;
     private PlayerSettlementConstructionBridge constructionBridge;
 
@@ -62,21 +68,45 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         INetwork network,
         IObjectManager objectManager,
         IPlayerManager playerManager,
-        Harmony harmony)
+        Harmony harmony,
+        IModConfigAuthority configAuthority,
+        IAuthorityRequestRouter authorityRequestRouter)
     {
         this.messageBroker = messageBroker;
         this.network = network;
         this.objectManager = objectManager;
         this.playerManager = playerManager;
+        this.configAuthority = configAuthority;
         if (harmony == null) throw new ArgumentNullException(nameof(harmony));
         adapterHarmony = new Harmony(PlayerSettlementHarmonyIsolation.AdapterHarmonyOwner);
 
         compatible = TryInstall();
         if (compatible) PlayerSettlementPatchRuntime.Current = this;
 
+        snapshotRoute = authorityRequestRouter.Register(
+            AuthorityRoute<PlayerSettlementSnapshotIntent, NetworkRequestPlayerSettlementState,
+                NetworkPlayerSettlementStateQueryResult>.Define(
+                "workshop.player-settlement.snapshot", AuthorityRouteKind.BootstrapQuery,
+                CreateSnapshotHeader,
+                (_, header) => new NetworkRequestPlayerSettlementState(header),
+                request => request.Header,
+                result => result.Header,
+                request => request.Header.TryValidate(out _) ? null : "invalid-player-settlement-snapshot-query",
+                request => "snapshot:" + request.Header.SessionId + ":" + request.Header.ExpectedRevision,
+                ValidateSnapshotHeader,
+                ExecuteSnapshotQuery,
+                CreateSnapshotTerminal,
+                ProbeSnapshotApplied,
+                _ => { },
+                PresentSnapshotTerminal,
+                configAuthority.IsTrustedServer,
+                AuthorityTimeoutPolicy.BootstrapQuery,
+                requireAuthenticatedPlayer: false));
+
         messageBroker.Subscribe<AllGameObjectsRegistered>(HandleAllGameObjectsRegistered);
-        messageBroker.Subscribe<NetworkRequestPlayerSettlementState>(HandleStateRequest);
         messageBroker.Subscribe<NetworkPlayerSettlementState>(HandleState);
+        messageBroker.Subscribe<NetworkPlayerSettlementStateQueryResult>(HandleStateQueryResult);
+        messageBroker.Subscribe<HostModConfigAccepted>(HandleHostModConfigAccepted);
         messageBroker.Subscribe<NetworkRequestPlayerSettlementConstruction>(HandleConstructionRequest);
         messageBroker.Subscribe<NetworkPlayerSettlementConstructionResult>(HandleConstructionResult);
     }
@@ -84,8 +114,10 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
     public void Dispose()
     {
         messageBroker.Unsubscribe<AllGameObjectsRegistered>(HandleAllGameObjectsRegistered);
-        messageBroker.Unsubscribe<NetworkRequestPlayerSettlementState>(HandleStateRequest);
         messageBroker.Unsubscribe<NetworkPlayerSettlementState>(HandleState);
+        messageBroker.Unsubscribe<NetworkPlayerSettlementStateQueryResult>(HandleStateQueryResult);
+        messageBroker.Unsubscribe<HostModConfigAccepted>(HandleHostModConfigAccepted);
+        snapshotRoute.Dispose();
         messageBroker.Unsubscribe<NetworkRequestPlayerSettlementConstruction>(HandleConstructionRequest);
         messageBroker.Unsubscribe<NetworkPlayerSettlementConstructionResult>(HandleConstructionResult);
         if (ReferenceEquals(PlayerSettlementPatchRuntime.Current, this))
@@ -122,27 +154,11 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
 
     public bool TrySubmitConstruction(object owner, MethodBase original, object[] arguments)
     {
-        if (!compatible || !ModInformation.IsClient || constructionBridge == null || revisionGate.Revision < 0)
-            return false;
-        var requestId = ++nextConstructionRequestId;
-        if (!constructionBridge.TryCapture(
-                owner,
-                original,
-                arguments,
-                requestId,
-                revisionGate.Revision,
-                value => objectManager.TryGetId(value, out var id) ? id : string.Empty,
-                out var request,
-                out var failure))
-        {
-            Logger.Error("Player Settlement construction intent was rejected locally: {Failure}", failure);
-            InformationManager.DisplayMessage(new InformationMessage(
-                "Player Settlement placement could not be submitted: " + failure));
-            return false;
-        }
-        pendingConstructionRequests.Add(requestId);
-        network.SendAll(request);
-        return true;
+        // The legacy construction command has no core authority owner yet. Snapshot readiness
+        // never authorizes it; Task 6 supplies the real command route.
+        if (compatible && ModInformation.IsClient)
+            NotifyFeatureBlocked("authority-command-route-unavailable");
+        return false;
     }
 
     public void ValidateObjectRegistration(bool isSavedCampaign)
@@ -425,9 +441,10 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         constructionLedger.Clear();
         pendingConstructionRequests.Clear();
         nextConstructionRequestId = 0;
+        snapshotReady = !ModInformation.IsClient;
         if (ModInformation.IsClient)
         {
-            network.SendAll(new NetworkRequestPlayerSettlementState());
+            StartSnapshotBootstrap();
             return;
         }
 
@@ -437,6 +454,67 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
             throw new InvalidOperationException(
                 "Player Settlement reached registry completion without guarded object registration validation");
         SendSnapshotOrAbort(peer: null);
+    }
+
+    private void HandleHostModConfigAccepted(MessagePayload<HostModConfigAccepted> payload)
+    {
+        if (payload?.What.Snapshot == null || !configAuthority.IsCurrent(payload.What.Snapshot)) return;
+        StartSnapshotBootstrap();
+    }
+
+    private void StartSnapshotBootstrap()
+    {
+        if (!compatible || !objectRegistrationValidated || !ModInformation.IsClient || snapshotReady ||
+            !configAuthority.TryGetCurrent(out _)) return;
+        snapshotRoute.Submit(default);
+    }
+
+    private AuthorityRequestHeader CreateSnapshotHeader(long requestId)
+    {
+        if (!configAuthority.TryGetCurrent(out var config)) return default;
+        return new AuthorityRequestHeader(config.ProtocolVersion, config.SessionId, requestId, config.Revision);
+    }
+
+    private AuthorityHeaderValidation ValidateSnapshotHeader(AuthorityRequestHeader header)
+    {
+        if (!compatible || !objectRegistrationValidated || !configAuthority.TryGetCurrent(out var config))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "player-settlement-snapshot-unavailable");
+        if (header.ProtocolVersion != config.ProtocolVersion || !string.Equals(header.SessionId, config.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-config-session");
+        return header.ExpectedRevision == config.Revision
+            ? AuthorityHeaderValidation.Valid
+            : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-config-revision");
+    }
+
+    private AuthorityServerReply<NetworkPlayerSettlementStateQueryResult> ExecuteSnapshotQuery(
+        AuthorityServerContext context, NetworkRequestPlayerSettlementState _)
+    {
+        if (!TryCaptureSnapshot(out var snapshot, out var failure))
+        {
+            Logger.Warning("Player Settlement snapshot query is unavailable: {Failure}", failure);
+            return new AuthorityServerReply<NetworkPlayerSettlementStateQueryResult>(
+                CreateSnapshotTerminal(context.Header, AuthorityResultStatus.Unavailable,
+                    "player-settlement-snapshot-unavailable"), false);
+        }
+        return new AuthorityServerReply<NetworkPlayerSettlementStateQueryResult>(
+            new NetworkPlayerSettlementStateQueryResult(context.Header, AuthorityResultStatus.Accepted, snapshot, null), true);
+    }
+
+    private static NetworkPlayerSettlementStateQueryResult CreateSnapshotTerminal(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reasonCode) =>
+        new NetworkPlayerSettlementStateQueryResult(header, status, null, reasonCode);
+
+    private AuthorityCommitProbeResult ProbeSnapshotApplied(NetworkPlayerSettlementStateQueryResult result) =>
+        snapshotReady && result.Snapshot != null && revisionGate.Revision == result.Header.CommittedRevision
+            ? AuthorityCommitProbeResult.Applied
+            : AuthorityCommitProbeResult.Pending;
+
+    private void PresentSnapshotTerminal(AuthorityClientOutcome<NetworkPlayerSettlementStateQueryResult> outcome)
+    {
+        if (outcome.Completion == AuthorityClientCompletion.Applied) return;
+        snapshotReady = false;
+        Logger.Warning("Player Settlement snapshot bootstrap ended without readiness. Completion={Completion} Reason={Reason}",
+            outcome.Completion, outcome.ReasonCode);
     }
 
     private void HandleStateRequest(MessagePayload<NetworkRequestPlayerSettlementState> payload)
@@ -484,6 +562,27 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
         GameThread.RunSafe(
             () => ApplyConstructionRequest(peer, payload.What),
             context: nameof(PlayerSettlementCompatibilityHandler));
+    }
+
+    private void HandleStateQueryResult(MessagePayload<NetworkPlayerSettlementStateQueryResult> payload)
+    {
+        if (!compatible || !ModInformation.IsClient || payload?.Who is not NetPeer serverPeer ||
+            !configAuthority.IsTrustedServer(serverPeer) || payload.What.Header.Status != AuthorityResultStatus.Accepted ||
+            payload.What.Snapshot == null)
+            return;
+
+        GameThread.RunSafe(() =>
+        {
+            if (ApplySnapshot(payload.What.Snapshot, out var failure))
+            {
+                snapshotReady = true;
+                return;
+            }
+            snapshotReady = false;
+            Logger.Fatal("Disconnecting from the Coop server because Player Settlement state could not be accepted: {Failure}",
+                failure);
+            serverPeer.Disconnect();
+        }, context: nameof(PlayerSettlementCompatibilityHandler));
     }
 
     private void ApplyConstructionRequest(NetPeer peer, NetworkRequestPlayerSettlementConstruction request)
@@ -634,6 +733,44 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
 
         serverRevision = nextRevision;
         lastServerFingerprint = fingerprint;
+    }
+
+    private bool TryCaptureSnapshot(out NetworkPlayerSettlementState snapshot, out string failure)
+    {
+        snapshot = null;
+        if (!objectRegistrationValidated)
+        {
+            failure = "authoritative object registration is not ready";
+            return false;
+        }
+        PlayerSettlementStateEntry[] entries;
+        try
+        {
+            entries = CaptureStateOrThrow("snapshot query");
+        }
+        catch (Exception exception)
+        {
+            failure = exception.Message;
+            return false;
+        }
+        string fingerprint = PlayerSettlementStateCodec.ComputeHash(entries);
+        long revision = lastServerFingerprint != null &&
+            !string.Equals(lastServerFingerprint, fingerprint, StringComparison.OrdinalIgnoreCase)
+            ? serverRevision + 1
+            : serverRevision;
+        snapshot = new NetworkPlayerSettlementState(
+            PlayerSettlementCompatibilityManifest.AdapterVersion,
+            revision,
+            PlayerSettlementFeatureStatus.Enabled,
+            fingerprint,
+            entries);
+        if (!PlayerSettlementStateCodec.TryValidate(snapshot, out failure))
+        {
+            failure = "captured state was invalid: " + failure;
+            return false;
+        }
+        failure = null;
+        return true;
     }
 
     private static bool ReadStoreValue(
@@ -790,6 +927,10 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
     private static Assembly FindAssembly(string name) =>
         AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(candidate =>
             string.Equals(candidate.GetName().Name, name, StringComparison.Ordinal));
+}
+
+internal readonly struct PlayerSettlementSnapshotIntent
+{
 }
 
 internal static class PlayerSettlementStoreResolver

@@ -11,9 +11,50 @@ using System.Xml;
 
 namespace GameInterface.Services.WorkshopMods.PlayerSettlement;
 
+[AuthorityRoute("workshop.player-settlement.snapshot", AuthorityRouteKind.BootstrapQuery)]
 [ProtoContract(SkipConstructor = true)]
 internal readonly struct NetworkRequestPlayerSettlementState : ICommand
 {
+    [ProtoMember(1)] public readonly int ProtocolVersion;
+    [ProtoMember(2)] public readonly string SessionId;
+    [ProtoMember(3)] public readonly long AuthorityRequestId;
+    [ProtoMember(4)] public readonly long ExpectedRevision;
+
+    public NetworkRequestPlayerSettlementState(AuthorityRequestHeader header)
+    {
+        ProtocolVersion = header.ProtocolVersion;
+        SessionId = header.SessionId;
+        AuthorityRequestId = header.RequestId;
+        ExpectedRevision = header.ExpectedRevision;
+    }
+
+    public AuthorityRequestHeader Header =>
+        new AuthorityRequestHeader(ProtocolVersion, SessionId, AuthorityRequestId, ExpectedRevision);
+}
+
+[ProtoContract(SkipConstructor = true)]
+internal readonly struct NetworkPlayerSettlementStateQueryResult : IEvent
+{
+    [ProtoMember(1)] public readonly NetworkPlayerSettlementState Snapshot;
+    [ProtoMember(2)] public readonly string SessionId;
+    [ProtoMember(3)] public readonly long AuthorityRequestId;
+    [ProtoMember(4)] public readonly AuthorityResultStatus Status;
+    [ProtoMember(5)] public readonly long CommittedRevision;
+    [ProtoMember(6)] public readonly string ReasonCode;
+
+    public NetworkPlayerSettlementStateQueryResult(
+        AuthorityRequestHeader request, AuthorityResultStatus status, NetworkPlayerSettlementState snapshot, string reasonCode)
+    {
+        Snapshot = snapshot;
+        SessionId = request.SessionId;
+        AuthorityRequestId = request.RequestId;
+        Status = status;
+        CommittedRevision = snapshot?.Revision ?? request.ExpectedRevision;
+        ReasonCode = reasonCode;
+    }
+
+    public AuthorityResultHeader Header =>
+        new AuthorityResultHeader(SessionId, AuthorityRequestId, Status, CommittedRevision, ReasonCode);
 }
 
 [ProtoContract]

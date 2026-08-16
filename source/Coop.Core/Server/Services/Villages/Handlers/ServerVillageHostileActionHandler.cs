@@ -145,7 +145,8 @@ internal class ServerVillageHostileActionHandler : IHandler
             // This ordered state publication is the route's commit proof. The approval remains
             // unconsumable until it has been queued, so MapEventCreation cannot race ahead.
             network.Send(context.Peer, new NetworkVillageHostileActionStarted(
-                request.Action, request.MobilePartyId, request.SettlementId));
+                request.Action, request.MobilePartyId, request.SettlementId,
+                context.Header.SessionId, context.Header.RequestId));
             if (!villageHostileActionInterface.MarkApprovedMapEventStartPublished(
                     mobileParty.Party, settlement, request.Action))
             {

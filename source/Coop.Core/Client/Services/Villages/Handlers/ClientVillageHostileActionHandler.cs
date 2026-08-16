@@ -1,7 +1,9 @@
 using Common;
 using Common.Messaging;
+using Common.Network.Messages;
 using GameInterface.Configuration;
 using GameInterface.Services.AuthorityRequests;
+using GameInterface.Services.CampaignService.Messages;
 using GameInterface.Services.GameDebug.Messages;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Villages.Data;
@@ -22,7 +24,8 @@ internal class ClientVillageHostileActionHandler : IHandler
     private readonly IVillageHostileActionInterface villageHostileActionInterface;
     private readonly IModConfigAuthority configAuthority;
     private readonly IAuthorityRouteHandle<VillageHostileActionIntent, NetworkVillageHostileActionResult> hostileActionRoute;
-    private readonly HashSet<string> publishedApprovals = new HashSet<string>(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> publishedApprovalSemantics = new Dictionary<string, string>(StringComparer.Ordinal);
+    private readonly HashSet<string> conflictedApprovalCorrelations = new HashSet<string>(StringComparer.Ordinal);
 
     public ClientVillageHostileActionHandler(
         IMessageBroker messageBroker,
@@ -48,6 +51,8 @@ internal class ClientVillageHostileActionHandler : IHandler
                 failClosedOnApplyFailure: true, isExpectedClientResult: IsExpectedResult));
 
         messageBroker.Subscribe<VillageHostileActionAttempted>(Handle_VillageHostileActionAttempted);
+        messageBroker.Subscribe<HostModConfigAccepted>(Handle_HostModConfigAccepted);
+        messageBroker.Subscribe<ClientSessionEnded>(Handle_ClientSessionEnded);
         messageBroker.Subscribe<NetworkVillageHostileActionStarted>(Handle_NetworkVillageHostileActionStarted);
         messageBroker.Subscribe<NetworkVillageHostileActionCooldowns>(Handle_NetworkVillageHostileActionCooldowns);
     }
@@ -55,6 +60,8 @@ internal class ClientVillageHostileActionHandler : IHandler
     public void Dispose()
     {
         messageBroker.Unsubscribe<VillageHostileActionAttempted>(Handle_VillageHostileActionAttempted);
+        messageBroker.Unsubscribe<HostModConfigAccepted>(Handle_HostModConfigAccepted);
+        messageBroker.Unsubscribe<ClientSessionEnded>(Handle_ClientSessionEnded);
         messageBroker.Unsubscribe<NetworkVillageHostileActionStarted>(Handle_NetworkVillageHostileActionStarted);
         messageBroker.Unsubscribe<NetworkVillageHostileActionCooldowns>(Handle_NetworkVillageHostileActionCooldowns);
         hostileActionRoute.Dispose();
@@ -72,12 +79,42 @@ internal class ClientVillageHostileActionHandler : IHandler
 
     private void Handle_NetworkVillageHostileActionStarted(MessagePayload<NetworkVillageHostileActionStarted> payload)
     {
-        if (!(payload.Who is NetPeer) || !configAuthority.IsTrustedServer(payload.Who))
+        if (!(payload.Who is NetPeer) || !configAuthority.IsTrustedServer(payload.Who) ||
+            !configAuthority.TryGetCurrent(out ModConfigSnapshot current) ||
+            !string.Equals(payload.What.SessionId, current.SessionId, StringComparison.Ordinal) ||
+            payload.What.AuthorityRequestId <= 0 || !IsKnownAction(payload.What.Action) ||
+            string.IsNullOrWhiteSpace(payload.What.MobilePartyId) || payload.What.MobilePartyId.Length > 256 ||
+            string.IsNullOrWhiteSpace(payload.What.SettlementId) || payload.What.SettlementId.Length > 256)
             return;
 
-        lock (publishedApprovals)
-            publishedApprovals.Add(ApprovalKey(payload.What.Action, payload.What.MobilePartyId, payload.What.SettlementId));
+        string correlation = CorrelationKey(payload.What.SessionId, payload.What.AuthorityRequestId);
+        string semantics = ApprovalSemantics(payload.What.Action, payload.What.MobilePartyId, payload.What.SettlementId);
+        lock (publishedApprovalSemantics)
+        {
+            if (conflictedApprovalCorrelations.Contains(correlation))
+                return;
+
+            if (publishedApprovalSemantics.TryGetValue(correlation, out string priorSemantics))
+            {
+                if (!string.Equals(priorSemantics, semantics, StringComparison.Ordinal))
+                {
+                    publishedApprovalSemantics.Remove(correlation);
+                    conflictedApprovalCorrelations.Add(correlation);
+                }
+                return;
+            }
+
+            publishedApprovalSemantics.Add(correlation, semantics);
+        }
     }
+
+    private void Handle_HostModConfigAccepted(MessagePayload<HostModConfigAccepted> payload)
+    {
+        if (!ModInformation.IsServer && payload.What.Snapshot != null && configAuthority.IsCurrent(payload.What.Snapshot))
+            ClearPublishedApprovals();
+    }
+
+    private void Handle_ClientSessionEnded(MessagePayload<ClientSessionEnded> _) => ClearPublishedApprovals();
 
     private void Handle_NetworkVillageHostileActionCooldowns(MessagePayload<NetworkVillageHostileActionCooldowns> payload)
     {
@@ -135,28 +172,36 @@ internal class ClientVillageHostileActionHandler : IHandler
     {
         if (result.Header.Status != AuthorityResultStatus.Accepted ||
             !IsKnownAction(result.Action) || string.IsNullOrWhiteSpace(result.MobilePartyId) ||
-            string.IsNullOrWhiteSpace(result.SettlementId))
+            string.IsNullOrWhiteSpace(result.SettlementId) ||
+            !configAuthority.TryGetCurrent(out ModConfigSnapshot current) ||
+            !string.Equals(current.SessionId, result.Header.SessionId, StringComparison.Ordinal))
             return AuthorityCommitProbeResult.Invalid;
 
-        lock (publishedApprovals)
-            return publishedApprovals.Contains(ApprovalKey(result.Action, result.MobilePartyId, result.SettlementId))
+        string correlation = CorrelationKey(result.Header.SessionId, result.Header.RequestId);
+        string semantics = ApprovalSemantics(result.Action, result.MobilePartyId, result.SettlementId);
+        lock (publishedApprovalSemantics)
+        {
+            if (conflictedApprovalCorrelations.Contains(correlation))
+                return AuthorityCommitProbeResult.Invalid;
+            if (!publishedApprovalSemantics.TryGetValue(correlation, out string publishedSemantics))
+                return AuthorityCommitProbeResult.Pending;
+            return string.Equals(publishedSemantics, semantics, StringComparison.Ordinal)
                 ? AuthorityCommitProbeResult.Applied
-                : AuthorityCommitProbeResult.Pending;
+                : AuthorityCommitProbeResult.Invalid;
+        }
     }
 
     private void PresentTerminalOutcome(AuthorityClientOutcome<NetworkVillageHostileActionResult> outcome)
     {
         if (outcome.Applied)
         {
-            lock (publishedApprovals)
-                publishedApprovals.Remove(ApprovalKey(outcome.Result.Action, outcome.Result.MobilePartyId, outcome.Result.SettlementId));
+            RemovePublishedApproval(outcome.Result.Header.SessionId, outcome.Result.Header.RequestId);
             villageHostileActionInterface.BeginHostileActionPresentation(outcome.Result.Action);
             return;
         }
 
         // No local hostile-action presentation is allowed to remain armed after any terminal failure.
-        lock (publishedApprovals)
-            publishedApprovals.Clear();
+        ClearPublishedApprovals();
         PlayerEncounter.LeaveEncounter = true;
         GameMenu.ExitToLast();
         messageBroker.Publish(this, new SendInformationMessage(GetFailureMessage(outcome)));
@@ -165,9 +210,31 @@ internal class ClientVillageHostileActionHandler : IHandler
     private static bool IsKnownAction(VillageHostileAction action) => action == VillageHostileAction.Raid ||
         action == VillageHostileAction.ForceVolunteers || action == VillageHostileAction.ForceSupplies;
 
-    private static string ApprovalKey(VillageHostileAction action, string mobilePartyId, string settlementId) =>
+    private static string CorrelationKey(string sessionId, long requestId) =>
+        string.Concat(sessionId?.Length ?? -1, ":", sessionId ?? string.Empty, ":", requestId);
+
+    private static string ApprovalSemantics(VillageHostileAction action, string mobilePartyId, string settlementId) =>
         string.Concat((int)action, ":", mobilePartyId?.Length ?? -1, ":", mobilePartyId ?? string.Empty,
             ":", settlementId?.Length ?? -1, ":", settlementId ?? string.Empty);
+
+    private void RemovePublishedApproval(string sessionId, long requestId)
+    {
+        string correlation = CorrelationKey(sessionId, requestId);
+        lock (publishedApprovalSemantics)
+        {
+            publishedApprovalSemantics.Remove(correlation);
+            conflictedApprovalCorrelations.Remove(correlation);
+        }
+    }
+
+    private void ClearPublishedApprovals()
+    {
+        lock (publishedApprovalSemantics)
+        {
+            publishedApprovalSemantics.Clear();
+            conflictedApprovalCorrelations.Clear();
+        }
+    }
 
     private static string GetFailureMessage(AuthorityClientOutcome<NetworkVillageHostileActionResult> outcome)
     {

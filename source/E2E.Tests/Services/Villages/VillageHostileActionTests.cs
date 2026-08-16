@@ -91,8 +91,10 @@ public class VillageHostileActionTests : MapEventTestBase
         Assert.Equal(VillageHostileAction.Raid, started.Action);
         Assert.Equal(mobilePartyId, started.MobilePartyId);
         Assert.Equal(target.SettlementId, started.SettlementId);
-        Assert.Equal(AuthorityResultStatus.Accepted,
-            Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionResult>().Single().Header.Status);
+        var accepted = Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionResult>().Single();
+        Assert.Equal(AuthorityResultStatus.Accepted, accepted.Header.Status);
+        Assert.Equal(accepted.Header.SessionId, started.SessionId);
+        Assert.Equal(accepted.Header.RequestId, started.AuthorityRequestId);
 
         var result = ConsumeApprovedMapEventStart(mobilePartyId, target.SettlementPartyId, RaidFlags());
         Assert.True(result.Approved);

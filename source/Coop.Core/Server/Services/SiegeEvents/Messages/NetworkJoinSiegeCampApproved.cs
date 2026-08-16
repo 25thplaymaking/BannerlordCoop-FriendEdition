@@ -14,10 +14,25 @@ public record NetworkJoinSiegeCampApproved : IEvent
     public string SettlementId { get; }
     [ProtoMember(2)]
     public bool Approved { get; }
+    [ProtoMember(3)]
+    public AuthorityResultHeader Header { get; }
+    [ProtoMember(4)]
+    public string PartyId { get; }
 
     public NetworkJoinSiegeCampApproved(string settlementId, bool approved)
+        : this(settlementId, approved, default, null)
+    {
+    }
+
+    public NetworkJoinSiegeCampApproved(
+        string settlementId,
+        bool approved,
+        AuthorityResultHeader header,
+        string partyId)
     {
         SettlementId = settlementId;
         Approved = approved;
+        Header = header;
+        PartyId = partyId;
     }
 }

@@ -1,5 +1,6 @@
 ﻿using Common;
 using Common.Network;
+using Common.Messaging;
 using Common.Util;
 using Coop.Core.Client.Services.MobileParties.Messages;
 using Coop.Core.Client.Services.SiegeEvents.Handlers;
@@ -9,6 +10,7 @@ using Coop.Core.Server.Services.SiegeEvents.Messages;
 using E2E.Tests.Environment.Instance;
 using E2E.Tests.Services.MapEvents;
 using E2E.Tests.Util;
+using GameInterface.Configuration;
 using GameInterface.Services.GameDebug.Messages;
 using GameInterface.Services.SiegeEvents.Interfaces;
 using GameInterface.Services.Villages.Interfaces;
@@ -473,7 +475,8 @@ public class SiegeEntryValidationFlowTests : MapEventTestBase
             () => client.Resolve<INetwork>().SendAll(
                 new NetworkRequestBesiegeSettlement(
                     context.PartyId,
-                    context.SettlementId)),
+                    context.SettlementId,
+                    CreateAuthorityHeader(client))),
             disabledMethods);
     }
 
@@ -486,8 +489,15 @@ public class SiegeEntryValidationFlowTests : MapEventTestBase
             () => client.Resolve<INetwork>().SendAll(
                 new NetworkRequestJoinSiegeCamp(
                     context.PartyId,
-                    context.SettlementId)),
+                    context.SettlementId,
+                    CreateAuthorityHeader(client))),
             disabledMethods);
+    }
+
+    private static AuthorityRequestHeader CreateAuthorityHeader(EnvironmentInstance client)
+    {
+        Assert.True(client.Resolve<IModConfigAuthority>().TryGetCurrent(out var snapshot));
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, 1, snapshot.Revision);
     }
 
     private static void IgnoreEntryResults(EnvironmentInstance client) =>

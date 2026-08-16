@@ -13,9 +13,27 @@ public record NetworkBesiegeSettlementApproved : IEvent
 {
     [ProtoMember(1)]
     public bool Approved { get; }
+    [ProtoMember(2)]
+    public AuthorityResultHeader Header { get; }
+    [ProtoMember(3)]
+    public string PartyId { get; }
+    [ProtoMember(4)]
+    public string SettlementId { get; }
 
     public NetworkBesiegeSettlementApproved(bool approved)
+        : this(approved, default, null, null)
+    {
+    }
+
+    public NetworkBesiegeSettlementApproved(
+        bool approved,
+        AuthorityResultHeader header,
+        string partyId,
+        string settlementId)
     {
         Approved = approved;
+        Header = header;
+        PartyId = partyId;
+        SettlementId = settlementId;
     }
 }

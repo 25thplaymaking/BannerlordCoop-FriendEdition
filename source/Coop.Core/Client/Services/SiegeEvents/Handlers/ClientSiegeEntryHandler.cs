@@ -5,6 +5,8 @@ using Common.Network;
 using Common.Util;
 using Coop.Core.Client.Services.SiegeEvents.Messages;
 using Coop.Core.Server.Services.SiegeEvents.Messages;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.PlayerCaptivityService.Messages;
 using GameInterface.Services.SiegeEvents.Interfaces;
@@ -15,6 +17,7 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
+using TaleWorlds.Engine;
 
 namespace Coop.Core.Client.Services.SiegeEvents.Handlers;
 
@@ -30,6 +33,9 @@ internal class ClientSiegeEntryHandler : IHandler
     private readonly INetwork network;
     private readonly IObjectManager objectManager;
     private readonly ISiegeEventInterface siegeEventInterface;
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRouteHandle<SiegeEntryIntent, NetworkBesiegeSettlementApproved> besiegeRoute;
+    private readonly IAuthorityRouteHandle<SiegeEntryIntent, NetworkJoinSiegeCampApproved> joinRoute;
     private PendingInterruptedAssault pendingInterruptedAssault;
     private PendingBreakInContinuation pendingBreakInContinuation;
 
@@ -53,23 +59,58 @@ internal class ClientSiegeEntryHandler : IHandler
 
     internal TimeSpan BreakInContinuationTimeout { get; set; }
 
-    public ClientSiegeEntryHandler(
+    // Kept for focused legacy unit tests that exercise only the unrelated break/termination UI path.
+    internal ClientSiegeEntryHandler(
         IMessageBroker messageBroker,
         INetwork network,
         INetworkConfig configuration,
         IObjectManager objectManager,
         ISiegeEventInterface siegeEventInterface)
+        : this(messageBroker, network, configuration, objectManager, siegeEventInterface, null, null)
+    {
+    }
+
+    public ClientSiegeEntryHandler(
+        IMessageBroker messageBroker,
+        INetwork network,
+        INetworkConfig configuration,
+        IObjectManager objectManager,
+        ISiegeEventInterface siegeEventInterface,
+        IModConfigAuthority configAuthority,
+        IAuthorityRequestRouter authorityRequestRouter)
     {
         this.messageBroker = messageBroker;
         this.network = network;
         this.objectManager = objectManager;
         this.siegeEventInterface = siegeEventInterface;
+        this.configAuthority = configAuthority;
         BreakInContinuationTimeout = configuration.ObjectCreationTimeout;
+        if (authorityRequestRouter != null && configAuthority != null)
+        {
+            besiegeRoute = authorityRequestRouter.Register(
+                AuthorityRoute<SiegeEntryIntent, NetworkRequestBesiegeSettlement, NetworkBesiegeSettlementApproved>.Define(
+                    "siege.besiege-settlement", AuthorityRouteKind.Command, CreateHeader,
+                    (intent, header) => new NetworkRequestBesiegeSettlement(intent.PartyId, intent.SettlementId, header),
+                    request => request.Header, result => result.Header, ValidateBesiegeWireShape, BuildBesiegeCommandKey,
+                    ValidateHeader, (_, __) => throw new InvalidOperationException("Siege entry routes execute only on the server."),
+                    CreateBesiegeTerminalResult, ProbeBesiegeCommit, _ => { }, PresentBesiegeOutcome,
+                    configAuthority.IsTrustedServer, new AuthorityTimeoutPolicy(configuration.ObjectCreationTimeout,
+                        configuration.ObjectCreationTimeout, retryCount: 1), failClosedOnApplyFailure: true,
+                    isExpectedClientResult: IsExpectedBesiegeResult));
+            joinRoute = authorityRequestRouter.Register(
+                AuthorityRoute<SiegeEntryIntent, NetworkRequestJoinSiegeCamp, NetworkJoinSiegeCampApproved>.Define(
+                    "siege.join-camp", AuthorityRouteKind.Command, CreateHeader,
+                    (intent, header) => new NetworkRequestJoinSiegeCamp(intent.PartyId, intent.SettlementId, header),
+                    request => request.Header, result => result.Header, ValidateJoinWireShape, BuildJoinCommandKey,
+                    ValidateHeader, (_, __) => throw new InvalidOperationException("Siege entry routes execute only on the server."),
+                    CreateJoinTerminalResult, ProbeJoinCommit, _ => { }, PresentJoinOutcome,
+                    configAuthority.IsTrustedServer, new AuthorityTimeoutPolicy(configuration.ObjectCreationTimeout,
+                        configuration.ObjectCreationTimeout, retryCount: 1), failClosedOnApplyFailure: true,
+                    isExpectedClientResult: IsExpectedJoinResult));
+        }
         messageBroker.Subscribe<BesiegeSettlementAttempted>(HandleBesiegeAttempt);
         messageBroker.Subscribe<JoinSiegeCampAttempted>(HandleJoinAttempt);
         messageBroker.Subscribe<BreakSiegeAttempted>(HandleBreakAttempt);
-        messageBroker.Subscribe<NetworkBesiegeSettlementApproved>(HandleBesiegeApproved);
-        messageBroker.Subscribe<NetworkJoinSiegeCampApproved>(HandleJoinApproved);
         messageBroker.Subscribe<NetworkBreakSiegeApproved>(HandleBreakApproved);
         messageBroker.Subscribe<NetworkPromptSiegeDefense>(HandleDefensePrompt);
         messageBroker.Subscribe<NetworkPromptSiegePreparation>(HandlePreparationPrompt);
@@ -348,7 +389,7 @@ internal class ClientSiegeEntryHandler : IHandler
         if (!objectManager.TryGetIdWithLogging(obj.Party, out var partyId)) return;
         if (!objectManager.TryGetIdWithLogging(obj.Settlement, out var settlementId)) return;
 
-        network.SendAll(new NetworkRequestBesiegeSettlement(partyId, settlementId));
+        besiegeRoute?.Submit(new SiegeEntryIntent(partyId, settlementId));
     }
 
     // Runs on the game thread already — published from the join-siege menu consequence; only resolves ids and sends, so no GameThread.RunSafe.
@@ -359,7 +400,7 @@ internal class ClientSiegeEntryHandler : IHandler
         if (!objectManager.TryGetIdWithLogging(obj.Party, out var partyId)) return;
         if (!objectManager.TryGetIdWithLogging(obj.Settlement, out var settlementId)) return;
 
-        network.SendAll(new NetworkRequestJoinSiegeCamp(partyId, settlementId));
+        joinRoute?.Submit(new SiegeEntryIntent(partyId, settlementId));
     }
 
     // Runs on the game thread already — published from the leave-siege consequence; only resolves an id and sends, so no GameThread.RunSafe.
@@ -372,42 +413,112 @@ internal class ClientSiegeEntryHandler : IHandler
         network.SendAll(new NetworkRequestBreakSiege(partyId, obj.FinishLocalMenus));
     }
 
-    private void HandleBesiegeApproved(MessagePayload<NetworkBesiegeSettlementApproved> payload)
+    private AuthorityRequestHeader CreateHeader(long requestId)
     {
-        if (!payload.What.Approved)
-        {
-            Logger.Information("Server rejected the besiege request; staying at the current menu");
-            return;
-        }
-
-        GameThread.RunSafe(() =>
-        {
-            using (new AllowedThread())
-            {
-                siegeEventInterface.StartLocalPlayerSiegePreparation();
-            }
-        });
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot snapshot)) return default;
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, requestId, snapshot.Revision);
     }
 
-    private void HandleJoinApproved(MessagePayload<NetworkJoinSiegeCampApproved> payload)
-    {
-        var obj = payload.What;
+    private static string ValidateBesiegeWireShape(NetworkRequestBesiegeSettlement request) =>
+        ValidateEntryIdentifiers(request.PartyId, request.SettlementId);
 
-        if (!obj.Approved)
+    private static string ValidateJoinWireShape(NetworkRequestJoinSiegeCamp request) =>
+        ValidateEntryIdentifiers(request.PartyId, request.SettlementId);
+
+    private static string ValidateEntryIdentifiers(string partyId, string settlementId) =>
+        string.IsNullOrWhiteSpace(partyId) || partyId.Length > 256 ||
+        string.IsNullOrWhiteSpace(settlementId) || settlementId.Length > 256
+            ? "invalid-siege-entry-identifiers" : null;
+
+    private static string BuildBesiegeCommandKey(NetworkRequestBesiegeSettlement request) =>
+        BuildEntryCommandKey(request.PartyId, request.SettlementId);
+
+    private static string BuildJoinCommandKey(NetworkRequestJoinSiegeCamp request) =>
+        BuildEntryCommandKey(request.PartyId, request.SettlementId);
+
+    private static string BuildEntryCommandKey(string partyId, string settlementId) =>
+        string.Concat(partyId.Length, ":", partyId, ":", settlementId.Length, ":", settlementId);
+
+    private AuthorityHeaderValidation ValidateHeader(AuthorityRequestHeader header)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot current))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "config-unavailable");
+        if (header.ProtocolVersion != current.ProtocolVersion)
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.InvalidRequest, "unsupported-protocol");
+        if (!string.Equals(header.SessionId, current.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-session");
+        if (header.ExpectedRevision != current.Revision)
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-state");
+        return AuthorityHeaderValidation.Valid;
+    }
+
+    private static NetworkBesiegeSettlementApproved CreateBesiegeTerminalResult(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        new(status == AuthorityResultStatus.Accepted,
+            new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason), null, null);
+
+    private static NetworkJoinSiegeCampApproved CreateJoinTerminalResult(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        new(null, status == AuthorityResultStatus.Accepted,
+            new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason), null);
+
+    private static bool IsExpectedBesiegeResult(NetworkRequestBesiegeSettlement request,
+        NetworkBesiegeSettlementApproved result) => result.Approved == (result.Header.Status == AuthorityResultStatus.Accepted) &&
+        string.Equals(request.PartyId, result.PartyId, StringComparison.Ordinal) &&
+        string.Equals(request.SettlementId, result.SettlementId, StringComparison.Ordinal);
+
+    private static bool IsExpectedJoinResult(NetworkRequestJoinSiegeCamp request,
+        NetworkJoinSiegeCampApproved result) => result.Approved == (result.Header.Status == AuthorityResultStatus.Accepted) &&
+        string.Equals(request.PartyId, result.PartyId, StringComparison.Ordinal) &&
+        string.Equals(request.SettlementId, result.SettlementId, StringComparison.Ordinal);
+
+    private AuthorityCommitProbeResult ProbeBesiegeCommit(NetworkBesiegeSettlementApproved result) =>
+        HasCanonicalCampMembership(result.PartyId, result.SettlementId, requireLeader: true)
+            ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+
+    private AuthorityCommitProbeResult ProbeJoinCommit(NetworkJoinSiegeCampApproved result) =>
+        HasCanonicalCampMembership(result.PartyId, result.SettlementId, requireLeader: false)
+            ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+
+    private bool HasCanonicalCampMembership(string partyId, string settlementId, bool requireLeader)
+    {
+        if (!objectManager.TryGetObject<MobileParty>(partyId, out var party) ||
+            !objectManager.TryGetObject<Settlement>(settlementId, out var settlement))
+            return false;
+
+        var camp = settlement.SiegeEvent?.BesiegerCamp;
+        return camp != null && ReferenceEquals(party.BesiegerCamp, camp) &&
+            (!requireLeader || ReferenceEquals(camp.LeaderParty, party));
+    }
+
+    private void PresentBesiegeOutcome(AuthorityClientOutcome<NetworkBesiegeSettlementApproved> outcome)
+    {
+        if (outcome.Applied)
         {
-            Logger.Information("Server rejected the join-siege request; staying at the current menu");
+            using (new AllowedThread()) siegeEventInterface.StartLocalPlayerSiegePreparation();
             return;
         }
+        UnwindSiegeEntry(outcome.ReasonCode);
+    }
 
-        GameThread.RunSafe(() =>
+    private void PresentJoinOutcome(AuthorityClientOutcome<NetworkJoinSiegeCampApproved> outcome)
+    {
+        if (outcome.Applied && objectManager.TryGetObject<Settlement>(outcome.Result.SettlementId, out var settlement))
         {
-            if (!objectManager.TryGetObjectWithLogging<Settlement>(obj.SettlementId, out var settlement)) return;
+            using (new AllowedThread()) siegeEventInterface.StartLocalPlayerJoinedSiege(settlement);
+            return;
+        }
+        UnwindSiegeEntry(outcome.ReasonCode ?? "canonical-siege-state-missing");
+    }
 
-            using (new AllowedThread())
-            {
-                siegeEventInterface.StartLocalPlayerJoinedSiege(settlement);
-            }
-        });
+    private static void UnwindSiegeEntry(string reason)
+    {
+        // Entry attempts do not make a local siege write. Clear the menu/loading residue exactly once
+        // when their authority lifecycle reaches any non-applied terminal outcome.
+        LoadingWindow.DisableGlobalLoadingWindow();
+        PlayerEncounter.LeaveEncounter = true;
+        GameMenu.ExitToLast();
+        Logger.Information("Siege entry did not apply: {Reason}", reason);
     }
 
     private void HandleBreakApproved(MessagePayload<NetworkBreakSiegeApproved> payload)
@@ -438,8 +549,8 @@ internal class ClientSiegeEntryHandler : IHandler
         messageBroker.Unsubscribe<BesiegeSettlementAttempted>(HandleBesiegeAttempt);
         messageBroker.Unsubscribe<JoinSiegeCampAttempted>(HandleJoinAttempt);
         messageBroker.Unsubscribe<BreakSiegeAttempted>(HandleBreakAttempt);
-        messageBroker.Unsubscribe<NetworkBesiegeSettlementApproved>(HandleBesiegeApproved);
-        messageBroker.Unsubscribe<NetworkJoinSiegeCampApproved>(HandleJoinApproved);
+        besiegeRoute?.Dispose();
+        joinRoute?.Dispose();
         messageBroker.Unsubscribe<NetworkBreakSiegeApproved>(HandleBreakApproved);
         messageBroker.Unsubscribe<NetworkPromptSiegeDefense>(HandleDefensePrompt);
         messageBroker.Unsubscribe<NetworkPromptSiegePreparation>(HandlePreparationPrompt);
@@ -451,6 +562,18 @@ internal class ClientSiegeEntryHandler : IHandler
         pendingInterruptedAssault = null;
         messageBroker.Unsubscribe<BreakInContinuationAttempted>(HandleBreakInContinuationAttempt);
         messageBroker.Unsubscribe<NetworkBreakInContinuationApproved>(HandleBreakInContinuationApproved);
+    }
+
+    private readonly struct SiegeEntryIntent
+    {
+        public SiegeEntryIntent(string partyId, string settlementId)
+        {
+            PartyId = partyId;
+            SettlementId = settlementId;
+        }
+
+        public string PartyId { get; }
+        public string SettlementId { get; }
     }
 
     private sealed class PendingBreakInContinuation

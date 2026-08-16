@@ -10,6 +10,8 @@ using System.Runtime.CompilerServices;
 
 namespace GameInterface.Services.MapEvents;
 
+internal enum ConversationLeaseApplyResult { Applied, Stale, Conflict }
+
 /// <summary>
 /// Server-side registry of AI parties currently held in a conversation/encounter with a player.
 /// </summary>
@@ -32,6 +34,8 @@ internal sealed class ConversationPartyTracker : IHandler
     private readonly Dictionary<string, ConversationLease> leasesById = new Dictionary<string, ConversationLease>();
     private readonly Dictionary<object, string> leaseByOwner = new Dictionary<object, string>(ReferenceObjectComparer.Instance);
     private readonly Dictionary<string, ConversationLease> replicaLeases = new Dictionary<string, ConversationLease>();
+    private readonly HashSet<string> conflictedReplicaLeaseIds = new HashSet<string>();
+    private string replicaSessionId;
     private long leaseRevision;
 
     // Player-vs-player conversations: both player parties' ids -> the partner's id. Unlike an AI engagement no party
@@ -76,6 +80,11 @@ internal sealed class ConversationPartyTracker : IHandler
             pvpPartnersByPartyId.Clear();
             pvpPeerByPartyId.Clear();
             pvpPartyIdByPeer.Clear();
+            leasesById.Clear();
+            leaseByOwner.Clear();
+            replicaLeases.Clear();
+            conflictedReplicaLeaseIds.Clear();
+            replicaSessionId = null;
             isEmpty = true;
             pvpIsEmpty = true;
         }
@@ -136,24 +145,28 @@ internal sealed class ConversationPartyTracker : IHandler
 
     internal readonly struct ConversationLease
     {
-        public ConversationLease(string leaseId, long revision, bool active, object owner, string ownerPartyId, string targetPartyId)
-        { LeaseId = leaseId; Revision = revision; Active = active; Owner = owner; OwnerPartyId = ownerPartyId; TargetPartyId = targetPartyId; }
+        public ConversationLease(string leaseId, long revision, bool active, object owner, string ownerPartyId, string targetPartyId,
+            string sessionId)
+        { LeaseId = leaseId; Revision = revision; Active = active; Owner = owner; OwnerPartyId = ownerPartyId; TargetPartyId = targetPartyId;
+          SessionId = sessionId; }
         public string LeaseId { get; }
         public long Revision { get; }
         public bool Active { get; }
         public object Owner { get; }
         public string OwnerPartyId { get; }
         public string TargetPartyId { get; }
+        public string SessionId { get; }
     }
 
-    internal ConversationLease BeginLease(object owner, string ownerPartyId, string targetPartyId, string leaseId = null)
+    internal ConversationLease BeginLease(object owner, string ownerPartyId, string targetPartyId, string sessionId, string leaseId = null)
     {
         lock (stateLock)
         {
             leaseId ??= Guid.NewGuid().ToString("N");
-            var lease = new ConversationLease(leaseId, ++leaseRevision, true, owner, ownerPartyId, targetPartyId);
+            var lease = new ConversationLease(leaseId, ++leaseRevision, true, owner, ownerPartyId, targetPartyId, sessionId);
             leasesById[leaseId] = lease;
             leaseByOwner[owner] = leaseId;
+            TrimLeaseHistory();
             return lease;
         }
     }
@@ -181,33 +194,80 @@ internal sealed class ConversationPartyTracker : IHandler
             if (!leasesById.TryGetValue(leaseId, out var lease) || !lease.Active) { ended = default; return false; }
             owned = ReferenceEquals(lease.Owner, owner);
             if (!owned) { ended = default; return false; }
-            ended = new ConversationLease(lease.LeaseId, ++leaseRevision, false, lease.Owner, lease.OwnerPartyId, lease.TargetPartyId);
+            ended = new ConversationLease(lease.LeaseId, ++leaseRevision, false, lease.Owner, lease.OwnerPartyId, lease.TargetPartyId, lease.SessionId);
             leasesById[leaseId] = ended;
             leaseByOwner.Remove(owner);
+            TrimLeaseHistory();
             return true;
         }
     }
 
-    internal void ApplyLeaseState(NetworkConversationLeaseState state)
+    internal ConversationLeaseApplyResult ApplyLeaseState(NetworkConversationLeaseState state)
     {
         lock (stateLock)
         {
-            if (replicaLeases.TryGetValue(state.LeaseId, out var current) && current.Revision > state.Revision) return;
+            if (string.IsNullOrEmpty(state.SessionId) || string.IsNullOrEmpty(state.LeaseId)) return ConversationLeaseApplyResult.Conflict;
+            if (replicaSessionId != state.SessionId)
+            {
+                replicaSessionId = state.SessionId;
+                replicaLeases.Clear();
+                conflictedReplicaLeaseIds.Clear();
+            }
+            if (replicaLeases.TryGetValue(state.LeaseId, out var current))
+            {
+                if (current.Revision > state.Revision) return ConversationLeaseApplyResult.Stale;
+                if (current.Revision == state.Revision)
+                {
+                    if (current.Active == state.IsActive && current.OwnerPartyId == state.OwnerPartyId && current.TargetPartyId == state.TargetPartyId)
+                        return ConversationLeaseApplyResult.Applied;
+                    conflictedReplicaLeaseIds.Add(state.LeaseId);
+                    return ConversationLeaseApplyResult.Conflict;
+                }
+            }
             replicaLeases[state.LeaseId] = new ConversationLease(state.LeaseId, state.Revision, state.IsActive, null,
-                state.OwnerPartyId, state.TargetPartyId);
+                state.OwnerPartyId, state.TargetPartyId, state.SessionId);
+            TrimReplicaHistory();
+            return ConversationLeaseApplyResult.Applied;
         }
     }
 
-    internal bool IsReplicaLease(string leaseId, long revision, bool active, string ownerPartyId, string targetPartyId)
+    internal bool IsReplicaLease(string sessionId, string leaseId, long revision, bool active, string ownerPartyId, string targetPartyId)
     {
         lock (stateLock)
-            return replicaLeases.TryGetValue(leaseId, out var lease) && lease.Revision == revision && lease.Active == active &&
+            return replicaSessionId == sessionId && !conflictedReplicaLeaseIds.Contains(leaseId) &&
+                replicaLeases.TryGetValue(leaseId, out var lease) && lease.SessionId == sessionId && lease.Revision == revision && lease.Active == active &&
                 (ownerPartyId == null || lease.OwnerPartyId == ownerPartyId) &&
                 (targetPartyId == null || lease.TargetPartyId == targetPartyId);
     }
 
-    internal bool HasActiveReplicaLease(string leaseId, long revision) =>
-        IsReplicaLease(leaseId, revision, true, null, null);
+    internal bool IsReplicaLeaseConflicted(string sessionId, string leaseId)
+    {
+        lock (stateLock) return replicaSessionId == sessionId && conflictedReplicaLeaseIds.Contains(leaseId);
+    }
+
+    internal bool HasActiveReplicaLease(string sessionId, string leaseId, long revision) =>
+        IsReplicaLease(sessionId, leaseId, revision, true, null, null);
+
+    private void TrimReplicaHistory()
+    {
+        while (replicaLeases.Count > 128)
+        {
+            var old = replicaLeases.Values.Where(x => !x.Active).OrderBy(x => x.Revision).FirstOrDefault();
+            if (old.LeaseId == null) break;
+            replicaLeases.Remove(old.LeaseId);
+            conflictedReplicaLeaseIds.Remove(old.LeaseId);
+        }
+    }
+
+    private void TrimLeaseHistory()
+    {
+        while (leasesById.Count > 256)
+        {
+            var old = leasesById.Values.Where(x => !x.Active).OrderBy(x => x.Revision).FirstOrDefault();
+            if (old.LeaseId == null) break;
+            leasesById.Remove(old.LeaseId);
+        }
+    }
 
     /// <summary>
     /// Begins or refreshes an engagement. A player cannot replace a live engagement with a different target, and a

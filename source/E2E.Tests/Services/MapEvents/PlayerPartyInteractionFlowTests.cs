@@ -1687,8 +1687,8 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionStarted>());
         AssertInteractionStateCleared(client1);
 
-        client1.Call(() => client1.Resolve<INetwork>().SendAll(
-            new NetworkConversationEnded("e2e-conversation-request")));
+        client1.Call(() => client1.Resolve<ConversationRequestHandler>().SubmitConversationEnd(
+            "e2e-conversation-request"));
     }
 
     [Fact]
@@ -2148,8 +2148,7 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
             Assert.Equal(currentRequestId, engagement.RequestId);
         });
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(
-            new NetworkConversationEnded(currentRequestId)));
+        client.Call(() => client.Resolve<ConversationRequestHandler>().SubmitConversationEnd(currentRequestId));
     }
 
     [Fact]

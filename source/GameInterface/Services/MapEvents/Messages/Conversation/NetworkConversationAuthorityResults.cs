@@ -10,6 +10,8 @@ internal enum ConversationResultKind
     PlayerInteraction = 1,
 }
 
+internal enum ConversationPlayerInteractionOutcome { None, Started, Existing, Busy }
+
 [ProtoContract(SkipConstructor = true)]
 internal readonly struct NetworkConversationBeginResult : IMessage
 {
@@ -22,13 +24,20 @@ internal readonly struct NetworkConversationBeginResult : IMessage
     [ProtoMember(7)] public readonly bool ForcePlayerOutFromSettlement;
     [ProtoMember(8)] public readonly ConversationRestartSource Source;
     [ProtoMember(9)] public readonly string RestartRequestId;
+    // The lease owner is canonical server state.  The restart pair above intentionally preserves
+    // the encounter orientation used by native presentation.
+    [ProtoMember(10)] public readonly string OwnerPartyId;
+    [ProtoMember(11)] public readonly string TargetPartyId;
+    [ProtoMember(12)] public readonly ConversationPlayerInteractionOutcome PlayerInteractionOutcome;
 
     public NetworkConversationBeginResult(AuthorityResultHeader header, ConversationResultKind kind, string leaseId,
         long leaseRevision, string defenderId, string attackerId, bool forcePlayerOutFromSettlement,
-        ConversationRestartSource source, string restartRequestId)
+        ConversationRestartSource source, string restartRequestId, string ownerPartyId, string targetPartyId,
+        ConversationPlayerInteractionOutcome playerInteractionOutcome = ConversationPlayerInteractionOutcome.None)
     { Header = header; Kind = kind; LeaseId = leaseId; LeaseRevision = leaseRevision; DefenderId = defenderId;
       AttackerId = attackerId; ForcePlayerOutFromSettlement = forcePlayerOutFromSettlement; Source = source;
-      RestartRequestId = restartRequestId; }
+      RestartRequestId = restartRequestId; OwnerPartyId = ownerPartyId; TargetPartyId = targetPartyId;
+      PlayerInteractionOutcome = playerInteractionOutcome; }
 }
 
 [ProtoContract(SkipConstructor = true)]
@@ -50,6 +59,9 @@ internal readonly struct NetworkConversationLeaseState : IMessage
     [ProtoMember(3)] public readonly bool IsActive;
     [ProtoMember(4)] public readonly string OwnerPartyId;
     [ProtoMember(5)] public readonly string TargetPartyId;
-    public NetworkConversationLeaseState(string leaseId, long revision, bool isActive, string ownerPartyId, string targetPartyId)
-    { LeaseId = leaseId; Revision = revision; IsActive = isActive; OwnerPartyId = ownerPartyId; TargetPartyId = targetPartyId; }
+    [ProtoMember(6)] public readonly string SessionId;
+    public NetworkConversationLeaseState(string leaseId, long revision, bool isActive, string ownerPartyId, string targetPartyId,
+        string sessionId)
+    { LeaseId = leaseId; Revision = revision; IsActive = isActive; OwnerPartyId = ownerPartyId; TargetPartyId = targetPartyId;
+      SessionId = sessionId; }
 }

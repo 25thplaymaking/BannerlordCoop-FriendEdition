@@ -1,5 +1,6 @@
 ﻿using GameInterface.Services.MapEvents;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.MapEvents.Messages.Conversation;
 using Moq;
 using Xunit;
 
@@ -13,7 +14,7 @@ public class ConversationPartyTrackerTests
         using var tracker = new ConversationPartyTracker(new Mock<IObjectManager>().Object);
         var owner = new object();
         var other = new object();
-        var active = tracker.BeginLease(owner, "owner-party", "target-party", "lease-1");
+        var active = tracker.BeginLease(owner, "owner-party", "target-party", "session-1", "lease-1");
 
         Assert.False(tracker.TryEndLease(other, active.LeaseId, out _, out var owned));
         Assert.False(owned);
@@ -21,6 +22,29 @@ public class ConversationPartyTrackerTests
         Assert.True(owned);
         Assert.False(ended.Active);
         Assert.True(ended.Revision > active.Revision);
+        Assert.True(tracker.TryGetLease(active.LeaseId, out var tombstone));
+        Assert.False(tombstone.Active);
+        Assert.Equal(ended.Revision, tombstone.Revision);
+    }
+
+    [Fact]
+    public void ReplicaLease_IsScopedToAcceptedSession_AndConflictingRevisionFailsClosed()
+    {
+        using var tracker = new ConversationPartyTracker(new Mock<IObjectManager>().Object);
+        var active = new NetworkConversationLeaseState("lease", 3, true, "owner", "target", "session-a");
+
+        Assert.Equal(ConversationLeaseApplyResult.Applied, tracker.ApplyLeaseState(active));
+        Assert.True(tracker.IsReplicaLease("session-a", "lease", 3, true, "owner", "target"));
+        Assert.False(tracker.IsReplicaLease("session-b", "lease", 3, true, "owner", "target"));
+
+        Assert.Equal(ConversationLeaseApplyResult.Conflict, tracker.ApplyLeaseState(
+            new NetworkConversationLeaseState("lease", 3, false, "owner", "target", "session-a")));
+        Assert.True(tracker.IsReplicaLeaseConflicted("session-a", "lease"));
+
+        Assert.Equal(ConversationLeaseApplyResult.Applied, tracker.ApplyLeaseState(
+            new NetworkConversationLeaseState("replacement", 1, true, "owner", "target", "session-b")));
+        Assert.False(tracker.IsReplicaLeaseConflicted("session-a", "lease"));
+        Assert.True(tracker.IsReplicaLease("session-b", "replacement", 1, true, "owner", "target"));
     }
 
     [Fact]

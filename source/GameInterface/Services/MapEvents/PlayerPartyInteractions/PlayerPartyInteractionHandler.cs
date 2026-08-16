@@ -42,6 +42,17 @@ using TaleWorlds.Library;
 
 namespace GameInterface.Services.MapEvents.PlayerPartyInteractions;
 
+internal enum PlayerPartyInteractionStartOutcome { Started, Existing, Busy }
+
+internal readonly struct PlayerPartyInteractionStartResult
+{
+    public static readonly PlayerPartyInteractionStartResult Busy = new(PlayerPartyInteractionStartOutcome.Busy, null);
+    public PlayerPartyInteractionStartResult(PlayerPartyInteractionStartOutcome outcome, string sessionId)
+    { Outcome = outcome; SessionId = sessionId; }
+    public PlayerPartyInteractionStartOutcome Outcome { get; }
+    public string SessionId { get; }
+}
+
 internal class PlayerPartyInteractionHandler : IHandler
 {
     private static readonly ILogger Logger = LogManager.GetLogger<PlayerPartyInteractionHandler>();
@@ -127,13 +138,13 @@ internal class PlayerPartyInteractionHandler : IHandler
         PlayerPartyInteractionDialogState.Clear();
     }
 
-    public bool TryStartSession(
+    internal PlayerPartyInteractionStartResult TryStartSessionDetailed(
         NetPeer initiatorPeer,
         NetworkRequestConversation request,
         PartyBase initiatorParty,
         PartyBase responderParty)
     {
-        if (ModInformation.IsClient) return false;
+        if (ModInformation.IsClient) return PlayerPartyInteractionStartResult.Busy;
 
         PlayerPartyInteractionSession session;
         lock (sessionGate)
@@ -142,8 +153,8 @@ internal class PlayerPartyInteractionHandler : IHandler
             if (existing != null)
             {
                 if (!IsSamePair(existing, request.AttackerId, request.DefenderId))
-                    network.Send(initiatorPeer, new NetworkPlayerPartyInteractionDenied(PlayerPartyInteractionDeniedReason.Busy));
-                return false;
+                    return PlayerPartyInteractionStartResult.Busy;
+                return new PlayerPartyInteractionStartResult(PlayerPartyInteractionStartOutcome.Existing, existing.SessionId);
             }
 
             session = new PlayerPartyInteractionSession(
@@ -155,7 +166,7 @@ internal class PlayerPartyInteractionHandler : IHandler
                 initiatorPeer,
                 AreHostile(initiatorParty, responderParty));
             AddInitialOptions(session, initiatorParty, responderParty);
-            if (!sessionsById.TryAdd(session.SessionId, session)) return false;
+            if (!sessionsById.TryAdd(session.SessionId, session)) return PlayerPartyInteractionStartResult.Busy;
             sessionsByPartyId[session.InitiatorPartyId] = session.SessionId;
             sessionsByPartyId[session.ResponderPartyId] = session.SessionId;
             conversationPartyTracker.BeginPvpConversation(session.InitiatorPartyId, session.ResponderPartyId);
@@ -176,7 +187,16 @@ internal class PlayerPartyInteractionHandler : IHandler
 
         SendInitialStates(session);
 
-        return true;
+        return new PlayerPartyInteractionStartResult(PlayerPartyInteractionStartOutcome.Started, session.SessionId);
+    }
+
+    public bool TryStartSession(NetPeer initiatorPeer, NetworkRequestConversation request, PartyBase initiatorParty,
+        PartyBase responderParty)
+    {
+        var result = TryStartSessionDetailed(initiatorPeer, request, initiatorParty, responderParty);
+        if (result.Outcome == PlayerPartyInteractionStartOutcome.Busy)
+            network.Send(initiatorPeer, new NetworkPlayerPartyInteractionDenied(PlayerPartyInteractionDeniedReason.Busy));
+        return result.Outcome == PlayerPartyInteractionStartOutcome.Started;
     }
 
     private void Handle_NetworkPlayerPartyInteractionStarted(MessagePayload<NetworkPlayerPartyInteractionStarted> payload)

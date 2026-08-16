@@ -264,14 +264,35 @@ internal class ConversationRequestHandler : IHandler
             return BeginReply(context.Header, request, AuthorityResultStatus.Rejected, "conversation-party-not-found");
         if (!ReferenceEquals(owner.Party, attacker) && !ReferenceEquals(owner.Party, defender))
             return BeginReply(context.Header, request, AuthorityResultStatus.Unauthorized, "conversation-actor-mismatch");
-        if (attacker.MapEvent != null || defender.MapEvent != null || IsInSiege(owner))
+        var authenticatedPartyId = ReferenceEquals(owner.Party, attacker) ? request.AttackerId : request.DefenderId;
+        if (IsInSiege(owner))
             return BeginReply(context.Header, request, AuthorityResultStatus.Rejected, "conversation-party-unavailable");
 
         if (!TryAcceptConversationRequest(context.Peer, request, attacker, defender, out var aiParty, out var aiPartyId,
                 out var playerPartyId, out var isPlayerVsPlayer, emitDenied: false))
             return BeginReply(context.Header, request, AuthorityResultStatus.Rejected, "conversation-denied");
-        if (isPlayerVsPlayer || aiParty == null)
-            return BeginReply(context.Header, request, AuthorityResultStatus.Rejected, "conversation-player-interaction-required");
+        if (isPlayerVsPlayer)
+        {
+            var interaction = playerPartyInteractionHandler.TryStartSessionDetailed(context.Peer, request, attacker, defender);
+            if (interaction.Outcome == PlayerPartyInteractionStartOutcome.Busy)
+                return BeginReply(context.Header, request, AuthorityResultStatus.Rejected, "conversation-player-interaction-busy");
+            return BeginReply(context.Header, request, AuthorityResultStatus.Accepted, null, default,
+                ConversationResultKind.PlayerInteraction, interaction.SessionId, authenticatedPartyId,
+                authenticatedPartyId == request.AttackerId ? request.DefenderId : request.AttackerId,
+                interaction.Outcome == PlayerPartyInteractionStartOutcome.Started
+                    ? ConversationPlayerInteractionOutcome.Started : ConversationPlayerInteractionOutcome.Existing);
+        }
+
+        // Joining a map event has no AI hold, but still gets a committed owner-scoped lease so the
+        // request/result protocol has an exact state proof and native UI can unwind through End.
+        if (aiParty == null)
+        {
+            var targetPartyId = playerPartyId == request.AttackerId ? request.DefenderId : request.AttackerId;
+            var joinLease = conversationPartyTracker.BeginLease(context.Peer, playerPartyId, targetPartyId,
+                context.Header.SessionId);
+            PublishLeaseState(context.Peer, joinLease);
+            return BeginReply(context.Header, request, AuthorityResultStatus.Accepted, null, joinLease);
+        }
 
         var leaseId = Guid.NewGuid().ToString("N");
         var leasedRequest = new NetworkRequestConversation(request.DefenderId, request.AttackerId,
@@ -280,35 +301,49 @@ internal class ConversationRequestHandler : IHandler
                 sendAllow: false, emitDenied: false))
             return BeginReply(context.Header, request, AuthorityResultStatus.Rejected, "conversation-lease-conflict");
 
-        var lease = conversationPartyTracker.BeginLease(context.Peer, playerPartyId, aiPartyId, leaseId);
-        network.SendAll(new NetworkConversationLeaseState(lease.LeaseId, lease.Revision, true, lease.OwnerPartyId, lease.TargetPartyId));
+        var lease = conversationPartyTracker.BeginLease(context.Peer, playerPartyId, aiPartyId, context.Header.SessionId, leaseId);
+        PublishLeaseState(context.Peer, lease);
         return BeginReply(context.Header, request, AuthorityResultStatus.Accepted, null, lease);
     }
 
     private AuthorityServerReply<NetworkConversationEndResult> ExecuteEnd(AuthorityServerContext context,
         NetworkConversationEnded request)
     {
-        if (!conversationPartyTracker.TryGetLease(request.RequestId, out var current) || !current.Active)
+        if (!conversationPartyTracker.TryGetLease(request.RequestId, out var current))
             return EndReply(context.Header, request.RequestId, AuthorityResultStatus.Rejected, "conversation-not-active", default);
         if (!ReferenceEquals(current.Owner, context.Peer))
             return EndReply(context.Header, request.RequestId, AuthorityResultStatus.Unauthorized, "conversation-lease-not-owned", default);
+        if (!current.Active)
+        {
+            PublishLeaseState(context.Peer, current);
+            return EndReply(context.Header, request.RequestId, AuthorityResultStatus.Accepted, null, current);
+        }
         if (!conversationPartyTracker.TryEndLease(context.Peer, request.RequestId, out var lease, out _))
             return EndReply(context.Header, request.RequestId, AuthorityResultStatus.Rejected, "conversation-not-active", default);
         ConversationPartyHold.EndEngagement(conversationPartyTracker, context.Peer, request.RequestId, requireRequestIdMatch: true);
-        network.SendAll(new NetworkConversationLeaseState(lease.LeaseId, lease.Revision, false, lease.OwnerPartyId, lease.TargetPartyId));
+        PublishLeaseState(context.Peer, lease);
         return EndReply(context.Header, request.RequestId, AuthorityResultStatus.Accepted, null, lease);
     }
 
+    // Lease state is private protocol state for the owner; observer clients have no consumer for it.
+    // Publishing this before the router's correlated result is the commit boundary for client presentation.
+    private void PublishLeaseState(NetPeer peer, ConversationPartyTracker.ConversationLease lease) =>
+        network.Send(peer, new NetworkConversationLeaseState(lease.LeaseId, lease.Revision, lease.Active,
+            lease.OwnerPartyId, lease.TargetPartyId, lease.SessionId));
+
     private static AuthorityServerReply<NetworkConversationBeginResult> BeginReply(AuthorityRequestHeader header,
         NetworkRequestConversation request, AuthorityResultStatus status, string reason,
-        ConversationPartyTracker.ConversationLease lease = default) =>
+        ConversationPartyTracker.ConversationLease lease = default, ConversationResultKind kind = ConversationResultKind.Lease,
+        string interactionSessionId = null, string ownerPartyId = null, string targetPartyId = null,
+        ConversationPlayerInteractionOutcome interactionOutcome = ConversationPlayerInteractionOutcome.None) =>
         new(new NetworkConversationBeginResult(new AuthorityResultHeader(header.SessionId, header.RequestId, status,
-            lease.Revision, reason), ConversationResultKind.Lease, lease.LeaseId, lease.Revision, request.DefenderId,
-            request.AttackerId, request.ForcePlayerOutFromSettlement, request.Source, request.RequestId), status == AuthorityResultStatus.Accepted);
+            lease.Revision, reason), kind, kind == ConversationResultKind.Lease ? lease.LeaseId : interactionSessionId, lease.Revision,
+            request.DefenderId, request.AttackerId, request.ForcePlayerOutFromSettlement, request.Source, request.RequestId,
+            ownerPartyId ?? lease.OwnerPartyId, targetPartyId ?? lease.TargetPartyId, interactionOutcome), status == AuthorityResultStatus.Accepted);
 
     private static NetworkConversationBeginResult CreateBeginTerminal(AuthorityRequestHeader header,
         AuthorityResultStatus status, string reason) => new(new AuthorityResultHeader(header.SessionId, header.RequestId,
-        status, 0, reason), ConversationResultKind.Lease, null, 0, null, null, false, default, null);
+        status, 0, reason), ConversationResultKind.Lease, null, 0, null, null, false, default, null, null, null);
 
     private static AuthorityServerReply<NetworkConversationEndResult> EndReply(AuthorityRequestHeader header,
         string leaseId, AuthorityResultStatus status, string reason, ConversationPartyTracker.ConversationLease lease) =>
@@ -323,15 +358,26 @@ internal class ConversationRequestHandler : IHandler
     {
         if (result.Header.Status != AuthorityResultStatus.Accepted) return AuthorityCommitProbeResult.Applied;
         var tracker = ConversationPartyTracker.Instance;
-        return tracker != null && tracker.IsReplicaLease(result.LeaseId, result.LeaseRevision, true,
-            result.AttackerId, result.DefenderId) ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+        if (result.Kind == ConversationResultKind.PlayerInteraction)
+            return PlayerPartyInteractionDialogState.SessionId == result.LeaseId &&
+                   (PlayerPartyInteractionDialogState.PartyId == result.OwnerPartyId ||
+                    PlayerPartyInteractionDialogState.PartyId == result.TargetPartyId) &&
+                   (PlayerPartyInteractionDialogState.OtherPartyId == result.OwnerPartyId ||
+                    PlayerPartyInteractionDialogState.OtherPartyId == result.TargetPartyId)
+                ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+        if (tracker == null) return AuthorityCommitProbeResult.Pending;
+        if (tracker.IsReplicaLeaseConflicted(result.Header.SessionId, result.LeaseId)) return AuthorityCommitProbeResult.Invalid;
+        return tracker.IsReplicaLease(result.Header.SessionId, result.LeaseId, result.LeaseRevision, true,
+            result.OwnerPartyId, result.TargetPartyId) ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
     }
 
     private static AuthorityCommitProbeResult ProbeEnd(NetworkConversationEndResult result)
     {
         if (result.Header.Status != AuthorityResultStatus.Accepted) return AuthorityCommitProbeResult.Applied;
         var tracker = ConversationPartyTracker.Instance;
-        return tracker != null && tracker.IsReplicaLease(result.LeaseId, result.LeaseRevision, false, null, null)
+        if (tracker == null) return AuthorityCommitProbeResult.Pending;
+        if (tracker.IsReplicaLeaseConflicted(result.Header.SessionId, result.LeaseId)) return AuthorityCommitProbeResult.Invalid;
+        return tracker.IsReplicaLease(result.Header.SessionId, result.LeaseId, result.LeaseRevision, false, null, null)
             ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
     }
 
@@ -351,6 +397,7 @@ internal class ConversationRequestHandler : IHandler
             ConversationPartyHold.ShowInteractionBlockedMessage();
             return;
         }
+        if (outcome.Result.Kind == ConversationResultKind.PlayerInteraction) return;
         RestartApprovedConversation(new NetworkAllowConversation(outcome.Result.DefenderId, outcome.Result.AttackerId,
             outcome.Result.ForcePlayerOutFromSettlement, outcome.Result.Source, outcome.Result.RestartRequestId,
             outcome.Result.LeaseRevision, outcome.Result.LeaseId));
@@ -360,24 +407,6 @@ internal class ConversationRequestHandler : IHandler
     {
         if (!outcome.Applied) return;
         ClearPendingConversationRequest(outcome.Result.LeaseId);
-    }
-
-    /// <summary>[Server] Validate the request; reply to allow, or stay silent to reject.</summary>
-    private void Handle_NetworkRequestConversation(MessagePayload<NetworkRequestConversation> payload)
-    {
-        if (ModInformation.IsClient) return;
-
-        var request = payload.What;
-
-        if (!(payload.Who is NetPeer requestingPeer))
-        {
-            Logger.Error("Received {Message} with no originating peer", nameof(NetworkRequestConversation));
-            return;
-        }
-
-        GameThread.RunSafe(
-            () => ProcessConversationRequest(requestingPeer, request, serverDetected: false),
-            context: nameof(Handle_NetworkRequestConversation));
     }
 
     private void ProcessConversationRequest(
@@ -393,13 +422,15 @@ internal class ConversationRequestHandler : IHandler
 
         if (aiParty == null)
         {
+            if (isPlayerVsPlayer)
+            {
+                if (playerPartyInteractionHandler.TryStartSession(requestingPeer, request, attacker, defender))
+                    NotifyPvpInteractionStarted(requestingPeer, request, attacker);
+                return;
+            }
+
             // No AI mobile party involved (a settlement side, or both sides are players); nothing to hold.
             SendAllowConversation(requestingPeer, request);
-
-            // PvP: tell the defending player's client to show a "hold on" popup while the attacker drives the
-            // interaction. request.DefenderId is the engaged (non-initiating) party.
-            if (isPlayerVsPlayer)
-                NotifyPvpInteractionStarted(requestingPeer, request, attacker);
 
             return;
         }
@@ -470,7 +501,10 @@ internal class ConversationRequestHandler : IHandler
         // PvP: two human players are allowed to open the encounter so they can fight each other. Neither side is AI,
         // so there is nothing to hold; the defending player is shown a "hold on" popup instead.
         if (attackerIsPlayer && defenderIsPlayer)
+        {
+            isPlayerVsPlayer = true;
             return TryAcceptPlayerVersusPlayer(requestingPeer, request, attacker, defender, emitDenied);
+        }
 
         // Reject: both parties are already in (separate) battles; do not (re)open an encounter conversation.
         if (attackerInMapEvent || defenderInMapEvent)
@@ -508,10 +542,7 @@ internal class ConversationRequestHandler : IHandler
     /// <summary>
     /// [Server] Resolves a request where both sides are human players.
     /// </summary>
-    /// <remarks>
-    /// Returning false does NOT always mean refused: the custom interaction session is started here
-    /// and driven from there, so this returns false to stop the caller also approving it.
-    /// </remarks>
+    /// <remarks>Admission only.  The caller owns the one typed start attempt so routes can report Started/Existing/Busy.</remarks>
     private bool TryAcceptPlayerVersusPlayer(
         NetPeer requestingPeer, NetworkRequestConversation request, PartyBase attacker, PartyBase defender,
         bool emitDenied = true)
@@ -545,11 +576,9 @@ internal class ConversationRequestHandler : IHandler
             return false;
         }
 
-        Logger.Debug(
-            "Starting custom player-party interaction. AttackerId={AttackerId}, DefenderId={DefenderId}",
+        Logger.Debug("Admitting custom player-party interaction. AttackerId={AttackerId}, DefenderId={DefenderId}",
             request.AttackerId, request.DefenderId);
-        playerPartyInteractionHandler.TryStartSession(requestingPeer, request, attacker, defender);
-        return false;
+        return true;
     }
 
     private void SendDenied(NetPeer peer, NetworkRequestConversation request, ConversationDeniedReason reason, bool emit)
@@ -648,11 +677,11 @@ internal class ConversationRequestHandler : IHandler
         string leaseId = null;
         if (serverDetected)
         {
-            var lease = conversationPartyTracker.BeginLease(requestingPeer, playerPartyId, aiPartyId, request.RequestId);
+            if (!configAuthority.TryGetCurrent(out var snapshot)) return false;
+            var lease = conversationPartyTracker.BeginLease(requestingPeer, playerPartyId, aiPartyId, snapshot.SessionId, request.RequestId);
             leaseRevision = lease.Revision;
             leaseId = lease.LeaseId;
-            network.SendAll(new NetworkConversationLeaseState(lease.LeaseId, lease.Revision, true,
-                lease.OwnerPartyId, lease.TargetPartyId));
+            PublishLeaseState(requestingPeer, lease);
         }
         if (sendAllow) SendAllowConversation(requestingPeer, request, leaseRevision, leaseId);
         return true;
@@ -806,9 +835,9 @@ internal class ConversationRequestHandler : IHandler
     private void Handle_NetworkAllowConversation(MessagePayload<NetworkAllowConversation> payload)
     {
         if (ModInformation.IsServer || !configAuthority.IsTrustedServer(payload.Who)) return;
-        if (payload.What.LeaseRevision > 0 &&
-            !conversationPartyTracker.HasActiveReplicaLease(payload.What.LeaseId ?? payload.What.RequestId,
-                payload.What.LeaseRevision)) return;
+        if (payload.What.LeaseRevision > 0 && (!configAuthority.TryGetCurrent(out var snapshot) ||
+            !conversationPartyTracker.HasActiveReplicaLease(snapshot.SessionId, payload.What.LeaseId ?? payload.What.RequestId,
+                payload.What.LeaseRevision))) return;
         RestartApprovedConversation(payload.What);
     }
 
@@ -926,21 +955,6 @@ internal class ConversationRequestHandler : IHandler
         if (!string.IsNullOrEmpty(requestId)) endRoute.Submit(requestId);
     }
 
-    /// <summary>[Server] A client's encounter finished: release the AI party held for that player, if any.</summary>
-    private void Handle_NetworkConversationEnded(MessagePayload<NetworkConversationEnded> payload)
-    {
-        if (ModInformation.IsClient) return;
-
-        if (!(payload.Who is NetPeer peer))
-        {
-            Logger.Error("Received {Message} with no originating peer", nameof(NetworkConversationEnded));
-            return;
-        }
-
-        ReleaseEngagementOnMainThread(peer, payload.What.RequestId, requireRequestIdMatch: true);
-        EndPvpInteraction(peer, payload.What.RequestId, requireRequestIdMatch: true);
-    }
-
     /// <summary>[Client] The server denied the request; tell the player why.</summary>
     private void Handle_NetworkConversationDenied(MessagePayload<NetworkConversationDenied> payload)
     {
@@ -999,8 +1013,8 @@ internal class ConversationRequestHandler : IHandler
 
         if (conversationPartyTracker.TryGetActiveLeaseByOwner(payload.What.PlayerId, out var lease) &&
             conversationPartyTracker.TryEndLease(payload.What.PlayerId, lease.LeaseId, out var ended, out _))
-            network.SendAll(new NetworkConversationLeaseState(ended.LeaseId, ended.Revision, false,
-                ended.OwnerPartyId, ended.TargetPartyId));
+            ConversationPartyHold.EndEngagement(conversationPartyTracker, payload.What.PlayerId, ended.LeaseId,
+                requireRequestIdMatch: true);
 
         ReleaseEngagementOnMainThread(payload.What.PlayerId);
         EndPvpInteraction(payload.What.PlayerId);

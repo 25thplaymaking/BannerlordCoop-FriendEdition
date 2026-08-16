@@ -272,22 +272,6 @@ public class HideoutMapEventTests : MapEventTestBase
             Assert.Equal(initialBanditCount, GetBanditCount());
         });
 
-        Server.Call(() => Server.Resolve<IMessageBroker>().Publish(
-            client.NetPeer,
-            new NetworkHideoutCampaignConsequenceRequested(
-                settlementId!,
-                HideoutCampaignConsequence.SetAttackCooldown)));
-
-        Server.Call(() =>
-        {
-            Assert.True(Server.ObjectManager.TryGetObject<Settlement>(settlementId!, out var settlement));
-            Assert.Equal(expectedNextAttackTime, settlement.Hideout.NextPossibleAttackTime);
-            Assert.Equal(
-                initialBanditCount,
-                settlement.Parties.Where(party => party.IsBandit).Sum(party => party.MemberRoster.TotalHealthyCount));
-            settlement.Hideout._nextPossibleAttackTime = new CampaignTime(-1);
-        });
-
         client.Call(() =>
         {
             Assert.True(client.ObjectManager.TryGetObject<Settlement>(settlementId!, out var settlement));
@@ -329,7 +313,7 @@ public class HideoutMapEventTests : MapEventTestBase
 
         var preparationMessages = Server.NetworkSentMessages.Messages;
         var preparationReplyIndex = preparationMessages.FindIndex(
-            message => message is NetworkHideoutCampaignConsequenceResolved);
+            message => message is NetworkHideoutCampaignConsequenceResult);
         var finalRosterDeltaIndex = preparationMessages.FindLastIndex(
             message => message is NetworkTroopRosterElementBatch);
         Assert.True(finalRosterDeltaIndex >= 0);
@@ -398,13 +382,17 @@ public class HideoutMapEventTests : MapEventTestBase
             Assert.Same(settlement, playerParty.CurrentSettlement);
             Assert.True(Server.ObjectManager.TryGetObject<Hero>(playerHeroId, out var playerHero));
             Assert.True(Server.ObjectManager.TryGetObject<Hero>(notableId!, out var notable));
-            expectedNotableRelation = playerHero.GetRelation(notable) + 2;
+            expectedNotableRelation = playerHero.GetRelation(notable);
 
-            Server.Resolve<IMessageBroker>().Publish(
-                client.NetPeer,
-                new NetworkHideoutCampaignConsequenceRequested(
-                    settlementId!,
-                    HideoutCampaignConsequence.GrantClearRewards));
+            // The server mutation is initiated by the owning peer through the typed authority route below.
+        });
+
+        client.Call(() =>
+        {
+            Assert.True(client.ObjectManager.TryGetObject<Settlement>(settlementId!, out var settlement));
+            Assert.False(client.Resolve<HideoutCampaignConsequencesHandler>().RequestConsequenceBlocking(
+                settlement,
+                HideoutCampaignConsequence.GrantClearRewards));
         });
 
         foreach (var connectedClient in Clients)

@@ -3,7 +3,10 @@ using Common.Logging;
 using Common.Messaging;
 using Common.Network;
 using Common.Network.Coalescing;
+using Common.Network.Messages;
 using GameInterface.Services.Barters;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Hideouts.Messages;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
@@ -13,12 +16,12 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.CampaignBehaviors;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Settlements;
+using TaleWorlds.Library;
 using static GameInterface.Services.ObjectManager.ObjectManager;
 
 namespace GameInterface.Services.Hideouts.Handlers;
@@ -34,7 +37,10 @@ internal sealed class HideoutCampaignConsequencesHandler : IHandler
     private readonly IPlayerManager playerManager;
     private readonly INetworkConfig configuration;
     private readonly ISendCoalescer sendCoalescer;
-    private readonly ConcurrentDictionary<string, PendingPreparation> pendingPreparations = new();
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRouteHandle<HideoutConsequenceIntent, NetworkHideoutCampaignConsequenceResult> consequenceRoute;
+    private readonly ConcurrentDictionary<NetPeer, AssaultSession> assaultSessions = new();
+    private AssaultSession replicaSession;
 
     public HideoutCampaignConsequencesHandler(
         IMessageBroker messageBroker,
@@ -42,7 +48,9 @@ internal sealed class HideoutCampaignConsequencesHandler : IHandler
         IObjectManager objectManager,
         IPlayerManager playerManager,
         INetworkConfig configuration,
-        ISendCoalescer sendCoalescer = null)
+        ISendCoalescer sendCoalescer,
+        IModConfigAuthority configAuthority,
+        IAuthorityRequestRouter authorityRequestRouter)
     {
         this.messageBroker = messageBroker;
         this.network = network;
@@ -50,17 +58,48 @@ internal sealed class HideoutCampaignConsequencesHandler : IHandler
         this.playerManager = playerManager;
         this.configuration = configuration;
         this.sendCoalescer = sendCoalescer;
+        this.configAuthority = configAuthority;
+
+        consequenceRoute = authorityRequestRouter.Register(
+            AuthorityRoute<HideoutConsequenceIntent, NetworkHideoutCampaignConsequenceRequested,
+                NetworkHideoutCampaignConsequenceResult>.Define(
+                routeId: "hideout.campaign-consequence",
+                kind: AuthorityRouteKind.Command,
+                createHeader: CreateHeader,
+                buildRequest: (intent, header) => new NetworkHideoutCampaignConsequenceRequested(
+                    header, intent.SettlementId, intent.Consequence, intent.AssaultSessionId, intent.ExpectedHideoutRevision),
+                readRequestHeader: request => request.Header,
+                readResultHeader: result => result.Header,
+                validateWireShape: ValidateWireShape,
+                buildCommandKey: request => string.Concat(
+                    request.SettlementId, ":", (int)request.Consequence, ":",
+                    request.AssaultSessionId, ":", request.ExpectedHideoutRevision),
+                validateHeader: ValidateHeader,
+                execute: ExecuteConsequence,
+                createTerminalResult: CreateTerminalResult,
+                probeClientCommit: ProbeClientCommit,
+                requestResync: _ => { },
+                presentTerminalOutcome: PresentTerminalOutcome,
+                isTrustedResultSource: configAuthority.IsTrustedServer,
+                timeoutPolicy: new AuthorityTimeoutPolicy(
+                    configuration.ObjectCreationTimeout,
+                    configuration.ObjectCreationTimeout,
+                    retryCount: 1),
+                failClosedOnApplyFailure: true));
 
         messageBroker.Subscribe<HideoutCampaignConsequenceRequested>(Handle_HideoutCampaignConsequenceRequested);
-        messageBroker.Subscribe<NetworkHideoutCampaignConsequenceRequested>(Handle_NetworkHideoutCampaignConsequenceRequested);
-        messageBroker.Subscribe<NetworkHideoutCampaignConsequenceResolved>(Handle_NetworkHideoutCampaignConsequenceResolved);
+        messageBroker.Subscribe<NetworkHideoutAssaultSessionState>(Handle_NetworkHideoutAssaultSessionState);
+        messageBroker.Subscribe<PlayerDisconnected>(Handle_PlayerDisconnected);
     }
 
     public void Dispose()
     {
         messageBroker.Unsubscribe<HideoutCampaignConsequenceRequested>(Handle_HideoutCampaignConsequenceRequested);
-        messageBroker.Unsubscribe<NetworkHideoutCampaignConsequenceRequested>(Handle_NetworkHideoutCampaignConsequenceRequested);
-        messageBroker.Unsubscribe<NetworkHideoutCampaignConsequenceResolved>(Handle_NetworkHideoutCampaignConsequenceResolved);
+        messageBroker.Unsubscribe<NetworkHideoutAssaultSessionState>(Handle_NetworkHideoutAssaultSessionState);
+        messageBroker.Unsubscribe<PlayerDisconnected>(Handle_PlayerDisconnected);
+        consequenceRoute.Dispose();
+        assaultSessions.Clear();
+        replicaSession = null;
     }
 
     /// <summary>
@@ -73,94 +112,37 @@ internal sealed class HideoutCampaignConsequencesHandler : IHandler
             !objectManager.TryGetIdWithLogging(settlement, out var settlementId))
             return false;
 
-        var requestId = Guid.NewGuid().ToString();
-        var pending = new PendingPreparation();
-        pendingPreparations[requestId] = pending;
-
-        try
-        {
-            var deadline = DateTime.UtcNow + configuration.ObjectCreationTimeout;
-            var consequence = isDirectAssault
-                ? HideoutCampaignConsequence.PrepareDirectAssaultMission
-                : HideoutCampaignConsequence.PrepareMission;
-
-            network.SendAll(new NetworkHideoutCampaignConsequenceRequested(
+        if (!SubmitBlocking(new HideoutConsequenceIntent(
                 settlementId,
-                consequence,
-                requestId));
+                isDirectAssault ? HideoutCampaignConsequence.PrepareDirectAssaultMission : HideoutCampaignConsequence.PrepareMission,
+                null,
+                0), out var prepare))
+            return false;
 
-            if (!GameThread.WaitWhilePumping(() => pending.Completed.IsSet, deadline))
-            {
-                Logger.Error(
-                    "Timed out waiting for authoritative hideout mission preparation. SettlementId={SettlementId}, RequestId={RequestId}",
-                    settlementId,
-                    requestId);
-                return false;
-            }
+        // The mission may start only after the canonical defender roster has reached this client. The
+        // shared route's commit probe enforces this, rather than treating delivery of the reply as success.
+        return SubmitBlocking(new HideoutConsequenceIntent(
+            settlementId,
+            HideoutCampaignConsequence.SetAttackCooldown,
+            prepare.AssaultSessionId,
+            prepare.HideoutRevision), out _);
+    }
 
-            if (!pending.Accepted)
-            {
-                Logger.Warning(
-                    "Server rejected hideout mission preparation. SettlementId={SettlementId}, RequestId={RequestId}",
-                    settlementId,
-                    requestId);
-                return false;
-            }
+    internal bool RequestConsequenceBlocking(Settlement settlement, HideoutCampaignConsequence consequence)
+    {
+        if (ModInformation.IsServer || settlement?.IsHideout != true ||
+            !objectManager.TryGetIdWithLogging(settlement, out var settlementId))
+            return false;
 
-            if (!GameThread.WaitWhilePumping(
-                    () => GetHealthyDefenderCount(settlement) == pending.ExpectedHealthyDefenderCount,
-                    deadline))
-            {
-                Logger.Error(
-                    "Authoritative hideout preparation did not reach roster parity before timeout. SettlementId={SettlementId}, ExpectedHealthyDefenders={ExpectedHealthyDefenders}, ActualHealthyDefenders={ActualHealthyDefenders}, RequestId={RequestId}",
-                    settlementId,
-                    pending.ExpectedHealthyDefenderCount,
-                    GetHealthyDefenderCount(settlement),
-                    requestId);
-                return false;
-            }
+        if (consequence == HideoutCampaignConsequence.GrantClearRewards)
+            return false; // Disabled until an authoritative mission/map-event clear receipt exists.
 
-            // Commit the cooldown only after this client has the authoritative defender roster.
-            var commitRequestId = Guid.NewGuid().ToString();
-            var commit = new PendingPreparation();
-            pendingPreparations[commitRequestId] = commit;
-            try
-            {
-                network.SendAll(new NetworkHideoutCampaignConsequenceRequested(
-                    settlementId,
-                    HideoutCampaignConsequence.SetAttackCooldown,
-                    commitRequestId));
-
-                var commitDeadline = DateTime.UtcNow + configuration.ObjectCreationTimeout;
-                if (!GameThread.WaitWhilePumping(() => commit.Completed.IsSet, commitDeadline))
-                {
-                    Logger.Warning(
-                        "Timed out waiting for authoritative hideout cooldown confirmation after roster parity; continuing mission startup. SettlementId={SettlementId}, RequestId={RequestId}",
-                        settlementId,
-                        commitRequestId);
-                    return true;
-                }
-
-                if (!commit.Accepted)
-                {
-                    Logger.Warning(
-                        "Server rejected hideout cooldown commit. SettlementId={SettlementId}, RequestId={RequestId}",
-                        settlementId,
-                        commitRequestId);
-                    return false;
-                }
-
-                return true;
-            }
-            finally
-            {
-                pendingPreparations.TryRemove(commitRequestId, out _);
-            }
-        }
-        finally
-        {
-            pendingPreparations.TryRemove(requestId, out _);
-        }
+        string assaultSessionId = consequence == HideoutCampaignConsequence.SetAttackCooldown &&
+                                  replicaSession?.SettlementId == settlementId
+            ? replicaSession.Id
+            : null;
+        long revision = assaultSessionId == null ? 0 : replicaSession.Revision;
+        return SubmitBlocking(new HideoutConsequenceIntent(settlementId, consequence, assaultSessionId, revision), out _);
     }
 
     private void Handle_HideoutCampaignConsequenceRequested(
@@ -170,61 +152,78 @@ internal sealed class HideoutCampaignConsequencesHandler : IHandler
             !objectManager.TryGetIdWithLogging(payload.What.Settlement, out var settlementId))
             return;
 
-        network.SendAll(new NetworkHideoutCampaignConsequenceRequested(
-            settlementId,
-            payload.What.Consequence));
+        if (payload.What.Consequence == HideoutCampaignConsequence.GrantClearRewards)
+        {
+            Logger.Warning("Ignored hideout clear-reward request because no server mission-clear receipt is wired");
+            return;
+        }
+
+        string assaultSessionId = payload.What.Consequence == HideoutCampaignConsequence.SetAttackCooldown &&
+                                  replicaSession?.SettlementId == settlementId
+            ? replicaSession.Id
+            : null;
+        long revision = assaultSessionId == null ? 0 : replicaSession.Revision;
+        consequenceRoute.Submit(new HideoutConsequenceIntent(
+            settlementId, payload.What.Consequence, assaultSessionId, revision));
     }
 
-    private void Handle_NetworkHideoutCampaignConsequenceRequested(
-        MessagePayload<NetworkHideoutCampaignConsequenceRequested> payload)
+    private AuthorityRequestHeader CreateHeader(long requestId)
     {
-        if (ModInformation.IsClient)
-            return;
-
-        if (payload.Who is not NetPeer peer)
-        {
-            Logger.Warning("Rejected hideout consequence request with no originating peer");
-            return;
-        }
-
-        if (!playerManager.TryGetPlayer(peer, out var player))
-        {
-            Logger.Warning("Rejected hideout consequence request from an unregistered peer");
-            ReplyToPreparation(peer, payload.What, accepted: false, expectedHealthyDefenderCount: 0);
-            return;
-        }
-
-        GameThread.RunSafe(
-            () =>
-            {
-                var result = ApplyConsequence(player.HeroId, player.MobilePartyId, payload.What);
-                ReplyToPreparation(peer, payload.What, result.Accepted, result.ExpectedHealthyDefenderCount);
-            },
-            blocking: !string.IsNullOrEmpty(payload.What.RequestId),
-            context: nameof(Handle_NetworkHideoutCampaignConsequenceRequested));
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot snapshot)) return default;
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, requestId, snapshot.Revision);
     }
 
-    private ConsequenceResult ApplyConsequence(
-        string heroId,
-        string mobilePartyId,
+    private AuthorityHeaderValidation ValidateHeader(AuthorityRequestHeader header)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot snapshot))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "hideout-config-unavailable");
+        if (header.ProtocolVersion != snapshot.ProtocolVersion ||
+            !string.Equals(header.SessionId, snapshot.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-config-session");
+        return header.ExpectedRevision == snapshot.Revision
+            ? AuthorityHeaderValidation.Valid
+            : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-config-revision");
+    }
+
+    private static string ValidateWireShape(NetworkHideoutCampaignConsequenceRequested request)
+    {
+        if (string.IsNullOrWhiteSpace(request.SettlementId) || request.SettlementId.Length > 256)
+            return "hideout-settlement-invalid";
+        if (!Enum.IsDefined(typeof(HideoutCampaignConsequence), request.Consequence))
+            return "hideout-consequence-invalid";
+        if (request.Consequence is HideoutCampaignConsequence.PrepareMission or
+            HideoutCampaignConsequence.PrepareDirectAssaultMission)
+            return string.IsNullOrEmpty(request.AssaultSessionId) && request.ExpectedHideoutRevision == 0
+                ? null
+                : "hideout-prepare-session-invalid";
+        if (request.Consequence == HideoutCampaignConsequence.SetAttackCooldown)
+            return !string.IsNullOrWhiteSpace(request.AssaultSessionId) && request.AssaultSessionId.Length <= 96 &&
+                   request.ExpectedHideoutRevision > 0
+                ? null
+                : "hideout-cooldown-session-invalid";
+        return "hideout-clear-receipt-unavailable";
+    }
+
+    private AuthorityServerReply<NetworkHideoutCampaignConsequenceResult> ExecuteConsequence(
+        AuthorityServerContext context,
         NetworkHideoutCampaignConsequenceRequested request)
     {
-        if (!objectManager.TryGetObject<Hero>(heroId, out var playerHero) ||
-            !objectManager.TryGetObject<MobileParty>(mobilePartyId, out var playerParty) ||
+        if (!objectManager.TryGetObject<Hero>(context.Player.HeroId, out var playerHero) ||
+            !objectManager.TryGetObject<MobileParty>(context.Player.MobilePartyId, out var playerParty) ||
             !objectManager.TryGetObject<Settlement>(request.SettlementId, out var settlement) ||
             settlement?.IsHideout != true ||
             playerParty.IsActive != true ||
             playerParty.CurrentSettlement != settlement)
         {
             Logger.Warning("Rejected invalid hideout consequence request for {SettlementId}", request.SettlementId);
-            return ConsequenceResult.Rejected;
+            return Reply(context.Header, request, AuthorityResultStatus.Rejected, "hideout-context-invalid", default);
         }
 
         var behavior = Campaign.Current?.GetCampaignBehavior<HideoutCampaignBehavior>();
         if (behavior == null)
         {
             Logger.Warning("Cannot apply hideout consequence because HideoutCampaignBehavior is unavailable");
-            return ConsequenceResult.Rejected;
+            return Reply(context.Header, request, AuthorityResultStatus.Unavailable, "hideout-behavior-unavailable", default);
         }
 
         using var playerContext = new BarterPlayerContext(playerHero, playerParty);
@@ -233,73 +232,225 @@ internal sealed class HideoutCampaignConsequencesHandler : IHandler
             case HideoutCampaignConsequence.PrepareMission:
             case HideoutCampaignConsequence.PrepareDirectAssaultMission:
                 if (!settlement.Hideout.IsInfested || !settlement.Hideout.NextPossibleAttackTime.IsPast)
-                    return ConsequenceResult.Rejected;
+                    return Reply(context.Header, request, AuthorityResultStatus.Rejected, "hideout-attack-unavailable", default);
 
-                behavior.ArrangeHideoutTroopCountsForMission();
+                if (assaultSessions.ContainsKey(context.Peer))
+                    return Reply(context.Header, request, AuthorityResultStatus.Rejected, "hideout-assault-active", default);
+                if (sendCoalescer == null)
+                    return Reply(context.Header, request, AuthorityResultStatus.Unavailable, "hideout-replication-unavailable", default);
 
-                if (request.Consequence == HideoutCampaignConsequence.PrepareDirectAssaultMission &&
-                    !EnsureDirectAssaultMinimum(settlement))
+                bool preparationMutated = false;
+                try
                 {
-                    Logger.Warning(
-                        "Cannot prepare direct hideout assault because no defender can receive the minimum troop adjustment. SettlementId={SettlementId}",
-                        request.SettlementId);
-                    return ConsequenceResult.Rejected;
-                }
+                    behavior.ArrangeHideoutTroopCountsForMission();
+                    preparationMutated = true;
 
-                FlushDefenderRosters(settlement);
-                return ConsequenceResult.AcceptedWith(GetHealthyDefenderCount(settlement));
+                    if (request.Consequence == HideoutCampaignConsequence.PrepareDirectAssaultMission &&
+                        !EnsureDirectAssaultMinimum(settlement))
+                    {
+                        Logger.Warning(
+                            "Cannot prepare direct hideout assault because no defender can receive the minimum troop adjustment. SettlementId={SettlementId}",
+                            request.SettlementId);
+                        context.Peer.Disconnect();
+                        return Reply(context.Header, request, AuthorityResultStatus.ExecutionFailed,
+                            "hideout-preparation-isolated", default, suppressReply: true);
+                    }
+
+                    var session = AssaultSession.Create(context.Peer, request.SettlementId,
+                        GetHealthyDefenderCount(settlement), settlement.Hideout.IsInfested);
+                    if (!assaultSessions.TryAdd(context.Peer, session))
+                        throw new InvalidOperationException("Hideout assault session was concurrently created");
+
+                    FlushDefenderRosters(settlement);
+                    PublishSession(context.Peer, context.Header.SessionId, session);
+                    return Reply(context.Header, request, AuthorityResultStatus.Accepted, null,
+                        new ConsequenceResult(session.ExpectedHealthyDefenderCount, expectedCooldownActive: false), session);
+                }
+                catch
+                {
+                    assaultSessions.TryRemove(context.Peer, out _);
+                    if (preparationMutated) context.Peer.Disconnect();
+                    throw;
+                }
 
             case HideoutCampaignConsequence.SetAttackCooldown:
                 if (!settlement.Hideout.IsInfested || !settlement.Hideout.NextPossibleAttackTime.IsPast)
-                    return ConsequenceResult.Rejected;
+                    return Reply(context.Header, request, AuthorityResultStatus.Rejected, "hideout-cooldown-unavailable", default);
 
-                settlement.Hideout.SetNextPossibleAttackTime(
-                    Campaign.Current.Models.HideoutModel.HideoutHiddenDuration);
-                return ConsequenceResult.AcceptedWithoutParity;
+                if (!TryGetOwnedSession(context.Peer, request, HideoutAssaultStage.Prepared, out var prepared))
+                    return Reply(context.Header, request, AuthorityResultStatus.Rejected, "hideout-cooldown-stage-invalid", default);
+
+                try
+                {
+                    settlement.Hideout.SetNextPossibleAttackTime(
+                        Campaign.Current.Models.HideoutModel.HideoutHiddenDuration);
+                    prepared.CommitCooldown(settlement.Hideout.IsInfested);
+                    PublishSession(context.Peer, context.Header.SessionId, prepared);
+                    var reply = Reply(context.Header, request, AuthorityResultStatus.Accepted, null,
+                        new ConsequenceResult(prepared.ExpectedHealthyDefenderCount, expectedCooldownActive: true), prepared);
+                    // Completion is a one-shot transition. The router's replay ledger retains this exact reply;
+                    // releasing the live record prevents a completed assault from blocking a later assault.
+                    assaultSessions.TryRemove(context.Peer, out _);
+                    return reply;
+                }
+                catch
+                {
+                    context.Peer.Disconnect();
+                    throw;
+                }
 
             case HideoutCampaignConsequence.GrantClearRewards:
-                if (settlement.Hideout.IsInfested)
-                    return ConsequenceResult.Rejected;
-
-                behavior.SetCleanHideoutRelations(settlement);
-                return ConsequenceResult.AcceptedWithoutParity;
+                return Reply(context.Header, request, AuthorityResultStatus.Unavailable,
+                    "hideout-clear-receipt-unavailable", default);
 
             default:
                 Logger.Warning("Rejected unknown hideout consequence {Consequence}", request.Consequence);
-                return ConsequenceResult.Rejected;
+                return Reply(context.Header, request, AuthorityResultStatus.InvalidRequest, "hideout-consequence-invalid", default);
         }
     }
 
-    private void ReplyToPreparation(
+    private AuthorityServerReply<NetworkHideoutCampaignConsequenceResult> Reply(
+        AuthorityRequestHeader header,
+        NetworkHideoutCampaignConsequenceRequested request,
+        AuthorityResultStatus status,
+        string reasonCode,
+        ConsequenceResult expected,
+        AssaultSession assaultSession = null,
+        bool suppressReply = false)
+    {
+        return new AuthorityServerReply<NetworkHideoutCampaignConsequenceResult>(
+            new NetworkHideoutCampaignConsequenceResult(
+                new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reasonCode),
+                request.SettlementId,
+                request.Consequence,
+                expected.ExpectedHealthyDefenderCount,
+                expected.ExpectedCooldownActive,
+                assaultSession?.Id,
+                assaultSession?.Stage ?? HideoutAssaultStage.None,
+                assaultSession?.Revision ?? 0,
+                assaultSession?.Infested ?? false),
+            statePublished: status == AuthorityResultStatus.Accepted,
+            suppressReply: suppressReply);
+    }
+
+    private static NetworkHideoutCampaignConsequenceResult CreateTerminalResult(
+        AuthorityRequestHeader header,
+        AuthorityResultStatus status,
+        string reasonCode)
+    {
+        return new NetworkHideoutCampaignConsequenceResult(
+            new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reasonCode),
+            null,
+            default,
+            0,
+            false,
+            null,
+            HideoutAssaultStage.None,
+            0,
+            false);
+    }
+
+    private AuthorityCommitProbeResult ProbeClientCommit(NetworkHideoutCampaignConsequenceResult result)
+    {
+        if (result.Header.Status != AuthorityResultStatus.Accepted ||
+            !objectManager.TryGetObject<Settlement>(result.SettlementId, out var settlement) ||
+            settlement?.IsHideout != true)
+            return AuthorityCommitProbeResult.Pending;
+
+        var session = replicaSession;
+        if (session == null || session.Id != result.AssaultSessionId ||
+            session.SettlementId != result.SettlementId || session.Stage != result.Stage ||
+            session.Revision != result.HideoutRevision || session.Infested != result.ExpectedInfested ||
+            session.ExpectedHealthyDefenderCount != result.ExpectedHealthyDefenderCount ||
+            session.CooldownActive != result.ExpectedCooldownActive)
+            return AuthorityCommitProbeResult.Pending;
+
+        return result.Consequence switch
+        {
+            HideoutCampaignConsequence.PrepareMission or HideoutCampaignConsequence.PrepareDirectAssaultMission =>
+                GetHealthyDefenderCount(settlement) == result.ExpectedHealthyDefenderCount
+                    ? AuthorityCommitProbeResult.Applied
+                    : AuthorityCommitProbeResult.Pending,
+            HideoutCampaignConsequence.SetAttackCooldown =>
+                session.Stage == HideoutAssaultStage.CooldownCommitted
+                    ? AuthorityCommitProbeResult.Applied
+                    : AuthorityCommitProbeResult.Pending,
+            HideoutCampaignConsequence.GrantClearRewards => AuthorityCommitProbeResult.Invalid,
+            _ => AuthorityCommitProbeResult.Invalid
+        };
+    }
+
+    private bool SubmitBlocking(HideoutConsequenceIntent intent, out NetworkHideoutCampaignConsequenceResult result)
+    {
+        var outcome = consequenceRoute.SubmitBlocking(intent);
+        result = outcome.Result;
+        if (outcome.Applied) return true;
+
+        Logger.Warning(
+            "Authoritative hideout consequence did not commit locally. SettlementId={SettlementId}, Consequence={Consequence}, Completion={Completion}, Reason={Reason}",
+            intent.SettlementId, intent.Consequence, outcome.Completion, outcome.ReasonCode);
+        GameThread.RunSafe(
+            () => InformationManager.DisplayMessage(new InformationMessage(
+                "The hideout could not be prepared by the server. Please try again.")),
+            context: nameof(SubmitBlocking));
+        return false;
+    }
+
+    private void PresentTerminalOutcome(AuthorityClientOutcome<NetworkHideoutCampaignConsequenceResult> outcome)
+    {
+        if (outcome.Applied) return;
+        Logger.Warning("Hideout authority request ended without a usable result. Completion={Completion}, Reason={Reason}",
+            outcome.Completion, outcome.ReasonCode);
+    }
+
+    private bool TryGetOwnedSession(
         NetPeer peer,
         NetworkHideoutCampaignConsequenceRequested request,
-        bool accepted,
-        int expectedHealthyDefenderCount)
+        HideoutAssaultStage expectedStage,
+        out AssaultSession session)
     {
-        if (string.IsNullOrEmpty(request.RequestId))
-            return;
-
-        network.Send(peer, new NetworkHideoutCampaignConsequenceResolved(
-            request.RequestId,
-            accepted,
-            expectedHealthyDefenderCount));
+        return assaultSessions.TryGetValue(peer, out session) &&
+               session.Id == request.AssaultSessionId &&
+               session.SettlementId == request.SettlementId &&
+               session.Stage == expectedStage &&
+               session.Revision == request.ExpectedHideoutRevision;
     }
 
-    private void Handle_NetworkHideoutCampaignConsequenceResolved(
-        MessagePayload<NetworkHideoutCampaignConsequenceResolved> payload)
+    private void PublishSession(NetPeer peer, string configSessionId, AssaultSession session)
     {
-        var response = payload.What;
-        if (!pendingPreparations.TryGetValue(response.RequestId, out var pending))
-        {
-            Logger.Warning(
-                "Received hideout preparation response for unknown or expired RequestId={RequestId}",
-                response.RequestId);
-            return;
-        }
+        network.Send(peer, new NetworkHideoutAssaultSessionState(
+            configSessionId,
+            session.Id,
+            session.SettlementId,
+            session.Stage,
+            session.Revision,
+            session.ExpectedHealthyDefenderCount,
+            session.CooldownActive,
+            session.Infested));
+    }
 
-        pending.Accepted = response.Accepted;
-        pending.ExpectedHealthyDefenderCount = response.ExpectedHealthyDefenderCount;
-        pending.Completed.Set();
+    private void Handle_NetworkHideoutAssaultSessionState(MessagePayload<NetworkHideoutAssaultSessionState> payload)
+    {
+        if (ModInformation.IsServer || !configAuthority.IsTrustedServer(payload.Who) ||
+            !configAuthority.TryGetCurrent(out ModConfigSnapshot snapshot) ||
+            !string.Equals(snapshot.SessionId, payload.What.ConfigSessionId, StringComparison.Ordinal))
+            return;
+
+        replicaSession = new AssaultSession(
+            owner: null,
+            id: payload.What.AssaultSessionId,
+            settlementId: payload.What.SettlementId,
+            stage: payload.What.Stage,
+            revision: payload.What.HideoutRevision,
+            expectedHealthyDefenderCount: payload.What.ExpectedHealthyDefenderCount,
+            cooldownActive: payload.What.CooldownActive,
+            infested: payload.What.Infested);
+    }
+
+    private void Handle_PlayerDisconnected(MessagePayload<PlayerDisconnected> payload)
+    {
+        if (!ModInformation.IsServer || payload.What?.PlayerId == null) return;
+        assaultSessions.TryRemove(payload.What.PlayerId, out _);
     }
 
     private static bool EnsureDirectAssaultMinimum(Settlement settlement)
@@ -344,27 +495,73 @@ internal sealed class HideoutCampaignConsequencesHandler : IHandler
     private static IEnumerable<MobileParty> GetDefenderParties(Settlement settlement) =>
         settlement.Parties.Where(party => party.IsBandit || party.IsBanditBossParty);
 
-    private readonly struct ConsequenceResult
+    private readonly struct HideoutConsequenceIntent
     {
-        public static ConsequenceResult Rejected => new(false, 0);
-        public static ConsequenceResult AcceptedWithoutParity => new(true, 0);
-        public static ConsequenceResult AcceptedWith(int expectedHealthyDefenderCount) =>
-            new(true, expectedHealthyDefenderCount);
-
-        public bool Accepted { get; }
-        public int ExpectedHealthyDefenderCount { get; }
-
-        private ConsequenceResult(bool accepted, int expectedHealthyDefenderCount)
+        public HideoutConsequenceIntent(
+            string settlementId,
+            HideoutCampaignConsequence consequence,
+            string assaultSessionId,
+            long expectedHideoutRevision)
         {
-            Accepted = accepted;
+            SettlementId = settlementId;
+            Consequence = consequence;
+            AssaultSessionId = assaultSessionId;
+            ExpectedHideoutRevision = expectedHideoutRevision;
+        }
+
+        public string SettlementId { get; }
+        public HideoutCampaignConsequence Consequence { get; }
+        public string AssaultSessionId { get; }
+        public long ExpectedHideoutRevision { get; }
+    }
+
+    private sealed class AssaultSession
+    {
+        public AssaultSession(
+            NetPeer owner, string id, string settlementId, HideoutAssaultStage stage, long revision,
+            int expectedHealthyDefenderCount, bool cooldownActive, bool infested)
+        {
+            Owner = owner;
+            Id = id;
+            SettlementId = settlementId;
+            Stage = stage;
+            Revision = revision;
             ExpectedHealthyDefenderCount = expectedHealthyDefenderCount;
+            CooldownActive = cooldownActive;
+            Infested = infested;
+        }
+
+        public NetPeer Owner { get; }
+        public string Id { get; }
+        public string SettlementId { get; }
+        public HideoutAssaultStage Stage { get; private set; }
+        public long Revision { get; private set; }
+        public int ExpectedHealthyDefenderCount { get; }
+        public bool CooldownActive { get; private set; }
+        public bool Infested { get; private set; }
+
+        public static AssaultSession Create(NetPeer owner, string settlementId, int defenderCount, bool infested) =>
+            new(owner, Guid.NewGuid().ToString("N"), settlementId, HideoutAssaultStage.Prepared, 1,
+                defenderCount, cooldownActive: false, infested);
+
+        public void CommitCooldown(bool infested)
+        {
+            Stage = HideoutAssaultStage.CooldownCommitted;
+            Revision++;
+            CooldownActive = true;
+            Infested = infested;
         }
     }
 
-    private sealed class PendingPreparation
+    private readonly struct ConsequenceResult
     {
-        public ManualResetEventSlim Completed { get; } = new(false);
-        public bool Accepted { get; set; }
-        public int ExpectedHealthyDefenderCount { get; set; }
+        public ConsequenceResult(int expectedHealthyDefenderCount, bool expectedCooldownActive)
+        {
+            ExpectedHealthyDefenderCount = expectedHealthyDefenderCount;
+            ExpectedCooldownActive = expectedCooldownActive;
+        }
+
+        public int ExpectedHealthyDefenderCount { get; }
+        public bool ExpectedCooldownActive { get; }
     }
 }

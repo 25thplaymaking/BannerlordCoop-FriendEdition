@@ -154,6 +154,11 @@ internal class HideoutCampaignBehaviorPatch
         if (!ModInformation.IsClient)
             return;
 
+        // Clear rewards remain disabled until a server-owned mission/map-event completion receipt exists.
+        // A client-observed empty hideout is not sufficient authority to grant campaign relations.
+        if (consequence == HideoutCampaignConsequence.GrantClearRewards)
+            return;
+
         settlement ??= Settlement.CurrentSettlement;
         if (settlement?.IsHideout != true)
             return;

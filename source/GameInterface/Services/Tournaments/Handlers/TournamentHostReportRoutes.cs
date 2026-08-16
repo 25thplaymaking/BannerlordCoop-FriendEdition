@@ -208,7 +208,8 @@ internal sealed partial class TournamentSessionHandler
         result.Manifest.MatchId == request.Manifest.MatchId && result.Snapshot?.MissionInstanceId == request.MissionInstanceId;
     private static bool IsExpectedHitProgressionResult(NetworkSubmitTournamentHitProgression request, NetworkTournamentHitProgressionApplied result) =>
         result.Status != AuthorityResultStatus.Accepted || result.TournamentSessionId == request.Data.SessionId && result.MatchId == request.Data.MatchId &&
-        result.DamageSequence == request.Data.DamageSequence && result.MissionInstanceId == request.MissionInstanceId;
+        result.DamageOriginControllerId == request.Data.DamageOriginControllerId && result.DamageSequence == request.Data.DamageSequence &&
+        result.AttackerAgentId == request.Data.AttackerAgentId && result.MissionInstanceId == request.MissionInstanceId;
     private static bool IsExpectedMatchResult(NetworkSubmitTournamentMatchResult request, NetworkTournamentMatchResultApplied result) =>
         result.Status != AuthorityResultStatus.Accepted || result.TournamentSessionId == request.Result.SessionId && result.MatchId == request.Result.MatchId &&
         result.Sequence == request.Result.Sequence && result.Snapshot?.MissionInstanceId == request.MissionInstanceId;

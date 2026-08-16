@@ -122,34 +122,12 @@ internal sealed class PlayerBoardGameCoordinator : IHandler
         this.objectManager = objectManager;
         this.controllerIdProvider = controllerIdProvider;
 
-        messageBroker.Subscribe<NetworkRequestPlayerBoardGame>(Handle_NetworkRequestPlayerBoardGame);
-        messageBroker.Subscribe<NetworkPlayerBoardGameChallenge>(Handle_NetworkPlayerBoardGameChallenge);
-        messageBroker.Subscribe<NetworkRespondPlayerBoardGameChallenge>(Handle_NetworkRespondPlayerBoardGameChallenge);
-        messageBroker.Subscribe<NetworkPlayerBoardGameStarted>(Handle_NetworkPlayerBoardGameStarted);
-        messageBroker.Subscribe<NetworkPlayerBoardGameChallengeDeclined>(Handle_NetworkPlayerBoardGameChallengeDeclined);
-        messageBroker.Subscribe<NetworkPlayerBoardGameMove>(Handle_NetworkPlayerBoardGameMove);
-        messageBroker.Subscribe<NetworkPlayerBoardGamePawnCaptured>(Handle_NetworkPlayerBoardGamePawnCaptured);
-        messageBroker.Subscribe<NetworkPlayerBoardGameFinished>(Handle_NetworkPlayerBoardGameFinished);
-        messageBroker.Subscribe<NetworkPlayerBoardGameCancelled>(Handle_NetworkPlayerBoardGameCancelled);
-        messageBroker.Subscribe<PlayerDisconnected>(Handle_PlayerDisconnected);
-
         Instance = this;
     }
 
     public void Dispose()
     {
         if (Instance == this) Instance = null;
-
-        messageBroker.Unsubscribe<NetworkRequestPlayerBoardGame>(Handle_NetworkRequestPlayerBoardGame);
-        messageBroker.Unsubscribe<NetworkPlayerBoardGameChallenge>(Handle_NetworkPlayerBoardGameChallenge);
-        messageBroker.Unsubscribe<NetworkRespondPlayerBoardGameChallenge>(Handle_NetworkRespondPlayerBoardGameChallenge);
-        messageBroker.Unsubscribe<NetworkPlayerBoardGameStarted>(Handle_NetworkPlayerBoardGameStarted);
-        messageBroker.Unsubscribe<NetworkPlayerBoardGameChallengeDeclined>(Handle_NetworkPlayerBoardGameChallengeDeclined);
-        messageBroker.Unsubscribe<NetworkPlayerBoardGameMove>(Handle_NetworkPlayerBoardGameMove);
-        messageBroker.Unsubscribe<NetworkPlayerBoardGamePawnCaptured>(Handle_NetworkPlayerBoardGamePawnCaptured);
-        messageBroker.Unsubscribe<NetworkPlayerBoardGameFinished>(Handle_NetworkPlayerBoardGameFinished);
-        messageBroker.Unsubscribe<NetworkPlayerBoardGameCancelled>(Handle_NetworkPlayerBoardGameCancelled);
-        messageBroker.Unsubscribe<PlayerDisconnected>(Handle_PlayerDisconnected);
 
         pendingChallenges.Clear();
         serverGames.Clear();
@@ -195,369 +173,32 @@ internal sealed class PlayerBoardGameCoordinator : IHandler
             return true;
         }
 
-        if (!IsSupportedPlayerBoardGame((int)logic.CurrentBoardGame))
-        {
-            ShowMessage("Player board games currently support Tablut only.");
-            return true;
-        }
-
-        if (activeGame != null)
-        {
-            ShowMessage("You are already playing a board game.");
-            return true;
-        }
-
-        if (!LocationMissionTracker.IsLocationMission(Mission.Current) ||
-            string.IsNullOrEmpty(controlled.ObjectControllerId) ||
-            controlled.ObjectControllerId == controllerIdProvider.ControllerId)
-        {
-            ShowMessage("Player board games are only available with another player in this location.");
-            return true;
-        }
-
-        network.SendAll(new NetworkRequestPlayerBoardGame(
-            controlled.ObjectControllerId,
-            (int)logic.CurrentBoardGame));
-        ShowMessage("Board game challenge sent.");
+        // The server has no canonical Tablut evaluator or board-position state. Do not turn the old
+        // client relay into a client-authoritative game; keep native AI/local games available instead.
+        ShowMessage("Player-versus-player board games are temporarily unavailable.");
         return true;
-    }
-
-    private void Handle_NetworkRequestPlayerBoardGame(MessagePayload<NetworkRequestPlayerBoardGame> payload)
-    {
-        if (ModInformation.IsClient) return;
-        if (!(payload.Who is NetPeer initiatorPeer)) return;
-        if (!playerManager.TryGetPlayer(initiatorPeer, out var initiator)) return;
-        if (!playerManager.TryGetPlayer(payload.What.TargetControllerId, out var target) ||
-            target.ControllerId == initiator.ControllerId ||
-            !playerManager.IsConnected(target) ||
-            !IsSupportedPlayerBoardGame(payload.What.BoardGameType))
-        {
-            network.Send(initiatorPeer, new NetworkPlayerBoardGameChallengeDeclined(string.Empty, initiator.ControllerId));
-            return;
-        }
-
-        if (pendingChallenges.Values.Any(challenge =>
-                challenge.InitiatorControllerId == initiator.ControllerId ||
-                challenge.TargetControllerId == initiator.ControllerId ||
-                challenge.InitiatorControllerId == target.ControllerId ||
-                challenge.TargetControllerId == target.ControllerId) ||
-            serverGames.Values.Any(game => game.Contains(initiator.ControllerId) || game.Contains(target.ControllerId)))
-        {
-            network.Send(initiatorPeer, new NetworkPlayerBoardGameChallengeDeclined(string.Empty, initiator.ControllerId));
-            return;
-        }
-
-        var challengeId = Guid.NewGuid().ToString("N");
-        var challenge = new PendingChallenge(
-            initiatorPeer,
-            initiator.ControllerId,
-            target.ControllerId,
-            payload.What.BoardGameType);
-
-        if (!pendingChallenges.TryAdd(challengeId, challenge)) return;
-
-        network.SendAll(new NetworkPlayerBoardGameChallenge(
-            challengeId,
-            initiator.ControllerId,
-            GetPlayerName(initiator),
-            target.ControllerId,
-            challenge.BoardGameType));
-    }
-
-    private void Handle_NetworkPlayerBoardGameChallenge(MessagePayload<NetworkPlayerBoardGameChallenge> payload)
-    {
-        if (ModInformation.IsServer) return;
-
-        var challenge = payload.What;
-        if (challenge.TargetControllerId != controllerIdProvider.ControllerId) return;
-
-        GameThread.RunSafe(() => ShowChallenge(challenge), context: nameof(Handle_NetworkPlayerBoardGameChallenge));
-    }
-
-    private void ShowChallenge(NetworkPlayerBoardGameChallenge challenge)
-    {
-        if (activeGame != null || !LocationMissionTracker.IsLocationMission(Mission.Current) ||
-            !TryFindAgent(challenge.InitiatorControllerId, out _))
-        {
-            network.SendAll(new NetworkRespondPlayerBoardGameChallenge(challenge.ChallengeId, accepted: false));
-            return;
-        }
-
-        LocationPlayerInteractionWaitingOverlay.Instance.Hide();
-        var gameName = ((CultureObject.BoardGameType)challenge.BoardGameType).ToString();
-        InformationManager.ShowInquiry(new InquiryData(
-            "Board Game Challenge",
-            $"{challenge.InitiatorName} wants to play {gameName}.",
-            true,
-            true,
-            "Accept",
-            "Decline",
-            () => network.SendAll(new NetworkRespondPlayerBoardGameChallenge(challenge.ChallengeId, accepted: true)),
-            () => network.SendAll(new NetworkRespondPlayerBoardGameChallenge(challenge.ChallengeId, accepted: false)),
-            string.Empty),
-            false,
-            false);
-    }
-
-    private void Handle_NetworkRespondPlayerBoardGameChallenge(MessagePayload<NetworkRespondPlayerBoardGameChallenge> payload)
-    {
-        if (ModInformation.IsClient) return;
-        if (!(payload.Who is NetPeer responderPeer)) return;
-        if (!pendingChallenges.TryRemove(payload.What.ChallengeId, out var challenge)) return;
-        if (!playerManager.TryGetPlayer(responderPeer, out var responder) || responder.ControllerId != challenge.TargetControllerId)
-        {
-            network.Send(challenge.InitiatorPeer, new NetworkPlayerBoardGameChallengeDeclined(payload.What.ChallengeId, challenge.InitiatorControllerId));
-            return;
-        }
-
-        if (!payload.What.Accepted)
-        {
-            network.SendAll(new NetworkPlayerBoardGameChallengeDeclined(payload.What.ChallengeId, challenge.InitiatorControllerId));
-            return;
-        }
-
-        var gameId = Guid.NewGuid().ToString("N");
-        if (!serverGames.TryAdd(gameId, new ServerGame(challenge.InitiatorControllerId, challenge.TargetControllerId))) return;
-
-        network.SendAll(new NetworkPlayerBoardGameStarted(
-            gameId,
-            challenge.InitiatorControllerId,
-            challenge.TargetControllerId,
-            challenge.BoardGameType));
-    }
-
-    private void Handle_NetworkPlayerBoardGameStarted(MessagePayload<NetworkPlayerBoardGameStarted> payload)
-    {
-        if (ModInformation.IsServer) return;
-
-        var message = payload.What;
-        var localControllerId = controllerIdProvider.ControllerId;
-        if (message.InitiatorControllerId != localControllerId && message.ResponderControllerId != localControllerId) return;
-
-        GameThread.RunSafe(() => StartLocalGame(message), context: nameof(Handle_NetworkPlayerBoardGameStarted));
-    }
-
-    private void StartLocalGame(NetworkPlayerBoardGameStarted message)
-    {
-        if (activeGame != null) return;
-        if (!LocationMissionTracker.IsLocationMission(Mission.Current) ||
-            !TryFindAgent(GetOtherControllerId(message), out var opposingAgent))
-        {
-            network.SendAll(new NetworkPlayerBoardGameCancelled(message.GameId, controllerIdProvider.ControllerId));
-            return;
-        }
-
-        var logic = Mission.Current.GetMissionBehavior<MissionBoardGameLogic>();
-        if (logic == null || logic.IsGameInProgress)
-        {
-            network.SendAll(new NetworkPlayerBoardGameCancelled(message.GameId, controllerIdProvider.ControllerId));
-            return;
-        }
-
-        completedGames.Remove(logic);
-        activeGame = new ClientGame(message.GameId, controllerIdProvider.ControllerId, GetOtherControllerId(message), logic);
-        LocationPlayerInteractionWaitingOverlay.Instance.Hide();
-        OpposingAgentProperty.SetValue(logic, opposingAgent);
-        logic.SetBoardGame((CultureObject.BoardGameType)message.BoardGameType);
-        logic.SetStartingPlayer(message.InitiatorControllerId == controllerIdProvider.ControllerId);
-        logic.StartBoardGame();
-    }
-
-    private void Handle_NetworkPlayerBoardGameChallengeDeclined(MessagePayload<NetworkPlayerBoardGameChallengeDeclined> payload)
-    {
-        if (ModInformation.IsServer || payload.What.InitiatorControllerId != controllerIdProvider.ControllerId) return;
-
-        GameThread.RunSafe(() => ShowMessage("Board game challenge declined."), context: nameof(Handle_NetworkPlayerBoardGameChallengeDeclined));
-    }
-
-    private void Handle_NetworkPlayerBoardGameMove(MessagePayload<NetworkPlayerBoardGameMove> payload)
-    {
-        if (ModInformation.IsServer)
-        {
-            RelayToPlayers(payload.Who, payload.What.GameId, payload.What.SenderControllerId, payload.What);
-            return;
-        }
-
-        if (!IsRemoteGameMessage(payload.What.GameId, payload.What.SenderControllerId)) return;
-        GameThread.RunSafe(() => ApplyRemoteMove(payload.What), context: nameof(Handle_NetworkPlayerBoardGameMove));
-    }
-
-    private void Handle_NetworkPlayerBoardGamePawnCaptured(MessagePayload<NetworkPlayerBoardGamePawnCaptured> payload)
-    {
-        if (ModInformation.IsServer)
-        {
-            RelayToPlayers(payload.Who, payload.What.GameId, payload.What.SenderControllerId, payload.What);
-            return;
-        }
-
-        if (!IsRemoteGameMessage(payload.What.GameId, payload.What.SenderControllerId)) return;
-        GameThread.RunSafe(() => ApplyRemoteCapture(payload.What), context: nameof(Handle_NetworkPlayerBoardGamePawnCaptured));
-    }
-
-    private void Handle_NetworkPlayerBoardGameFinished(MessagePayload<NetworkPlayerBoardGameFinished> payload)
-    {
-        if (ModInformation.IsServer)
-        {
-            if (!TryGetServerGame(payload.Who, payload.What.GameId, payload.What.SenderControllerId, out _)) return;
-            serverGames.TryRemove(payload.What.GameId, out _);
-            network.SendAll(payload.What);
-            return;
-        }
-
-        if (!IsRemoteGameMessage(payload.What.GameId, payload.What.SenderControllerId)) return;
-        GameThread.RunSafe(() => ApplyRemoteResult(payload.What), context: nameof(Handle_NetworkPlayerBoardGameFinished));
-    }
-
-    private void Handle_NetworkPlayerBoardGameCancelled(MessagePayload<NetworkPlayerBoardGameCancelled> payload)
-    {
-        if (ModInformation.IsServer)
-        {
-            if (!TryGetServerGame(payload.Who, payload.What.GameId, payload.What.SenderControllerId, out _)) return;
-            serverGames.TryRemove(payload.What.GameId, out _);
-            network.SendAll(payload.What);
-            return;
-        }
-
-        if (!IsRemoteGameMessage(payload.What.GameId, payload.What.SenderControllerId)) return;
-        GameThread.RunSafe(() =>
-        {
-            if (activeGame == null) return;
-            CompleteLocalGame(activeGame.Logic, GameOverEnum.PlayerCanceledTheGame);
-            ShowMessage("The other player left the board game.");
-        }, context: nameof(Handle_NetworkPlayerBoardGameCancelled));
-    }
-
-    private void Handle_PlayerDisconnected(MessagePayload<PlayerDisconnected> payload)
-    {
-        if (!ModInformation.IsServer) return;
-
-        foreach (var pending in pendingChallenges.Where(pair => ReferenceEquals(pair.Value.InitiatorPeer, payload.What.PlayerId)).ToArray())
-        {
-            pendingChallenges.TryRemove(pending.Key, out _);
-        }
-
-        if (!playerManager.TryGetPlayer(payload.What.PlayerId, out var player)) return;
-
-        foreach (var pending in pendingChallenges.Where(pair => pair.Value.TargetControllerId == player.ControllerId).ToArray())
-        {
-            if (!pendingChallenges.TryRemove(pending.Key, out var removed)) continue;
-            network.Send(removed.InitiatorPeer, new NetworkPlayerBoardGameChallengeDeclined(pending.Key, removed.InitiatorControllerId));
-        }
-
-        foreach (var game in serverGames.Where(pair => pair.Value.Contains(player.ControllerId)).ToArray())
-        {
-            if (!serverGames.TryRemove(game.Key, out _)) continue;
-            network.SendAll(new NetworkPlayerBoardGameCancelled(game.Key, player.ControllerId));
-        }
     }
 
     private void TrySendMoveInternal(BoardGameBase board, Move move)
     {
-        if (activeGame?.Logic?.Board != board || !move.IsValid) return;
-
-        var fromIndex = board.PlayerOneUnits.IndexOf(move.Unit);
-        var toIndex = Array.IndexOf(board.Tiles, move.GoalTile);
-        if (fromIndex < 0 || toIndex < 0) return;
-
-        network.SendAll(new NetworkPlayerBoardGameMove(activeGame.GameId, activeGame.LocalControllerId, fromIndex, toIndex));
+        // PvP board games are disabled until the server owns a deterministic board evaluator.
     }
 
     private void TrySendCapturedPawnInternal(BoardGameBase board, PawnBase pawn, bool fake)
     {
-        if (activeGame?.Logic?.Board != board || fake) return;
-
-        var index = board.PlayerTwoUnits.IndexOf(pawn);
-        if (index < 0) return;
-
-        network.SendAll(new NetworkPlayerBoardGamePawnCaptured(activeGame.GameId, activeGame.LocalControllerId, index));
+        // Captures cannot be client-authoritative; there is deliberately no network producer here.
     }
 
     private bool TryCompleteGameInternal(MissionBoardGameLogic logic, GameOverEnum gameOver)
     {
         if (activeGame?.Logic == logic)
         {
-            if (!applyingRemoteResult)
-            {
-                if (gameOver == GameOverEnum.PlayerCanceledTheGame)
-                {
-                    network.SendAll(new NetworkPlayerBoardGameCancelled(
-                        activeGame.GameId,
-                        activeGame.LocalControllerId));
-                }
-                else
-                {
-                    network.SendAll(new NetworkPlayerBoardGameFinished(
-                        activeGame.GameId,
-                        activeGame.LocalControllerId,
-                        (int)gameOver));
-                }
-            }
-
+            // Never accept a client-declared winner/cancellation. This only recovers a legacy active UI.
             CompleteLocalGame(logic, gameOver);
             return true;
         }
 
         return completedGames.TryGetValue(logic, out _);
-    }
-
-    private void ApplyRemoteMove(NetworkPlayerBoardGameMove message)
-    {
-        var board = activeGame?.Logic?.Board;
-        if (board == null || message.FromIndex < 0 || message.FromIndex >= board.PlayerTwoUnits.Count ||
-            message.ToIndex < 0 || message.ToIndex >= board.Tiles.Length)
-        {
-            return;
-        }
-
-        var goalTile = board.Tiles[message.ToIndex];
-        if (board is BoardGamePuluc && message.ToIndex != 11)
-            goalTile = board.Tiles[10 - message.ToIndex];
-
-        MovePawnToTileMethod.Invoke(board, new object[]
-        {
-            board.PlayerTwoUnits[message.FromIndex],
-            goalTile,
-            false,
-            true
-        });
-    }
-
-    private void ApplyRemoteCapture(NetworkPlayerBoardGamePawnCaptured message)
-    {
-        var board = activeGame?.Logic?.Board;
-        if (board == null || message.Index < 0 || message.Index >= board.PlayerOneUnits.Count) return;
-
-        board.SetPawnCaptured(board.PlayerOneUnits[message.Index]);
-    }
-
-    private void ApplyRemoteResult(NetworkPlayerBoardGameFinished message)
-    {
-        var logic = activeGame?.Logic;
-        if (logic == null) return;
-
-        applyingRemoteResult = true;
-        try
-        {
-            switch ((GameOverEnum)message.GameOver)
-            {
-                case GameOverEnum.PlayerOneWon:
-                    logic.PlayerTwoWon();
-                    break;
-                case GameOverEnum.PlayerTwoWon:
-                    logic.PlayerOneWon();
-                    break;
-                case GameOverEnum.Draw:
-                    logic.GameWasDraw();
-                    break;
-                default:
-                    CompleteLocalGame(logic, GameOverEnum.PlayerCanceledTheGame);
-                    break;
-            }
-        }
-        finally
-        {
-            applyingRemoteResult = false;
-        }
     }
 
     private void CompleteLocalGame(MissionBoardGameLogic logic, GameOverEnum gameOver)
@@ -659,59 +300,6 @@ internal sealed class PlayerBoardGameCoordinator : IHandler
             GameOverEnum.Draw => BoardGameHelper.BoardGameState.Draw,
             _ => BoardGameHelper.BoardGameState.None
         };
-    }
-
-    private static bool IsSupportedPlayerBoardGame(int boardGameType)
-        => boardGameType == (int)CultureObject.BoardGameType.Tablut;
-
-    private bool IsRemoteGameMessage(string gameId, string senderControllerId)
-        => activeGame != null &&
-           activeGame.GameId == gameId &&
-           activeGame.OtherControllerId == senderControllerId;
-
-    private void RelayToPlayers<T>(object sender, string gameId, string senderControllerId, T message)
-        where T : ICommand
-    {
-        if (!TryGetServerGame(sender, gameId, senderControllerId, out _)) return;
-        network.SendAll(message);
-    }
-
-    private bool TryGetServerGame(object sender, string gameId, string senderControllerId, out ServerGame game)
-    {
-        game = null;
-        if (!(sender is NetPeer peer) || !playerManager.TryGetPlayer(peer, out var player)) return false;
-        if (player.ControllerId != senderControllerId) return false;
-        return serverGames.TryGetValue(gameId, out game) && game.Contains(senderControllerId);
-    }
-
-    private bool TryFindAgent(string controllerId, out Agent agent)
-    {
-        agent = null;
-        if (Mission.Current == null || string.IsNullOrEmpty(controllerId)) return false;
-
-        agent = Mission.Current.Agents.FirstOrDefault(candidate =>
-        {
-            if (!(candidate.Character is CharacterObject character)) return false;
-            var hero = character.HeroObject;
-            return hero != null &&
-                   PlayerManager.TryGetControlledObjectInfo(hero, out var controlled) &&
-                   controlled.ObjectControllerId == controllerId;
-        });
-
-        return agent != null;
-    }
-
-    private string GetOtherControllerId(NetworkPlayerBoardGameStarted message)
-        => message.InitiatorControllerId == controllerIdProvider.ControllerId
-            ? message.ResponderControllerId
-            : message.InitiatorControllerId;
-
-    private string GetPlayerName(Player player)
-    {
-        if (objectManager.TryGetObject<Hero>(player.HeroId, out var hero))
-            return hero.Name?.ToString() ?? player.ControllerId;
-
-        return player.ControllerId;
     }
 
     private static void ShowMessage(string message)

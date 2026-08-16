@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "suiteId": "friend-edition-private-workshop-suite",
-  "moduleCount": 10,
-  "receiptSha256": "d202ef52ef632708bb86dd0851e34d9e84473d73921847833ed31ae69f4b9362",
+  "moduleCount": 14,
+  "receiptSha256": "0f43cc7b782bd4f5e2dc734ae4924d2515bb5eb17ff618c6a7141f2e494a30d1",
   "modules": [
     {
       "moduleId": "Bannerlord.ButterLib",
@@ -18,7 +18,7 @@
       "workshopId": "2881380744",
       "steamManifestId": "3938505074920035905",
       "version": "v1.4.7",
-      "loadOrder": 140,
+      "loadOrder": 240,
       "contentSha256": "55342c2d7c08b87862f53229b3b8b41ac237044d5a7daabc08fc89b4ae872e86",
       "configurationSha256": "1fa40c6db5e3946332aeb8b7e5ca183d231bea3786fa63a9832fe5c1b001a7dc"
     },
@@ -54,7 +54,7 @@
       "workshopId": "2875093027",
       "steamManifestId": "751945004455697202",
       "version": "v2.0.8.8",
-      "loadOrder": 120,
+      "loadOrder": 220,
       "contentSha256": "75a8186a873d104c01b503b473e1488aacb267005a7d78e5bf3e4f25bf683c57",
       "configurationSha256": "fc7445aa60bc455c8d0b4cb31a40930588e8104effe39c4a69a8e07856ee24d5"
     },
@@ -63,7 +63,7 @@
       "workshopId": "2875710877",
       "steamManifestId": "1598945672157391038",
       "version": "v1.4.7.6",
-      "loadOrder": 130,
+      "loadOrder": 230,
       "contentSha256": "3488b62a0b71a905c4499724059672289bd7c3222eba295332b47bf73d8a0a07",
       "configurationSha256": "103bb574563ebafc4199cadbb1a71a2bc9956f81f1db75a367bec8860ce3871e"
     },
@@ -72,9 +72,36 @@
       "workshopId": "2859265386",
       "steamManifestId": "5143458534246082850",
       "version": "v4.2.0.7",
-      "loadOrder": 110,
+      "loadOrder": 210,
       "contentSha256": "4e7b2ae3919b1f06d264420e2d2f22cc7a18ee619bc72eb8b704cef0e1fc0dba",
       "configurationSha256": "e5c6231cfbf33a8641a5c36f5b4cabc38082805c5d391ab46a65601754ceb29e"
+    },
+    {
+      "moduleId": "OpenSourceArmory",
+      "workshopId": "3011479883",
+      "steamManifestId": "6047321499764171194",
+      "version": "v2.0.0",
+      "loadOrder": 120,
+      "contentSha256": "db26719181e2dc107d172aaff4a6c791707c7e190d4ddd2887f2c0cc63fde830",
+      "configurationSha256": "0b79e0b83f8fcc88cee89be43eb21f3baa89ed124a42ed08e0f8a43e46b88706"
+    },
+    {
+      "moduleId": "OpenSourceSaddlery",
+      "workshopId": "3010990914",
+      "steamManifestId": "5590992806248040986",
+      "version": "v2.0.0",
+      "loadOrder": 100,
+      "contentSha256": "f63cdc1912f19c935e00255699e5b7acdae8f2f6891aa94cf5446234e780f9f9",
+      "configurationSha256": "95553471ae8378e00ed408e99050c833def7d2de6e254e646037fe6a90d1a210"
+    },
+    {
+      "moduleId": "OpenSourceWeaponry",
+      "workshopId": "3010984416",
+      "steamManifestId": "228880600705709326",
+      "version": "v2.0.1",
+      "loadOrder": 110,
+      "contentSha256": "80ffbc7cb2744c1a1e03971ebae8b61ba8fac126682a00600a650440338b5d41",
+      "configurationSha256": "9f8778ae6938a3dba1a07397adfd896aafe9447285d3463e37ece7c1038f6a99"
     },
     {
       "moduleId": "PlayerSettlement",
@@ -86,11 +113,20 @@
       "configurationSha256": "b6966432588f052336d89c02defd9c3cc1a6af9a5bcca1888962d885912fb5f9"
     },
     {
+      "moduleId": "RebellionsAndDemographics",
+      "workshopId": "3644127631",
+      "steamManifestId": "5679238579592221906",
+      "version": "v3.0.1",
+      "loadOrder": 260,
+      "contentSha256": "7b62b533e7abcf21ba0964db6c76d73fb8cc383d330e9c56fbcba7337842b589",
+      "configurationSha256": "6fc955a4dd41fa12b428289899991ec3d16a8530011e378613cb58fc35e516cb"
+    },
+    {
       "moduleId": "UnblockableThrust",
       "workshopId": "3614435151",
       "steamManifestId": "3108412629025003964",
       "version": "v1.1.3.1",
-      "loadOrder": 150,
+      "loadOrder": 250,
       "contentSha256": "ac74144e10d6c1774976b95e0a8ffeca3a348a04e6ced822947a4f4172f4ed88",
       "configurationSha256": "8220e05907ec9266e27ed205e73a7d09df2b81546d2f3647d06c4186b6b578bd"
     }

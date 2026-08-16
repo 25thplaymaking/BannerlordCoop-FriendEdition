@@ -34,6 +34,24 @@ function Write-TestModule {
     Write-TestFile -Path (Join-Path $Root "bin\Win64_Shipping_Client\$Dll") -Content "$Id runtime"
 }
 
+function Write-TestContentOnlyModule {
+    param([string]$Root, [string]$Id, [string]$Name, [string]$Version)
+    New-Item -ItemType Directory -Path $Root -Force | Out-Null
+    $xml = @"
+<Module>
+  <Name value="$Name" />
+  <Id value="$Id" />
+  <Version value="$Version" />
+  <SingleplayerModule value="true" />
+  <MultiplayerModule value="false" />
+  <SubModules />
+  <Xmls><XmlNode><XmlName id="Items" path="fixture_items" /></XmlNode></Xmls>
+</Module>
+"@
+    Write-TestFile -Path (Join-Path $Root 'SubModule.xml') -Content $xml
+    Write-TestFile -Path (Join-Path $Root 'ModuleData\fixture_items.xml') -Content '<Items />'
+}
+
 function New-LoadOrderFixture {
     param([string]$ModuleId, [int]$LoadOrder)
     return [pscustomobject]@{
@@ -116,9 +134,15 @@ try {
     $contentRoot = Join-Path $workshopRoot 'content\261550'
     $moduleA = Join-Path $contentRoot '1001'
     $moduleB = Join-Path $contentRoot '1002'
+    $contentOnlyModule = Join-Path $testRoot 'ContentOnlyModule'
     Write-TestModule -Root $moduleA -Id 'Canonical.Harmony' -Name 'Canonical Harmony' -Version 'v1.0.0' -Dll 'Canonical.Harmony.dll'
     Write-TestFile -Path (Join-Path $moduleA 'bin\Win64_Shipping_Client\0Harmony.dll') -Content 'canonical harmony dependency'
     Write-TestModule -Root $moduleB -Id 'Gameplay.Mod' -Name 'Gameplay Mod' -Version 'v2.0.0' -Dll 'Gameplay.Mod.dll'
+    Write-TestContentOnlyModule -Root $contentOnlyModule -Id 'Content.Only' -Name 'Content Only' -Version 'v1.0.0'
+    $contentOnlyDescriptor = & $workshopModule { param($root) Get-SubModuleDescriptor -ModuleRoot $root } $contentOnlyModule
+    $executableDescriptor = & $workshopModule { param($root) Get-SubModuleDescriptor -ModuleRoot $root } $moduleB
+    Assert-True (@($contentOnlyDescriptor.DeclaredDllNames).Count -eq 0) 'a content-only module with empty SubModules must declare no executable payload'
+    Assert-True ((@($executableDescriptor.DeclaredDllNames) -join ',') -ceq 'Gameplay.Mod.dll') 'an executable module must retain its exact declared DLL validation input'
     Write-TestFile -Path (Join-Path $moduleB 'bin\Win64_Shipping_Client\0Harmony.dll') -Content 'dangerous duplicate'
     Write-TestFile -Path (Join-Path $moduleB 'LICENSE.txt') -Content 'fixture license'
     New-Item -ItemType Directory -Path (Join-Path $contentRoot '9999') -Force | Out-Null
@@ -431,6 +455,7 @@ try {
 
     Write-Host 'PASS: Valve ACF parsing and exact subscription selection'
     Write-Host 'PASS: separate module staging and stale directory omission'
+    Write-Host 'PASS: content-only descriptors omit executable entries without weakening declared-DLL validation'
     Write-Host 'PASS: duplicate runtime exclusion without breaking SubModule.xml'
     Write-Host 'PASS: staged checksum verification'
     Write-Host 'PASS: before/after Workshop source SHA-256 digests unchanged'

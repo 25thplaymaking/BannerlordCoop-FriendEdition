@@ -461,11 +461,10 @@ function Get-SubModuleDescriptor {
     }
 
     $dllNames = New-Object System.Collections.Generic.List[string]
-    if ($null -ne $module.SubModules -and $null -ne $module.SubModules.SubModule) {
-        foreach ($submodule in @($module.SubModules.SubModule)) {
-            if ($null -ne $submodule.DLLName -and -not [string]::IsNullOrWhiteSpace([string]$submodule.DLLName.value)) {
-                $dllNames.Add([string]$submodule.DLLName.value)
-            }
+    foreach ($submodule in @($xml.SelectNodes('/Module/SubModules/SubModule'))) {
+        $dllName = $submodule.SelectSingleNode('DLLName')
+        if ($null -ne $dllName -and -not [string]::IsNullOrWhiteSpace([string]$dllName.GetAttribute('value'))) {
+            $dllNames.Add([string]$dllName.GetAttribute('value'))
         }
     }
 

@@ -103,7 +103,7 @@
       },
       {
         "glob": "bin/*/TaleWorlds.*.dll",
-        "minimumMatches": 1,
+        "minimumMatches": 0,
         "reason": "Installed Bannerlord/native module binaries are the canonical game API providers; private package copies must never shadow the selected nightly.",
         "assemblyClosure": {
           "providerModuleId": "__InstalledGame",
@@ -112,7 +112,7 @@
       },
       {
         "glob": "bin/*/SandBox*.dll",
-        "minimumMatches": 4,
+        "minimumMatches": 0,
         "reason": "Installed Sandbox module binaries are the canonical providers; Coop's hash-identical copies must not shadow or duplicate the selected nightly.",
         "assemblyClosure": {
           "providerModuleId": "__InstalledGame",

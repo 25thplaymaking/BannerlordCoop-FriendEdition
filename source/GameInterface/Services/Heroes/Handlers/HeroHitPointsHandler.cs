@@ -15,46 +15,71 @@ using TaleWorlds.CampaignSystem.Party;
 namespace GameInterface.Services.Heroes.Handlers;
 
 /// <summary>
-/// Owner-scoped route for health changes made by a client's hero or companions. The peer selects a
-/// health value only; the server derives the player and proves that the named hero is in that player's party.
-/// The regular synced HitPoints property remains the canonical state publication.
+/// Damage-only route for the requesting player's own hero. Healing and recovery are server-internal;
+/// a report must name the current battle and match the server's current health before it can lower it.
 /// </summary>
 public class HeroHitPointsHandler : IHandler
 {
     private static readonly ILogger Logger = LogManager.GetLogger<HeroHitPointsHandler>();
+    private readonly IMessageBroker messageBroker;
     private readonly IObjectManager objectManager;
     private readonly IModConfigAuthority configAuthority;
-    private readonly IAuthorityRouteHandle<HeroHitPointsChangeRequested, NetworkHeroHitPointsChangeResult> route;
+    private readonly IAuthorityRouteHandle<DamageIntent, NetworkHeroHitPointsChangeResult> route;
+
+    private readonly struct DamageIntent
+    {
+        public DamageIntent(string heroId, int hitPoints, int expectedHitPoints, string mapEventId)
+        {
+            HeroId = heroId;
+            HitPoints = hitPoints;
+            ExpectedHitPoints = expectedHitPoints;
+            MapEventId = mapEventId;
+        }
+        public string HeroId { get; }
+        public int HitPoints { get; }
+        public int ExpectedHitPoints { get; }
+        public string MapEventId { get; }
+    }
 
     public HeroHitPointsHandler(IMessageBroker messageBroker, IObjectManager objectManager,
-        IPlayerManager playerManager, IModConfigAuthority configAuthority, INetworkConfig configuration,
+        IModConfigAuthority configAuthority, INetworkConfig configuration,
         IAuthorityRequestRouter authorityRequestRouter)
     {
+        this.messageBroker = messageBroker;
         this.objectManager = objectManager;
         this.configAuthority = configAuthority;
         route = authorityRequestRouter.Register(
-            AuthorityRoute<HeroHitPointsChangeRequested, NetworkHeroHitPointsChangeRequest,
+            AuthorityRoute<DamageIntent, NetworkHeroHitPointsChangeRequest,
                 NetworkHeroHitPointsChangeResult>.Define(
-                "hero.hit-points", AuthorityRouteKind.Command, CreateHeader,
-                (intent, header) => new NetworkHeroHitPointsChangeRequest(HeroId(intent.Hero), intent.HitPoints, header),
+                "hero.damage-report", AuthorityRouteKind.Command, CreateHeader,
+                (intent, header) => new NetworkHeroHitPointsChangeRequest(intent.HeroId, intent.HitPoints,
+                    intent.ExpectedHitPoints, intent.MapEventId, header),
                 request => request.Header, result => result.Header, ValidateWireShape,
-                request => $"{request.HeroId}:{request.HitPoints}", ValidateHeader, Execute,
+                request => $"{request.HeroId}:{request.MapEventId}:{request.ExpectedHitPoints}:{request.HitPoints}", ValidateHeader, Execute,
                 Terminal, ProbeClientCommit, _ => { }, PresentTerminal, configAuthority.IsTrustedServer,
                 new AuthorityTimeoutPolicy(configuration.ObjectCreationTimeout, configuration.ObjectCreationTimeout, 1),
                 failClosedOnApplyFailure: true, isExpectedClientResult: (request, result) =>
                     string.Equals(request.HeroId, result.HeroId, StringComparison.Ordinal) && request.HitPoints == result.HitPoints));
-        this.playerManager = playerManager;
         messageBroker.Subscribe<HeroHitPointsChangeRequested>(HandleRequested);
     }
 
-    private readonly IPlayerManager playerManager;
-
-    public void Dispose() => route.Dispose();
+    public void Dispose()
+    {
+        messageBroker.Unsubscribe<HeroHitPointsChangeRequested>(HandleRequested);
+        route.Dispose();
+    }
 
     private void HandleRequested(MessagePayload<HeroHitPointsChangeRequested> payload)
     {
         if (ModInformation.IsServer) return;
-        route.Submit(payload.What);
+        var hero = payload.What.Hero;
+        if (hero == null || hero != Hero.MainHero || payload.What.HitPoints < 0 ||
+            payload.What.HitPoints >= hero.HitPoints)
+            return;
+        var party = MobileParty.MainParty;
+        if (party?.Party?.MapEvent == null || !objectManager.TryGetId(party.Party.MapEvent, out var mapEventId))
+            return;
+        route.Submit(new DamageIntent(HeroId(hero), payload.What.HitPoints, hero.HitPoints, mapEventId));
     }
 
     private AuthorityRequestHeader CreateHeader(long requestId)
@@ -64,7 +89,9 @@ public class HeroHitPointsHandler : IHandler
     }
 
     private static string ValidateWireShape(NetworkHeroHitPointsChangeRequest request) =>
-        string.IsNullOrWhiteSpace(request.HeroId) || request.HeroId.Length > 256
+        string.IsNullOrWhiteSpace(request.HeroId) || string.IsNullOrWhiteSpace(request.MapEventId) ||
+        request.HeroId.Length > 256 || request.MapEventId.Length > 256 || request.HitPoints < 0 ||
+        request.HitPoints >= request.ExpectedHitPoints
             ? "hero-target-invalid" : null;
 
     private AuthorityHeaderValidation ValidateHeader(AuthorityRequestHeader header)
@@ -83,28 +110,22 @@ public class HeroHitPointsHandler : IHandler
     private AuthorityServerReply<NetworkHeroHitPointsChangeResult> Execute(
         AuthorityServerContext context, NetworkHeroHitPointsChangeRequest request)
     {
-        if (!objectManager.TryGetObject<MobileParty>(context.Player.MobilePartyId, out var party) || party == null)
+        if (!objectManager.TryGetObject<MobileParty>(context.Player.MobilePartyId, out var party) || party?.Party == null)
             return Reply(context.Header, AuthorityResultStatus.Rejected, request.HeroId, request.HitPoints, "player-party-missing");
         if (!objectManager.TryGetObject<Hero>(request.HeroId, out var hero) || hero == null)
             return Reply(context.Header, AuthorityResultStatus.Rejected, request.HeroId, request.HitPoints, "hero-not-found");
-        if (!OwnsHero(context, party, hero))
+        if (!string.Equals(hero.StringId, context.Player.HeroId, StringComparison.Ordinal))
             return Reply(context.Header, AuthorityResultStatus.Unauthorized, request.HeroId, request.HitPoints, "hero-not-owned");
+        if (party.Party.MapEvent == null || !objectManager.TryGetId(party.Party.MapEvent, out var mapEventId) ||
+            !string.Equals(mapEventId, request.MapEventId, StringComparison.Ordinal))
+            return Reply(context.Header, AuthorityResultStatus.StaleState, request.HeroId, request.HitPoints, "battle-not-current");
+        if (hero.HitPoints != request.ExpectedHitPoints)
+            return Reply(context.Header, AuthorityResultStatus.StaleState, request.HeroId, request.HitPoints, "hit-points-stale");
 
         hero.HitPoints = request.HitPoints;
         if (hero.HitPoints != request.HitPoints)
             return Reply(context.Header, AuthorityResultStatus.ExecutionFailed, hero.StringId, hero.HitPoints, "hit-points-not-applied");
         return Reply(context.Header, AuthorityResultStatus.Accepted, hero.StringId, hero.HitPoints, null, statePublished: true);
-    }
-
-    private static bool OwnsHero(AuthorityServerContext context, MobileParty party, Hero hero)
-    {
-        if (string.Equals(hero.StringId, context.Player.HeroId, StringComparison.Ordinal)) return true;
-        for (int index = 0; index < party.MemberRoster.Count; index++)
-        {
-            var element = party.MemberRoster.GetElementCopyAtIndex(index);
-            if (element.Number > 0 && element.Character?.HeroObject == hero) return true;
-        }
-        return false;
     }
 
     private AuthorityCommitProbeResult ProbeClientCommit(NetworkHeroHitPointsChangeResult result)

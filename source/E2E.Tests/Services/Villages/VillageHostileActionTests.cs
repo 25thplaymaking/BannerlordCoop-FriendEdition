@@ -1446,8 +1446,8 @@ public class VillageHostileActionTests : MapEventTestBase
         Assert.NotNull(mapEventId);
         var playerPartyId = GetPartyBaseId(playerMobilePartyId);
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkRequestJoinBattle(
-            System.Guid.NewGuid().ToString(),
+        client.Call(() => client.Resolve<INetwork>().SendAll(BattleJoinLeaveTestRequest.Join(
+            client,
             mapEventId!,
             playerPartyId,
             BattleSideEnum.Attacker)), MapEventDisabledMethods);
@@ -1893,6 +1893,13 @@ public class VillageHostileActionTests : MapEventTestBase
         var reply = Server.NetworkSentMessages.GetMessages<NetworkJoinBattleReply>().Single();
         Assert.Equal(request.RequestId, reply.RequestId);
         Assert.True(reply.Accepted);
+        var proof = Server.NetworkSentMessages.GetMessages<NetworkAddBattleParty>()
+            .Single(message => message.AuthorityRequestId > 0);
+        Assert.Equal(request.Header.SessionId, proof.SessionId);
+        Assert.Equal(request.Header.RequestId, proof.AuthorityRequestId);
+        Assert.Equal(request.MapEventId, proof.MapEventId);
+        Assert.Equal(request.PartyId, proof.PartyId);
+        Assert.Equal((int)request.Side, proof.Side);
 
         Server.Call(() =>
         {
@@ -2189,8 +2196,8 @@ public class VillageHostileActionTests : MapEventTestBase
         {
             Server.NetworkSentMessages.Clear();
 
-            client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkRequestJoinBattle(
-                System.Guid.NewGuid().ToString(),
+            client.Call(() => client.Resolve<INetwork>().SendAll(BattleJoinLeaveTestRequest.Join(
+                client,
                 raidMapEventId!,
                 joinerPartyId,
                 BattleSideEnum.Attacker)), MapEventDisabledMethods);
@@ -2247,8 +2254,8 @@ public class VillageHostileActionTests : MapEventTestBase
 
         Server.NetworkSentMessages.Clear();
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkRequestJoinBattle(
-            System.Guid.NewGuid().ToString(),
+        client.Call(() => client.Resolve<INetwork>().SendAll(BattleJoinLeaveTestRequest.Join(
+            client,
             raidMapEventId!,
             joinerPartyId,
             BattleSideEnum.Attacker)), MapEventDisabledMethods);
@@ -2279,8 +2286,8 @@ public class VillageHostileActionTests : MapEventTestBase
         var context = CreateSlowRaidDefenderJoinContext();
 
         Server.NetworkSentMessages.Clear();
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkRequestJoinBattle(
-            Guid.NewGuid().ToString(),
+        client.Call(() => client.Resolve<INetwork>().SendAll(BattleJoinLeaveTestRequest.Join(
+            client,
             context.MapEventId,
             context.JoinerPartyId,
             BattleSideEnum.Defender)), MapEventDisabledMethods);
@@ -2564,8 +2571,8 @@ public class VillageHostileActionTests : MapEventTestBase
         var context = CreateSlowRaidDefenderJoinContext(remote, safePassage);
 
         Server.NetworkSentMessages.Clear();
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkRequestJoinBattle(
-            Guid.NewGuid().ToString(),
+        client.Call(() => client.Resolve<INetwork>().SendAll(BattleJoinLeaveTestRequest.Join(
+            client,
             context.MapEventId,
             context.JoinerPartyId,
             BattleSideEnum.Defender)), MapEventDisabledMethods);
@@ -2587,8 +2594,8 @@ public class VillageHostileActionTests : MapEventTestBase
         var context = CreateSlowRaidDefenderJoinContext(coastal: true);
 
         Server.NetworkSentMessages.Clear();
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkRequestJoinBattle(
-            Guid.NewGuid().ToString(),
+        client.Call(() => client.Resolve<INetwork>().SendAll(BattleJoinLeaveTestRequest.Join(
+            client,
             context.MapEventId,
             context.JoinerPartyId,
             BattleSideEnum.Defender)), MapEventDisabledMethods);
@@ -2731,8 +2738,8 @@ public class VillageHostileActionTests : MapEventTestBase
 
         Server.NetworkSentMessages.Clear();
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkRequestJoinBattle(
-            System.Guid.NewGuid().ToString(),
+        client.Call(() => client.Resolve<INetwork>().SendAll(BattleJoinLeaveTestRequest.Join(
+            client,
             mapEventId!,
             joinerPartyId,
             BattleSideEnum.Attacker)), MapEventDisabledMethods);
@@ -2775,8 +2782,8 @@ public class VillageHostileActionTests : MapEventTestBase
 
         Server.NetworkSentMessages.Clear();
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkRequestJoinBattle(
-            System.Guid.NewGuid().ToString(),
+        client.Call(() => client.Resolve<INetwork>().SendAll(BattleJoinLeaveTestRequest.Join(
+            client,
             hostileAction.MapEventId,
             joinerPartyId,
             BattleSideEnum.Attacker)), MapEventDisabledMethods);
@@ -2798,12 +2805,19 @@ public class VillageHostileActionTests : MapEventTestBase
         }
 
         Server.NetworkSentMessages.Clear();
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkRequestLeaveBattle(
-            joinerPartyId)), MapEventDisabledMethods);
+        client.Call(() => client.Resolve<INetwork>().SendAll(BattleJoinLeaveTestRequest.Leave(
+            client, joinerPartyId, hostileAction.MapEventId)), MapEventDisabledMethods);
 
         var left = Server.NetworkSentMessages.GetMessages<NetworkPartyLeftBattle>().Single();
         Assert.Equal(joinerPartyId, left.PartyId);
         Assert.False(left.LeaveSiege);
+        var leaveRequest = client.NetworkSentMessages.GetMessages<NetworkRequestLeaveBattle>().Single();
+        var leaveResult = Server.NetworkSentMessages.GetMessages<NetworkLeaveBattleResult>().Single();
+        Assert.Equal(leaveRequest.Header.SessionId, left.SessionId);
+        Assert.Equal(leaveRequest.Header.RequestId, left.AuthorityRequestId);
+        Assert.Equal(hostileAction.MapEventId, left.MapEventId);
+        Assert.Equal(leaveRequest.Header.RequestId, leaveResult.Header.RequestId);
+        Assert.Equal(AuthorityResultStatus.Accepted, leaveResult.Header.Status);
 
         AssertHostileActionJoinerLeft(Server, hostileAction.MapEventId, hostileAction.AttackerPartyId, joinerPartyId);
         foreach (var leftClient in Clients)

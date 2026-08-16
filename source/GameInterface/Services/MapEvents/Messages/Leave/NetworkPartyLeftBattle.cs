@@ -13,6 +13,9 @@ internal readonly struct NetworkPartyLeftBattle : ICommand
     public readonly bool LeaveSiege;
     [ProtoMember(3)]
     public readonly bool FinishLocalMenus;
+    [ProtoMember(4)] public readonly string SessionId;
+    [ProtoMember(5)] public readonly long AuthorityRequestId;
+    [ProtoMember(6)] public readonly string MapEventId;
 
     public NetworkPartyLeftBattle(
         string partyId,
@@ -22,5 +25,19 @@ internal readonly struct NetworkPartyLeftBattle : ICommand
         PartyId = partyId;
         LeaveSiege = leaveSiege;
         FinishLocalMenus = finishLocalMenus;
+        SessionId = null;
+        AuthorityRequestId = 0;
+        MapEventId = null;
+    }
+
+    public NetworkPartyLeftBattle(string partyId, bool leaveSiege, bool finishLocalMenus,
+        string sessionId, long authorityRequestId, string mapEventId)
+    {
+        PartyId = partyId;
+        LeaveSiege = leaveSiege;
+        FinishLocalMenus = finishLocalMenus;
+        SessionId = sessionId;
+        AuthorityRequestId = authorityRequestId;
+        MapEventId = mapEventId;
     }
 }

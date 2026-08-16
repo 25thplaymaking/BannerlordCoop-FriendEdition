@@ -2129,6 +2129,7 @@ public class MapEventDebugCommands
         if (!TryGetObjectManager(out var objectManager) ||
             !ContainerProvider.TryResolve<IMessageBroker>(out var messageBroker) ||
             !ContainerProvider.TryResolve<IPlayerManager>(out var playerManager) ||
+            !ContainerProvider.TryResolve<IModConfigAuthority>(out var configAuthority) ||
             !ContainerProvider.TryResolve<IMissionMembershipRegistry>(out var missionMembership) ||
             !playerManager.TryGetPeer(fixture.JoiningControllerId, out var joiningPeer))
         {
@@ -2150,8 +2151,12 @@ public class MapEventDebugCommands
             return "Unable to resolve the fixture map event or joining party.";
         }
 
+        if (!configAuthority.TryGetCurrent(out var config))
+            return "The authority configuration is not ready.";
+
         messageBroker.Publish(joiningPeer, new NetworkRequestJoinBattle(
-            Guid.NewGuid().ToString(),
+            new AuthorityRequestHeader(config.ProtocolVersion, config.SessionId,
+                Interlocked.Increment(ref debugBattleStartRequestId), config.Revision),
             fixture.MapEventId,
             fixture.JoiningPlayerPartyId,
             BattleSideEnum.Attacker));
@@ -2410,8 +2415,10 @@ public class MapEventDebugCommands
         var fixture = lateJoinModeFixture;
         if (fixture == null) return true;
 
-        messageBroker.Publish(typeof(MapEventDebugCommands), new NetworkRequestLeaveBattle(fixture.JoiningPlayerPartyId));
-        messageBroker.Publish(typeof(MapEventDebugCommands), new NetworkRequestLeaveBattle(fixture.FirstPlayerPartyId));
+        if (objectManager.TryGetObject<PartyBase>(fixture.JoiningPlayerPartyId, out var joiningParty))
+            messageBroker.Publish(typeof(MapEventDebugCommands), new PlayerLeaveBattleAttempted(joiningParty));
+        if (objectManager.TryGetObject<PartyBase>(fixture.FirstPlayerPartyId, out var firstParty))
+            messageBroker.Publish(typeof(MapEventDebugCommands), new PlayerLeaveBattleAttempted(firstParty));
         if (objectManager.TryGetObject<MapEvent>(fixture.MapEventId, out var mapEvent) && !mapEvent.IsFinalized)
             mapEvent.FinalizeEvent();
         ServerBattleModeArbiter.Release(fixture.MapEventId);

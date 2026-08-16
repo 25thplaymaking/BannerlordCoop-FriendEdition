@@ -242,7 +242,11 @@ public class TroopScoreHitVerticalTests : MissionTestEnvironment
 
         // The leave and finalization paths run normally; only the campaign-map locatable scan is unavailable headlessly.
         Server.Call(
-            () => Server.Resolve<IMessageBroker>().Publish(this, new NetworkRequestLeaveBattle(partyBaseId!)),
+            () =>
+            {
+                Assert.True(Server.ObjectManager.TryGetObject<PartyBase>(partyBaseId!, out var leavingParty));
+                Server.Resolve<IMessageBroker>().Publish(this, new PlayerLeaveBattleAttempted(leavingParty));
+            },
             new[] { AccessTools.Method(typeof(MapEvent), "ResetUnsuitablePartiesThatWereTargetingThisMapEvent") });
 
         var messages = Server.NetworkSentMessages.Messages;

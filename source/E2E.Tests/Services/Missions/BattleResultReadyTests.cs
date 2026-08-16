@@ -4,6 +4,7 @@ using Common.Network.Messages;
 using Coop.Core.Server.Services.Instances;
 using Coop.Core.Server.Services.Instances.Handlers;
 using E2E.Tests.Environment.Instance;
+using E2E.Tests.Util;
 using GameInterface.Services.MapEvents;
 using GameInterface.Services.MapEvents.Messages;
 using GameInterface.Services.MapEvents.Messages.Start;
@@ -142,8 +143,8 @@ public class BattleResultReadyTests : MissionTestEnvironment
         });
 
         clients[1].Call(() => clients[1].Resolve<INetwork>().SendAll(
-            new NetworkRequestJoinBattle(
-                Guid.NewGuid().ToString(),
+            BattleJoinLeaveTestRequest.Join(
+                clients[1],
                 mapEventId,
                 joinerPartyBaseId!,
                 BattleSideEnum.Attacker)));
@@ -404,8 +405,8 @@ public class BattleResultReadyTests : MissionTestEnvironment
         var client = Clients.First();
         RegisterPeer(client, "joining-player");
         client.Call(() => client.Resolve<INetwork>().SendAll(
-            new NetworkRequestJoinBattle(
-                Guid.NewGuid().ToString(),
+            BattleJoinLeaveTestRequest.Join(
+                client,
                 mapEventId,
                 joinerPartyId!,
                 BattleSideEnum.Attacker)));

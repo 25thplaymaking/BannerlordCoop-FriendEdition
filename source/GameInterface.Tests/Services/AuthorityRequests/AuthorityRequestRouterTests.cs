@@ -74,6 +74,36 @@ public sealed class AuthorityRequestRouterTests
     }
 
     [Fact]
+    public void Update_PollsBootstrapAndCommandRoutesFromTheMainLoop()
+    {
+        using var broker = new MessageBroker();
+        using var network = new TestNetwork();
+        var server = network.CreatePeer();
+        using var router = new AuthorityRequestRouter(broker, network, new Mock<IPlayerManager>().Object);
+        using var route = router.Register(CreateRoute(() => AuthorityCommitProbeResult.Pending,
+            new AuthorityTimeoutPolicy(TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1), 1)));
+
+        route.Submit("intent");
+        Thread.Sleep(10);
+        router.Update(TimeSpan.Zero);
+
+        Assert.Equal(2, network.GetPeerMessagesFromType<TestRequest>(server).Count());
+    }
+
+    [Fact]
+    public void IsRegistered_RequiresTheExactRouteIdAndKind()
+    {
+        using var broker = new MessageBroker();
+        using var network = new TestNetwork();
+        using var router = new AuthorityRequestRouter(broker, network, new Mock<IPlayerManager>().Object);
+        using var route = router.Register(CreateRoute(() => AuthorityCommitProbeResult.Pending));
+
+        Assert.True(router.IsRegistered("test.route", AuthorityRouteKind.Command));
+        Assert.False(router.IsRegistered("test.route", AuthorityRouteKind.BootstrapQuery));
+        Assert.False(router.IsRegistered("unknown", AuthorityRouteKind.Command));
+    }
+
+    [Fact]
     public void Rejection_CompletesAndPresentsExactlyOnce()
     {
         using var broker = new MessageBroker();

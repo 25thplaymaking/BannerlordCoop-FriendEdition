@@ -15,12 +15,14 @@ using System.Threading;
 namespace GameInterface.Services.AuthorityRequests;
 
 /// <summary>Registers typed authority routes. It deliberately has no arbitrary RPC entrypoint.</summary>
-public interface IAuthorityRequestRouter : IGameAbstraction, IDisposable
+public interface IAuthorityRequestRouter : IGameAbstraction, IUpdateable, IDisposable
 {
     IAuthorityRouteHandle<TIntent, TResult> Register<TIntent, TRequest, TResult>(
         AuthorityRoute<TIntent, TRequest, TResult> route)
         where TRequest : IMessage
         where TResult : IMessage;
+
+    bool IsRegistered(string routeId, AuthorityRouteKind kind);
 }
 
 public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
@@ -81,6 +83,21 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
         return registration;
     }
 
+    public bool IsRegistered(string routeId, AuthorityRouteKind kind) =>
+        !string.IsNullOrWhiteSpace(routeId) && !disposed && registrations
+            .OfType<IAuthorityRegistration>()
+            .Any(registration => string.Equals(registration.RouteId, routeId, StringComparison.Ordinal) &&
+                                 registration.Kind == kind);
+
+    public int Priority => UpdatePriority.MainLoop.GameThread - 1;
+
+    public void Update(TimeSpan frameTime)
+    {
+        if (disposed || ModInformation.IsServer) return;
+        foreach (var registration in registrations.OfType<IAuthorityRegistration>().ToArray())
+            registration.Poll();
+    }
+
     public void Dispose()
     {
         if (disposed) return;
@@ -102,6 +119,8 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
     private interface IAuthorityRegistration
     {
         string RouteId { get; }
+        AuthorityRouteKind Kind { get; }
+        void Poll();
     }
 
     private sealed class RouteRegistration<TIntent, TRequest, TResult> :
@@ -151,6 +170,7 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
         }
 
         public string RouteId => route.RouteId;
+        public AuthorityRouteKind Kind => route.Kind;
         public AuthorityRequestLifecycle Lifecycle => lifecycle;
 
         public AuthorityRequestTicket<TResult> Submit(

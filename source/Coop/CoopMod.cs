@@ -16,6 +16,7 @@ using GameInterface.Services.Modules.Handlers;
 using GameInterface.Services.Diagnostics;
 using GameInterface.Services.Chat;
 using GameInterface.Services.MapEvents.PlayerPartyInteractions;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Separatism;
 using GameInterface.Services.Tournaments.UI;
 using GameInterface.Services.UI;
@@ -471,6 +472,8 @@ namespace Coop
             Coop = new CoopartiveMultiplayerExperience(isServer, CrashDiagnostics.SetPhase);
 
             Updateables.Add(GameThread.Instance);
+            if (ContainerProvider.TryResolve<IAuthorityRequestRouter>(out var authorityRequestRouter))
+                Updateables.Add(authorityRequestRouter);
 
 #if DEBUG
             if (isAutoConnect)

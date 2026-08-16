@@ -77,9 +77,10 @@ public sealed class SeparatismConfigurationSyncTests : IDisposable
         ModConfigSnapshot accepted = null;
         Server.Call(() => Assert.True(
             Server.Resolve<IModConfigAuthority>().TryGetCurrent(out accepted)));
-        Server.SimulateMessage(client.NetPeer, new NetworkRequestServerModConfig(accepted));
+        Server.SimulateMessage(client.NetPeer, new NetworkRequestServerModConfig(HeaderFor(accepted, 1)));
 
-        var sent = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkLoadModConfig>());
+        var sent = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkModConfigQueryResult>());
+        Assert.Equal(AuthorityResultStatus.Accepted, sent.Status);
         Assert.True(sent.Snapshot.ModOptions.Separatism.ChaosStartEnabled);
         Assert.Equal(1f, sent.Snapshot.ModOptions.Separatism.DailyLordRebellionChance);
         Assert.False(sent.Snapshot.ModOptions.Separatism.SettlementRebellionsEnabled);
@@ -150,9 +151,10 @@ public sealed class SeparatismConfigurationSyncTests : IDisposable
         Server.Call(() => Assert.True(
             Server.Resolve<IModConfigAuthority>().TryGetCurrent(out accepted)));
 
-        Server.SimulateMessage(client.NetPeer, new NetworkRequestServerModConfig(accepted));
+        Server.SimulateMessage(client.NetPeer, new NetworkRequestServerModConfig(HeaderFor(accepted, 1)));
 
-        Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkLoadModConfig>());
+        var unauthorized = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkModConfigQueryResult>());
+        Assert.Equal(AuthorityResultStatus.Unauthorized, unauthorized.Status);
         Assert.NotEqual(LiteNetLib.ConnectionState.ShutdownRequested, client.NetPeer.ConnectionState);
 
         Server.Call(() =>
@@ -166,9 +168,10 @@ public sealed class SeparatismConfigurationSyncTests : IDisposable
                 "joining-character")));
             players.SetPeer("joining-client", client.NetPeer);
         });
-        Server.SimulateMessage(client.NetPeer, new NetworkRequestServerModConfig(accepted));
+        Server.SimulateMessage(client.NetPeer, new NetworkRequestServerModConfig(HeaderFor(accepted, 1)));
 
-        Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkLoadModConfig>());
+        Assert.Contains(Server.NetworkSentMessages.GetMessages<NetworkModConfigQueryResult>(),
+            result => result.Status == AuthorityResultStatus.Accepted);
         Assert.NotEqual(LiteNetLib.ConnectionState.ShutdownRequested, client.NetPeer.ConnectionState);
     }
 
@@ -240,4 +243,7 @@ public sealed class SeparatismConfigurationSyncTests : IDisposable
             CampaignOptions.Difficulty.VeryEasy,
             false,
             CampaignOptions.Difficulty.VeryEasy);
+
+    private static AuthorityRequestHeader HeaderFor(ModConfigSnapshot snapshot, long requestId) =>
+        new(snapshot.ProtocolVersion, snapshot.SessionId, requestId, snapshot.Revision);
 }

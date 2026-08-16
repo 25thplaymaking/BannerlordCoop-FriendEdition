@@ -4,17 +4,26 @@ using Common.Network.Messages;
 using Coop.Tests.Mocks;
 using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Players;
+using GameInterface.Services.Players.Data;
 using LiteNetLib;
 using Moq;
 using System;
 using System.Linq;
+using System.Runtime.ExceptionServices;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using Xunit;
 
 namespace GameInterface.Tests.Services.AuthorityRequests;
 
+[Collection(ModInformationRoleCollection.Name)]
 public sealed class AuthorityRequestRouterTests
 {
+    static AuthorityRequestRouterTests()
+    {
+        RuntimeHelpers.RunModuleConstructor(typeof(TestNetwork).Module.ModuleHandle);
+    }
+
     [Fact]
     public void Submit_CorrelatesOnlyMatchingTrustedResult_AndWaitsForReplicaApply()
     {
@@ -145,10 +154,219 @@ public sealed class AuthorityRequestRouterTests
         Assert.Equal("commit-probe-failed", ticket.Outcome.ReasonCode);
     }
 
+    [Fact]
+    public void SessionMismatch_CancelsEveryPendingTicket()
+    {
+        using var broker = new MessageBroker();
+        using var network = new TestNetwork();
+        var server = network.CreatePeer();
+        using var router = new AuthorityRequestRouter(broker, network, new Mock<IPlayerManager>().Object);
+        using var route = router.Register(CreateRoute(() => AuthorityCommitProbeResult.Pending));
+
+        var first = route.Submit("first");
+        var second = route.Submit("second");
+        broker.Publish(server, new TestResult(new AuthorityResultHeader("replacement", first.RequestId,
+            AuthorityResultStatus.Rejected, 0, "session-replaced")));
+
+        Assert.Equal(AuthorityClientCompletion.Cancelled, first.Outcome.Completion);
+        Assert.Equal(AuthorityClientCompletion.Cancelled, second.Outcome.Completion);
+    }
+
+    [Fact]
+    public void PresentationCallback_RunsOnTheInitializedGameThread()
+    {
+        Assert.True(GameThread.Instance.IsInitialized, "game-loop pump was not initialized");
+        using var broker = new MessageBroker();
+        using var network = new TestNetwork();
+        var server = network.CreatePeer();
+        using var router = new AuthorityRequestRouter(broker, network, new Mock<IPlayerManager>().Object);
+        bool presentedOnGameThread = false;
+        using var route = router.Register(CreateRoute(() => AuthorityCommitProbeResult.Pending,
+            presented: _ => presentedOnGameThread = GameThread.Instance.IsGameThread));
+
+        var ticket = route.Submit("intent");
+        broker.Publish(server, new TestResult(new AuthorityResultHeader("session", ticket.RequestId,
+            AuthorityResultStatus.Rejected, 0, "denied")));
+
+        Assert.True(presentedOnGameThread);
+    }
+
+    [Theory]
+    [InlineData(AuthorityResultStatus.Unavailable)]
+    [InlineData(AuthorityResultStatus.StaleSession)]
+    [InlineData(AuthorityResultStatus.StaleState)]
+    public void ServerHeaderFailure_UsesTheExplicitTerminalStatus(AuthorityResultStatus status)
+    {
+        RunAsServer(() =>
+        {
+            using var broker = new MessageBroker();
+            using var network = new TestNetwork();
+            var peer = network.CreatePeer();
+            var manager = AuthenticatedManager(peer);
+            using var router = new AuthorityRequestRouter(broker, network, manager.Object);
+            using var route = router.Register(CreateRoute(
+                () => AuthorityCommitProbeResult.Pending,
+                validateHeader: _ => AuthorityHeaderValidation.Reject(status, "server-not-ready")));
+
+            broker.Publish(peer, new TestRequest(new AuthorityRequestHeader(1, "session", 1, 2), "intent"));
+
+            var reply = Assert.Single(network.GetPeerMessagesFromType<TestResult>(peer));
+            Assert.Equal(status, reply.Header.Status);
+            Assert.Equal("server-not-ready", reply.Header.ReasonCode);
+        });
+    }
+
+    [Fact]
+    public void FullInFlightServerLedger_ReturnsUnavailableWithoutEvictingTheOriginalRequest()
+    {
+        RunAsServer(() =>
+        {
+            using var broker = new MessageBroker();
+            using var network = new TestNetwork();
+            var peer = network.CreatePeer();
+            var manager = AuthenticatedManager(peer);
+            using var router = new AuthorityRequestRouter(broker, network, manager.Object,
+                replayLedgerCapacityPerPeer: 1);
+            using var route = router.Register(CreateRoute(() => AuthorityCommitProbeResult.Pending,
+                execute: (_, request) =>
+                {
+                    if (request.Header.RequestId == 1)
+                        broker.Publish(peer, new TestRequest(new AuthorityRequestHeader(1, "session", 2, 2), "second"));
+                    return Accepted(request.Header);
+                }));
+
+            broker.Publish(peer, new TestRequest(new AuthorityRequestHeader(1, "session", 1, 2), "first"));
+
+            var replies = network.GetPeerMessagesFromType<TestResult>(peer).ToArray();
+            Assert.Equal(2, replies.Length);
+            Assert.Contains(replies, reply => reply.Header.RequestId == 1 &&
+                reply.Header.Status == AuthorityResultStatus.Accepted);
+            Assert.Contains(replies, reply => reply.Header.RequestId == 2 &&
+                reply.Header.Status == AuthorityResultStatus.Unavailable &&
+                reply.Header.ReasonCode == "authority-overloaded");
+        });
+    }
+
+    [Fact]
+    public void CompletedReplay_IsCached_AndConflictDoesNotExecuteAgain()
+    {
+        RunAsServer(() =>
+        {
+            using var broker = new MessageBroker();
+            using var network = new TestNetwork();
+            var peer = network.CreatePeer();
+            var manager = AuthenticatedManager(peer);
+            int executions = 0;
+            using var router = new AuthorityRequestRouter(broker, network, manager.Object);
+            using var route = router.Register(CreateRoute(() => AuthorityCommitProbeResult.Pending,
+                execute: (_, request) =>
+                {
+                    executions++;
+                    return Accepted(request.Header);
+                }));
+            var request = new TestRequest(new AuthorityRequestHeader(1, "session", 1, 2), "first");
+
+            broker.Publish(peer, request);
+            broker.Publish(peer, request);
+            broker.Publish(peer, new TestRequest(request.Header, "conflict"));
+
+            Assert.Equal(1, executions);
+            Assert.Equal(2, network.GetPeerMessagesFromType<TestResult>(peer).Count());
+        });
+    }
+
+    [Fact]
+    public void BootstrapRoute_EndsAtReplySentWithoutCommandMutationPhases()
+    {
+        RunAsServer(() =>
+        {
+            using var broker = new MessageBroker();
+            using var network = new TestNetwork();
+            var peer = network.CreatePeer();
+            var manager = AuthenticatedManager(peer);
+            using var router = new AuthorityRequestRouter(broker, network, manager.Object);
+            using var route = router.Register(CreateBootstrapRoute());
+
+            broker.Publish(peer, new BootstrapTestRequest(new AuthorityRequestHeader(1, "session", 1, 2), "query"));
+
+            Assert.True(route.Lifecycle.TryGetSnapshot("1", out var snapshot));
+            Assert.Equal(AuthorityRequestPhase.ReplySent, snapshot.Phase);
+            Assert.Equal(AuthorityResultStatus.Accepted.ToString(), snapshot.Outcome);
+        });
+    }
+
+    [Fact]
+    public void UnauthorizedRequest_DoesNotReserveReplayIdBeforeLaterAuthenticatedExecution()
+    {
+        RunAsServer(() =>
+        {
+            using var broker = new MessageBroker();
+            using var network = new TestNetwork();
+            var peer = network.CreatePeer();
+            var manager = new Mock<IPlayerManager>();
+            Player player = new Player("controller", "hero", "party", "clan", "character");
+            manager.Setup(m => m.TryGetPlayer(peer, out player)).Returns(false);
+            int executions = 0;
+            using var router = new AuthorityRequestRouter(broker, network, manager.Object);
+            using var route = router.Register(CreateRoute(() => AuthorityCommitProbeResult.Pending,
+                execute: (_, request) =>
+                {
+                    executions++;
+                    return Accepted(request.Header);
+                }));
+            var request = new TestRequest(new AuthorityRequestHeader(1, "session", 1, 2), "intent");
+
+            broker.Publish(peer, request);
+            manager.Setup(m => m.TryGetPlayer(peer, out player)).Returns(true);
+            broker.Publish(peer, request);
+
+            Assert.Equal(1, executions);
+            Assert.Contains(network.GetPeerMessagesFromType<TestResult>(peer),
+                reply => reply.Header.Status == AuthorityResultStatus.Unauthorized);
+            Assert.Contains(network.GetPeerMessagesFromType<TestResult>(peer),
+                reply => reply.Header.Status == AuthorityResultStatus.Accepted);
+        });
+    }
+
+    [Fact]
+    public void ExecutorAndPublicationFailures_ReturnExecutionFailed()
+    {
+        RunAsServer(() =>
+        {
+            using var broker = new MessageBroker();
+            using var network = new TestNetwork();
+            var peer = network.CreatePeer();
+            var manager = AuthenticatedManager(peer);
+            using (var router = new AuthorityRequestRouter(broker, network, manager.Object))
+            using (router.Register(CreateRoute(() => AuthorityCommitProbeResult.Pending,
+                execute: (_, __) => throw new InvalidOperationException("boom"))))
+            {
+                broker.Publish(peer, new TestRequest(new AuthorityRequestHeader(1, "session", 1, 2), "throw"));
+                Assert.Equal(AuthorityResultStatus.ExecutionFailed,
+                    Assert.Single(network.GetPeerMessagesFromType<TestResult>(peer)).Header.Status);
+            }
+
+            network.Clear();
+            using (var router = new AuthorityRequestRouter(broker, network, manager.Object))
+            using (router.Register(CreateRoute(() => AuthorityCommitProbeResult.Pending,
+                execute: (_, request) => new AuthorityServerReply<TestResult>(
+                    new TestResult(new AuthorityResultHeader("session", request.Header.RequestId,
+                        AuthorityResultStatus.Accepted, 3, "")), false))))
+            {
+                broker.Publish(peer, new TestRequest(new AuthorityRequestHeader(1, "session", 2, 2), "unpublished"));
+                var publicationReply = Assert.Single(network.GetPeerMessagesFromType<TestResult>(peer));
+                Assert.Equal(AuthorityResultStatus.ExecutionFailed, publicationReply.Header.Status);
+                Assert.Equal("publication-failed", publicationReply.Header.ReasonCode);
+            }
+        });
+    }
+
     private static AuthorityRoute<string, TestRequest, TestResult> CreateRoute(
         Func<AuthorityCommitProbeResult> probe,
         AuthorityTimeoutPolicy timeout = null,
-        Action<AuthorityClientOutcome<TestResult>> presented = null) =>
+        Action<AuthorityClientOutcome<TestResult>> presented = null,
+        Func<AuthorityRequestHeader, AuthorityHeaderValidation> validateHeader = null,
+        Func<AuthorityServerContext, TestRequest, AuthorityServerReply<TestResult>> execute = null) =>
         AuthorityRoute<string, TestRequest, TestResult>.Define(
             "test.route", AuthorityRouteKind.Command,
             id => new AuthorityRequestHeader(1, "session", id, 2),
@@ -157,17 +375,63 @@ public sealed class AuthorityRequestRouterTests
             result => result.Header,
             _ => null,
             request => request.Intent,
-            header => header.SessionId == "session" && header.ExpectedRevision == 2
+            validateHeader ?? (header => header.SessionId == "session" && header.ExpectedRevision == 2
                 ? AuthorityHeaderValidation.Valid
-                : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale"),
-            (_, request) => new AuthorityServerReply<TestResult>(new TestResult(new AuthorityResultHeader(
-                request.Header.SessionId, request.Header.RequestId, AuthorityResultStatus.Accepted, 3, "")), true),
+                : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale")),
+            execute ?? ((_, request) => Accepted(request.Header)),
             (header, status, reason) => new TestResult(new AuthorityResultHeader(header.SessionId, header.RequestId, status, 0, reason)),
             _ => probe(),
             _ => { },
             presented ?? (_ => { }),
             source => source is NetPeer,
             timeout ?? AuthorityTimeoutPolicy.CampaignMutation);
+
+    private static AuthorityServerReply<TestResult> Accepted(AuthorityRequestHeader header) =>
+        new AuthorityServerReply<TestResult>(new TestResult(new AuthorityResultHeader(
+            header.SessionId, header.RequestId, AuthorityResultStatus.Accepted, 3, "")), true);
+
+    private static AuthorityRoute<string, BootstrapTestRequest, TestResult> CreateBootstrapRoute() =>
+        AuthorityRoute<string, BootstrapTestRequest, TestResult>.Define(
+            "test.bootstrap", AuthorityRouteKind.BootstrapQuery,
+            id => new AuthorityRequestHeader(1, "session", id, 2),
+            (intent, header) => new BootstrapTestRequest(header, intent),
+            request => request.Header,
+            result => result.Header,
+            _ => null,
+            request => request.Intent,
+            header => header.SessionId == "session" && header.ExpectedRevision == 2
+                ? AuthorityHeaderValidation.Valid
+                : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale"),
+            (_, request) => Accepted(request.Header),
+            (header, status, reason) => new TestResult(new AuthorityResultHeader(
+                header.SessionId, header.RequestId, status, 0, reason)),
+            _ => AuthorityCommitProbeResult.Applied,
+            _ => { },
+            _ => { },
+            source => source is NetPeer,
+            AuthorityTimeoutPolicy.BootstrapQuery);
+
+    private static Mock<IPlayerManager> AuthenticatedManager(NetPeer peer)
+    {
+        var manager = new Mock<IPlayerManager>();
+        Player player = new Player("controller", "hero", "party", "clan", "character");
+        manager.Setup(m => m.TryGetPlayer(peer, out player)).Returns(true);
+        return manager;
+    }
+
+    private static void RunAsServer(Action action)
+    {
+        bool wasServer = ModInformation.IsServer;
+        Exception failure = null;
+        GameThread.Run(() =>
+        {
+            ModInformation.IsServer = true;
+            try { action(); }
+            catch (Exception exception) { failure = exception; }
+            finally { ModInformation.IsServer = wasServer; }
+        }, blocking: true, label: nameof(RunAsServer));
+        if (failure != null) ExceptionDispatchInfo.Capture(failure).Throw();
+    }
 }
 
 [AuthorityRoute("test.route", AuthorityRouteKind.Command)]
@@ -187,4 +451,17 @@ internal readonly struct TestResult : IMessage
 {
     public TestResult(AuthorityResultHeader header) => Header = header;
     public AuthorityResultHeader Header { get; }
+}
+
+[AuthorityRoute("test.bootstrap", AuthorityRouteKind.BootstrapQuery)]
+internal readonly struct BootstrapTestRequest : IMessage
+{
+    public BootstrapTestRequest(AuthorityRequestHeader header, string intent)
+    {
+        Header = header;
+        Intent = intent;
+    }
+
+    public AuthorityRequestHeader Header { get; }
+    public string Intent { get; }
 }

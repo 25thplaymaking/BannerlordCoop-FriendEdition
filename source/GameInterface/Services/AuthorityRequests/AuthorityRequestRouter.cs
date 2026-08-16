@@ -30,15 +30,23 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
     private readonly IMessageBroker messageBroker;
     private readonly INetwork network;
     private readonly IPlayerManager playerManager;
+    private readonly int replayLedgerCapacityPerPeer;
     private readonly List<IDisposable> registrations = new List<IDisposable>();
     private long nextRequestId;
     private bool disposed;
 
-    public AuthorityRequestRouter(IMessageBroker messageBroker, INetwork network, IPlayerManager playerManager)
+    public AuthorityRequestRouter(
+        IMessageBroker messageBroker,
+        INetwork network,
+        IPlayerManager playerManager,
+        int replayLedgerCapacityPerPeer = 256)
     {
         this.messageBroker = messageBroker ?? throw new ArgumentNullException(nameof(messageBroker));
         this.network = network ?? throw new ArgumentNullException(nameof(network));
         this.playerManager = playerManager ?? throw new ArgumentNullException(nameof(playerManager));
+        if (replayLedgerCapacityPerPeer < 1)
+            throw new ArgumentOutOfRangeException(nameof(replayLedgerCapacityPerPeer));
+        this.replayLedgerCapacityPerPeer = replayLedgerCapacityPerPeer;
     }
 
     public IAuthorityRouteHandle<TIntent, TResult> Register<TIntent, TRequest, TResult>(
@@ -67,7 +75,8 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             messageBroker,
             network,
             playerManager,
-            NextRequestId);
+            NextRequestId,
+            replayLedgerCapacityPerPeer);
         registrations.Add(registration);
         return registration;
     }
@@ -106,7 +115,7 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
         private readonly IPlayerManager playerManager;
         private readonly Func<long> nextRequestId;
         private readonly AuthorityRequestLifecycle lifecycle;
-        private readonly AuthorityReplayLedger<TResult> replayLedger = new AuthorityReplayLedger<TResult>();
+        private readonly AuthorityReplayLedger<TResult> replayLedger;
         private readonly Dictionary<long, PendingRequest> pending = new Dictionary<long, PendingRequest>();
         private readonly object sync = new object();
         private readonly Action<MessagePayload<TRequest>> requestHandler;
@@ -120,13 +129,15 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             IMessageBroker messageBroker,
             INetwork network,
             IPlayerManager playerManager,
-            Func<long> nextRequestId)
+            Func<long> nextRequestId,
+            int replayLedgerCapacityPerPeer)
         {
             this.route = route;
             this.messageBroker = messageBroker;
             this.network = network;
             this.playerManager = playerManager;
             this.nextRequestId = nextRequestId;
+            replayLedger = new AuthorityReplayLedger<TResult>(replayLedgerCapacityPerPeer);
             lifecycle = new AuthorityRequestLifecycle(route.RouteId, Logger);
 
             requestHandler = HandleRequest;
@@ -465,14 +476,15 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
                     lifecycle.PublicationFailed(header.RequestId.ToString(), "accepted-without-publication");
                     result = route.CreateTerminalResult(header, AuthorityResultStatus.ExecutionFailed, "publication-failed");
                 }
-                else if (resultHeader.Status == AuthorityResultStatus.Accepted)
+                else if (resultHeader.Status == AuthorityResultStatus.Accepted && route.Kind == AuthorityRouteKind.Command)
                 {
                     lifecycle.MutationCommitted(header.RequestId.ToString(), "accepted");
                     lifecycle.StatePublished(header.RequestId.ToString(), resultHeader.CommittedRevision.ToString());
                 }
                 else
                 {
-                    lifecycle.ServerRejected(header.RequestId.ToString(), resultHeader.ReasonCode);
+                    if (resultHeader.Status != AuthorityResultStatus.Accepted)
+                        lifecycle.ServerRejected(header.RequestId.ToString(), resultHeader.ReasonCode);
                 }
             }
             catch (Exception exception)

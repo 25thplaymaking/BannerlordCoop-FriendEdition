@@ -13,6 +13,10 @@ using E2E.Tests.Environment.Instance;
 using E2E.Tests.Services.MapEvents;
 using E2E.Tests.Util;
 using GameInterface.Services.Entity;
+using GameInterface.Configuration;
+using GameInterface.Services.CampaignService.Handlers;
+using GameInterface.Services.CampaignService.Messages;
+using GameInterface.Services.GameState.Messages;
 using GameInterface.Services.Heroes.Enum;
 using GameInterface.Services.Heroes.Interaces;
 using GameInterface.Services.MapEventComponents.Messages;
@@ -35,6 +39,7 @@ using HarmonyLib;
 using Missions.Messages;
 using Moq;
 using System.Net;
+using System.Reflection;
 using System.Threading;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.CharacterDevelopment;
@@ -60,6 +65,14 @@ public class VillageHostileActionTests : MapEventTestBase
 
     public VillageHostileActionTests(ITestOutputHelper output) : base(output)
     {
+        foreach (var client in Clients)
+        {
+            client.Call(() => Assert.True(client.Resolve<IModConfigAuthority>().TryBindTrustedServer(
+                Server.NetPeer,
+                out var failure), failure));
+        }
+        Server.Call(() => Server.Resolve<LoadModConfigHandler>().Handle_CampaignReady(
+            new MessagePayload<CampaignReady>(this, new CampaignReady())));
     }
 
     [Fact]
@@ -589,8 +602,9 @@ public class VillageHostileActionTests : MapEventTestBase
 
         Server.NetworkSentMessages.Clear();
 
+        var header = CreateMapEventRequestHeader(1);
         client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkRequestCreateMapEvent(
-            "RaidRequest",
+            header,
             attackerPartyId,
             target.SettlementPartyId,
             RaidFlags(),
@@ -633,8 +647,9 @@ public class VillageHostileActionTests : MapEventTestBase
         RequestConversation(secondClient, secondPartyId, aiPartyId);
         Server.NetworkSentMessages.Clear();
 
+        var firstHeader = CreateMapEventRequestHeader(1);
         firstClient.Call(() => firstClient.Resolve<INetwork>().SendAll(
-            new NetworkRequestCreateMapEvent("FirstBattle", firstPartyId, aiPartyId, default, null)), MapEventDisabledMethods);
+            new NetworkRequestCreateMapEvent(firstHeader, firstPartyId, aiPartyId, default, null)), MapEventDisabledMethods);
         var firstReply = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkMapEventCreated>());
         Server.NetworkSentMessages.Clear();
         bool? reservationPrecededJoinCommit = null;
@@ -647,9 +662,10 @@ public class VillageHostileActionTests : MapEventTestBase
             reservationPrecededJoinCommit = secondParty.MapEventSide == null;
         });
 
+        var overlapHeader = CreateMapEventRequestHeader(2);
         secondClient.Call(() => secondClient.Resolve<INetwork>().SendAll(
             new NetworkRequestCreateMapEvent(
-                "OverlappingBattle",
+                overlapHeader,
                 secondPartyId,
                 aiPartyId,
                 default,
@@ -677,9 +693,10 @@ public class VillageHostileActionTests : MapEventTestBase
         RequestConversation(secondClient, secondPartyId, aiPartyId);
         Server.NetworkSentMessages.Clear();
 
+        var staleHeader = CreateMapEventRequestHeader(3);
         secondClient.Call(() => secondClient.Resolve<INetwork>().SendAll(
             new NetworkRequestCreateMapEvent(
-                "StaleBattle",
+                staleHeader,
                 secondPartyId,
                 aiPartyId,
                 default,
@@ -731,7 +748,10 @@ public class VillageHostileActionTests : MapEventTestBase
             client.Resolve<IVillageHostileActionInterface>().BeginHostileActionPresentation(action);
         }, disabledMethods);
 
-        var request = client.NetworkSentMessages.GetMessages<NetworkRequestCreateMapEvent>().Single();
+        var requests = client.NetworkSentMessages.GetMessages<NetworkRequestCreateMapEvent>().ToArray();
+        Assert.Equal(2, requests.Length);
+        Assert.Equal(requests[0].AuthorityRequestId, requests[1].AuthorityRequestId);
+        var request = requests[0];
         Assert.Equal(attackerPartyId, request.AttackerId);
         Assert.Equal(target.SettlementPartyId, request.DefenderId);
         Assert.Equal(expectedForceRaid, request.ForceRaid);
@@ -3429,14 +3449,32 @@ public class VillageHostileActionTests : MapEventTestBase
     {
         instance.Call(() =>
         {
-            var config = new Mock<INetworkConfig>();
-            config.SetupGet(x => x.ObjectCreationTimeout).Returns(timeout);
-
             var coordinator = instance.Resolve<MapEventCreationCoordinator>();
-            var configurationField = AccessTools.Field(typeof(MapEventCreationCoordinator), "configuration");
-            Assert.NotNull(configurationField);
-            configurationField.SetValue(coordinator, config.Object);
+            var handleField = AccessTools.Field(typeof(MapEventCreationCoordinator), "mapEventRoute");
+            Assert.NotNull(handleField);
+            object handle = handleField.GetValue(coordinator);
+            var routeField = handle.GetType().GetField("route", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(routeField);
+            object route = routeField.GetValue(handle);
+            object policy = route.GetType().GetProperty("TimeoutPolicy")?.GetValue(route);
+            Assert.NotNull(policy);
+            var responseTimeout = policy.GetType().GetField("<ResponseTimeout>k__BackingField",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var applyTimeout = policy.GetType().GetField("<ApplyTimeout>k__BackingField",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(responseTimeout);
+            Assert.NotNull(applyTimeout);
+            responseTimeout.SetValue(policy, timeout);
+            applyTimeout.SetValue(policy, timeout);
         });
+    }
+
+    private AuthorityRequestHeader CreateMapEventRequestHeader(long requestId)
+    {
+        GameInterface.Configuration.ModConfigSnapshot snapshot = null;
+        Server.Call(() => Assert.True(Server.Resolve<GameInterface.Configuration.IModConfigAuthority>()
+            .TryGetCurrent(out snapshot)));
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, requestId, snapshot.Revision);
     }
 
     private void AssertCanStartHostileAction(string mobilePartyId, string settlementId, VillageHostileAction action)

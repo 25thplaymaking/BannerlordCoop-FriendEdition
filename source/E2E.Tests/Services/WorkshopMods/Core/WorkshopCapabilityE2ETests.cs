@@ -71,10 +71,15 @@ public sealed class WorkshopCapabilityE2ETests : IDisposable
 
         Server.SimulateMessage(
             client.NetPeer,
-            new NetworkRequestWorkshopCapabilities(current.Snapshot));
+            new NetworkRequestWorkshopCapabilities(new AuthorityRequestHeader(
+                current.Snapshot.ProtocolVersion,
+                current.Snapshot.SessionId,
+                requestId: 1,
+                current.Snapshot.Revision)));
 
-        NetworkWorkshopCapabilities response =
-            Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkWorkshopCapabilities>());
+        NetworkWorkshopCapabilityQueryResult response =
+            Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkWorkshopCapabilityQueryResult>());
+        Assert.Equal(AuthorityResultStatus.Accepted, response.Status);
         Assert.Equal(current.Snapshot.Sha256, response.Snapshot.Sha256);
     }
 

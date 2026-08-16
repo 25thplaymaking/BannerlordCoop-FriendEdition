@@ -264,6 +264,7 @@ public sealed class AuthorityRequestLifecycle
                     next == AuthorityRequestPhase.ServerResolved || IsTerminal(next);
             case AuthorityRequestPhase.ServerAdmitted:
                 return next == AuthorityRequestPhase.MutationCommitted ||
+                    next == AuthorityRequestPhase.ReplySent ||
                     next == AuthorityRequestPhase.ServerRejected || IsTerminal(next);
             case AuthorityRequestPhase.MutationCommitted:
                 return next == AuthorityRequestPhase.StatePublished || IsTerminal(next);

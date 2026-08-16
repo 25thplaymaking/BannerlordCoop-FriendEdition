@@ -6,6 +6,10 @@ using E2E.Tests.Environment;
 using E2E.Tests.Environment.Instance;
 using E2E.Tests.Util;
 using GameInterface.Services.Entity;
+using GameInterface.Configuration;
+using GameInterface.Services.CampaignService.Handlers;
+using GameInterface.Services.CampaignService.Messages;
+using GameInterface.Services.GameState.Messages;
 using GameInterface.Services.MapEvents;
 using GameInterface.Services.MapEvents.Handlers;
 using GameInterface.Services.MapEvents.Messages.Start;
@@ -39,6 +43,14 @@ public class RejectedEncounterRecoveryTests : MapEventTestBase
 
     public RejectedEncounterRecoveryTests(ITestOutputHelper output) : base(output)
     {
+        foreach (var client in Clients)
+        {
+            client.Call(() => Assert.True(client.Resolve<IModConfigAuthority>().TryBindTrustedServer(
+                Server.NetPeer,
+                out var failure), failure));
+        }
+        Server.Call(() => Server.Resolve<LoadModConfigHandler>().Handle_CampaignReady(
+            new MessagePayload<CampaignReady>(this, new CampaignReady())));
     }
 
     [Fact]
@@ -159,16 +171,16 @@ public class RejectedEncounterRecoveryTests : MapEventTestBase
         client.Call(() =>
         {
             var coordinator = client.Resolve<MapEventCreationCoordinator>();
-            Assert.True(coordinator.RequestLifecycle.TryGetSnapshot(request.RequestId, out var clientRequest));
-            Assert.Equal(AuthorityRequestPhase.ClientApplied, clientRequest.Phase);
-            Assert.Equal($"Created:{mapEventId}", clientRequest.Outcome);
+            Assert.True(coordinator.RequestLifecycle.TryGetSnapshot(request.AuthorityRequestId.ToString(), out var clientRequest));
+            Assert.Equal(AuthorityRequestPhase.Completed, clientRequest.Phase);
+            Assert.Equal("accepted", clientRequest.Outcome);
         });
         Server.Call(() =>
         {
             var coordinator = Server.Resolve<MapEventCreationCoordinator>();
-            Assert.True(coordinator.RequestLifecycle.TryGetSnapshot(request.RequestId, out var serverRequest));
-            Assert.Equal(AuthorityRequestPhase.ServerResolved, serverRequest.Phase);
-            Assert.Equal($"Created:{mapEventId}", serverRequest.Outcome);
+            Assert.True(coordinator.RequestLifecycle.TryGetSnapshot(request.AuthorityRequestId.ToString(), out var serverRequest));
+            Assert.Equal(AuthorityRequestPhase.ReplySent, serverRequest.Phase);
+            Assert.Equal(AuthorityResultStatus.Accepted.ToString(), serverRequest.Outcome);
         });
         Server.Call(() =>
         {
@@ -223,7 +235,7 @@ public class RejectedEncounterRecoveryTests : MapEventTestBase
     }
 
     [Fact]
-    public void ServerUnresolvedFieldEncounter_KeepsEncounterForLaterReconciliation()
+    public void ServerExecutorFailure_FieldEncounterRecoversToMap()
     {
         var client = Clients.First();
         var (_, playerPartyId) = CreatePlayerHeroParty("PlayerOne");
@@ -236,40 +248,20 @@ public class RejectedEncounterRecoveryTests : MapEventTestBase
             targetPartyId,
             new CampaignVec2(new Vec2(18f, 20f), true));
 
-        var serverBroker = Server.Resolve<IMessageBroker>();
-        Action<MessagePayload<NetworkRequestCreateMapEvent>> replyUnresolved = payload =>
-        {
-            var requestingPeer = Assert.IsType<NetPeer>(payload.Who);
-            Server.Resolve<INetwork>().Send(
-                requestingPeer,
-                new NetworkMapEventCreated(
-                    payload.What.RequestId,
-                    MapEventCreationOutcome.Unresolved,
-                    null));
-        };
-        serverBroker.Subscribe(replyUnresolved);
+        var disabledMethods = MapEventDisabledMethods
+            .Append(AccessTools.Method(
+                typeof(MapEventCreationCoordinator),
+                "ExecuteAuthoritatively"))
+            .ToList();
 
-        try
+        client.Call(() =>
         {
-            var disabledMethods = MapEventDisabledMethods
-                .Append(AccessTools.Method(
-                    typeof(MapEventCreationCoordinator),
-                    "CreateAndReplyToMapEventRequest"))
-                .ToList();
+            var result = (MapEvent?)StartBattleInternal.Invoke(pendingEncounter, Array.Empty<object>());
+            Assert.Null(result);
+        }, disabledMethods);
 
-            client.Call(() =>
-            {
-                var result = (MapEvent?)StartBattleInternal.Invoke(pendingEncounter, Array.Empty<object>());
-                Assert.Null(result);
-            }, disabledMethods);
-
-            client.Call(() => GameThread.Instance.Update(TimeSpan.Zero), MapEventDisabledMethods);
-            client.Call(() => Assert.Same(pendingEncounter, PlayerEncounter.Current), MapEventDisabledMethods);
-        }
-        finally
-        {
-            serverBroker.Unsubscribe(replyUnresolved);
-        }
+        client.Call(() => GameThread.Instance.Update(TimeSpan.Zero), MapEventDisabledMethods);
+        client.Call(() => Assert.Null(PlayerEncounter.Current), MapEventDisabledMethods);
     }
 
     [Fact]
@@ -549,13 +541,23 @@ public class RejectedEncounterRecoveryTests : MapEventTestBase
     {
         instance.Call(() =>
         {
-            var config = new Mock<INetworkConfig>();
-            config.SetupGet(x => x.ObjectCreationTimeout).Returns(timeout);
-
             var coordinator = instance.Resolve<MapEventCreationCoordinator>();
-            var configurationField = AccessTools.Field(typeof(MapEventCreationCoordinator), "configuration");
-            Assert.NotNull(configurationField);
-            configurationField.SetValue(coordinator, config.Object);
+            var handleField = AccessTools.Field(typeof(MapEventCreationCoordinator), "mapEventRoute");
+            Assert.NotNull(handleField);
+            object handle = handleField.GetValue(coordinator);
+            var routeField = handle.GetType().GetField("route", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(routeField);
+            object route = routeField.GetValue(handle);
+            object policy = route.GetType().GetProperty("TimeoutPolicy")?.GetValue(route);
+            Assert.NotNull(policy);
+            var responseTimeout = policy.GetType().GetField("<ResponseTimeout>k__BackingField",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var applyTimeout = policy.GetType().GetField("<ApplyTimeout>k__BackingField",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(responseTimeout);
+            Assert.NotNull(applyTimeout);
+            responseTimeout.SetValue(policy, timeout);
+            applyTimeout.SetValue(policy, timeout);
         });
     }
 }

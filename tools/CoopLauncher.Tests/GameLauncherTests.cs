@@ -40,12 +40,14 @@ public sealed class GameLauncherTests
         var config = new LauncherConfig
         {
             ModuleToken = "_MODULES_*Coop*RebellionsAndDemographics*_MODULES_",
+            BlockedModuleIds = ["RebellionsAndDemographics"],
+            CompatibilityHoldNotice = "test hold",
         };
 
         InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
             GameLauncher.CreateStartInfo(@"C:\Games\Bannerlord.exe", config, string.Empty));
 
         Assert.Contains("RebellionsAndDemographics", exception.Message);
-        Assert.Contains("source must be migrated", exception.Message);
+        Assert.Contains("test hold", exception.Message);
     }
 }

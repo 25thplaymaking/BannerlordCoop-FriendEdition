@@ -19,11 +19,11 @@ $expectedModules = @(
     'Bannerlord.Harmony', 'Bannerlord.ButterLib', 'Bannerlord.UIExtenderEx',
     'Bannerlord.MBOptionScreen', 'RBM', 'ImprovedGarrisons', 'DismembermentPlus',
     'Fourberie', 'Bannerlord.Diplomacy', 'UnblockableThrust', 'PlayerSettlement',
-    'Separatism'
+    'RebellionsAndDemographics', 'Separatism'
 )
 $actualModules = @($inventory.modules.moduleId | Sort-Object -Unique)
 Assert-Inventory (($actualModules -join '|') -ceq (($expectedModules | Sort-Object) -join '|')) 'module coverage is not the exact approved 12-surface set'
-Assert-Inventory ([int]$inventory.summary.moduleCount -eq 12) 'summary module count is wrong'
+Assert-Inventory ([int]$inventory.summary.moduleCount -eq 13) 'summary module count is wrong'
 Assert-Inventory ([int]$inventory.summary.assemblyCount -eq @($inventory.assemblies).Count) 'summary assembly count is wrong'
 Assert-Inventory ([int]$inventory.summary.methodCount -eq (@($inventory.assemblies.methods).Count)) 'summary method count is wrong'
 

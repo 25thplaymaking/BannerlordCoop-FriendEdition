@@ -27,15 +27,15 @@ public sealed class WorkshopAuthorityCapabilityTests
     }
 
     [Fact]
-    public void RebellionsAndDemographics_AdvertisesTheSourceMigrationHoldInsteadOfAReadyCapability()
+    public void RebellionsAndDemographics_UsesTheSameFailClosedRouteReasonAsOtherCampaignAdapters()
     {
-        WorkshopCapability capability = new RebellionsAndDemographicsCapabilitySource()
+        WorkshopCapability capability = new RebellionsAndDemographicsCapabilitySource(null)
             .CaptureCapabilities().Single();
 
         Assert.Equal(RebellionsAndDemographicsCapabilitySource.ModuleId, capability.ModuleId);
         Assert.Equal(RebellionsAndDemographicsCapabilitySource.Operation, capability.Operation);
         Assert.False(capability.Enabled);
-        Assert.Equal(RebellionsAndDemographicsCapabilitySource.HoldReason, capability.Reason);
+        Assert.Equal("authority-command-route-unavailable", capability.Reason);
     }
 
     private static void AssertUnavailable(WorkshopCapability capability)

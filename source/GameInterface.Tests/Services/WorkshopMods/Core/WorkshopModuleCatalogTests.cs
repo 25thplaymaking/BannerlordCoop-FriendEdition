@@ -51,15 +51,10 @@ public class WorkshopModuleCatalogTests
                 .Select(module => module.ModuleId));
 
         Assert.DoesNotContain(modules, module => module.ModuleId == "RBM");
-        Assert.All(modules.Where(module => module.ModuleId != "RebellionsAndDemographics"), module =>
-        {
-            Assert.True(module.FeatureActiveExpectedOnServer);
-            Assert.True(module.FeatureActiveExpectedOnClient);
-        });
         WorkshopModuleExpectation held = Assert.Single(modules.Where(module =>
             module.ModuleId == "RebellionsAndDemographics"));
-        Assert.False(held.FeatureActiveExpectedOnServer);
-        Assert.False(held.FeatureActiveExpectedOnClient);
+        Assert.True(held.FeatureActiveExpectedOnServer);
+        Assert.True(held.FeatureActiveExpectedOnClient);
 
         Assert.Collection(
             modules.Where(module => module.ModuleId.StartsWith("OpenSource")),
@@ -75,6 +70,7 @@ public class WorkshopModuleCatalogTests
         Assert.All(
             modules.Where(module => module.Role != WorkshopModuleRole.Framework &&
                                     module.ModuleId != "PlayerSettlement" &&
+                                    module.ModuleId != "RebellionsAndDemographics" &&
                                     !module.ModuleId.StartsWith("OpenSource")),
             module => Assert.False(module.LoadsBeforeCoop));
     }

@@ -290,15 +290,14 @@
         "DismembermentPlus",
         "Fourberie",
         "Bannerlord.Diplomacy",
-        "UnblockableThrust"
-      ],
-      "stagedInactiveModuleIds": [
+        "UnblockableThrust",
         "RebellionsAndDemographics"
       ],
+      "stagedInactiveModuleIds": [],
       "disabledModuleIds": [
         "BirthAndDeath"
       ],
-      "note": "All three rendered clients install and activate the exact approved gear-inclusive Friend Edition loadout. Open Source Saddlery, Weaponry, and Armory are byte-exact content modules with no executable submodules. RebellionsAndDemographics v3.0.1 is packaged only and remains staged-inactive: its current 1.3.13-targeted binary has no reviewed 1.4.8 source migration or authoritative co-op surface. RBM is retired after its native campaign-initialization crash. The optional TaleWorlds BirthAndDeath module stays disabled."
+      "note": "All three rendered clients install and activate the exact approved gear-inclusive Friend Edition loadout. Open Source Saddlery, Weaponry, and Armory are byte-exact content modules with no executable submodules. RebellionsAndDemographics v3.0.1 is active through the pinned 1.4.8 host-authoritative lifecycle adapter; clients receive its canonical readiness receipt and never run upstream campaign behaviors. RBM is retired after its native campaign-initialization crash. The optional TaleWorlds BirthAndDeath module stays disabled."
     },
     "server": {
       "stageAllManagedModules": true,
@@ -321,7 +320,8 @@
         "DismembermentPlus",
         "Fourberie",
         "Bannerlord.Diplomacy",
-        "UnblockableThrust"
+        "UnblockableThrust",
+        "RebellionsAndDemographics"
       ],
       "canonicalHarmonyPolicy": "Activate the pinned Bannerlord.Harmony v2.4.2.248 Workshop module before Native and Coop. Its Win64 0Harmony and wrapper hashes are proven by the selected nightly's live dedicated-server topology. Coop's embedded 0Harmony is excluded, and no bootstrap is provided or implied.",
       "harmonyPreflight": {
@@ -350,7 +350,8 @@
           "DismembermentPlus",
           "Fourberie",
           "Bannerlord.Diplomacy",
-          "UnblockableThrust"
+          "UnblockableThrust",
+          "RebellionsAndDemographics"
         ],
         "harmonyMustPrecede": [
           "Native",
@@ -374,10 +375,8 @@
       "neverActivateModuleIds": [
         "BirthAndDeath"
       ],
-      "guardedModuleIds": [
-        "RebellionsAndDemographics"
-      ],
-      "note": "Production launch exactly activates the approved gear-inclusive Friend Edition order. RebellionsAndDemographics v3.0.1 is intentionally packaged but guarded on server and client until its source is migrated to 1.4.8 and every mutating behavior/client action has an authority owner."
+      "guardedModuleIds": [],
+      "note": "Production launch activates the approved gear-inclusive Friend Edition order including RebellionsAndDemographics v3.0.1. Coop replaces the upstream peer-local lifecycle with a pinned host-authoritative adapter and canonical client readiness receipt."
     }
   },
   "modules": [
@@ -618,7 +617,7 @@
     },
     {
       "loadOrder": 260,
-      "placement": "packaged after Coop but staged inactive on every peer",
+      "placement": "after Coop; active on every peer through the host-authoritative lifecycle adapter",
       "workshopId": "3644127631",
       "steamManifestId": "5679238579592221906",
       "workshopUrl": "https://steamcommunity.com/sharedfiles/filedetails/?id=3644127631",

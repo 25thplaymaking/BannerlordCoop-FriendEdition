@@ -6,9 +6,9 @@
   "serverPort": 4200,
   "serverPassword": "",
 
-  "moduleToken": "_MODULES_*Bannerlord.Harmony*Bannerlord.ButterLib*Bannerlord.UIExtenderEx*Bannerlord.MBOptionScreen*Native*SandBoxCore*CustomBattle*Sandbox*StoryMode*OpenSourceSaddlery*OpenSourceWeaponry*OpenSourceArmory*PlayerSettlement*Coop*ImprovedGarrisons*DismembermentPlus*Fourberie*Bannerlord.Diplomacy*UnblockableThrust*_MODULES_",
-  "blockedModuleIds": ["RebellionsAndDemographics"],
-  "compatibilityHoldNotice": "Rebellions & Demographics is packaged but held: its source must be migrated to 1.4.8 and wired to server authority before it can be launched.",
+  "moduleToken": "_MODULES_*Bannerlord.Harmony*Bannerlord.ButterLib*Bannerlord.UIExtenderEx*Bannerlord.MBOptionScreen*Native*SandBoxCore*CustomBattle*Sandbox*StoryMode*OpenSourceSaddlery*OpenSourceWeaponry*OpenSourceArmory*PlayerSettlement*Coop*ImprovedGarrisons*DismembermentPlus*Fourberie*Bannerlord.Diplomacy*UnblockableThrust*RebellionsAndDemographics*_MODULES_",
+  "blockedModuleIds": [],
+  "compatibilityHoldNotice": "",
 
   // Empty = auto-detect the Bannerlord install from Steam.
   "gamePath": "",

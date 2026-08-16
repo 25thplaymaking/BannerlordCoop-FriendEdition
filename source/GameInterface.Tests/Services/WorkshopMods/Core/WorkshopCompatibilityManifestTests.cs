@@ -39,7 +39,7 @@ public class WorkshopCompatibilityManifestTests
         Assert.True(roundTrip.Entries.Single(entry => entry.ModuleId == "Bannerlord.Harmony").Active);
         Assert.All(roundTrip.Entries.Where(entry => entry.ModuleId.StartsWith("OpenSource")), entry =>
             Assert.True(entry.Active));
-        Assert.False(roundTrip.Entries.Single(entry =>
+        Assert.True(roundTrip.Entries.Single(entry =>
             entry.ModuleId == "RebellionsAndDemographics").Active);
     }
 

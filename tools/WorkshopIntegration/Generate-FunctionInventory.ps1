@@ -29,6 +29,7 @@ $moduleMetadata = [ordered]@{
     'Bannerlord.Diplomacy' = [ordered]@{ category = 'campaign-and-ui'; deployment = 'active server-authoritative adapter' }
     'UnblockableThrust' = [ordered]@{ category = 'combat-rule'; deployment = 'active mission adapter' }
     'PlayerSettlement' = [ordered]@{ category = 'campaign-and-map'; deployment = 'client placement UI; authenticated host construction/rebuild/overwrite; replicated object graph' }
+    'RebellionsAndDemographics' = [ordered]@{ category = 'campaign-and-demographics'; deployment = 'active pinned v3.0.1 server-authoritative lifecycle adapter' }
     'Separatism' = [ordered]@{ category = 'campaign'; deployment = 'integrated Friend Edition server-authoritative implementation' }
 }
 
@@ -58,18 +59,19 @@ $specs = @(
     [ordered]@{ moduleId='UnblockableThrust'; role='entrypoint-and-implementation'; path='mb2\Modules\UnblockableThrust\bin\Win64_Shipping_Client\UnblockableThrust.dll' },
     [ordered]@{ moduleId='PlayerSettlement'; role='entrypoint-and-implementation'; path='mb2\Modules\PlayerSettlement\bin\Win64_Shipping_Client\PlayerSettlement.dll' },
     [ordered]@{ moduleId='PlayerSettlement'; role='fixes'; path='mb2\Modules\PlayerSettlement\bin\Win64_Shipping_Client\PlayerSettlementFixes.dll' },
+    [ordered]@{ moduleId='RebellionsAndDemographics'; role='entrypoint-and-implementation'; path='P:\SteamLibrary\steamapps\workshop\content\261550\3644127631\bin\Win64_Shipping_Client\RebellionsAndDemographics.dll'; relativePath='workshop/3644127631/bin/Win64_Shipping_Client/RebellionsAndDemographics.dll' },
     [ordered]@{ moduleId='Separatism'; role='integrated-source-filter'; path='source\GameInterface\bin\Release\netstandard2.0\GameInterface.dll' }
 )
 
 $requests = New-Object System.Collections.Generic.List[object]
 foreach ($spec in $specs) {
-    $fullPath = Join-Path $repo $spec.path
+    $fullPath = if ([IO.Path]::IsPathRooted([string]$spec.path)) { [IO.Path]::GetFullPath([string]$spec.path) } else { Join-Path $repo $spec.path }
     if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
         throw "Function inventory input is missing: $($spec.path)"
     }
     $requests.Add([ordered]@{
         moduleId = [string]$spec.moduleId
-        relativePath = ([string]$spec.path).Replace('\', '/')
+        relativePath = if ($null -ne $spec.PSObject.Properties['relativePath']) { ([string]$spec.relativePath).Replace('\', '/') } else { ([string]$spec.path).Replace('\', '/') }
         path = $fullPath
         included = $true
         platform = if ([string]$spec.moduleId -ceq 'Separatism') { 'netstandard2.0' } else { 'Win64_Shipping_Client' }
@@ -85,7 +87,7 @@ $inspections = @(& $workshopModule {
 
 $assemblies = New-Object System.Collections.Generic.List[object]
 foreach ($spec in $specs) {
-    $relativePath = ([string]$spec.path).Replace('\', '/')
+    $relativePath = if ($null -ne $spec.PSObject.Properties['relativePath']) { ([string]$spec.relativePath).Replace('\', '/') } else { ([string]$spec.path).Replace('\', '/') }
     $matches = @($inspections | Where-Object {
         [string]$_.moduleId -ceq [string]$spec.moduleId -and
         [string]$_.relativePath -ceq $relativePath

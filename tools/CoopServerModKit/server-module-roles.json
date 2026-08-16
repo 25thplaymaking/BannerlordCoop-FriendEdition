@@ -5,7 +5,8 @@
     "DismembermentPlus",
     "Fourberie",
     "Bannerlord.Diplomacy",
-    "UnblockableThrust"
+    "UnblockableThrust",
+    "RebellionsAndDemographics"
   ],
   "clientPresentationModules": [
     "Bannerlord.UIExtenderEx",

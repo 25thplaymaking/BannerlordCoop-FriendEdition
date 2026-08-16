@@ -14,6 +14,9 @@ $verifyScript = Join-Path $kitRoot 'Verify-ServerModuleBins.py'
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('coop-server-bin-tests-' + [guid]::NewGuid().ToString('N'))
 
 try {
+    # Several verifier calls are deliberately negative.  PowerShell 7 turns their stderr into a
+    # terminating NativeCommandError under the script-wide Stop policy, so assert exit codes here.
+    $ErrorActionPreference = 'Continue'
     $moduleRoot = Join-Path $testRoot 'Modules\Example.Mod'
     $clientBin = Join-Path $moduleRoot 'bin\Win64_Shipping_Client'
     New-Item -ItemType Directory -Path $clientBin -Force | Out-Null
@@ -55,6 +58,25 @@ try {
     & python $verifyScript --modules-root (Join-Path $testRoot 'Modules') --role-manifest $roleManifest
     Assert-True ($LASTEXITCODE -eq 0) 'verification rejected an exact mirrored runtime'
 
+    $rdSourceRoot = 'P:\SteamLibrary\steamapps\workshop\content\261550\3644127631'
+    $rdSourceDll = Join-Path $rdSourceRoot 'bin\Win64_Shipping_Client\RebellionsAndDemographics.dll'
+    if ((Test-Path -LiteralPath (Join-Path $rdSourceRoot 'SubModule.xml') -PathType Leaf) -and
+        (Test-Path -LiteralPath $rdSourceDll -PathType Leaf)) {
+        $rdRoot = Join-Path $testRoot 'Modules\RebellionsAndDemographics'
+        $rdClientBin = Join-Path $rdRoot 'bin\Win64_Shipping_Client'
+        New-Item -ItemType Directory -Path $rdClientBin -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $rdSourceRoot 'SubModule.xml') -Destination $rdRoot
+        Copy-Item -LiteralPath $rdSourceDll -Destination $rdClientBin
+        $descriptorBefore = (Get-FileHash -LiteralPath (Join-Path $rdRoot 'SubModule.xml') -Algorithm SHA256).Hash
+        & $syncScript -ModulesRoot (Join-Path $testRoot 'Modules') -ModuleIds @('RebellionsAndDemographics')
+        $descriptorAfter = (Get-FileHash -LiteralPath (Join-Path $rdRoot 'SubModule.xml') -Algorithm SHA256).Hash
+        $rdServerDll = Join-Path $rdRoot 'bin\Win64_Shipping_Server\RebellionsAndDemographics.dll'
+        Assert-True ($descriptorAfter -ceq $descriptorBefore) 'R&D server-bin staging must not mutate SubModule.xml'
+        Assert-True ((Get-FileHash -LiteralPath $rdServerDll -Algorithm SHA256).Hash.ToLowerInvariant() -ceq
+            '115ca5f26eaa50f9ce6fa4ac88dc2b65b94be1eb4ff27a895ea29982983463a8') 'R&D dedicated DLL must retain the exact audited hash'
+    }
+    else { Write-Host 'SKIP: exact R&D server-bin fixture (audited Workshop source absent)' }
+
     $presentationServerBin = Join-Path $presentationRoot 'bin\Win64_Shipping_Server'
     New-Item -ItemType Directory -Path $presentationServerBin -Force | Out-Null
     [System.IO.File]::WriteAllText((Join-Path $presentationServerBin 'Presentation.Mod.dll'), 'presentation')
@@ -65,7 +87,9 @@ try {
     $supportManifest = Join-Path $testRoot 'server-support.json'
     $supportRelativePath = 'Coop/bin/Win64_Shipping_Server/ClientOnly.Support.dll'
     $supportBytes = [System.Text.Encoding]::UTF8.GetBytes('support-runtime')
-    $supportHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($supportBytes)).ToLowerInvariant()
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try { $supportHash = ([BitConverter]::ToString($sha256.ComputeHash($supportBytes))).Replace('-', '').ToLowerInvariant() }
+    finally { $sha256.Dispose() }
     [System.IO.File]::WriteAllText($supportManifest, (@{
         assemblies = @(@{ relativePath = $supportRelativePath; sha256 = $supportHash })
     } | ConvertTo-Json -Depth 4))

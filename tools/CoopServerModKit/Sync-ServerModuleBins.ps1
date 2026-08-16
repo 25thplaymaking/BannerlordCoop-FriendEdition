@@ -55,7 +55,8 @@ foreach ($moduleId in $ModuleIds) {
 
     New-Item -ItemType Directory -Path $serverBin -Force | Out-Null
     foreach ($source in $runtimeFiles) {
-        $relative = [System.IO.Path]::GetRelativePath($clientBin, $source.FullName)
+        # Windows PowerShell 5.1 lacks Path.GetRelativePath; source is enumerated below clientBin.
+        $relative = $source.FullName.Substring($clientBin.TrimEnd('\', '/').Length).TrimStart('\', '/')
         $destination = Join-Path $serverBin $relative
         $destinationParent = Split-Path -Parent $destination
         New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
@@ -70,6 +71,15 @@ foreach ($moduleId in $ModuleIds) {
         }
 
         Copy-Item -LiteralPath $source.FullName -Destination $destination -Force:$Overwrite
+    }
+
+    if ($moduleId -ceq 'RebellionsAndDemographics') {
+        $rdDll = Join-Path $serverBin 'RebellionsAndDemographics.dll'
+        if (-not (Test-Path -LiteralPath $rdDll -PathType Leaf) -or
+            (Get-FileHash -LiteralPath $rdDll -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                '115ca5f26eaa50f9ce6fa4ac88dc2b65b94be1eb4ff27a895ea29982983463a8') {
+            throw "R&D dedicated runtime is absent or hash-mismatched: $rdDll"
+        }
     }
 
     Write-Host "STAGED SERVER MODULE BIN: $moduleId ($($runtimeFiles.Count) files)"

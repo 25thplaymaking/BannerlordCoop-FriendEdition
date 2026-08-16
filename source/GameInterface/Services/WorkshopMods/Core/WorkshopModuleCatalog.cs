@@ -94,8 +94,7 @@ public interface IWorkshopModuleCatalog
 public sealed class FriendEditionWorkshopModuleCatalog : IWorkshopModuleCatalog
 {
     // The live Friend Edition loadout runs the exact same active content and gameplay modules on
-    // both roles. RebellionsAndDemographics is included in the sealed package but deliberately
-    // inactive until its 1.4.8 source migration and authority surface are reviewed.
+    // both roles. RebellionsAndDemographics is lifecycle-isolated and host-authoritative.
     // RBM is intentionally absent: its combat-parameter initialization caused a native access
     // violation during co-op campaign startup and the project owner retired it from the loadout.
     // Retaining an RBM catalog entry would make the handshake and pack disagree with the launcher.
@@ -164,8 +163,8 @@ public sealed class FriendEditionWorkshopModuleCatalog : IWorkshopModuleCatalog
             loadsBeforeCoop: true),
         new("RebellionsAndDemographics", "3644127631", "5679238579592221906", "v3.0.1", 260,
             WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign,
-            featureActiveExpectedOnServer: false,
-            featureActiveExpectedOnClient: false),
+            featureActiveExpectedOnServer: true,
+            featureActiveExpectedOnClient: true),
     };
 
     private readonly IReadOnlyDictionary<string, WorkshopModuleExpectation> modulesById =

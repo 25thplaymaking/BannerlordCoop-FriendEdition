@@ -75,6 +75,7 @@ public class GameInterfaceModule : Module
         new FourberieModule(),
         new DiplomacyModule(),
         new PlayerSettlementModule(),
+        new RebellionsAndDemographicsModule(),
     };
 
     protected override void Load(ContainerBuilder builder)

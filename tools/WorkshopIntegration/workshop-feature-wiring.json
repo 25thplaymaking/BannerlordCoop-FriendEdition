@@ -3,17 +3,7 @@
   "targetGameVersion": "v1.4.8",
   "purpose": "Action-level release ledger for every module in the Friend Edition managed Workshop suite. A method-level authority disposition is necessary but is not sufficient to mark a player function wired.",
   "allowedReleaseStatuses": ["VerifiedFramework", "VerifiedPresentation", "VerifiedWired"],
-  "compatibilityHolds": [
-    {
-      "moduleId": "RebellionsAndDemographics",
-      "version": "v3.0.1",
-      "status": "HeldForSource",
-      "reason": "source-required-for-authority-and-1.4.8-migration",
-      "owner": "RebellionsAndDemographicsCapabilitySource",
-      "routes": ["staged package receipt", "capability snapshot: CampaignAuthority=false", "launcher and server launch guards"],
-      "tests": ["RebellionsAndDemographics_AdvertisesTheSourceMigrationHoldInsteadOfAReadyCapability", "CreateStartInfo_RejectsAnAuthorityHeldModule"]
-    }
-  ],
+  "compatibilityHolds": [],
   "modules": [
     {
       "moduleId": "Bannerlord.Harmony",
@@ -322,6 +312,37 @@
           "owner": "PlayerSettlementHarmonyIsolation and Coop settlement/army/siege owners",
           "routes": ["sidecar purge", "exact Coop replacement inventory"],
           "tests": ["PlayerSettlementCompatibilityTests.HarmonyIsolation_RemovesOptionalOwnerPatchAndLeavesNoInventory", "PlayerSettlementCompatibilityTests.HarmonyIsolation_RequiresExactDedicatedGuardInventoryAndRejectsOverlap"]
+        }
+      ]
+    },
+    {
+      "moduleId": "RebellionsAndDemographics",
+      "version": "v3.0.1",
+      "role": "client-presentation-server-authority",
+      "featureFamilies": [
+        {
+          "id": "population-plague-and-demographics",
+          "playerFunction": "Run the upstream population, plague, recruitment, demographics, and audited automatic rebellion behavior only on the authoritative campaign and expose a read-only demographic report to clients.",
+          "status": "VerifiedWired",
+          "owner": "RebellionsAndDemographicsCompatibilityHandler and RebellionsAndDemographicsStateObserverBehavior",
+          "routes": ["server callback batch", "revisioned canonical population/plague snapshot", "late-join resync"],
+          "tests": ["RebellionsAndDemographicsProtocolTests.CanonicalState_UsesStructuredBoundedCultures_AndCorrelatedPromptTombstone", "RebellionsAndDemographicsProtocolTests.CanonicalState_RetainsConcurrentInterventionWatermarks"]
+        },
+        {
+          "id": "rebellion-intervention-and-ruler-choices",
+          "playerFunction": "Fund a foreign non-ruler rebellion and answer rebellion ultimatum/asylum choices through exact server-owned, one-shot transactions.",
+          "status": "VerifiedWired",
+          "owner": "RebellionsAndDemographicsCompatibilityHandler",
+          "routes": ["workshop.rebellions-demographics.intervention", "workshop.rebellions-demographics.choice", "correlated intervention watermark", "prompt tombstone"],
+          "tests": ["RebellionsAndDemographicsProtocolTests.ChoiceCommand_IsAnAuthenticatedTypedRoute_AndRejectsMalformedLease", "RebellionsAndDemographicsProtocolTests.InterventionWatermark_CorrelatesActorTargetAndExactPostconditions"]
+        },
+        {
+          "id": "lifecycle-isolation",
+          "playerFunction": "Prevent the upstream global PatchAll and peer-local lifecycle from registering unsynchronized campaign, mission, or UI writers.",
+          "status": "VerifiedWired",
+          "owner": "RebellionsAndDemographicsHarmonyIsolation",
+          "routes": ["post-PatchAll owner purge", "guarded OnGameStart", "guarded mission lifecycle"],
+          "tests": ["RebellionsAndDemographicsProtocolTests.ChoiceCommand_IsAnAuthenticatedTypedRoute_AndRejectsMalformedLease"]
         }
       ]
     }

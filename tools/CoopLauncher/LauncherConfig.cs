@@ -33,18 +33,15 @@ public sealed class LauncherConfig
         "_MODULES_*Bannerlord.Harmony*Bannerlord.ButterLib*Bannerlord.UIExtenderEx*Bannerlord.MBOptionScreen" +
         "*Native*SandBoxCore*CustomBattle*Sandbox*StoryMode*OpenSourceSaddlery*OpenSourceWeaponry" +
         "*OpenSourceArmory*PlayerSettlement*Coop*ImprovedGarrisons" +
-        "*DismembermentPlus*Fourberie*Bannerlord.Diplomacy*UnblockableThrust*_MODULES_";
+        "*DismembermentPlus*Fourberie*Bannerlord.Diplomacy*UnblockableThrust*RebellionsAndDemographics*_MODULES_";
 
     /// <summary>
-    /// Package members deliberately held out of the launch token. This is an explicit safety
-    /// boundary, not an optional cosmetic preference: a token containing one of these IDs is
-    /// rejected before the game process is started.
+    /// Explicit launch exclusions, normally empty for the production compatibility suite.
     /// </summary>
-    public string[] BlockedModuleIds { get; set; } = ["RebellionsAndDemographics"];
+    public string[] BlockedModuleIds { get; set; } = [];
 
-    /// <summary>Displayed whenever the otherwise-ready armory has a deliberately held package member.</summary>
-    public string CompatibilityHoldNotice { get; set; } =
-        "Rebellions & Demographics is packaged but held: its source must be migrated to 1.4.8 and wired to server authority before it can be launched.";
+    /// <summary>Optional explanation for an explicitly blocked local module.</summary>
+    public string CompatibilityHoldNotice { get; set; } = "";
 
     internal string? GetBlockedModuleInToken()
     {

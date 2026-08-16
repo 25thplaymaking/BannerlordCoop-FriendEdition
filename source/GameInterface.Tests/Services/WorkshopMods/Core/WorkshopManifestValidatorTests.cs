@@ -166,12 +166,8 @@ public class WorkshopManifestValidatorTests
         }
         Assert.Equal(14, client.Entries.Length);
         Assert.DoesNotContain(client.Entries, entry => entry.ModuleId == "RBM");
-        Assert.All(server.Entries.Where(entry => entry.ModuleId != "RebellionsAndDemographics"),
-            entry => Assert.True(entry.Active));
-        Assert.All(client.Entries.Where(entry => entry.ModuleId != "RebellionsAndDemographics"),
-            entry => Assert.True(entry.Active));
-        Assert.False(server.Entries.Single(entry => entry.ModuleId == "RebellionsAndDemographics").Active);
-        Assert.False(client.Entries.Single(entry => entry.ModuleId == "RebellionsAndDemographics").Active);
+        Assert.All(server.Entries, entry => Assert.True(entry.Active));
+        Assert.All(client.Entries, entry => Assert.True(entry.Active));
     }
 
     /// <summary>

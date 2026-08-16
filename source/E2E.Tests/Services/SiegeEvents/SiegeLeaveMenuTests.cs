@@ -223,6 +223,19 @@ public class SiegeLeaveMenuTests : IDisposable
         Assert.Equal(approval.Header.RequestId, leaveProof.AuthorityRequestId);
         AssertBesiegerCamp(Server, partyId, expectCamp: false);
         AssertBesiegerCamp(leavingClient, partyId, expectCamp: false);
+
+        // Transport delivery observes the approval synchronously, but terminal presentation is
+        // intentionally owned by the authority router's regular frame poll. Advance that real
+        // client lifecycle after the correlated proof has cleared the replica.
+        leavingClient.Call(
+            () => leavingClient.Resolve<IAuthorityRequestRouter>().Update(TimeSpan.Zero),
+            disabledMethods);
+        Assert.Equal(1, menuExit.CountFor(leavingClient));
+
+        // Completion removes the pending route, so a later frame cannot unwind the menu twice.
+        leavingClient.Call(
+            () => leavingClient.Resolve<IAuthorityRequestRouter>().Update(TimeSpan.Zero),
+            disabledMethods);
         Assert.Equal(1, menuExit.CountFor(leavingClient));
     }
 

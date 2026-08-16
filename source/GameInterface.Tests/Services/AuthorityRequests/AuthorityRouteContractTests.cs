@@ -1,6 +1,7 @@
 using Common.Messaging;
 using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.MapEvents.Messages.Start;
+using GameInterface.Services.Tournaments.Messages;
 using GameInterface.Services.Villages.Data;
 using GameInterface.Services.Villages.Messages;
 using System;
@@ -46,6 +47,40 @@ public sealed class AuthorityRouteContractTests
         Assert.Equal(header.RequestId, request.Header.RequestId);
         Assert.Equal(header.SessionId, request.Header.SessionId);
         Assert.Equal(header.ExpectedRevision, request.Header.ExpectedRevision);
+    }
+
+    [Fact]
+    public void TournamentStateRequest_DeclaresBootstrapRouteAndRetainsConfigCorrelation()
+    {
+        var attribute = (AuthorityRouteAttribute)Attribute.GetCustomAttribute(
+            typeof(NetworkRequestTournamentState), typeof(AuthorityRouteAttribute));
+        var header = new AuthorityRequestHeader(1, "0123456789abcdef0123456789abcdef", 27, 3);
+        var request = new NetworkRequestTournamentState(header);
+
+        Assert.NotNull(attribute);
+        Assert.Equal("tournament.state", attribute.RouteId);
+        Assert.Equal(AuthorityRouteKind.BootstrapQuery, attribute.Kind);
+        Assert.True(request.TryValidateWireShape(out _));
+        Assert.Equal(header.SessionId, request.Header.SessionId);
+        Assert.Equal(header.RequestId, request.Header.RequestId);
+        Assert.Equal(header.ExpectedRevision, request.Header.ExpectedRevision);
+    }
+
+    [Fact]
+    public void TournamentStateResult_RetainsExactRequestCorrelationAndRequestedEpoch()
+    {
+        var request = new AuthorityRequestHeader(1, "0123456789abcdef0123456789abcdef", 28, 4);
+        var result = new NetworkTournamentStateQueryResult(
+            request,
+            AuthorityResultStatus.Accepted,
+            default,
+            stateEpoch: 9,
+            reasonCode: null);
+
+        Assert.Equal(request.SessionId, result.Header.SessionId);
+        Assert.Equal(request.RequestId, result.Header.RequestId);
+        Assert.Equal(request.ExpectedRevision, result.Header.CommittedRevision);
+        Assert.Equal(9, result.StateEpoch);
     }
 
     [Fact]

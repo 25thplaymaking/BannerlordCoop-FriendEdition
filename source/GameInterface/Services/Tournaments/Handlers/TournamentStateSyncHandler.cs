@@ -3,9 +3,11 @@ using Common.Logging;
 using Common.Messaging;
 using Common.Network;
 using Common.Util;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
+using GameInterface.Services.CampaignService.Messages;
 using GameInterface.Services.GameState.Messages;
 using GameInterface.Services.ObjectManager;
-using GameInterface.Services.Players;
 using GameInterface.Services.Tournaments.Data;
 using GameInterface.Services.Tournaments.Messages;
 using LiteNetLib;
@@ -27,59 +29,168 @@ internal sealed class TournamentStateSyncHandler : IHandler
     private readonly IMessageBroker messageBroker;
     private readonly INetwork network;
     private readonly IObjectManager objectManager;
-    private readonly IPlayerManager playerManager;
     private readonly ITournamentSessionRegistry sessionRegistry;
     private readonly IRelayNetwork[] relayNetworks;
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRouteHandle<TournamentStateIntent, NetworkTournamentStateQueryResult> stateRoute;
+    private long nextStateEpoch;
+    private long appliedStateEpoch = -1;
+    private string appliedConfigSessionId;
 
     public TournamentStateSyncHandler(
         IMessageBroker messageBroker,
         INetwork network,
         IObjectManager objectManager,
-        IPlayerManager playerManager,
         ITournamentSessionRegistry sessionRegistry,
-        IEnumerable<IRelayNetwork> relayNetworks)
+        IEnumerable<IRelayNetwork> relayNetworks,
+        IModConfigAuthority configAuthority,
+        IAuthorityRequestRouter authorityRequestRouter)
     {
         this.messageBroker = messageBroker;
         this.network = network;
         this.objectManager = objectManager;
-        this.playerManager = playerManager;
         this.sessionRegistry = sessionRegistry;
         this.relayNetworks = relayNetworks?.ToArray() ?? Array.Empty<IRelayNetwork>();
+        this.configAuthority = configAuthority;
+
+        stateRoute = authorityRequestRouter.Register(
+            AuthorityRoute<TournamentStateIntent, NetworkRequestTournamentState,
+                NetworkTournamentStateQueryResult>.Define(
+                routeId: "tournament.state",
+                kind: AuthorityRouteKind.BootstrapQuery,
+                createHeader: CreateStateHeader,
+                buildRequest: (_, header) => new NetworkRequestTournamentState(header),
+                readRequestHeader: request => request.Header,
+                readResultHeader: result => result.Header,
+                validateWireShape: request => request.TryValidateWireShape(out var failure) ? null : failure,
+                buildCommandKey: request => $"state:{request.SessionId.Length}:{request.SessionId}:{request.Revision}",
+                validateHeader: ValidateStateHeader,
+                execute: ExecuteStateQuery,
+                createTerminalResult: CreateStateTerminal,
+                probeClientCommit: ProbeStateApplied,
+                requestResync: _ => { },
+                presentTerminalOutcome: PresentStateTerminal,
+                isTrustedResultSource: configAuthority.IsTrustedServer,
+                timeoutPolicy: AuthorityTimeoutPolicy.BootstrapQuery,
+                requireAuthenticatedPlayer: true,
+                failClosedOnApplyFailure: true,
+                isExpectedClientResult: (request, result) =>
+                    result.Status != AuthorityResultStatus.Accepted ||
+                    result.Snapshot.NativeTournaments != null));
 
         messageBroker.Subscribe<CampaignReady>(Handle_CampaignReady);
-        messageBroker.Subscribe<NetworkRequestTournamentState>(Handle_StateRequest);
         messageBroker.Subscribe<NetworkTournamentStateSnapshot>(Handle_StateSnapshot);
+        messageBroker.Subscribe<NetworkTournamentStateQueryResult>(Handle_StateQueryResult);
         messageBroker.Subscribe<NetworkTournamentSessionRemoved>(Handle_SessionRemoved);
         messageBroker.Subscribe<TournamentNativeStateChanged>(Handle_NativeStateChanged);
+        messageBroker.Subscribe<HostModConfigAccepted>(Handle_HostModConfigAccepted);
     }
 
     public void Dispose()
     {
         messageBroker.Unsubscribe<CampaignReady>(Handle_CampaignReady);
-        messageBroker.Unsubscribe<NetworkRequestTournamentState>(Handle_StateRequest);
         messageBroker.Unsubscribe<NetworkTournamentStateSnapshot>(Handle_StateSnapshot);
+        messageBroker.Unsubscribe<NetworkTournamentStateQueryResult>(Handle_StateQueryResult);
         messageBroker.Unsubscribe<NetworkTournamentSessionRemoved>(Handle_SessionRemoved);
         messageBroker.Unsubscribe<TournamentNativeStateChanged>(Handle_NativeStateChanged);
+        messageBroker.Unsubscribe<HostModConfigAccepted>(Handle_HostModConfigAccepted);
+        stateRoute.Dispose();
     }
 
     private void Handle_CampaignReady(MessagePayload<CampaignReady> payload)
     {
         if (ModInformation.IsClient)
-            network.SendAll(new NetworkRequestTournamentState());
+            StartStateBootstrap();
     }
 
-    private void Handle_StateRequest(MessagePayload<NetworkRequestTournamentState> payload)
+    private void Handle_HostModConfigAccepted(MessagePayload<HostModConfigAccepted> payload)
     {
-        if (ModInformation.IsClient ||
-            payload.Who is not NetPeer peer ||
-            !playerManager.TryGetPlayer(peer, out _))
+        if (payload.What.Snapshot == null || !configAuthority.IsCurrent(payload.What.Snapshot)) return;
+        if (ModInformation.IsClient && !string.Equals(appliedConfigSessionId, payload.What.Snapshot.SessionId,
+                StringComparison.Ordinal))
         {
-            return;
+            appliedConfigSessionId = null;
+            appliedStateEpoch = -1;
+        }
+        StartStateBootstrap();
+    }
+
+    private void StartStateBootstrap()
+    {
+        if (!ModInformation.IsClient || !configAuthority.TryGetCurrent(out _)) return;
+        stateRoute.Submit(default);
+    }
+
+    private AuthorityRequestHeader CreateStateHeader(long requestId)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot config)) return default;
+        return new AuthorityRequestHeader(config.ProtocolVersion, config.SessionId, requestId, config.Revision);
+    }
+
+    private AuthorityHeaderValidation ValidateStateHeader(AuthorityRequestHeader header)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot config))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "tournament-state-unavailable");
+        if (header.ProtocolVersion != config.ProtocolVersion ||
+            !string.Equals(header.SessionId, config.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-config-session");
+        return header.ExpectedRevision == config.Revision
+            ? AuthorityHeaderValidation.Valid
+            : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-config-revision");
+    }
+
+    private AuthorityServerReply<NetworkTournamentStateQueryResult> ExecuteStateQuery(
+        AuthorityServerContext context,
+        NetworkRequestTournamentState _)
+    {
+        NetworkTournamentStateSnapshot snapshot;
+        try
+        {
+            snapshot = CreateStateSnapshot();
+        }
+        catch (Exception exception)
+        {
+            Logger.Error(exception, "Tournament state bootstrap failed to capture canonical state");
+            return new AuthorityServerReply<NetworkTournamentStateQueryResult>(
+                CreateStateTerminal(context.Header, AuthorityResultStatus.ExecutionFailed,
+                    "tournament-state-capture-failed"), false);
         }
 
-        GameThread.RunSafe(
-            () => network.Send(peer, CreateStateSnapshot()),
-            context: nameof(Handle_StateRequest));
+        return new AuthorityServerReply<NetworkTournamentStateQueryResult>(
+            new NetworkTournamentStateQueryResult(
+                context.Header,
+                AuthorityResultStatus.Accepted,
+                snapshot,
+                ++nextStateEpoch,
+                null),
+            statePublished: true);
+    }
+
+    private static NetworkTournamentStateQueryResult CreateStateTerminal(
+        AuthorityRequestHeader header,
+        AuthorityResultStatus status,
+        string reasonCode) =>
+        new NetworkTournamentStateQueryResult(header, status, default, 0, reasonCode);
+
+    private AuthorityCommitProbeResult ProbeStateApplied(NetworkTournamentStateQueryResult result)
+    {
+        if (result.Status != AuthorityResultStatus.Accepted || result.StateEpoch <= 0 ||
+            !configAuthority.TryGetCurrent(out ModConfigSnapshot config) ||
+            !string.Equals(config.SessionId, result.Header.SessionId, StringComparison.Ordinal) ||
+            config.Revision != result.Header.CommittedRevision)
+            return AuthorityCommitProbeResult.Invalid;
+
+        return string.Equals(appliedConfigSessionId, result.Header.SessionId, StringComparison.Ordinal) &&
+            appliedStateEpoch == result.StateEpoch
+            ? AuthorityCommitProbeResult.Applied
+            : AuthorityCommitProbeResult.Pending;
+    }
+
+    private static void PresentStateTerminal(AuthorityClientOutcome<NetworkTournamentStateQueryResult> outcome)
+    {
+        if (outcome.Completion == AuthorityClientCompletion.Applied) return;
+        Logger.Warning("Tournament state bootstrap ended without a canonical snapshot. Completion={Completion}, Reason={Reason}",
+            outcome.Completion, outcome.ReasonCode);
     }
 
     private void Handle_NativeStateChanged(MessagePayload<TournamentNativeStateChanged> payload)
@@ -110,10 +221,31 @@ internal sealed class TournamentStateSyncHandler : IHandler
             context: nameof(Handle_StateSnapshot));
     }
 
-    private void ApplyStateSnapshot(NetworkTournamentStateSnapshot state)
+    private void Handle_StateQueryResult(MessagePayload<NetworkTournamentStateQueryResult> payload)
+    {
+        if (ModInformation.IsServer || !TournamentServerMessageGuard.IsTrusted(payload.Who, relayNetworks)) return;
+        if (payload.What.Status != AuthorityResultStatus.Accepted) return;
+
+        GameThread.RunSafe(() =>
+        {
+            if (!configAuthority.TryGetCurrent(out ModConfigSnapshot config) ||
+                !string.Equals(config.SessionId, payload.What.SessionId, StringComparison.Ordinal) ||
+                config.Revision != payload.What.CommittedRevision ||
+                payload.What.StateEpoch <= 0)
+                return;
+
+            if (ApplyStateSnapshot(payload.What.Snapshot))
+            {
+                appliedConfigSessionId = payload.What.SessionId;
+                appliedStateEpoch = payload.What.StateEpoch;
+            }
+        }, context: nameof(Handle_StateQueryResult));
+    }
+
+    private bool ApplyStateSnapshot(NetworkTournamentStateSnapshot state)
     {
         if (Campaign.Current?.TournamentManager is not TournamentManager manager)
-            return;
+            return false;
 
         TournamentNativeGameData[] nativeTournaments = state.NativeTournaments ??
             System.Array.Empty<TournamentNativeGameData>();
@@ -129,6 +261,7 @@ internal sealed class TournamentStateSyncHandler : IHandler
         ReconcileNativeTournaments(manager, authoritativeTournaments);
         ReconcileLeaderboard(manager, leaderboard);
         ApplySessions(sessions);
+        return true;
     }
 
     private static void LogReceivedState(
@@ -337,5 +470,9 @@ internal sealed class TournamentStateSyncHandler : IHandler
         private UnsupportedFightTournamentGame(Town town) : base(town)
         {
         }
+    }
+
+    private readonly struct TournamentStateIntent
+    {
     }
 }

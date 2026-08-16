@@ -117,6 +117,8 @@ internal class ServerVillageHostileActionHandler : IHandler
         AuthorityServerContext context,
         NetworkRequestVillageHostileAction request)
     {
+        bool mutationStarted = false;
+        string stage = "pre-mutation-validation";
         try
         {
             if (!objectManager.TryGetObjectWithLogging<MobileParty>(request.MobilePartyId, out var mobileParty))
@@ -138,32 +140,73 @@ internal class ServerVillageHostileActionHandler : IHandler
             }
 
             if (request.Action == VillageHostileAction.Raid)
+            {
+                // Raid eviction has pre-existing broadcast/settlement mutations. It remains a
+                // separately classified pre-mutation boundary; this route does not widen the
+                // isolation policy for a partial eviction failure.
+                stage = "pre-mutation-raid-eviction";
                 KickOtherPlayersOutOfVillage(context.Player.ControllerId, mobileParty, settlement);
+            }
 
+            stage = "apply-hostile-action";
+            mutationStarted = true;
             villageHostileActionInterface.ApplyHostileAction(mobileParty, settlement, request.Action);
+            stage = "approve-map-event-start";
             villageHostileActionInterface.ApproveMapEventStart(mobileParty.Party, settlement, request.Action);
             // This ordered state publication is the route's commit proof. The approval remains
             // unconsumable until it has been queued, so MapEventCreation cannot race ahead.
+            stage = "publish-started-state";
             network.Send(context.Peer, new NetworkVillageHostileActionStarted(
                 request.Action, request.MobilePartyId, request.SettlementId,
-                context.Header.SessionId, context.Header.RequestId));
+                context.Header.SessionId, context.Header.RequestId, context.Header.ExpectedRevision));
+            stage = "mark-approval-published";
             if (!villageHostileActionInterface.MarkApprovedMapEventStartPublished(
                     mobileParty.Party, settlement, request.Action))
-            {
-                villageHostileActionInterface.CancelMapEventStartApprovals(mobileParty.Party);
-                return Failed(context.Header, request, "approval-publication-failed");
-            }
+                return IsolateAfterMutation(context, request, stage,
+                    new InvalidOperationException("Approved hostile-action publication could not be marked."));
 
             return Accepted(context.Header, request);
         }
         catch (Exception e)
         {
-            Logger.Error(e, "Failed to start village hostile action");
-            if (objectManager.TryGetObject<MobileParty>(request.MobilePartyId, out var mobileParty) &&
-                mobileParty?.Party != null)
-                villageHostileActionInterface.CancelMapEventStartApprovals(mobileParty.Party);
+            if (mutationStarted)
+                return IsolateAfterMutation(context, request, stage, e);
+
+            Logger.Error(e,
+                "Village hostile action failed before its irreversible mutation. Route={Route} SessionId={SessionId} RequestId={RequestId} Action={Action} Party={Party} Settlement={Settlement} Stage={Stage}",
+                context.RouteId, context.Header.SessionId, context.Header.RequestId, request.Action,
+                request.MobilePartyId, request.SettlementId, stage);
             return Failed(context.Header, request, "hostile-action-failed");
         }
+    }
+
+    private static AuthorityServerReply<NetworkVillageHostileActionResult> IsolateAfterMutation(
+        AuthorityServerContext context,
+        NetworkRequestVillageHostileAction request,
+        string stage,
+        Exception exception)
+    {
+        Logger.Fatal(exception,
+            "Irreversible village hostile action failure; isolating requester. Route={Route} SessionId={SessionId} RequestId={RequestId} Action={Action} Party={Party} Settlement={Settlement} Stage={Stage}",
+            context.RouteId, context.Header.SessionId, context.Header.RequestId, request.Action,
+            request.MobilePartyId, request.SettlementId, stage);
+        try
+        {
+            context.Peer.Disconnect();
+        }
+        catch (Exception disconnectException)
+        {
+            Logger.Fatal(disconnectException,
+                "Could not disconnect isolated village hostile-action requester. Route={Route} SessionId={SessionId} RequestId={RequestId}",
+                context.RouteId, context.Header.SessionId, context.Header.RequestId);
+        }
+        return new AuthorityServerReply<NetworkVillageHostileActionResult>(
+            new NetworkVillageHostileActionResult(new AuthorityResultHeader(
+                context.Header.SessionId, context.Header.RequestId, AuthorityResultStatus.ExecutionFailed,
+                context.Header.ExpectedRevision, "hostile-action-isolated"),
+                request.Action, request.MobilePartyId, request.SettlementId),
+            statePublished: false,
+            suppressReply: true);
     }
 
     private static AuthorityServerReply<NetworkVillageHostileActionResult> Accepted(
@@ -190,7 +233,10 @@ internal class ServerVillageHostileActionHandler : IHandler
             VillageHostileAction.Raid, null, null);
 
     private static bool IsExpectedResult(NetworkRequestVillageHostileAction request,
-        NetworkVillageHostileActionResult result) => request.Action == result.Action &&
+        NetworkVillageHostileActionResult result) => request.Header.RequestId == result.Header.RequestId &&
+        request.Header.ExpectedRevision == result.Header.CommittedRevision &&
+        string.Equals(request.Header.SessionId, result.Header.SessionId, StringComparison.Ordinal) &&
+        request.Action == result.Action &&
         string.Equals(request.MobilePartyId, result.MobilePartyId, StringComparison.Ordinal) &&
         string.Equals(request.SettlementId, result.SettlementId, StringComparison.Ordinal);
 

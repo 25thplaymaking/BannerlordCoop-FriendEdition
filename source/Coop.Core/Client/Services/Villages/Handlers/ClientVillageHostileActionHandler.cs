@@ -82,12 +82,14 @@ internal class ClientVillageHostileActionHandler : IHandler
         if (!(payload.Who is NetPeer) || !configAuthority.IsTrustedServer(payload.Who) ||
             !configAuthority.TryGetCurrent(out ModConfigSnapshot current) ||
             !string.Equals(payload.What.SessionId, current.SessionId, StringComparison.Ordinal) ||
-            payload.What.AuthorityRequestId <= 0 || !IsKnownAction(payload.What.Action) ||
+            payload.What.AuthorityRequestId <= 0 || payload.What.CommittedRevision != current.Revision ||
+            !IsKnownAction(payload.What.Action) ||
             string.IsNullOrWhiteSpace(payload.What.MobilePartyId) || payload.What.MobilePartyId.Length > 256 ||
             string.IsNullOrWhiteSpace(payload.What.SettlementId) || payload.What.SettlementId.Length > 256)
             return;
 
-        string correlation = CorrelationKey(payload.What.SessionId, payload.What.AuthorityRequestId);
+        string correlation = CorrelationKey(
+            payload.What.SessionId, payload.What.AuthorityRequestId, payload.What.CommittedRevision);
         string semantics = ApprovalSemantics(payload.What.Action, payload.What.MobilePartyId, payload.What.SettlementId);
         lock (publishedApprovalSemantics)
         {
@@ -164,7 +166,10 @@ internal class ClientVillageHostileActionHandler : IHandler
             VillageHostileAction.Raid, null, null);
 
     private static bool IsExpectedResult(NetworkRequestVillageHostileAction request,
-        NetworkVillageHostileActionResult result) => request.Action == result.Action &&
+        NetworkVillageHostileActionResult result) => request.Header.RequestId == result.Header.RequestId &&
+        request.Header.ExpectedRevision == result.Header.CommittedRevision &&
+        string.Equals(request.Header.SessionId, result.Header.SessionId, StringComparison.Ordinal) &&
+        request.Action == result.Action &&
         string.Equals(request.MobilePartyId, result.MobilePartyId, StringComparison.Ordinal) &&
         string.Equals(request.SettlementId, result.SettlementId, StringComparison.Ordinal);
 
@@ -174,10 +179,12 @@ internal class ClientVillageHostileActionHandler : IHandler
             !IsKnownAction(result.Action) || string.IsNullOrWhiteSpace(result.MobilePartyId) ||
             string.IsNullOrWhiteSpace(result.SettlementId) ||
             !configAuthority.TryGetCurrent(out ModConfigSnapshot current) ||
-            !string.Equals(current.SessionId, result.Header.SessionId, StringComparison.Ordinal))
+            !string.Equals(current.SessionId, result.Header.SessionId, StringComparison.Ordinal) ||
+            current.Revision != result.Header.CommittedRevision)
             return AuthorityCommitProbeResult.Invalid;
 
-        string correlation = CorrelationKey(result.Header.SessionId, result.Header.RequestId);
+        string correlation = CorrelationKey(
+            result.Header.SessionId, result.Header.RequestId, result.Header.CommittedRevision);
         string semantics = ApprovalSemantics(result.Action, result.MobilePartyId, result.SettlementId);
         lock (publishedApprovalSemantics)
         {
@@ -195,7 +202,10 @@ internal class ClientVillageHostileActionHandler : IHandler
     {
         if (outcome.Applied)
         {
-            RemovePublishedApproval(outcome.Result.Header.SessionId, outcome.Result.Header.RequestId);
+            RemovePublishedApproval(
+                outcome.Result.Header.SessionId,
+                outcome.Result.Header.RequestId,
+                outcome.Result.Header.CommittedRevision);
             villageHostileActionInterface.BeginHostileActionPresentation(outcome.Result.Action);
             return;
         }
@@ -210,16 +220,16 @@ internal class ClientVillageHostileActionHandler : IHandler
     private static bool IsKnownAction(VillageHostileAction action) => action == VillageHostileAction.Raid ||
         action == VillageHostileAction.ForceVolunteers || action == VillageHostileAction.ForceSupplies;
 
-    private static string CorrelationKey(string sessionId, long requestId) =>
-        string.Concat(sessionId?.Length ?? -1, ":", sessionId ?? string.Empty, ":", requestId);
+    private static string CorrelationKey(string sessionId, long requestId, long committedRevision) =>
+        string.Concat(sessionId?.Length ?? -1, ":", sessionId ?? string.Empty, ":", requestId, ":", committedRevision);
 
     private static string ApprovalSemantics(VillageHostileAction action, string mobilePartyId, string settlementId) =>
         string.Concat((int)action, ":", mobilePartyId?.Length ?? -1, ":", mobilePartyId ?? string.Empty,
             ":", settlementId?.Length ?? -1, ":", settlementId ?? string.Empty);
 
-    private void RemovePublishedApproval(string sessionId, long requestId)
+    private void RemovePublishedApproval(string sessionId, long requestId, long committedRevision)
     {
-        string correlation = CorrelationKey(sessionId, requestId);
+        string correlation = CorrelationKey(sessionId, requestId, committedRevision);
         lock (publishedApprovalSemantics)
         {
             publishedApprovalSemantics.Remove(correlation);

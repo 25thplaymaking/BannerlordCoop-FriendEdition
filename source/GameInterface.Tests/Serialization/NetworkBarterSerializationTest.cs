@@ -30,6 +30,21 @@ public class NetworkBarterSerializationTest
     }
 
     [Fact]
+    public void BanditSafePassageAuthorityMessages_RoundTrip_PreserveRouteCorrelation()
+    {
+        var request = RoundTrip(new NetworkRequestBanditBarter("bandit-party", 250,
+            System.Array.Empty<ItemRosterElementData>(), System.Array.Empty<TroopRosterElementData>(),
+            new AuthorityRequestHeader(1, "session", 9, 4)));
+        var result = RoundTrip(new NetworkBanditBarterResult("bandit-party",
+            new AuthorityResultHeader("session", 9, AuthorityResultStatus.Accepted, 4, null), 250));
+
+        Assert.Equal(9, request.Header.RequestId);
+        Assert.Equal("session", request.Header.SessionId);
+        Assert.Equal(9, result.Header.RequestId);
+        Assert.Equal(AuthorityResultStatus.Accepted, result.Header.Status);
+    }
+
+    [Fact]
     public void PeaceBarterRequest_RoundTrip_PreservesContextAndTerms()
     {
         var original = new NetworkRequestPeaceBarter(
@@ -234,3 +249,4 @@ public class NetworkBarterSerializationTest
         return (T)RuntimeTypeModel.Default.Deserialize(stream, null, typeof(T));
     }
 }
+using Common.Messaging;

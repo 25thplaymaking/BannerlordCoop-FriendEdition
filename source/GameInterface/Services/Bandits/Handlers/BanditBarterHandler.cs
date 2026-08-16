@@ -3,6 +3,8 @@ using Common.Logging;
 using Common.Messaging;
 using Common.Network;
 using Common.Network.Coalescing;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Bandits.Messages;
 using GameInterface.Services.Bandits.Patches;
 using GameInterface.Services.Barters;
@@ -35,6 +37,7 @@ namespace GameInterface.Services.Bandits.Handlers;
 internal sealed class BanditBarterHandler : IHandler
 {
     private static readonly ILogger Logger = LogManager.GetLogger<BanditBarterHandler>();
+    private static BanditBarterHandler instance;
 
     private readonly IMessageBroker messageBroker;
     private readonly IObjectManager objectManager;
@@ -45,6 +48,10 @@ internal sealed class BanditBarterHandler : IHandler
     private readonly IBarterClientPresentation barterClientPresentation;
     private readonly ISafePassagePartyResolver safePassagePartyResolver;
     private readonly ISendCoalescer sendCoalescer;
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRouteHandle<BanditBarterIntent, NetworkBanditBarterResult> safePassageRoute;
+    private readonly Dictionary<string, NetworkBanditSafePassageDelta> receivedDeltas =
+        new Dictionary<string, NetworkBanditSafePassageDelta>(StringComparer.Ordinal);
 
     public BanditBarterHandler(
         IMessageBroker messageBroker,
@@ -55,6 +62,8 @@ internal sealed class BanditBarterHandler : IHandler
         ISessionInteractionsPlayerDataInterface interactions,
         IBarterClientPresentation barterClientPresentation,
         ISafePassagePartyResolver safePassagePartyResolver,
+        IModConfigAuthority configAuthority,
+        IAuthorityRequestRouter authorityRequestRouter,
         ISendCoalescer sendCoalescer = null)
     {
         this.messageBroker = messageBroker;
@@ -66,57 +75,58 @@ internal sealed class BanditBarterHandler : IHandler
         this.barterClientPresentation = barterClientPresentation;
         this.safePassagePartyResolver = safePassagePartyResolver;
         this.sendCoalescer = sendCoalescer;
+        this.configAuthority = configAuthority;
+        instance = this;
 
-        messageBroker.Subscribe<NetworkRequestBanditBarter>(HandleRequest);
-        messageBroker.Subscribe<NetworkBanditBarterResult>(HandleResult);
+        safePassageRoute = authorityRequestRouter.Register(
+            AuthorityRoute<BanditBarterIntent, NetworkRequestBanditBarter, NetworkBanditBarterResult>.Define(
+                "barter.bandit.safe-passage", AuthorityRouteKind.Command, CreateHeader,
+                (intent, header) => new NetworkRequestBanditBarter(intent.BanditPartyId, intent.PlayerGold,
+                    intent.PlayerItems, intent.PlayerPrisoners, header),
+                request => request.Header, result => result.Header, ValidateWireShape, BuildCommandKey,
+                ValidateHeader, ExecuteSafePassage, CreateTerminalResult, ProbeClientCommit, _ => { },
+                PresentTerminalOutcome, configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true, isExpectedClientResult: IsExpectedResult));
+
+        messageBroker.Subscribe<NetworkBanditSafePassageDelta>(HandleDelta);
     }
 
     public void Dispose()
     {
-        messageBroker.Unsubscribe<NetworkRequestBanditBarter>(HandleRequest);
-        messageBroker.Unsubscribe<NetworkBanditBarterResult>(HandleResult);
+        messageBroker.Unsubscribe<NetworkBanditSafePassageDelta>(HandleDelta);
+        safePassageRoute.Dispose();
+        if (instance == this) instance = null;
         BanditBarterPatch.ClearPendingRequest();
     }
 
-    private void HandleRequest(MessagePayload<NetworkRequestBanditBarter> payload)
+    internal static bool TrySubmit(BanditBarterIntent intent)
     {
-        if (ModInformation.IsClient) return;
-        if (!(payload.Who is NetPeer peer))
-        {
-            Logger.Error("Received bandit safe-passage request without an originating peer");
-            return;
-        }
-
-        var request = payload.What;
-        GameThread.RunSafe(
-            () => ProcessRequest(peer, request),
-            context: nameof(BanditBarterHandler));
+        if (instance == null || ModInformation.IsServer) return false;
+        instance.safePassageRoute.Submit(intent);
+        return true;
     }
 
-    private void HandleResult(MessagePayload<NetworkBanditBarterResult> payload)
-    {
-        if (ModInformation.IsServer) return;
-
-        var result = payload.What;
-        GameThread.RunSafe(
-            () => BanditBarterPatch.CompleteRequest(result, barterClientPresentation),
-            context: nameof(NetworkBanditBarterResult));
-    }
-
-    private void ProcessRequest(NetPeer peer, NetworkRequestBanditBarter request)
+    private AuthorityServerReply<NetworkBanditBarterResult> ExecuteSafePassage(
+        AuthorityServerContext context, NetworkRequestBanditBarter request)
     {
         Hero playerHero = null;
         var mutationApplied = false;
+        var published = false;
         try
         {
-            if (!TryResolveParties(peer, request.BanditPartyId, out var player, out playerHero, out var playerParty, out var banditParty, out var reason) ||
-                !HasActiveEngagement(peer, playerParty, banditParty, out reason) ||
-                !TryValidateOffer(request, playerHero, playerParty, banditParty, out var offer, out reason))
+            if (!TryResolveParties(context.Peer, request.BanditPartyId, out var player, out playerHero, out var playerParty, out var banditParty, out var reason) ||
+                !string.Equals(player.HeroId, context.Player.HeroId, StringComparison.Ordinal) ||
+                !HasActiveEngagement(context.Peer, playerParty, banditParty, out reason) ||
+                !TryValidateOffer(request, playerHero, playerParty, banditParty, out var offer, out reason) ||
+                !CanPublishCanonicalDelta(playerParty, banditParty, out reason))
             {
-                Reject(peer, request, playerHero?.Gold ?? 0, reason);
-                return;
+                return Reject(context.Header, request, playerHero?.Gold ?? 0, reason);
             }
 
+            // The first protection change is irreversible from this request's perspective. Any failure after
+            // this point is ambiguous, so its replay entry is retained with the reply suppressed and the
+            // requester is isolated instead of manufacturing a retryable rejection.
+            mutationApplied = true;
             var protectionUntil = CampaignTime.HoursFromNow(32);
             foreach (var protectedParty in offer.EnemyParties)
             {
@@ -134,24 +144,22 @@ internal sealed class BanditBarterHandler : IHandler
                 request.BanditPartyId,
                 BanditInteractionsCampaignBehavior.PlayerInteraction.PaidOffParty);
 
-            // Safe passage is now authoritative, so later failures must not leave the request retryable.
-            mutationApplied = true;
             ApplyOffer(playerHero, playerParty.Party, banditParty.Party, offer);
+            CompleteAcceptedRequest(context.Peer, playerHero);
+            published = PublishCanonicalDelta(context.Header, player, playerHero, playerParty, banditParty,
+                offer.EnemyParties, protectionUntil);
+            if (!published)
+                return IsolateAfterMutation(context, request, "safe-passage-publication-failed");
 
-            CompleteAcceptedRequest(peer, playerHero);
-            Accept(peer, request, playerHero.Gold);
+            return Accept(context.Header, request, playerHero.Gold);
         }
         catch (Exception exception)
         {
             Logger.Error(exception, "Failed to apply an authoritative bandit safe-passage barter");
             if (mutationApplied)
-            {
-                CompleteAcceptedRequest(peer, playerHero);
-                Accept(peer, request, playerHero?.Gold ?? 0);
-                return;
-            }
+                return IsolateAfterMutation(context, request, published ? "safe-passage-ambiguous" : "safe-passage-publication", exception);
 
-            Reject(peer, request, playerHero?.Gold ?? 0, "The server could not process the bandit barter.");
+            return Reject(context.Header, request, playerHero?.Gold ?? 0, "safe-passage-failed");
         }
     }
 
@@ -227,12 +235,6 @@ internal sealed class BanditBarterHandler : IHandler
     {
         offer = null;
         reason = null;
-
-        if (string.IsNullOrEmpty(request.RequestId))
-        {
-            reason = "The bandit barter request is no longer valid.";
-            return false;
-        }
 
         if (request.PlayerGold < 0 || request.PlayerGold > playerHero.Gold)
         {
@@ -514,24 +516,220 @@ internal sealed class BanditBarterHandler : IHandler
         }
     }
 
-    private void Accept(NetPeer peer, NetworkRequestBanditBarter request, int playerGold)
+    private AuthorityRequestHeader CreateHeader(long requestId)
     {
-        network.Send(peer, new NetworkBanditBarterResult(
-            request.BanditPartyId,
-            true,
-            playerGold,
-            requestId: request.RequestId));
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot snapshot)) return default;
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, requestId, snapshot.Revision);
     }
 
-    private void Reject(NetPeer peer, NetworkRequestBanditBarter request, int playerGold, string reason)
+    private AuthorityHeaderValidation ValidateHeader(AuthorityRequestHeader header)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot current))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "config-unavailable");
+        if (header.ProtocolVersion != current.ProtocolVersion)
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.InvalidRequest, "unsupported-protocol");
+        if (!string.Equals(header.SessionId, current.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-session");
+        return header.ExpectedRevision == current.Revision ? AuthorityHeaderValidation.Valid :
+            AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-state");
+    }
+
+    private static string ValidateWireShape(NetworkRequestBanditBarter request)
+    {
+        if (string.IsNullOrWhiteSpace(request.BanditPartyId) || request.BanditPartyId.Length > 256 || request.PlayerGold < 0)
+            return "invalid-safe-passage";
+        if (request.PlayerItems == null || request.PlayerPrisoners == null || request.PlayerItems.Length > 512 || request.PlayerPrisoners.Length > 128)
+            return "invalid-safe-passage-offer";
+        return null;
+    }
+
+    private static string BuildCommandKey(NetworkRequestBanditBarter request) => string.Concat(
+        request.BanditPartyId.Length, ":", request.BanditPartyId, ":", request.PlayerGold, ":",
+        request.PlayerItems.Length, ":", request.PlayerPrisoners.Length);
+
+    private static NetworkBanditBarterResult CreateTerminalResult(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        new NetworkBanditBarterResult(null, new AuthorityResultHeader(header.SessionId, header.RequestId,
+            status, header.ExpectedRevision, reason), 0);
+
+    private static bool IsExpectedResult(NetworkRequestBanditBarter request, NetworkBanditBarterResult result) =>
+        result.Header.RequestId == request.Header.RequestId &&
+        result.Header.CommittedRevision == request.Header.ExpectedRevision &&
+        string.Equals(result.Header.SessionId, request.Header.SessionId, StringComparison.Ordinal) &&
+        string.Equals(result.BanditPartyId, request.BanditPartyId, StringComparison.Ordinal);
+
+    private void HandleDelta(MessagePayload<NetworkBanditSafePassageDelta> payload)
+    {
+        if (ModInformation.IsServer || !configAuthority.IsTrustedServer(payload.Who) ||
+            !configAuthority.TryGetCurrent(out ModConfigSnapshot config)) return;
+        var delta = payload.What;
+        if (delta.AuthorityRequestId <= 0 || delta.CommittedRevision != config.Revision ||
+            !string.Equals(delta.SessionId, config.SessionId, StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(delta.PlayerPartyId) || string.IsNullOrWhiteSpace(delta.BanditPartyId)) return;
+        receivedDeltas[DeltaKey(delta.SessionId, delta.AuthorityRequestId, delta.CommittedRevision)] = delta;
+    }
+
+    private AuthorityCommitProbeResult ProbeClientCommit(NetworkBanditBarterResult result)
+    {
+        if (result.Header.Status != AuthorityResultStatus.Accepted ||
+            !configAuthority.TryGetCurrent(out ModConfigSnapshot config) ||
+            config.Revision != result.Header.CommittedRevision || config.SessionId != result.Header.SessionId)
+            return AuthorityCommitProbeResult.Invalid;
+        if (!receivedDeltas.TryGetValue(DeltaKey(result.Header.SessionId, result.Header.RequestId,
+                result.Header.CommittedRevision), out var delta))
+            return AuthorityCommitProbeResult.Pending;
+        if (!objectManager.TryGetObject(delta.PlayerPartyId, out PartyBase playerParty) ||
+            !objectManager.TryGetObject(delta.BanditPartyId, out PartyBase banditParty) ||
+            playerParty.MobileParty?.LeaderHero?.Gold != delta.PlayerGold || banditParty.Gold != delta.BanditGold ||
+            !TryPackItems(playerParty.ItemRoster, out var playerItems) ||
+            !TryPackPrisoners(playerParty.PrisonRoster, out var playerPrisoners) ||
+            !TryPackItems(banditParty.ItemRoster, out var banditItems) ||
+            !TryPackPrisoners(banditParty.PrisonRoster, out var banditPrisoners))
+            return AuthorityCommitProbeResult.Pending;
+        return HashItems(playerItems) == delta.PlayerItemRosterHash &&
+            HashPrisoners(playerPrisoners) == delta.PlayerPrisonRosterHash &&
+            HashItems(banditItems) == delta.BanditItemRosterHash &&
+            HashPrisoners(banditPrisoners) == delta.BanditPrisonRosterHash
+            ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+    }
+
+    private void PresentTerminalOutcome(AuthorityClientOutcome<NetworkBanditBarterResult> outcome)
+    {
+        if (outcome.Applied)
+        {
+            receivedDeltas.Remove(DeltaKey(outcome.Result.Header.SessionId, outcome.Result.Header.RequestId,
+                outcome.Result.Header.CommittedRevision));
+            BanditBarterPatch.CompleteAcceptedRequest(outcome.Result, barterClientPresentation);
+            return;
+        }
+        BanditBarterPatch.CompleteFailedRequest(outcome.ReasonCode);
+    }
+
+    private static string DeltaKey(string sessionId, long requestId, long revision) =>
+        string.Concat(sessionId, ":", requestId, ":", revision);
+
+    private AuthorityServerReply<NetworkBanditBarterResult> IsolateAfterMutation(
+        AuthorityServerContext context, NetworkRequestBanditBarter request, string stage, Exception exception = null)
+    {
+        if (exception != null) Logger.Fatal(exception, "Bandit safe-passage ambiguity after mutation. Stage={Stage}", stage);
+        else Logger.Fatal("Bandit safe-passage ambiguity after mutation. Stage={Stage}", stage);
+        // SendAll has no per-recipient acknowledgement. If its correlated publication is ambiguous, every
+        // connected campaign peer is an incomplete-publication audience and must rejoin from a clean snapshot.
+        foreach (var audience in playerManager.Players)
+        {
+            try
+            {
+                if (playerManager.TryGetPeer(audience.ControllerId, out var audiencePeer)) audiencePeer.Disconnect();
+            }
+            catch { }
+        }
+        try { context.Peer.Disconnect(); } catch { }
+        return new AuthorityServerReply<NetworkBanditBarterResult>(new NetworkBanditBarterResult(request.BanditPartyId,
+            new AuthorityResultHeader(context.Header.SessionId, context.Header.RequestId, AuthorityResultStatus.ExecutionFailed,
+                context.Header.ExpectedRevision, "safe-passage-isolated"), 0), false, suppressReply: true);
+    }
+
+    private bool PublishCanonicalDelta(AuthorityRequestHeader header, Player player, Hero playerHero,
+        MobileParty playerParty, MobileParty banditParty, IEnumerable<MobileParty> enemyParties, CampaignTime protectedUntil)
+    {
+        // The generated roster mutations are flushed before this envelope.  The envelope is the authoritative
+        // commit witness: its identities, full values and hashes are what the requester correlates before UI close.
+        if (!objectManager.TryGetId(playerParty.Party, out var playerPartyId) ||
+            !objectManager.TryGetId(banditParty.Party, out var banditPartyId)) return false;
+        sendCoalescer?.FlushInstance(playerParty.Party.StringId, network);
+        sendCoalescer?.FlushInstance(banditParty.Party.StringId, network);
+        if (!TryPackItems(playerParty.ItemRoster, out var playerItems) ||
+            !TryPackPrisoners(playerParty.PrisonRoster, out var playerPrisoners) ||
+            !TryPackItems(banditParty.ItemRoster, out var banditItems) ||
+            !TryPackPrisoners(banditParty.PrisonRoster, out var banditPrisoners)) return false;
+        var protections = enemyParties.Select(party => objectManager.TryGetId(party.Party, out var id)
+            ? new BanditSafePassageProtectionData(id, protectedUntil.NumTicks) : default).Where(x => x.EnemyPartyId != null).ToArray();
+        network.SendAll(new NetworkBanditSafePassageDelta(header, playerPartyId, banditPartyId, playerHero.Gold,
+            banditParty.Party.Gold, playerPartyId + ":items", playerPartyId + ":prisoners", banditPartyId + ":items",
+            banditPartyId + ":prisoners", HashItems(playerItems), HashPrisoners(playerPrisoners),
+            HashItems(banditItems), HashPrisoners(banditPrisoners), playerItems, playerPrisoners, banditItems, banditPrisoners,
+            protections, new BanditSafePassageInteractionData(player.HeroId, banditPartyId,
+                (int)BanditInteractionsCampaignBehavior.PlayerInteraction.PaidOffParty, true)));
+        return true;
+    }
+
+    private bool CanPublishCanonicalDelta(MobileParty playerParty, MobileParty banditParty, out string reason)
+    {
+        reason = null;
+        if (!TryPackItems(playerParty.ItemRoster, out _) || !TryPackPrisoners(playerParty.PrisonRoster, out _) ||
+            !TryPackItems(banditParty.ItemRoster, out _) || !TryPackPrisoners(banditParty.PrisonRoster, out _))
+        {
+            reason = "safe-passage-state-unavailable";
+            return false;
+        }
+        return true;
+    }
+
+    private bool TryPackItems(ItemRoster roster, out ItemRosterElementData[] data)
+    {
+        var packed = new List<ItemRosterElementData>();
+        foreach (var element in roster)
+        {
+            if (element.Amount <= 0 || element.EquipmentElement.Item == null ||
+                !objectManager.TryGetCatalogId(element.EquipmentElement.Item, out var itemId)) { data = null; return false; }
+            string modifierId = null;
+            bool noModifier = element.EquipmentElement.ItemModifier == null;
+            if (!noModifier && !objectManager.TryGetId(element.EquipmentElement.ItemModifier, out modifierId))
+            { data = null; return false; }
+            packed.Add(new ItemRosterElementData(new ItemObjectData(itemId, modifierId, noModifier), element.Amount));
+        }
+        data = packed.OrderBy(x => x.ItemObjectData.ItemObjectId, StringComparer.Ordinal)
+            .ThenBy(x => x.ItemObjectData.ItemModifierId, StringComparer.Ordinal).ToArray();
+        return true;
+    }
+
+    private bool TryPackPrisoners(TroopRoster roster, out TroopRosterElementData[] data)
+    {
+        var packed = new List<TroopRosterElementData>();
+        foreach (var element in roster)
+        {
+            if (element.Character == null || element.Number <= 0 ||
+                !objectManager.TryGetId(element.Character, out var characterId)) { data = null; return false; }
+            packed.Add(new TroopRosterElementData(characterId, element.Number, element.WoundedNumber, element.Xp));
+        }
+        data = packed.OrderBy(x => x.CharacterId, StringComparer.Ordinal).ToArray();
+        return true;
+    }
+
+    private static long HashItems(IEnumerable<ItemRosterElementData> items)
+    {
+        long hash = 1469598103934665603L;
+        foreach (var item in items) { hash = Hash(hash, item.ItemObjectData.ItemObjectId); hash = Hash(hash, item.ItemObjectData.ItemModifierId); hash = Hash(hash, item.Amount); }
+        return hash;
+    }
+
+    private static long HashPrisoners(IEnumerable<TroopRosterElementData> prisoners)
+    {
+        long hash = 1469598103934665603L;
+        foreach (var prisoner in prisoners) { hash = Hash(hash, prisoner.CharacterId); hash = Hash(hash, prisoner.Number); hash = Hash(hash, prisoner.WoundedNumber); hash = Hash(hash, prisoner.Xp); }
+        return hash;
+    }
+
+    private static long Hash(long value, string text)
+    {
+        unchecked { foreach (char c in text ?? string.Empty) value = (value ^ c) * 1099511628211L; return value; }
+    }
+
+    private static long Hash(long value, int number) => unchecked((value ^ number) * 1099511628211L);
+
+    private static AuthorityServerReply<NetworkBanditBarterResult> Accept(
+        AuthorityRequestHeader header, NetworkRequestBanditBarter request, int playerGold) =>
+        new(new NetworkBanditBarterResult(request.BanditPartyId,
+            new AuthorityResultHeader(header.SessionId, header.RequestId, AuthorityResultStatus.Accepted,
+                header.ExpectedRevision, null), playerGold), statePublished: true);
+
+    private static AuthorityServerReply<NetworkBanditBarterResult> Reject(
+        AuthorityRequestHeader header, NetworkRequestBanditBarter request, int playerGold, string reason)
     {
         Logger.Warning("Rejected bandit barter for {BanditPartyId}: {Reason}", request.BanditPartyId, reason);
-        network.Send(peer, new NetworkBanditBarterResult(
-            request.BanditPartyId,
-            false,
-            playerGold,
-            reason,
-            request.RequestId));
+        return new AuthorityServerReply<NetworkBanditBarterResult>(new NetworkBanditBarterResult(request.BanditPartyId,
+            new AuthorityResultHeader(header.SessionId, header.RequestId, AuthorityResultStatus.Rejected,
+                header.ExpectedRevision, reason), playerGold), statePublished: false);
     }
 
     private sealed class ValidatedOffer
@@ -565,4 +763,21 @@ internal sealed class BanditBarterHandler : IHandler
             Amount = amount;
         }
     }
+}
+
+internal readonly struct BanditBarterIntent
+{
+    public BanditBarterIntent(string banditPartyId, int playerGold, ItemRosterElementData[] playerItems,
+        TroopRosterElementData[] playerPrisoners)
+    {
+        BanditPartyId = banditPartyId;
+        PlayerGold = playerGold;
+        PlayerItems = playerItems ?? Array.Empty<ItemRosterElementData>();
+        PlayerPrisoners = playerPrisoners ?? Array.Empty<TroopRosterElementData>();
+    }
+
+    public string BanditPartyId { get; }
+    public int PlayerGold { get; }
+    public ItemRosterElementData[] PlayerItems { get; }
+    public TroopRosterElementData[] PlayerPrisoners { get; }
 }

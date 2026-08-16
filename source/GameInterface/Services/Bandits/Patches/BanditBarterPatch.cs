@@ -2,6 +2,7 @@
 using Common.Network;
 using GameInterface.Policies;
 using GameInterface.Services.Barters;
+using GameInterface.Services.Bandits.Handlers;
 using GameInterface.Services.Bandits.Messages;
 using GameInterface.Services.Inventory.Data;
 using GameInterface.Services.ObjectManager;
@@ -59,19 +60,16 @@ internal static class BanditBarterPatch
         }
 
         if (!ContainerProvider.TryResolve<IObjectManager>(out var objectManager) ||
-            !ContainerProvider.TryResolve<INetwork>(out var network) ||
             !objectManager.TryGetId(banditParty, out var banditPartyId))
         {
             ShowMessage("Unable to send the bandit barter to the server.");
             return false;
         }
 
-        var requestId = Guid.NewGuid().ToString("N");
         if (!TryCreateRequest(
                 offeredBarterables,
                 barterData.OffererParty,
                 banditPartyId,
-                requestId,
                 objectManager,
                 out var request))
         {
@@ -81,9 +79,13 @@ internal static class BanditBarterPatch
 
         pendingBarter = barterData;
         pendingBanditPartyId = banditPartyId;
-        pendingRequestId = requestId;
+        pendingRequestId = "authority";
         pendingUiActive = true;
-        network.SendAll(request);
+        if (!BanditBarterHandler.TrySubmit(request))
+        {
+            ClearPendingRequest();
+            ShowMessage("Unable to send the bandit barter to the server.");
+        }
         return false;
     }
 
@@ -98,26 +100,17 @@ internal static class BanditBarterPatch
         return true;
     }
 
-    internal static void CompleteRequest(
+    internal static void CompleteAcceptedRequest(
         NetworkBanditBarterResult result,
         IBarterClientPresentation barterClientPresentation)
     {
         if (pendingBarter == null ||
-            pendingBanditPartyId != result.BanditPartyId ||
-            pendingRequestId != result.RequestId)
+            pendingBanditPartyId != result.BanditPartyId)
             return;
 
         var completedBarter = pendingBarter;
         var shouldCompleteUi = pendingUiActive;
         ClearPendingRequest();
-
-        if (!result.Accepted)
-        {
-            ShowMessage(string.IsNullOrWhiteSpace(result.Reason)
-                ? "The server rejected the bandit barter."
-                : result.Reason);
-            return;
-        }
 
         var encounterIsActive = shouldCompleteUi && PlayerEncounter.Current != null &&
             completedBarter.OtherParty == MobileParty.ConversationParty?.Party;
@@ -156,6 +149,23 @@ internal static class BanditBarterPatch
         MBInformationManager.AddQuickInformation(GameTexts.FindText("str_offer_accepted"));
     }
 
+    // Compatibility entrypoint for focused UI tests and older result delivery. New authority results reach
+    // CompleteAcceptedRequest only after the router has observed the correlated canonical delta.
+    internal static void CompleteRequest(NetworkBanditBarterResult result, IBarterClientPresentation presentation)
+    {
+        if (result.Accepted)
+            CompleteAcceptedRequest(result, presentation);
+        else
+            CompleteFailedRequest(result.Reason);
+    }
+
+    internal static void CompleteFailedRequest(string reason)
+    {
+        if (pendingBarter == null) return;
+        ClearPendingRequest();
+        ShowMessage(string.IsNullOrWhiteSpace(reason) ? "The server rejected the bandit barter." : reason);
+    }
+
     internal static void ClearPendingRequest()
     {
         pendingBarter = null;
@@ -173,9 +183,8 @@ internal static class BanditBarterPatch
         IEnumerable<Barterable> barterables,
         PartyBase playerParty,
         string banditPartyId,
-        string requestId,
         IObjectManager objectManager,
-        out NetworkRequestBanditBarter request)
+        out BanditBarterIntent request)
     {
         var playerItems = new List<ItemRosterElementData>();
         var playerPrisoners = new List<TroopRosterElementData>();
@@ -225,12 +234,11 @@ internal static class BanditBarterPatch
             }
         }
 
-        request = new NetworkRequestBanditBarter(
+        request = new BanditBarterIntent(
             banditPartyId,
             playerGold,
             playerItems.ToArray(),
-            playerPrisoners.ToArray(),
-            requestId);
+            playerPrisoners.ToArray());
         return true;
     }
 

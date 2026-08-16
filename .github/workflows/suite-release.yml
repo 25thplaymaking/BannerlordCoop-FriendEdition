@@ -1,0 +1,112 @@
+name: Launcher Suite Release
+
+# Workshop bytes are licensed/local build inputs and are not present in CI. A maintainer first
+# uploads the locally verified ZIP to its content-addressed public R2 key, then dispatches this
+# workflow. CI checks public reachability and byte length and publishes only the small feed JSON.
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Suite release channel
+        type: choice
+        default: nightly
+        options: [nightly, stable]
+      version:
+        description: Dotted-numeric version newer than the installed receipt
+        required: true
+        type: string
+      sha256:
+        description: SHA-256 of the already-uploaded Coop-suite.zip
+        required: true
+        type: string
+      bytes:
+        description: Exact byte length of Coop-suite.zip
+        required: true
+        type: string
+      notes:
+        description: One-line player-facing suite note
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: launcher-suite-release-${{ inputs.channel }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Verify release safety policy
+        run: |
+          python -m pip install PyYAML==6.0.3
+          python .github/scripts/verify-release-safety.py
+
+      - name: Test suite feed builder
+        run: python .github/scripts/test_build_suite_feed.py
+
+      - name: Build suite manifest
+        env:
+          SUITE_VERSION: ${{ inputs.version }}
+          SUITE_SHA256: ${{ inputs.sha256 }}
+          SUITE_BYTES: ${{ inputs.bytes }}
+          SUITE_NOTES: ${{ inputs.notes }}
+        run: |
+          python .github/scripts/build_suite_feed.py \
+            --version "$SUITE_VERSION" \
+            --sha256 "$SUITE_SHA256" \
+            --bytes "$SUITE_BYTES" \
+            --notes "$SUITE_NOTES" \
+            --output artifact/suite.json
+
+      - name: Verify staged R2 payload
+        env:
+          EXPECTED_BYTES: ${{ inputs.bytes }}
+        run: |
+          set -eu
+          object_url=$(jq -r .clientZipUrl artifact/suite.json)
+          remote_bytes=$(curl --fail --silent --show-error --head --retry 3 \
+            --retry-all-errors --output /dev/null --write-out '%header{content-length}' \
+            "$object_url" | tr -d '\r')
+          if [ "$remote_bytes" != "$EXPECTED_BYTES" ]; then
+            echo "R2 object length $remote_bytes does not match expected $EXPECTED_BYTES" >&2
+            exit 1
+          fi
+
+      - name: Publish suite feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -eu
+          tag="suite-$CHANNEL"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            mkdir -p previous
+            gh release download "$tag" --pattern suite.json --dir previous --clobber
+            current_version=$(jq -r .version previous/suite.json)
+            proposed_version=$(jq -r .version artifact/suite.json)
+            PYTHONPATH=.github/scripts python -c \
+              'import sys; from build_suite_feed import is_newer; raise SystemExit(0 if is_newer(sys.argv[1], sys.argv[2]) else 1)' \
+              "$proposed_version" "$current_version" || {
+                echo "Suite version $proposed_version must be newer than published $current_version" >&2
+                exit 1
+              }
+          else
+            gh release create "$tag" \
+              --title "Calradia Co-op — $CHANNEL suite feed" \
+              --notes "Rolling $CHANNEL suite manifest. Payload bytes are immutable objects in public R2."
+          fi
+          gh release upload "$tag" artifact/suite.json --clobber
+          printf 'Feed: https://github.com/%s/releases/download/%s/suite.json\n' \
+            "$GITHUB_REPOSITORY" "$tag" >> "$GITHUB_STEP_SUMMARY"

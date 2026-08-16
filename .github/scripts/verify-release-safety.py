@@ -164,6 +164,35 @@ def main() -> None:
         "launcher development pushes must be forced to nightly",
     )
 
+    suite = load_workflow("suite-release.yml")
+    require(
+        set(suite["on"]) == {"workflow_dispatch"},
+        "suite payload promotion must be manual-only",
+    )
+    suite_dispatch = suite["on"]["workflow_dispatch"]["inputs"]
+    require(
+        suite_dispatch["channel"]["default"] == "nightly"
+        and suite_dispatch["channel"]["options"] == ["nightly", "stable"],
+        "suite promotion must default to nightly and require an explicit stable choice",
+    )
+    suite_workflow_text = (ROOT / ".github" / "workflows" / "suite-release.yml").read_text(
+        encoding="utf-8"
+    )
+    require(
+        "secrets." not in suite_workflow_text,
+        "suite metadata promotion must not receive an R2 credential",
+    )
+    require(
+        "Verify release safety policy" in step_names(suite, "publish")
+        and "Test suite feed builder" in step_names(suite, "publish")
+        and "Verify staged R2 payload" in step_names(suite, "publish"),
+        "suite promotion must enforce release safety, test its feed, and verify public payload length",
+    )
+    require(
+        'gh release upload "$tag" artifact/suite.json --clobber' in suite_workflow_text,
+        "suite promotion may upload only the small manifest to GitHub",
+    )
+
     config_text = (ROOT / "tools" / "CoopLauncher" / "launcher-config.json").read_text(encoding="utf-8")
     config_text = re.sub(r"^\s*//.*$", "", config_text, flags=re.MULTILINE)
     public_config = json.loads(config_text)
@@ -176,7 +205,7 @@ def main() -> None:
     print(
         "PASS: stable feeds are manual, pushes are nightly-only, launcher manifests are pinned, "
         "required ModuleData and Workshop metadata are packaged, the managed Workshop receipt is "
-        "pinned, and public config has no password"
+        "pinned, suite payload promotion is metadata-only, and public config has no password"
     )
 
 

@@ -3,6 +3,8 @@ using Common.Logging;
 using Common.Messaging;
 using Common.Network;
 using Common.Util;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.MapEventParties.Messages;
 using GameInterface.Services.MobileParties.Data;
 using GameInterface.Services.MobileParties.Messages.Behavior;
@@ -58,29 +60,52 @@ namespace GameInterface.Services.PlayerCaptivityService.Handlers;
 internal class PlayerCaptivityServerHandler : IHandler
 {
     private static readonly ILogger Logger = LogManager.GetLogger<PlayerCaptivityServerHandler>();
+    internal static PlayerCaptivityServerHandler Instance { get; private set; }
     private readonly IObjectManager objectManager;
     private readonly INetwork network;
     private readonly IMessageBroker messageBroker;
     private readonly IPlayerManager playerManager;
     private readonly ConversationPartyTracker conversationPartyTracker;
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRouteHandle<SurrenderIntent, NetworkPlayerSurrenderResult> surrenderRoute;
+
+    private readonly struct SurrenderIntent
+    {
+        public SurrenderIntent(string mapEventId) => MapEventId = mapEventId;
+        public string MapEventId { get; }
+    }
 
     public PlayerCaptivityServerHandler(
         IObjectManager objectManager,
         INetwork network,
         IMessageBroker messageBroker,
         IPlayerManager playerManager,
-        ConversationPartyTracker conversationPartyTracker)
+        ConversationPartyTracker conversationPartyTracker,
+        IModConfigAuthority configAuthority,
+        INetworkConfig configuration,
+        IAuthorityRequestRouter authorityRequestRouter)
     {
         this.objectManager = objectManager;
         this.network = network;
         this.messageBroker = messageBroker;
         this.playerManager = playerManager;
         this.conversationPartyTracker = conversationPartyTracker;
+        this.configAuthority = configAuthority;
+        surrenderRoute = authorityRequestRouter.Register(
+            AuthorityRoute<SurrenderIntent, NetworkPlayerSurrendered, NetworkPlayerSurrenderResult>.Define(
+                "battle.surrender", AuthorityRouteKind.Command, CreateHeader,
+                (intent, header) => new NetworkPlayerSurrendered(intent.MapEventId, header),
+                request => request.Header, result => result.Header, ValidateSurrenderWire,
+                request => request.MapEventId, ValidateHeader, ExecuteSurrender, SurrenderTerminal,
+                ProbeSurrenderCommit, _ => { }, PresentSurrenderTerminal, configAuthority.IsTrustedServer,
+                new AuthorityTimeoutPolicy(configuration.ObjectCreationTimeout, configuration.ObjectCreationTimeout, 1),
+                failClosedOnApplyFailure: true,
+                isExpectedClientResult: (request, result) => string.Equals(request.MapEventId, result.MapEventId, StringComparison.Ordinal)));
+        Instance = this;
 
         // ModInformation is evaluated per call (tests flip it per instance), so each handler
         // guards itself instead of gating the subscriptions here.
         messageBroker.Subscribe<PrisonerTaken>(Handle_PrisonerTaken);
-        messageBroker.Subscribe<NetworkPlayerSurrendered>(Handle_NetworkPlayerSurrendered);
         messageBroker.Subscribe<NetworkEndPlayerCaptivityAttempted>(Handle_NetworkEndPlayerCaptivityAttempted);
         messageBroker.Subscribe<NetworkEndCaptivityAttempted>(Handle_NetworkEndCaptivityAttempted);
         messageBroker.Subscribe<PlayerCaptivityEndedByServer>(Handle_PlayerCaptivityEndedByServer);
@@ -90,11 +115,142 @@ internal class PlayerCaptivityServerHandler : IHandler
     public void Dispose()
     {
         messageBroker.Unsubscribe<PrisonerTaken>(Handle_PrisonerTaken);
-        messageBroker.Unsubscribe<NetworkPlayerSurrendered>(Handle_NetworkPlayerSurrendered);
+        surrenderRoute.Dispose();
+        if (Instance == this) Instance = null;
         messageBroker.Unsubscribe<NetworkEndPlayerCaptivityAttempted>(Handle_NetworkEndPlayerCaptivityAttempted);
         messageBroker.Unsubscribe<NetworkEndCaptivityAttempted>(Handle_NetworkEndCaptivityAttempted);
         messageBroker.Unsubscribe<PlayerCaptivityEndedByServer>(Handle_PlayerCaptivityEndedByServer);
         messageBroker.Unsubscribe<CampaignTick>(Handle_CampaignTick);
+    }
+
+    /// <summary>Client entry point. The map-event key is a stale-context guard only.</summary>
+    internal void RequestSurrender(string mapEventId)
+    {
+        if (ModInformation.IsServer || string.IsNullOrWhiteSpace(mapEventId)) return;
+        surrenderRoute.Submit(new SurrenderIntent(mapEventId));
+    }
+
+    private AuthorityRequestHeader CreateHeader(long requestId)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot snapshot)) return default;
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, requestId, snapshot.Revision);
+    }
+
+    private static string ValidateSurrenderWire(NetworkPlayerSurrendered request)
+    {
+        if (string.IsNullOrWhiteSpace(request.MapEventId) || request.MapEventId.Length > 256)
+            return "map-event-invalid";
+        // Route messages never contain a player-controlled party id. Supplying one is an attempted
+        // cross-player capability, including when it happens to name the sender's own party.
+        return string.IsNullOrEmpty(request.PlayerParty) ? null : "client-party-not-allowed";
+    }
+
+    private AuthorityHeaderValidation ValidateHeader(AuthorityRequestHeader header)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot current))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "config-unavailable");
+        if (header.ProtocolVersion != current.ProtocolVersion)
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.InvalidRequest, "unsupported-protocol");
+        if (!string.Equals(header.SessionId, current.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-session");
+        return header.ExpectedRevision == current.Revision
+            ? AuthorityHeaderValidation.Valid
+            : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-state");
+    }
+
+    private AuthorityServerReply<NetworkPlayerSurrenderResult> ExecuteSurrender(
+        AuthorityServerContext context, NetworkPlayerSurrendered request)
+    {
+        if (!objectManager.TryGetObject<MobileParty>(context.Player.MobilePartyId, out var playerParty) ||
+            playerParty?.Party == null)
+            return SurrenderReply(context.Header, AuthorityResultStatus.Rejected, request.MapEventId, null,
+                "player-party-missing");
+        if (!objectManager.TryGetObject<MapEvent>(request.MapEventId, out var mapEvent) || mapEvent == null ||
+            playerParty.Party.MapEvent != mapEvent)
+            return SurrenderReply(context.Header, AuthorityResultStatus.StaleState, request.MapEventId,
+                context.Player.MobilePartyId, "map-event-not-current");
+        if (mapEvent.IsFinalized || mapEvent.HasWinner || playerParty.Party.MapEventSide == null)
+            return SurrenderReply(context.Header, AuthorityResultStatus.Rejected, request.MapEventId,
+                context.Player.MobilePartyId, "battle-not-surrenderable");
+        if (ServerBattleModeArbiter.IsClaimed(request.MapEventId))
+            return SurrenderReply(context.Header, AuthorityResultStatus.Rejected, request.MapEventId,
+                context.Player.MobilePartyId, "battle-claimed");
+        if (!objectManager.TryGetId(playerParty.Party, out var surrenderedPartyId))
+            return SurrenderReply(context.Header, AuthorityResultStatus.ExecutionFailed, request.MapEventId,
+                context.Player.MobilePartyId, "party-id-unavailable");
+
+        bool crossedMutationBoundary = false;
+        try
+        {
+            var side = playerParty.Party.MapEventSide;
+            bool hasHealthyAllies = side.Parties.Any(p => p.Party != playerParty.Party &&
+                p.Party?.NumberOfHealthyMembers > 0);
+            if (hasHealthyAllies)
+            {
+                if (!TryGetCaptorForPartialSurrender(mapEvent, playerParty.Party.Side, out var captorParty))
+                    return SurrenderReply(context.Header, AuthorityResultStatus.Rejected, request.MapEventId,
+                        context.Player.MobilePartyId, "captor-not-found");
+                if (!TryGetPlayerHeroOfParty(playerParty, out var playerHero))
+                    return SurrenderReply(context.Header, AuthorityResultStatus.Unauthorized, request.MapEventId,
+                        context.Player.MobilePartyId, "player-hero-missing");
+
+                crossedMutationBoundary = true;
+                playerParty.Party.MapEventSide = null;
+                network.SendAll(new NetworkPartyLeftBattle(surrenderedPartyId, false));
+                TakePrisonerAction.Apply(captorParty, playerHero);
+            }
+            else
+            {
+                var playerPartyIds = MapEventPlayerPartyCollector.CollectPartyIds(mapEvent, objectManager);
+                crossedMutationBoundary = true;
+                PvpEncounterCloseSender.Send(network, playerPartyIds, surrenderedPartyId, request.MapEventId);
+                mapEvent.DoSurrender(playerParty.Party.Side);
+                messageBroker.Publish(this, new MapEventConcluded(request.MapEventId, playerPartyIds, surrenderedPartyId));
+            }
+
+            // Every native mutation ran with patches live and its ordinary state messages were sent before
+            // this terminal reply. The client route waits for the party's canonical battle absence.
+            return SurrenderReply(context.Header, AuthorityResultStatus.Accepted, request.MapEventId,
+                context.Player.MobilePartyId, null, statePublished: true);
+        }
+        catch (Exception exception)
+        {
+            Logger.Error(exception, "Authority surrender failed for {PartyId} in {MapEventId}",
+                context.Player.MobilePartyId, request.MapEventId);
+            if (crossedMutationBoundary)
+            {
+                // The requester may have received only part of a roster/battle publication. Preserve
+                // replay ownership, suppress a false terminal reply, and force the only safe recovery.
+                context.Peer.Disconnect();
+                return new AuthorityServerReply<NetworkPlayerSurrenderResult>(
+                    SurrenderTerminal(context.Header, AuthorityResultStatus.ExecutionFailed, "surrender-publication-failed"),
+                    statePublished: false, suppressReply: true);
+            }
+            return SurrenderReply(context.Header, AuthorityResultStatus.ExecutionFailed, request.MapEventId,
+                context.Player.MobilePartyId, "surrender-failed");
+        }
+    }
+
+    private AuthorityCommitProbeResult ProbeSurrenderCommit(NetworkPlayerSurrenderResult result)
+    {
+        if (result.Header.Status != AuthorityResultStatus.Accepted) return AuthorityCommitProbeResult.Applied;
+        if (!objectManager.TryGetObject<MobileParty>(result.PlayerPartyId, out var party) || party?.Party == null)
+            return AuthorityCommitProbeResult.Pending;
+        return party.Party.MapEvent == null ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+    }
+
+    private static AuthorityServerReply<NetworkPlayerSurrenderResult> SurrenderReply(AuthorityRequestHeader header,
+        AuthorityResultStatus status, string mapEventId, string partyId, string reason, bool statePublished = false) =>
+        new(new NetworkPlayerSurrenderResult(header, status, mapEventId, partyId, reason), statePublished);
+
+    private static NetworkPlayerSurrenderResult SurrenderTerminal(AuthorityRequestHeader header,
+        AuthorityResultStatus status, string reason) => new(header, status, null, null, reason);
+
+    private static void PresentSurrenderTerminal(AuthorityClientOutcome<NetworkPlayerSurrenderResult> outcome)
+    {
+        if (!outcome.Applied)
+            Logger.Warning("Battle surrender did not commit. Completion={Completion} Reason={Reason}",
+                outcome.Completion, outcome.ReasonCode);
     }
 
     /// <summary>

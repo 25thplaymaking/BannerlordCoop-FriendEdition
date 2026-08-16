@@ -265,7 +265,7 @@ internal class RomanceHandler : IHandler
     private static string ValidateTransitionWire(NetworkRequestRomanceStateChange request)
     {
         if (string.IsNullOrWhiteSpace(request.TargetHeroId) ||
-            !Enum.IsDefined(typeof(Romance.RomanceLevelEnum), request.RequestedLevel))
+            !global::System.Enum.IsDefined(typeof(Romance.RomanceLevelEnum), request.RequestedLevel))
             return "invalid-romance-transition";
 
         // The UI formerly copied client-local progress fields into the authoritative campaign
@@ -286,7 +286,7 @@ internal class RomanceHandler : IHandler
             return TransitionReply(context.Header, null, null, default, AuthorityResultStatus.Unauthorized,
                 "requester-hero-missing");
         if (!TryResolveHero(request.TargetHeroId, out var targetHero) || targetHero == null)
-            return TransitionReply(context.Header, null, request.TargetHeroId, default, AuthorityResultStatus.Rejected,
+            return TransitionReply(context.Header, null, null, default, AuthorityResultStatus.Rejected,
                 "target-hero-missing");
 
         Romance.RomanceLevelEnum level = (Romance.RomanceLevelEnum)request.RequestedLevel;
@@ -294,7 +294,7 @@ internal class RomanceHandler : IHandler
         if (!string.IsNullOrEmpty(request.ClanMemberHeroId))
         {
             if (!TryResolveHero(request.ClanMemberHeroId, out subject) || subject == null)
-                return TransitionReply(context.Header, null, request.TargetHeroId, level, AuthorityResultStatus.Rejected,
+                return TransitionReply(context.Header, null, null, level, AuthorityResultStatus.Rejected,
                     "arranged-clan-member-missing");
             if (!romanceAuthority.TryValidateArrangedStateChange(playerHero, subject, targetHero, level, out var reason))
                 return TransitionReply(context.Header, subject, targetHero, level, AuthorityResultStatus.Rejected, reason);
@@ -364,13 +364,15 @@ internal class RomanceHandler : IHandler
 
     private AuthorityCommitProbeResult ProbeTransition(NetworkRomanceStateChangeResult result)
     {
+        Hero subject = null;
+        Hero target = null;
         if (result.Status != AuthorityResultStatus.Accepted ||
             !configAuthority.TryGetCurrent(out var config) ||
             !string.Equals(config.SessionId, result.SessionId, StringComparison.Ordinal) ||
             config.Revision != result.CommittedRevision ||
-            !TryResolveHero(result.Person1Id, out var subject) ||
-            !TryResolveHero(result.Person2Id, out var target) ||
-            !Enum.IsDefined(typeof(Romance.RomanceLevelEnum), result.Level))
+            !TryResolveHero(result.Person1Id, out subject) ||
+            !TryResolveHero(result.Person2Id, out target) ||
+            !global::System.Enum.IsDefined(typeof(Romance.RomanceLevelEnum), result.Level))
             return AuthorityCommitProbeResult.Invalid;
 
         return Romance.GetRomanticLevel(subject, target) == (Romance.RomanceLevelEnum)result.Level
@@ -389,8 +391,10 @@ internal class RomanceHandler : IHandler
         RomanceStateData[] expected = result.States ?? Array.Empty<RomanceStateData>();
         foreach (var state in expected)
         {
-            if (!TryResolveHero(state.Person1Id, out var first) || !TryResolveHero(state.Person2Id, out var second) ||
-                !Enum.IsDefined(typeof(Romance.RomanceLevelEnum), state.Level))
+            Hero first = null;
+            Hero second = null;
+            if (!TryResolveHero(state.Person1Id, out first) || !TryResolveHero(state.Person2Id, out second) ||
+                !global::System.Enum.IsDefined(typeof(Romance.RomanceLevelEnum), state.Level))
                 return AuthorityCommitProbeResult.Invalid;
             var local = Romance.GetRomanticState(first, second);
             if (local == null || local.Level != (Romance.RomanceLevelEnum)state.Level ||

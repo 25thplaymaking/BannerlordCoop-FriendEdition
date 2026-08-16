@@ -592,7 +592,7 @@ internal sealed class BanditBarterHandler : IHandler
             return AuthorityCommitProbeResult.Pending;
         if (!objectManager.TryGetObject(delta.PlayerPartyId, out PartyBase playerParty) ||
             !objectManager.TryGetObject(delta.BanditPartyId, out PartyBase banditParty) ||
-            playerParty.MobileParty?.LeaderHero?.Gold != delta.PlayerGold || banditParty.Gold != delta.BanditGold ||
+            playerParty.MobileParty?.LeaderHero?.Gold != delta.PlayerGold ||
             !TryPackItems(playerParty.ItemRoster, out var playerItems) ||
             !TryPackPrisoners(playerParty.PrisonRoster, out var playerPrisoners) ||
             !TryPackItems(banditParty.ItemRoster, out var banditItems) ||
@@ -648,8 +648,8 @@ internal sealed class BanditBarterHandler : IHandler
         // commit witness: its identities, full values and hashes are what the requester correlates before UI close.
         if (!objectManager.TryGetId(playerParty.Party, out var playerPartyId) ||
             !objectManager.TryGetId(banditParty.Party, out var banditPartyId)) return false;
-        sendCoalescer?.FlushInstance(playerParty.Party.StringId, network);
-        sendCoalescer?.FlushInstance(banditParty.Party.StringId, network);
+        sendCoalescer?.FlushInstance(playerPartyId, network);
+        sendCoalescer?.FlushInstance(banditPartyId, network);
         if (!TryPackItems(playerParty.ItemRoster, out var playerItems) ||
             !TryPackPrisoners(playerParty.PrisonRoster, out var playerPrisoners) ||
             !TryPackItems(banditParty.ItemRoster, out var banditItems) ||
@@ -657,7 +657,7 @@ internal sealed class BanditBarterHandler : IHandler
         var protections = enemyParties.Select(party => objectManager.TryGetId(party.Party, out var id)
             ? new BanditSafePassageProtectionData(id, protectedUntil.NumTicks) : default).Where(x => x.EnemyPartyId != null).ToArray();
         network.SendAll(new NetworkBanditSafePassageDelta(header, playerPartyId, banditPartyId, playerHero.Gold,
-            banditParty.Party.Gold, playerPartyId + ":items", playerPartyId + ":prisoners", banditPartyId + ":items",
+            banditParty.LeaderHero?.Gold ?? 0, playerPartyId + ":items", playerPartyId + ":prisoners", banditPartyId + ":items",
             banditPartyId + ":prisoners", HashItems(playerItems), HashPrisoners(playerPrisoners),
             HashItems(banditItems), HashPrisoners(banditPrisoners), playerItems, playerPrisoners, banditItems, banditPrisoners,
             protections, new BanditSafePassageInteractionData(player.HeroId, banditPartyId,
@@ -680,7 +680,7 @@ internal sealed class BanditBarterHandler : IHandler
     private bool TryPackItems(ItemRoster roster, out ItemRosterElementData[] data)
     {
         var packed = new List<ItemRosterElementData>();
-        foreach (var element in roster)
+        foreach (var element in roster.GetTroopRoster())
         {
             if (element.Amount <= 0 || element.EquipmentElement.Item == null ||
                 !objectManager.TryGetCatalogId(element.EquipmentElement.Item, out var itemId)) { data = null; return false; }

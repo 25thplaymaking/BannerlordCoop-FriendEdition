@@ -1,4 +1,5 @@
 ﻿using Common.Messaging;
+using GameInterface.Services.AuthorityRequests;
 using ProtoBuf;
 
 namespace Coop.Core.Client.Services.SiegeEngines.Messages;
@@ -8,6 +9,7 @@ namespace Coop.Core.Client.Services.SiegeEngines.Messages;
 /// on the occupant and server-issued slot generation the UI observed.
 /// </summary>
 [ProtoContract(SkipConstructor = true)]
+[AuthorityRoute("siege.engine.remove", AuthorityRouteKind.Command)]
 public record NetworkRequestRemoveSiegeEngine : ICommand
 {
     [ProtoMember(1)]
@@ -26,6 +28,10 @@ public record NetworkRequestRemoveSiegeEngine : ICommand
     public long ExpectedRevision { get; }
     [ProtoMember(8)]
     public string RevisionEpoch { get; }
+    [ProtoMember(9)]
+    public string ContainerId { get; }
+    [ProtoMember(10)]
+    public AuthorityRequestHeader Header { get; }
 
     public NetworkRequestRemoveSiegeEngine(
         string siegeEventId,
@@ -35,7 +41,9 @@ public record NetworkRequestRemoveSiegeEngine : ICommand
         bool moveToReserve,
         string expectedOccupantId,
         long expectedRevision,
-        string revisionEpoch)
+        string revisionEpoch,
+        string containerId,
+        AuthorityRequestHeader header = default)
     {
         SiegeEventId = siegeEventId;
         Side = side;
@@ -45,5 +53,7 @@ public record NetworkRequestRemoveSiegeEngine : ICommand
         ExpectedOccupantId = expectedOccupantId;
         ExpectedRevision = expectedRevision;
         RevisionEpoch = revisionEpoch;
+        ContainerId = containerId;
+        Header = header;
     }
 }

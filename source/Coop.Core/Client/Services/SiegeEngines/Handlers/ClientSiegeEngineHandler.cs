@@ -3,6 +3,8 @@ using Common.Messaging;
 using Common.Network;
 using Coop.Core.Client.Services.SiegeEngines.Messages;
 using Coop.Core.Server.Services.SiegeEngines.Messages;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.GameState.Messages;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.SiegeEngines.Messages;
@@ -10,6 +12,7 @@ using GameInterface.Services.SiegeEnginesConstructionProgress.Messages;
 using System;
 using System.Collections.Generic;
 using Serilog;
+using TaleWorlds.Core;
 using static TaleWorlds.CampaignSystem.Siege.SiegeEvent;
 
 namespace Coop.Core.Client.Services.SiegeEngines.Handlers;
@@ -35,20 +38,114 @@ internal class ClientSiegeEngineHandler : IHandler
         public string ExpectedOccupantId;
     }
 
+    private sealed class ObservedSlotState
+    {
+        public bool IsDeployed;
+        public string SiegeEngineId;
+        public string EngineTypeId;
+        public bool MoveToReserve;
+        public string SessionId;
+        public long RequestId;
+    }
+
+    private readonly struct SiegeEngineDeployIntent
+    {
+        public SiegeEngineDeployIntent(PendingSlotRequest request, long revision, string epoch)
+        {
+            SiegeEventId = request.SiegeEventId;
+            ContainerId = request.ContainerId;
+            Side = request.Side;
+            EngineTypeId = request.EngineTypeId;
+            Index = request.Index;
+            ExpectedOccupantId = request.ExpectedOccupantId;
+            ExpectedRevision = revision;
+            RevisionEpoch = epoch;
+        }
+
+        public string SiegeEventId { get; }
+        public string ContainerId { get; }
+        public int Side { get; }
+        public string EngineTypeId { get; }
+        public int Index { get; }
+        public string ExpectedOccupantId { get; }
+        public long ExpectedRevision { get; }
+        public string RevisionEpoch { get; }
+    }
+
+    private readonly struct SiegeEngineRemoveIntent
+    {
+        public SiegeEngineRemoveIntent(PendingSlotRequest request, long revision, string epoch)
+        {
+            SiegeEventId = request.SiegeEventId;
+            ContainerId = request.ContainerId;
+            Side = request.Side;
+            Index = request.Index;
+            IsRanged = request.IsRanged;
+            MoveToReserve = request.MoveToReserve;
+            ExpectedOccupantId = request.ExpectedOccupantId;
+            ExpectedRevision = revision;
+            RevisionEpoch = epoch;
+        }
+
+        public string SiegeEventId { get; }
+        public string ContainerId { get; }
+        public int Side { get; }
+        public int Index { get; }
+        public bool IsRanged { get; }
+        public bool MoveToReserve { get; }
+        public string ExpectedOccupantId { get; }
+        public long ExpectedRevision { get; }
+        public string RevisionEpoch { get; }
+    }
+
     private readonly IMessageBroker messageBroker;
     private readonly INetwork network;
     private readonly IObjectManager objectManager;
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRouteHandle<SiegeEngineDeployIntent, NetworkSiegeEngineCommandResult> deployRoute;
+    private readonly IAuthorityRouteHandle<SiegeEngineRemoveIntent, NetworkSiegeEngineCommandResult> removeRoute;
     private readonly object revisionGate = new object();
     private readonly Dictionary<string, long> slotRevisions = new Dictionary<string, long>();
     private readonly List<IMessage> pendingSlotDeltas = new List<IMessage>();
     private readonly List<PendingSlotRequest> pendingLocalRequests = new List<PendingSlotRequest>();
+    private readonly Dictionary<string, ObservedSlotState> observedSlotStates = new Dictionary<string, ObservedSlotState>();
     private string revisionEpoch;
 
-    public ClientSiegeEngineHandler(IMessageBroker messageBroker, INetwork network, IObjectManager objectManager)
+    public ClientSiegeEngineHandler(
+        IMessageBroker messageBroker,
+        INetwork network,
+        IObjectManager objectManager,
+        IModConfigAuthority configAuthority,
+        IAuthorityRequestRouter authorityRequestRouter)
     {
         this.messageBroker = messageBroker;
         this.network = network;
         this.objectManager = objectManager;
+        this.configAuthority = configAuthority;
+        deployRoute = authorityRequestRouter.Register(
+            AuthorityRoute<SiegeEngineDeployIntent, NetworkRequestDeploySiegeEngine,
+                NetworkSiegeEngineCommandResult>.Define(
+                "siege.engine.deploy", AuthorityRouteKind.Command, CreateHeader,
+                (intent, header) => new NetworkRequestDeploySiegeEngine(intent.SiegeEventId, intent.Side,
+                    intent.EngineTypeId, intent.Index, intent.ExpectedOccupantId, intent.ExpectedRevision,
+                    intent.RevisionEpoch, intent.ContainerId, header),
+                request => request.Header, result => result.Header, ValidateDeployWireShape, BuildDeployCommandKey,
+                ValidateHeader, (_, __) => throw new InvalidOperationException("Siege engine routes execute only on the server."),
+                CreateDeployTerminalResult, ProbeDeployCommit, _ => { }, PresentTerminalOutcome,
+                configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true, isExpectedClientResult: IsExpectedDeployResult));
+        removeRoute = authorityRequestRouter.Register(
+            AuthorityRoute<SiegeEngineRemoveIntent, NetworkRequestRemoveSiegeEngine,
+                NetworkSiegeEngineCommandResult>.Define(
+                "siege.engine.remove", AuthorityRouteKind.Command, CreateHeader,
+                (intent, header) => new NetworkRequestRemoveSiegeEngine(intent.SiegeEventId, intent.Side,
+                    intent.Index, intent.IsRanged, intent.MoveToReserve, intent.ExpectedOccupantId,
+                    intent.ExpectedRevision, intent.RevisionEpoch, intent.ContainerId, header),
+                request => request.Header, result => result.Header, ValidateRemoveWireShape, BuildRemoveCommandKey,
+                ValidateHeader, (_, __) => throw new InvalidOperationException("Siege engine routes execute only on the server."),
+                CreateRemoveTerminalResult, ProbeRemoveCommit, _ => { }, PresentTerminalOutcome,
+                configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true, isExpectedClientResult: IsExpectedRemoveResult));
         messageBroker.Subscribe<NetworkChangeSiegeEngineDeployed>(HandleDeployed);
         messageBroker.Subscribe<NetworkChangeSiegeEngineUndeployed>(HandleUndeployed);
         messageBroker.Subscribe<NetworkChangeSiegeEngineReserveAdded>(HandleReserveAdded);
@@ -67,7 +164,12 @@ internal class ClientSiegeEngineHandler : IHandler
         var obj = payload.What;
         lock (revisionGate)
         {
-            if (!TryAdvanceSlotRevisionLocked(obj.RevisionEpoch, obj.ContainerId, obj.IsRanged, obj.Index, obj.SlotRevision, obj)) return;
+            if (!TryAdvanceSlotRevisionLocked(obj.RevisionEpoch, obj.ContainerId, obj.IsRanged, obj.Index, obj.SlotRevision, obj))
+            {
+                RecordEqualRevisionProofLocked(obj);
+                return;
+            }
+            RecordObservedStateLocked(obj);
             PublishDeployed(obj);
         }
     }
@@ -82,7 +184,12 @@ internal class ClientSiegeEngineHandler : IHandler
         var obj = payload.What;
         lock (revisionGate)
         {
-            if (!TryAdvanceSlotRevisionLocked(obj.RevisionEpoch, obj.ContainerId, obj.IsRanged, obj.Index, obj.SlotRevision, obj)) return;
+            if (!TryAdvanceSlotRevisionLocked(obj.RevisionEpoch, obj.ContainerId, obj.IsRanged, obj.Index, obj.SlotRevision, obj))
+            {
+                RecordEqualRevisionProofLocked(obj);
+                return;
+            }
+            RecordObservedStateLocked(obj);
             PublishUndeployed(obj);
         }
     }
@@ -104,6 +211,7 @@ internal class ClientSiegeEngineHandler : IHandler
             // concurrently arriving live delta cannot overtake this buffered batch.
             revisionEpoch = snapshot.RevisionEpoch;
             slotRevisions.Clear();
+            observedSlotStates.Clear();
             var replayedSlotKeys = ReplayPendingSlotDeltasLocked();
 
             // The snapshot is authoritative for every slot, including ones with no post-save delta. Max also
@@ -148,7 +256,12 @@ internal class ClientSiegeEngineHandler : IHandler
         replayedSlotKeys.Add(SlotKey(deployed.ContainerId, deployed.IsRanged, deployed.Index));
         if (TryAdvanceSlotRevisionLocked(deployed.RevisionEpoch, deployed.ContainerId, deployed.IsRanged,
                 deployed.Index, deployed.SlotRevision, deployed))
+        {
+            RecordObservedStateLocked(deployed);
             PublishDeployed(deployed);
+        }
+        else
+            RecordEqualRevisionProofLocked(deployed);
     }
 
     private void ReplayUndeployedSlotDeltaLocked(NetworkChangeSiegeEngineUndeployed undeployed,
@@ -157,7 +270,12 @@ internal class ClientSiegeEngineHandler : IHandler
         replayedSlotKeys.Add(SlotKey(undeployed.ContainerId, undeployed.IsRanged, undeployed.Index));
         if (TryAdvanceSlotRevisionLocked(undeployed.RevisionEpoch, undeployed.ContainerId, undeployed.IsRanged,
                 undeployed.Index, undeployed.SlotRevision, undeployed))
+        {
+            RecordObservedStateLocked(undeployed);
             PublishUndeployed(undeployed);
+        }
+        else
+            RecordEqualRevisionProofLocked(undeployed);
     }
 
     private void MergeSlotRevisionSnapshotLocked(IEnumerable<SiegeEngineSlotRevision> snapshotSlots)
@@ -196,6 +314,7 @@ internal class ClientSiegeEngineHandler : IHandler
         {
             revisionEpoch = null;
             slotRevisions.Clear();
+            observedSlotStates.Clear();
             pendingSlotDeltas.Clear();
             pendingLocalRequests.Clear();
         }
@@ -285,9 +404,200 @@ internal class ClientSiegeEngineHandler : IHandler
             || objectManager.TryGetIdWithLogging(expectedOccupant, out expectedOccupantId);
     }
 
+    private AuthorityRequestHeader CreateHeader(long requestId)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot snapshot)) return default;
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, requestId, snapshot.Revision);
+    }
+
+    private AuthorityHeaderValidation ValidateHeader(AuthorityRequestHeader header)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot current))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "config-unavailable");
+        if (header.ProtocolVersion != current.ProtocolVersion)
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.InvalidRequest, "unsupported-protocol");
+        if (!string.Equals(header.SessionId, current.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-session");
+        if (header.ExpectedRevision != current.Revision)
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-state");
+        return AuthorityHeaderValidation.Valid;
+    }
+
+    private static string ValidateDeployWireShape(NetworkRequestDeploySiegeEngine request) =>
+        string.IsNullOrWhiteSpace(request.SiegeEventId) || request.SiegeEventId.Length > 256 ||
+        string.IsNullOrWhiteSpace(request.ContainerId) || request.ContainerId.Length > 256 ||
+        string.IsNullOrWhiteSpace(request.EngineTypeId) || request.EngineTypeId.Length > 256 ||
+        request.Side != (int)BattleSideEnum.Attacker || request.Index < 0 || request.Index > 31 ||
+        request.ExpectedRevision < 0 || string.IsNullOrWhiteSpace(request.RevisionEpoch) ||
+        request.RevisionEpoch.Length > 64 ||
+        (request.ExpectedOccupantId != null && request.ExpectedOccupantId.Length > 256)
+            ? "invalid-siege-engine-deploy" : null;
+
+    private static string ValidateRemoveWireShape(NetworkRequestRemoveSiegeEngine request) =>
+        string.IsNullOrWhiteSpace(request.SiegeEventId) || request.SiegeEventId.Length > 256 ||
+        string.IsNullOrWhiteSpace(request.ContainerId) || request.ContainerId.Length > 256 ||
+        request.Side != (int)BattleSideEnum.Attacker || request.Index < 0 || request.Index > 31 ||
+        request.ExpectedRevision < 0 || string.IsNullOrWhiteSpace(request.RevisionEpoch) ||
+        request.RevisionEpoch.Length > 64 ||
+        (request.ExpectedOccupantId != null && request.ExpectedOccupantId.Length > 256)
+            ? "invalid-siege-engine-remove" : null;
+
+    private static string BuildDeployCommandKey(NetworkRequestDeploySiegeEngine request) => string.Concat(
+        request.SiegeEventId.Length, ":", request.SiegeEventId, ":", request.ContainerId.Length, ":", request.ContainerId,
+        ":", request.Side, ":", request.EngineTypeId.Length, ":", request.EngineTypeId, ":", request.Index,
+        ":", request.ExpectedOccupantId?.Length ?? -1, ":", request.ExpectedOccupantId, ":", request.ExpectedRevision,
+        ":", request.RevisionEpoch);
+
+    private static string BuildRemoveCommandKey(NetworkRequestRemoveSiegeEngine request) => string.Concat(
+        request.SiegeEventId.Length, ":", request.SiegeEventId, ":", request.ContainerId.Length, ":", request.ContainerId,
+        ":", request.Side, ":", request.Index, ":", request.IsRanged, ":", request.MoveToReserve,
+        ":", request.ExpectedOccupantId?.Length ?? -1, ":", request.ExpectedOccupantId, ":", request.ExpectedRevision,
+        ":", request.RevisionEpoch);
+
+    private static NetworkSiegeEngineCommandResult CreateDeployTerminalResult(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        new(new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason),
+            SiegeEngineCommandKind.Deploy, null, null, 0, 0, false, null, null, 0, null);
+
+    private static NetworkSiegeEngineCommandResult CreateRemoveTerminalResult(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        new(new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason),
+            SiegeEngineCommandKind.Remove, null, null, 0, 0, false, null, null, 0, null);
+
+    private static bool IsExpectedDeployResult(NetworkRequestDeploySiegeEngine request,
+        NetworkSiegeEngineCommandResult result) => result.Kind == SiegeEngineCommandKind.Deploy &&
+        string.Equals(request.SiegeEventId, result.SiegeEventId, StringComparison.Ordinal) &&
+        string.Equals(request.ContainerId, result.ContainerId, StringComparison.Ordinal) &&
+        request.Side == result.Side && request.Index == result.Index &&
+        string.Equals(request.EngineTypeId, result.EngineTypeId, StringComparison.Ordinal) &&
+        result.Header.RequestId == request.Header.RequestId &&
+        string.Equals(result.Header.SessionId, request.Header.SessionId, StringComparison.Ordinal);
+
+    private static bool IsExpectedRemoveResult(NetworkRequestRemoveSiegeEngine request,
+        NetworkSiegeEngineCommandResult result) => result.Kind == SiegeEngineCommandKind.Remove &&
+        string.Equals(request.SiegeEventId, result.SiegeEventId, StringComparison.Ordinal) &&
+        string.Equals(request.ContainerId, result.ContainerId, StringComparison.Ordinal) &&
+        request.Side == result.Side && request.Index == result.Index && request.IsRanged == result.IsRanged &&
+        result.Header.RequestId == request.Header.RequestId &&
+        string.Equals(result.Header.SessionId, request.Header.SessionId, StringComparison.Ordinal);
+
+    private AuthorityCommitProbeResult ProbeDeployCommit(NetworkSiegeEngineCommandResult result) =>
+        ProbeCommit(result, expectDeployed: true);
+
+    private AuthorityCommitProbeResult ProbeRemoveCommit(NetworkSiegeEngineCommandResult result) =>
+        ProbeCommit(result, expectDeployed: false);
+
+    private AuthorityCommitProbeResult ProbeCommit(NetworkSiegeEngineCommandResult result, bool expectDeployed)
+    {
+        lock (revisionGate)
+        {
+            string key = CommitKey(result.RevisionEpoch, result.ContainerId, result.IsRanged, result.Index,
+                result.SlotRevision);
+            if (!observedSlotStates.TryGetValue(key, out var state) ||
+                state.IsDeployed != expectDeployed ||
+                state.RequestId != result.Header.RequestId ||
+                !string.Equals(state.SessionId, result.Header.SessionId, StringComparison.Ordinal) ||
+                (expectDeployed && (!string.Equals(state.SiegeEngineId, result.SiegeEngineId, StringComparison.Ordinal) ||
+                                    !string.Equals(state.EngineTypeId, result.EngineTypeId, StringComparison.Ordinal))))
+                return AuthorityCommitProbeResult.Pending;
+        }
+
+        if (!objectManager.TryGetObject<SiegeEnginesContainer>(result.ContainerId, out var container))
+            return AuthorityCommitProbeResult.Pending;
+
+        var slot = GetSlot(container, result.IsRanged, result.Index);
+        if (!expectDeployed) return slot == null ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Invalid;
+        if (slot == null || !objectManager.TryGetId(slot, out var slotId)) return AuthorityCommitProbeResult.Pending;
+        return string.Equals(slotId, result.SiegeEngineId, StringComparison.Ordinal) &&
+               string.Equals(slot.SiegeEngine?.StringId, result.EngineTypeId, StringComparison.Ordinal)
+            ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Invalid;
+    }
+
+    // The production click gate closes the selection popup before this request is submitted. A terminal
+    // failure therefore needs no rollback of a local mutation; leaving the popup closed prevents a stale
+    // click from being replayed against a later slot generation.
+    private static void PresentTerminalOutcome(AuthorityClientOutcome<NetworkSiegeEngineCommandResult> outcome)
+    {
+        if (outcome.Completion != AuthorityClientCompletion.Applied)
+            Logger.Warning("Siege-engine authority request did not apply. Reason={Reason}", outcome.ReasonCode);
+    }
+
     private static string SlotKey(string containerId, bool isRanged, int index)
     {
         return containerId + "|" + (isRanged ? "r" : "m") + "|" + index;
+    }
+
+    private static string CommitKey(string epoch, string containerId, bool isRanged, int index, long revision) =>
+        epoch + "|" + SlotKey(containerId, isRanged, index) + "|" + revision;
+
+    private void RecordObservedStateLocked(NetworkChangeSiegeEngineDeployed deployed)
+    {
+        observedSlotStates[CommitKey(deployed.RevisionEpoch, deployed.ContainerId, deployed.IsRanged, deployed.Index,
+            deployed.SlotRevision)] = new ObservedSlotState
+        {
+            IsDeployed = true,
+            SiegeEngineId = deployed.SiegeEngineId,
+            EngineTypeId = deployed.EngineTypeId,
+            SessionId = deployed.AuthoritySessionId,
+            RequestId = deployed.AuthorityRequestId,
+        };
+    }
+
+    private void RecordObservedStateLocked(NetworkChangeSiegeEngineUndeployed undeployed)
+    {
+        observedSlotStates[CommitKey(undeployed.RevisionEpoch, undeployed.ContainerId, undeployed.IsRanged, undeployed.Index,
+            undeployed.SlotRevision)] = new ObservedSlotState
+        {
+            IsDeployed = false,
+            MoveToReserve = undeployed.MoveToReserve,
+            SessionId = undeployed.AuthoritySessionId,
+            RequestId = undeployed.AuthorityRequestId,
+        };
+    }
+
+    private void RecordEqualRevisionProofLocked(NetworkChangeSiegeEngineDeployed deployed)
+    {
+        if (deployed.AuthorityRequestId <= 0 ||
+            !string.Equals(revisionEpoch, deployed.RevisionEpoch, StringComparison.Ordinal))
+            return;
+
+        string key = CommitKey(deployed.RevisionEpoch, deployed.ContainerId, deployed.IsRanged, deployed.Index,
+            deployed.SlotRevision);
+        if (!observedSlotStates.TryGetValue(key, out var state) || !state.IsDeployed ||
+            !string.Equals(state.SiegeEngineId, deployed.SiegeEngineId, StringComparison.Ordinal) ||
+            !string.Equals(state.EngineTypeId, deployed.EngineTypeId, StringComparison.Ordinal))
+        {
+            Logger.Error("Rejecting conflicting equal-revision siege-engine deployment proof for {Slot}", key);
+            return;
+        }
+
+        state.SessionId = deployed.AuthoritySessionId;
+        state.RequestId = deployed.AuthorityRequestId;
+    }
+
+    private void RecordEqualRevisionProofLocked(NetworkChangeSiegeEngineUndeployed undeployed)
+    {
+        if (undeployed.AuthorityRequestId <= 0 ||
+            !string.Equals(revisionEpoch, undeployed.RevisionEpoch, StringComparison.Ordinal))
+            return;
+
+        string key = CommitKey(undeployed.RevisionEpoch, undeployed.ContainerId, undeployed.IsRanged, undeployed.Index,
+            undeployed.SlotRevision);
+        if (!observedSlotStates.TryGetValue(key, out var state) || state.IsDeployed ||
+            state.MoveToReserve != undeployed.MoveToReserve)
+        {
+            Logger.Error("Rejecting conflicting equal-revision siege-engine removal proof for {Slot}", key);
+            return;
+        }
+
+        state.SessionId = undeployed.AuthoritySessionId;
+        state.RequestId = undeployed.AuthorityRequestId;
+    }
+
+    private static SiegeEngineConstructionProgress GetSlot(SiegeEnginesContainer container, bool isRanged, int index)
+    {
+        var slots = isRanged ? container.DeployedRangedSiegeEngines : container.DeployedMeleeSiegeEngines;
+        return index >= 0 && index < slots.Length ? slots[index] : null;
     }
 
     private void QueueOrSendSlotRequest(PendingSlotRequest request)
@@ -315,26 +625,11 @@ internal class ClientSiegeEngineHandler : IHandler
 
         if (request.IsDeploy)
         {
-            network.SendAll(new NetworkRequestDeploySiegeEngine(
-                request.SiegeEventId,
-                request.Side,
-                request.EngineTypeId,
-                request.Index,
-                request.ExpectedOccupantId,
-                expectedRevision,
-                revisionEpoch));
+            deployRoute.Submit(new SiegeEngineDeployIntent(request, expectedRevision, revisionEpoch));
             return;
         }
 
-        network.SendAll(new NetworkRequestRemoveSiegeEngine(
-            request.SiegeEventId,
-            request.Side,
-            request.Index,
-            request.IsRanged,
-            request.MoveToReserve,
-            request.ExpectedOccupantId,
-            expectedRevision,
-            revisionEpoch));
+        removeRoute.Submit(new SiegeEngineRemoveIntent(request, expectedRevision, revisionEpoch));
     }
 
     // Caller holds revisionGate through both this state transition and publication of the corresponding
@@ -390,5 +685,7 @@ internal class ClientSiegeEngineHandler : IHandler
         messageBroker.Unsubscribe<CampaignReady>(HandleCampaignReady);
         messageBroker.Unsubscribe<SiegeEngineDeployRequested>(HandleDeployRequested);
         messageBroker.Unsubscribe<SiegeEngineRemovalRequested>(HandleRemovalRequested);
+        deployRoute.Dispose();
+        removeRoute.Dispose();
     }
 }

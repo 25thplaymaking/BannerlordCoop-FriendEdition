@@ -6,6 +6,7 @@ using GameInterface.Policies;
 using GameInterface.Services.SiegeEngines.Messages;
 using HarmonyLib;
 using Serilog;
+using System;
 using TaleWorlds.CampaignSystem.Siege;
 using TaleWorlds.Core;
 using static TaleWorlds.CampaignSystem.Siege.SiegeEvent;
@@ -51,8 +52,41 @@ internal class SiegeEnginesContainerPatches
         }
 
         SiegeEngineRegistration.EnsureRegistered(siegeEngine, nameof(SiegeEnginesContainer.DeploySiegeEngineAtIndex));
-        MessageBroker.Instance.Publish(__instance, new SiegeEngineDeployed(__instance, siegeEngine, index));
         return true;
+    }
+
+    // Publication is deliberately after the native mutation: an authority route may only certify a
+    // deployed slot that the game actually committed. The prefix still registers the newly-created
+    // progress before vanilla touches the container.
+    [HarmonyPatch(nameof(SiegeEnginesContainer.DeploySiegeEngineAtIndex))]
+    [HarmonyPostfix]
+    private static void DeploySiegeEngineAtIndexPostfix(
+        SiegeEnginesContainer __instance,
+        SiegeEngineConstructionProgress siegeEngine,
+        int index)
+    {
+        if (!ModInformation.IsServer) return;
+
+        bool isRanged = siegeEngine?.SiegeEngine?.IsRanged == true;
+        var slots = isRanged ? __instance.DeployedRangedSiegeEngines : __instance.DeployedMeleeSiegeEngines;
+        if (index < 0 || index >= slots.Length || !ReferenceEquals(slots[index], siegeEngine))
+            throw new InvalidOperationException("Native siege-engine deployment did not commit the requested slot.");
+
+        MessageBroker.Instance.Publish(__instance, new SiegeEngineDeployed(__instance, siegeEngine, index));
+    }
+
+    [HarmonyPatch(nameof(SiegeEnginesContainer.DeploySiegeEngineAtIndex))]
+    [HarmonyFinalizer]
+    private static Exception DeploySiegeEngineAtIndexFinalizer(
+        SiegeEnginesContainer __instance,
+        SiegeEngineConstructionProgress siegeEngine,
+        int index,
+        Exception __exception)
+    {
+        if (__exception != null && ModInformation.IsServer)
+            MessageBroker.Instance.Publish(__instance, new SiegeEngineContainerMutationFailed(
+                __instance, index, siegeEngine?.SiegeEngine?.IsRanged == true, __exception));
+        return __exception;
     }
 
     [HarmonyPatch(nameof(SiegeEnginesContainer.RemoveDeployedSiegeEngine))]
@@ -81,8 +115,39 @@ internal class SiegeEnginesContainerPatches
             return false;
         }
 
-        MessageBroker.Instance.Publish(__instance, new SiegeEngineUndeployed(__instance, index, isRanged, moveToReserve));
         return true;
+    }
+
+    // See deploy postfix: never publish a canonical removal ahead of the native container update.
+    [HarmonyPatch(nameof(SiegeEnginesContainer.RemoveDeployedSiegeEngine))]
+    [HarmonyPostfix]
+    private static void RemoveDeployedSiegeEnginePostfix(
+        SiegeEnginesContainer __instance,
+        int index,
+        bool isRanged,
+        bool moveToReserve)
+    {
+        if (!ModInformation.IsServer) return;
+
+        var slots = isRanged ? __instance.DeployedRangedSiegeEngines : __instance.DeployedMeleeSiegeEngines;
+        if (index < 0 || index >= slots.Length || slots[index] != null)
+            throw new InvalidOperationException("Native siege-engine removal did not clear the requested slot.");
+
+        MessageBroker.Instance.Publish(__instance, new SiegeEngineUndeployed(__instance, index, isRanged, moveToReserve));
+    }
+
+    [HarmonyPatch(nameof(SiegeEnginesContainer.RemoveDeployedSiegeEngine))]
+    [HarmonyFinalizer]
+    private static Exception RemoveDeployedSiegeEngineFinalizer(
+        SiegeEnginesContainer __instance,
+        int index,
+        bool isRanged,
+        Exception __exception)
+    {
+        if (__exception != null && ModInformation.IsServer)
+            MessageBroker.Instance.Publish(__instance, new SiegeEngineContainerMutationFailed(
+                __instance, index, isRanged, __exception));
+        return __exception;
     }
 
     // The container has no back-reference to its siege or side; on a client the only native caller is

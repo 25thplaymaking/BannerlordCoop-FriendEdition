@@ -21,6 +21,10 @@ public record NetworkChangeSiegeEngineUndeployed : IEvent
     public long SlotRevision { get; }
     [ProtoMember(6)]
     public string RevisionEpoch { get; }
+    [ProtoMember(7)]
+    public string AuthoritySessionId { get; }
+    [ProtoMember(8)]
+    public long AuthorityRequestId { get; }
 
     public NetworkChangeSiegeEngineUndeployed(
         string containerId,
@@ -28,7 +32,9 @@ public record NetworkChangeSiegeEngineUndeployed : IEvent
         bool isRanged,
         bool moveToReserve,
         long slotRevision,
-        string revisionEpoch)
+        string revisionEpoch,
+        string authoritySessionId = null,
+        long authorityRequestId = 0)
     {
         ContainerId = containerId;
         Index = index;
@@ -36,5 +42,7 @@ public record NetworkChangeSiegeEngineUndeployed : IEvent
         MoveToReserve = moveToReserve;
         SlotRevision = slotRevision;
         RevisionEpoch = revisionEpoch;
+        AuthoritySessionId = authoritySessionId;
+        AuthorityRequestId = authorityRequestId;
     }
 }

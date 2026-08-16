@@ -5,8 +5,11 @@ using Coop.Core.Server.Connections.Messages;
 using Coop.Core.Server.Services.SiegeEngines.Handlers;
 using Coop.Core.Server.Services.SiegeEngines.Messages;
 using Coop.Tests.Mocks;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.GameState.Messages;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.Players;
 using GameInterface.Services.SiegeEngines.Messages;
 using GameInterface.Services.SiegeEvents.Interfaces;
 using Moq;
@@ -38,7 +41,7 @@ public class SiegeEngineConcurrencyTests
         objectManager.Setup(m => m.TryGetIdWithLogging<SiegeEvent>(siegeEvent, out siegeEventId)).Returns(true);
         objectManager.Setup(m => m.TryGetIdWithLogging<SiegeEnginesContainer>(container, out containerId)).Returns(true);
         objectManager.Setup(m => m.TryGetIdWithLogging<SiegeEngineConstructionProgress>(expectedOccupant, out occupantId)).Returns(true);
-        var handler = new ClientSiegeEngineHandler(broker, network, objectManager.Object);
+        var handler = CreateClientHandler(broker, network, objectManager.Object);
         broker.Publish(this, new NetworkSyncSiegeEngineSlotRevisions("epoch-a", new[]
         {
             new SiegeEngineSlotRevision(containerId, isRanged: false, index: 0, revision: 7L),
@@ -54,8 +57,10 @@ public class SiegeEngineConcurrencyTests
 
         var request = Assert.IsType<NetworkRequestDeploySiegeEngine>(Assert.Single(network.GetPeerMessages(peer)));
         Assert.Equal(occupantId, request.ExpectedOccupantId);
+        Assert.Equal(containerId, request.ContainerId);
         Assert.Equal(7L, request.ExpectedRevision);
         Assert.Equal("epoch-a", request.RevisionEpoch);
+        Assert.True(request.Header.RequestId > 0);
         handler.Dispose();
     }
 
@@ -75,7 +80,7 @@ public class SiegeEngineConcurrencyTests
         objectManager.Setup(m => m.TryGetIdWithLogging<SiegeEvent>(siegeEvent, out siegeEventId)).Returns(true);
         objectManager.Setup(m => m.TryGetIdWithLogging<SiegeEnginesContainer>(container, out containerId)).Returns(true);
         objectManager.Setup(m => m.TryGetIdWithLogging<SiegeEngineConstructionProgress>(expectedOccupant, out occupantId)).Returns(true);
-        var handler = new ClientSiegeEngineHandler(broker, network, objectManager.Object);
+        var handler = CreateClientHandler(broker, network, objectManager.Object);
         broker.Publish(this, new NetworkSyncSiegeEngineSlotRevisions("epoch-a", new[]
         {
             new SiegeEngineSlotRevision(containerId, isRanged: false, index: 0, revision: 11L),
@@ -99,8 +104,10 @@ public class SiegeEngineConcurrencyTests
 
         var request = Assert.IsType<NetworkRequestRemoveSiegeEngine>(Assert.Single(network.GetPeerMessages(peer)));
         Assert.Equal(occupantId, request.ExpectedOccupantId);
+        Assert.Equal(containerId, request.ContainerId);
         Assert.Equal(11L, request.ExpectedRevision);
         Assert.Equal("epoch-a", request.RevisionEpoch);
+        Assert.True(request.Header.RequestId > 0);
         handler.Dispose();
     }
 
@@ -110,7 +117,7 @@ public class SiegeEngineConcurrencyTests
         var broker = new TestMessageBroker();
         var network = new TestNetwork();
         var objectManager = new Mock<IObjectManager>();
-        var handler = new ClientSiegeEngineHandler(broker, network, objectManager.Object);
+        var handler = CreateClientHandler(broker, network, objectManager.Object);
         broker.Publish(this, new NetworkSyncSiegeEngineSlotRevisions("epoch-a", new[]
         {
             new SiegeEngineSlotRevision("container-1", isRanged: false, index: 0, revision: 2L),
@@ -136,7 +143,7 @@ public class SiegeEngineConcurrencyTests
         var broker = new TestMessageBroker();
         var network = new TestNetwork();
         var objectManager = new Mock<IObjectManager>();
-        var handler = new ClientSiegeEngineHandler(broker, network, objectManager.Object);
+        var handler = CreateClientHandler(broker, network, objectManager.Object);
 
         broker.Publish(this, new NetworkChangeSiegeEngineDeployed(
             "container-1", "engine-a", "type-a", index: 0, slotRevision: 1L, isRanged: false, revisionEpoch: "epoch-a"));
@@ -175,7 +182,7 @@ public class SiegeEngineConcurrencyTests
         objectManager.Setup(m => m.TryGetIdWithLogging<SiegeEvent>(siegeEvent, out siegeEventId)).Returns(true);
         objectManager.Setup(m => m.TryGetIdWithLogging<SiegeEnginesContainer>(container, out containerId)).Returns(true);
         objectManager.Setup(m => m.TryGetIdWithLogging<SiegeEngineConstructionProgress>(oldOccupant, out oldOccupantId)).Returns(true);
-        var handler = new ClientSiegeEngineHandler(broker, network, objectManager.Object);
+        var handler = CreateClientHandler(broker, network, objectManager.Object);
 
         // The connection flushes post-save deltas ahead of its revision snapshot. The loaded UI can still
         // accept a click in that window. Even though replay returns the slot to the same occupant (ABA), the
@@ -225,7 +232,7 @@ public class SiegeEngineConcurrencyTests
         objectManager.Setup(m => m.TryGetIdWithLogging<SiegeEvent>(siegeEvent, out siegeEventId)).Returns(true);
         objectManager.Setup(m => m.TryGetIdWithLogging<SiegeEnginesContainer>(container, out containerId)).Returns(true);
         objectManager.Setup(m => m.TryGetIdWithLogging<SiegeEngineConstructionProgress>(expectedOccupant, out expectedOccupantId)).Returns(true);
-        var handler = new ClientSiegeEngineHandler(broker, network, objectManager.Object);
+        var handler = CreateClientHandler(broker, network, objectManager.Object);
 
         broker.Publish(this, new SiegeEngineRemovalRequested(
             siegeEvent,
@@ -265,7 +272,7 @@ public class SiegeEngineConcurrencyTests
         objectManager.Setup(m => m.TryGetIdWithLogging<SiegeEvent>(siegeEvent, out siegeEventId)).Returns(true);
         objectManager.Setup(m => m.TryGetIdWithLogging<SiegeEnginesContainer>(container, out containerId)).Returns(true);
         objectManager.Setup(m => m.TryGetIdWithLogging<SiegeEngineConstructionProgress>(expectedOccupant, out occupantId)).Returns(true);
-        var handler = new ClientSiegeEngineHandler(broker, network, objectManager.Object);
+        var handler = CreateClientHandler(broker, network, objectManager.Object);
         broker.Publish(this, new NetworkSyncSiegeEngineSlotRevisions("old-epoch", new[]
         {
             new SiegeEngineSlotRevision(containerId, isRanged: false, index: 0, revision: 99L),
@@ -363,7 +370,7 @@ public class SiegeEngineConcurrencyTests
         string engineId = "engine-a";
         objectManager.Setup(m => m.TryGetIdWithLogging<SiegeEnginesContainer>(container, out containerId)).Returns(true);
         objectManager.Setup(m => m.TryGetIdWithLogging<SiegeEngineConstructionProgress>(engine, out engineId)).Returns(true);
-        var handler = new ServerSiegeEngineHandler(broker, network, objectManager.Object, siegeEventInterface.Object);
+        var handler = CreateServerHandler(broker, network, objectManager.Object, siegeEventInterface.Object);
 
         broker.Publish(this, new SiegeEngineDeployed(container, engine, index: 0));
         broker.Publish(this, new SiegeEngineUndeployed(container, index: 0, isRanged: false, moveToReserve: true));
@@ -398,6 +405,37 @@ public class SiegeEngineConcurrencyTests
     private static SiegeEngineConstructionProgress CreateEngine()
     {
         return new SiegeEngineConstructionProgress(new SiegeEngineType(), 1f, 100f);
+    }
+
+    private static ClientSiegeEngineHandler CreateClientHandler(
+        TestMessageBroker broker,
+        TestNetwork network,
+        IObjectManager objectManager)
+    {
+        var players = new Mock<IPlayerManager>();
+        return new ClientSiegeEngineHandler(broker, network, objectManager, CreateConfigAuthority(),
+            new AuthorityRequestRouter(broker, network, players.Object));
+    }
+
+    private static ServerSiegeEngineHandler CreateServerHandler(
+        TestMessageBroker broker,
+        TestNetwork network,
+        IObjectManager objectManager,
+        ISiegeEventInterface siegeEventInterface)
+    {
+        var players = new Mock<IPlayerManager>();
+        return new ServerSiegeEngineHandler(broker, network, objectManager, siegeEventInterface, players.Object,
+            CreateConfigAuthority(), new AuthorityRequestRouter(broker, network, players.Object));
+    }
+
+    private static IModConfigAuthority CreateConfigAuthority()
+    {
+        var authority = new Mock<IModConfigAuthority>();
+        var snapshot = new ModConfigSnapshot("0123456789abcdef0123456789abcdef", 1,
+            new ModOptions(new ModOptionsData()), birthAndDeathEnabled: true);
+        authority.Setup(x => x.TryGetCurrent(out snapshot)).Returns(true);
+        authority.Setup(x => x.IsTrustedServer(It.IsAny<object>())).Returns(true);
+        return authority.Object;
     }
 
 #pragma warning disable SYSLIB0050 // Identity-only test double; no native siege constructor is invoked.

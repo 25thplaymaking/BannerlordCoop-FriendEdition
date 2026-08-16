@@ -135,12 +135,6 @@ internal class RecruitmentCampaignBehaviorPatch
         if (mercenaryData.TroopType == null || mercenaryData.Number <= 0)
             return false;
 
-        CharacterObject mercenaryTroop = useConversationCharacter
-            ? CharacterObject.OneToOneConversationCharacter
-            : mercenaryData.TroopType;
-        if (mercenaryTroop == null)
-            return false;
-
         int unitPrice = Campaign.Current.Models.PartyWageModel.GetTroopRecruitmentCost(mercenaryData.TroopType, Hero.MainHero).RoundedResultNumber;
         if (unitPrice <= 0)
             return false;
@@ -149,21 +143,14 @@ internal class RecruitmentCampaignBehaviorPatch
         if (count <= 0)
             return false;
 
-        int goldAmount = count * unitPrice;
-        PublishMercenariesHired(behavior, town, mercenaryTroop, count, goldAmount);
+        PublishMercenariesHired(behavior, town, count);
 
         return true;
     }
 
-    private static void PublishMercenariesHired(RecruitmentCampaignBehavior behavior, Town town, CharacterObject mercenaryTroop, int count, int goldAmount)
+    private static void PublishMercenariesHired(RecruitmentCampaignBehavior behavior, Town town, int count)
     {
-        var message = new MercenariesHired(
-            Hero.MainHero,
-            MobileParty.MainParty,
-            town,
-            mercenaryTroop,
-            count,
-            goldAmount);
+        var message = new MercenariesHired(town, count);
         MessageBroker.Instance.Publish(behavior, message);
     }
 

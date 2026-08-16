@@ -48,19 +48,24 @@ internal class TradeHandler : IHandler
         this.troopRosterInterface = troopRosterInterface;
 
         messageBroker.Subscribe<TradeAttempted>(Handle_TradeAttempted);
-        messageBroker.Subscribe<CompleteTrade>(Handle_CompleteTrade);
         messageBroker.Subscribe<UpdateEquipmentClients>(Handle_UpdateEquipmentClients);
     }
 
     public void Dispose()
     {
         messageBroker.Unsubscribe<TradeAttempted>(Handle_TradeAttempted);
-        messageBroker.Unsubscribe<CompleteTrade>(Handle_CompleteTrade);
         messageBroker.Unsubscribe<UpdateEquipmentClients>(Handle_UpdateEquipmentClients);
     }
 
     private void Handle_TradeAttempted(MessagePayload<TradeAttempted> payload)
     {
+        // A CompleteTrade packet used to accept client-authored roster, equipment, gold, warehouse and
+        // troop snapshots. There is no deterministic server-side reconstruction for every inventory
+        // mode yet, so fail closed rather than let a client mutate campaign state. Supported modes must
+        // be reintroduced through the typed trade.open/trade.commit authority flow.
+        logger.Warning("Blocked legacy client-authored trade completion; the inventory mode is not authority-wired.");
+        return;
+
         var what = payload.What;
 
         var isManagingWarehouse = what.InventoryMode == InventoryScreenHelper.InventoryMode.Warehouse;

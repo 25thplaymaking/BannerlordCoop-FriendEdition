@@ -2,6 +2,8 @@
 using Common.Logging;
 using Common.Messaging;
 using Common.Network;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.MobileParties.Messages;
 using GameInterface.Services.MobileParties.Patches;
 using GameInterface.Services.ObjectManager;
@@ -15,6 +17,8 @@ using TaleWorlds.CampaignSystem.CharacterDevelopment;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
+using TaleWorlds.ObjectSystem;
+using System;
 
 namespace GameInterface.Services.MobileParties.Handlers;
 
@@ -29,64 +33,49 @@ internal class MercenaryHireHandler : IHandler
     private readonly IMessageBroker messageBroker;
     private readonly IObjectManager objectManager;
     private readonly INetwork network;
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRouteHandle<MercenaryHireIntent, MercenaryHireResult> hireRoute;
 
     public MercenaryHireHandler(
         IMessageBroker messageBroker,
         IObjectManager objectManager,
-        INetwork network)
+        INetwork network,
+        IModConfigAuthority configAuthority,
+        IAuthorityRequestRouter authorityRequestRouter)
     {
         this.messageBroker = messageBroker;
         this.objectManager = objectManager;
         this.network = network;
+        this.configAuthority = configAuthority;
+        hireRoute = authorityRequestRouter.Register(AuthorityRoute<MercenaryHireIntent, HireMercenaries, MercenaryHireResult>.Define(
+            "mercenary.hire", AuthorityRouteKind.Command, CreateHeader,
+            (intent, header) => new HireMercenaries(intent.TownId, intent.Count, header), request => request.Header, result => result.Header,
+            request => string.IsNullOrWhiteSpace(request.TownId) || request.Count <= 0 || request.Count > 1000 ? "hire-shape-invalid" : null,
+            request => request.TownId + ":" + request.Count, ValidateHeader, ExecuteHire, Terminal, Probe, _ => { }, Present,
+            configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation, failClosedOnApplyFailure: true,
+            isExpectedClientResult: (request, result) => request.TownId == result.TownId && request.Count == result.Count));
 
         messageBroker.Subscribe<MercenariesHired>(Handle_MercenariesHired);
-        messageBroker.Subscribe<HireMercenaries>(Handle_HireMercenaries);
     }
 
     public void Dispose()
     {
         messageBroker.Unsubscribe<MercenariesHired>(Handle_MercenariesHired);
-        messageBroker.Unsubscribe<HireMercenaries>(Handle_HireMercenaries);
+        hireRoute.Dispose();
     }
 
     internal void Handle_MercenariesHired(MessagePayload<MercenariesHired> obj)
     {
-        if (!objectManager.TryGetIdWithLogging(obj.What.MainHero, out var mainHeroId)) return;
-        if (!objectManager.TryGetIdWithLogging(obj.What.MainParty, out var mainPartyId)) return;
-        if (!objectManager.TryGetIdWithLogging(obj.What.Town, out var townId)) return;
-        if (!objectManager.TryGetIdWithLogging(obj.What.MercenaryTroop, out var mercenaryTroopId)) return;
-
-        network.SendAll(new HireMercenaries(
-            mainHeroId,
-            mainPartyId,
-            townId,
-            mercenaryTroopId,
-            obj.What.Count,
-            obj.What.GoldAmount,
-            obj.What.MainHero.Gold));
+        if (ModInformation.IsServer || !objectManager.TryGetId(obj.What.Town, out var townId)) return;
+        hireRoute.Submit(new MercenaryHireIntent(townId, obj.What.Count));
     }
 
-    private void Handle_HireMercenaries(MessagePayload<HireMercenaries> obj)
+    private AuthorityServerReply<MercenaryHireResult> ExecuteHire(AuthorityServerContext context, HireMercenaries data)
     {
-        // Only the server applies the hire authoritatively; clients receive the replicated troop and
-        // gold changes instead.
-        if (ModInformation.IsClient) return;
-
-        var data = obj.What;
-        var peer = obj.Who as NetPeer;
-
-        // The hire applies vanilla game actions; defer them to the game-loop thread so they run there
-        // instead of on the network (poller) thread that delivered the message.
-        GameThread.RunSafe(() => ApplyHireMercenaries(data, peer), context: nameof(MercenaryHireHandler));
-    }
-
-    private void ApplyHireMercenaries(HireMercenaries data, NetPeer peer)
-    {
-        if (!objectManager.TryGetObjectWithLogging<Hero>(data.MainHeroId, out var mainHero)) return;
-        if (!objectManager.TryGetObjectWithLogging<MobileParty>(data.MainPartyId, out var mainParty)) return;
-        if (!objectManager.TryGetObjectWithLogging<Town>(data.TownId, out var town)) return;
-        if (!objectManager.TryGetObjectWithLogging<CharacterObject>(data.MercenaryTroopId, out var mercenaryTroop)) return;
-        if (town.Settlement == null || !town.Settlement.IsTown) return;
+        if (!TryActor(context, out var mainHero, out var mainParty, out var reason) ||
+            !objectManager.TryGetObject(data.TownId, out Town town) || town.Settlement == null || !town.Settlement.IsTown ||
+            !ReferenceEquals(mainParty.CurrentSettlement, town.Settlement))
+            return Reply(context.Header, data.TownId, null, data.Count, 0, 0, 0, AuthorityResultStatus.Unauthorized, reason ?? "hire-town-context-invalid");
 
         var recruitmentBehavior = Campaign.Current?.GetCampaignBehavior<RecruitmentCampaignBehavior>();
         var mercenaryData = recruitmentBehavior?.GetMercenaryData(town);
@@ -94,46 +83,21 @@ internal class MercenaryHireHandler : IHandler
             ? 0
             : Campaign.Current.Models.PartyWageModel.GetTroopRecruitmentCost(mercenaryData.TroopType, mainHero).RoundedResultNumber;
         int goldAmount = GetMercenaryHireGoldAmount(data.Count, unitPrice);
-        bool availableTroopMatches = mercenaryData?.TroopType == mercenaryTroop;
         int availableCount = mercenaryData?.Number ?? 0;
 
         // The server stock may tick while a client is still in the tavern conversation. Reject those
         // stale requests against the current server stock, then publish the latest stock back below.
         if (mercenaryData == null ||
             !CanApplyMercenaryHire(
-                data.Count,
-                goldAmount,
-                mainHero.Gold,
-                unitPrice,
-                availableTroopMatches,
-                availableCount))
+                data.Count, goldAmount, mainHero.Gold, unitPrice, mercenaryData?.TroopType != null, availableCount) ||
+            mainParty.MemberRoster.TotalManCount + data.Count > Campaign.Current.Models.PartySizeLimitModel.GetPartyMemberSizeLimit(mainParty.Party).ResultNumber)
         {
-            var availableTroopId = "unresolved";
-            if (mercenaryData?.TroopType != null &&
-                objectManager.TryGetIdWithLogging(mercenaryData.TroopType, out var resolvedAvailableTroopId))
-            {
-                availableTroopId = resolvedAvailableTroopId;
-            }
-
-            logger.Warning(
-                "Rejected town mercenary hire for {TownId}: requested {RequestedTroopId} x{RequestedCount}, available {AvailableTroop} x{AvailableCount}, client hero gold {ClientHeroGold}, server hero gold {ServerHeroGold}, client cost {ClientGoldAmount}, server cost {GoldAmount}",
-                data.TownId,
-                data.MercenaryTroopId,
-                data.Count,
-                availableTroopId,
-                availableCount,
-                data.HeroGold,
-                mainHero.Gold,
-                data.GoldAmount,
-                goldAmount);
-
-            SendMercenaryStock(peer, town, mercenaryData?.TroopType, mercenaryData?.Number ?? 0);
-
-            return;
+            return Reply(context.Header, data.TownId, null, data.Count, 0, mainHero.Gold, availableCount, AuthorityResultStatus.Rejected, "hire-ineligible");
         }
 
         // Apply with patches LIVE (no AllowedThread): the roster add replicates via the
         // TroopRoster patches and the gold change via the Hero.Gold sync.
+        CharacterObject mercenaryTroop = mercenaryData.TroopType;
         mainParty.AddElementToMemberRoster(mercenaryTroop, data.Count);
         GiveGoldAction.ApplyBetweenCharacters(mainHero, null, goldAmount, false);
 
@@ -154,6 +118,66 @@ internal class MercenaryHireHandler : IHandler
 
         mercenaryData.ChangeMercenaryCount(-data.Count);
         RecruitmentCampaignBehaviorPatch.PublishMercenaryStock(recruitmentBehavior, town);
+        if (!objectManager.TryGetId(mercenaryTroop, out var troopId))
+        {
+            try { context.Peer.Disconnect(); } catch { }
+            return new AuthorityServerReply<MercenaryHireResult>(Terminal(context.Header, AuthorityResultStatus.ExecutionFailed, "hire-publication-failed"), false, true);
+        }
+        return Reply(context.Header, data.TownId, troopId, data.Count, mainParty.MemberRoster.GetTroopCount(mercenaryTroop), mainHero.Gold,
+            mercenaryData.Number, AuthorityResultStatus.Accepted, null);
+    }
+
+    private AuthorityRequestHeader CreateHeader(long requestId)
+    {
+        return configAuthority.TryGetCurrent(out var snapshot)
+            ? new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, requestId, snapshot.Revision)
+            : default;
+    }
+
+    private AuthorityHeaderValidation ValidateHeader(AuthorityRequestHeader header)
+    {
+        if (!configAuthority.TryGetCurrent(out var snapshot)) return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "config-unavailable");
+        if (header.ProtocolVersion != snapshot.ProtocolVersion) return AuthorityHeaderValidation.Reject(AuthorityResultStatus.InvalidRequest, "unsupported-protocol");
+        if (!string.Equals(header.SessionId, snapshot.SessionId, StringComparison.Ordinal)) return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-session");
+        return header.ExpectedRevision == snapshot.Revision ? AuthorityHeaderValidation.Valid : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-state");
+    }
+
+    private bool TryActor(AuthorityServerContext context, out Hero hero, out MobileParty party, out string reason)
+    {
+        hero = null; party = null; reason = null;
+        if (string.IsNullOrWhiteSpace(context.Player.HeroId) || string.IsNullOrWhiteSpace(context.Player.MobilePartyId) ||
+            !objectManager.TryGetObject(context.Player.HeroId, out hero) || !objectManager.TryGetObject(context.Player.MobilePartyId, out party) ||
+            !ReferenceEquals(party.LeaderHero, hero)) { reason = "hire-actor-missing"; return false; }
+        return true;
+    }
+
+    private static AuthorityServerReply<MercenaryHireResult> Reply(AuthorityRequestHeader header, string townId, string troopId,
+        int count, int partyTroopCount, int heroGold, int stock, AuthorityResultStatus status, string reason) =>
+        new(new MercenaryHireResult(townId, troopId, count, partyTroopCount, heroGold, stock,
+            new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason)), status == AuthorityResultStatus.Accepted);
+
+    private static MercenaryHireResult Terminal(AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        new(null, null, 0, 0, 0, 0, new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason));
+
+    private static AuthorityCommitProbeResult Probe(MercenaryHireResult result)
+    {
+        if (result.Header.Status != AuthorityResultStatus.Accepted) return AuthorityCommitProbeResult.Applied;
+        CharacterObject troop = string.IsNullOrWhiteSpace(result.TroopId) ? null : MBObjectManager.Instance.GetObject<CharacterObject>(result.TroopId);
+        if (troop == null) return AuthorityCommitProbeResult.Pending;
+        return MobileParty.MainParty?.MemberRoster.GetTroopCount(troop) >= result.ExpectedPartyTroopCount && Hero.MainHero?.Gold == result.ExpectedHeroGold
+            ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+    }
+
+    private static void Present(AuthorityClientOutcome<MercenaryHireResult> outcome)
+    {
+        if (!outcome.Applied) MBInformationManager.AddQuickInformation(new TaleWorlds.Localization.TextObject("{=coop_mercenary_hire_failed}Unable to hire mercenaries."));
+    }
+
+    private readonly struct MercenaryHireIntent
+    {
+        public MercenaryHireIntent(string townId, int count) { TownId = townId; Count = count; }
+        public string TownId { get; }
+        public int Count { get; }
     }
 
     private void SendMercenaryStock(NetPeer peer, Town town, CharacterObject troopType, int number)

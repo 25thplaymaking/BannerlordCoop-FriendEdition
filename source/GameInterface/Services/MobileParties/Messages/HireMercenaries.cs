@@ -1,4 +1,5 @@
 ﻿using Common.Messaging;
+using GameInterface.Services.AuthorityRequests;
 using ProtoBuf;
 
 namespace GameInterface.Services.MobileParties.Messages;
@@ -12,38 +13,30 @@ namespace GameInterface.Services.MobileParties.Messages;
 /// diagnostics only.
 /// </summary>
 [ProtoContract(SkipConstructor = true)]
+[AuthorityRoute("mercenary.hire", AuthorityRouteKind.Command)]
 internal readonly struct HireMercenaries : ICommand
 {
-    [ProtoMember(1)]
-    public readonly string MainHeroId;
-    [ProtoMember(2)]
-    public readonly string MainPartyId;
-    [ProtoMember(3)]
-    public readonly string TownId;
-    [ProtoMember(4)]
-    public readonly string MercenaryTroopId;
-    [ProtoMember(5)]
-    public readonly int Count;
-    [ProtoMember(6)]
-    public readonly int GoldAmount;
-    [ProtoMember(7)]
-    public readonly int HeroGold;
+    [ProtoMember(1)] public readonly string TownId;
+    [ProtoMember(2)] public readonly int Count;
+    [ProtoMember(3)] public readonly AuthorityRequestHeader Header;
 
-    public HireMercenaries(
-        string mainHeroId,
-        string mainPartyId,
-        string townId,
-        string mercenaryTroopId,
-        int count,
-        int goldAmount,
-        int heroGold)
-    {
-        MainHeroId = mainHeroId;
-        MainPartyId = mainPartyId;
-        TownId = townId;
-        MercenaryTroopId = mercenaryTroopId;
-        Count = count;
-        GoldAmount = goldAmount;
-        HeroGold = heroGold;
-    }
+    public HireMercenaries(string townId, int count, AuthorityRequestHeader header)
+    { TownId = townId; Count = count; Header = header; }
+}
+
+[ProtoContract(SkipConstructor = true)]
+internal readonly struct MercenaryHireResult : ICommand
+{
+    [ProtoMember(1)] public readonly string TownId;
+    [ProtoMember(2)] public readonly string TroopId;
+    [ProtoMember(3)] public readonly int Count;
+    [ProtoMember(4)] public readonly int ExpectedPartyTroopCount;
+    [ProtoMember(5)] public readonly int ExpectedHeroGold;
+    [ProtoMember(6)] public readonly int ExpectedStock;
+    [ProtoMember(7)] public readonly AuthorityResultHeader Header;
+
+    public MercenaryHireResult(string townId, string troopId, int count, int expectedPartyTroopCount,
+        int expectedHeroGold, int expectedStock, AuthorityResultHeader header)
+    { TownId = townId; TroopId = troopId; Count = count; ExpectedPartyTroopCount = expectedPartyTroopCount;
+      ExpectedHeroGold = expectedHeroGold; ExpectedStock = expectedStock; Header = header; }
 }

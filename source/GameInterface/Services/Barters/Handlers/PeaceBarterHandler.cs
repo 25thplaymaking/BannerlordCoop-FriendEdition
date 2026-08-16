@@ -591,8 +591,8 @@ internal sealed class PeaceBarterHandler : IHandler
         reason = null;
         if (!objectManager.TryGetId(playerHero, out _) || !objectManager.TryGetId(targetHero, out _) ||
             !objectManager.TryGetId(playerHero.MapFaction, out _) || !objectManager.TryGetId(targetHero.MapFaction, out _) ||
-            !TryPackRoster(playerParty, out _, out _, out _, out _) ||
-            !TryPackRoster(targetParty, out _, out _, out _, out _) ||
+            !TryPackRoster(playerParty, out _, out _, out _, out _, out _) ||
+            !TryPackRoster(targetParty, out _, out _, out _, out _, out _) ||
             !TryPackFiefs(offeredBarterables, out _) || !TryPackPrisonerStates(offeredBarterables, out _))
         {
             reason = "peace-state-unavailable";

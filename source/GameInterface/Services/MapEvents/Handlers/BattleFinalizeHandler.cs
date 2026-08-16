@@ -3,7 +3,10 @@ using Common.Logging;
 using Common.Messaging;
 using Common.Network;
 using Common.Util;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.MapEvents;
+using GameInterface.Services.MapEvents.Extensions;
 using GameInterface.Services.MapEvents.Logging;
 using GameInterface.Services.MapEvents.Messages;
 using GameInterface.Services.MapEvents.Messages.Leave;
@@ -28,15 +31,28 @@ using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
+using TaleWorlds.MountAndBlade;
 
 namespace GameInterface.Services.MapEvents.Handlers;
 
+internal readonly struct MapEventFinalizeIntent
+{
+    public MapEventFinalizeIntent(string mapEventId, int hostEpoch)
+    {
+        MapEventId = mapEventId;
+        HostEpoch = hostEpoch;
+    }
+
+    public string MapEventId { get; }
+    public int HostEpoch { get; }
+}
+
 /// <summary>
 /// Owns finalizing a map event and tearing its encounter down (split out of <see cref="BattleHandler"/>). The
-/// server finalizes on an explicit leave (<see cref="NetworkMapEventFinalizeAttempted"/>) and automatically on a
+/// server finalizes an authenticated host request (<see cref="NetworkMapEventFinalizeAttempted"/>) and automatically on a
 /// concluded victory (<see cref="MapEventConcluded"/>), deduping so <c>FinalizeEventAux</c> never runs twice, and
-/// tells every involved player to close its encounter (<see cref="NetworkClosePvpEncounter"/>). The requester-only
-/// <see cref="NetworkMapEventFinalized"/> reply remains as the no-player-party fallback.
+/// tells every involved player to close its encounter (<see cref="NetworkClosePvpEncounter"/>). The correlated
+/// <see cref="NetworkMapEventFinalized"/> certificate completes only after the canonical tombstone applies.
 /// </summary>
 internal class BattleFinalizeHandler : IHandler
 {
@@ -61,6 +77,8 @@ internal class BattleFinalizeHandler : IHandler
     private readonly ISettlementInterface settlementInterface;
     private readonly IBattleHostRegistry hostRegistry;
     private readonly IPlayerManager playerManager;
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRouteHandle<MapEventFinalizeIntent, NetworkMapEventFinalized> finalizeRoute;
 
     public BattleFinalizeHandler(
         IMessageBroker messageBroker,
@@ -71,7 +89,9 @@ internal class BattleFinalizeHandler : IHandler
         IBattleTroopReserveBuilder reserveBuilder,
         ISettlementInterface settlementInterface,
         IBattleHostRegistry hostRegistry,
-        IPlayerManager playerManager)
+        IPlayerManager playerManager,
+        IModConfigAuthority configAuthority,
+        IAuthorityRequestRouter authorityRequestRouter)
     {
         this.messageBroker = messageBroker;
         this.objectManager = objectManager;
@@ -82,10 +102,36 @@ internal class BattleFinalizeHandler : IHandler
         this.settlementInterface = settlementInterface;
         this.hostRegistry = hostRegistry;
         this.playerManager = playerManager;
+        this.configAuthority = configAuthority;
+
+        finalizeRoute = authorityRequestRouter.Register(
+            AuthorityRoute<MapEventFinalizeIntent, NetworkMapEventFinalizeAttempted,
+                NetworkMapEventFinalized>.Define(
+                routeId: "map-event.finalize",
+                kind: AuthorityRouteKind.Command,
+                createHeader: CreateHeader,
+                buildRequest: (intent, header) => new NetworkMapEventFinalizeAttempted(
+                    header, intent.MapEventId, intent.HostEpoch),
+                readRequestHeader: request => request.Header,
+                readResultHeader: result => result.Header,
+                validateWireShape: ValidateFinalizeWireShape,
+                buildCommandKey: request => string.Concat(
+                    request.MapEventId.Length, ":", request.MapEventId, ":", request.HostEpoch),
+                validateHeader: ValidateHeader,
+                execute: ExecuteFinalize,
+                createTerminalResult: (header, status, reason) => new NetworkMapEventFinalized(
+                    header, status, null, 0, false, reason),
+                probeClientCommit: ProbeFinalizeCommit,
+                requestResync: _ => { },
+                presentTerminalOutcome: PresentFinalizeOutcome,
+                isTrustedResultSource: configAuthority.IsTrustedServer,
+                timeoutPolicy: AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true,
+                isExpectedClientResult: (request, result) =>
+                    string.Equals(request.MapEventId, result.MapEventId, StringComparison.Ordinal) &&
+                    request.HostEpoch == result.HostEpoch));
 
         messageBroker.Subscribe<MapEventFinalizeAttempted>(Handle_MapEventFinalizeAttempted);
-        messageBroker.Subscribe<NetworkMapEventFinalizeAttempted>(Handle_NetworkMapEventFinalizeAttempted);
-        messageBroker.Subscribe<NetworkMapEventFinalized>(Handle_NetworkMapEventFinalized);
         messageBroker.Subscribe<NetworkRaidBattleTransition>(Handle_NetworkRaidBattleTransition);
         messageBroker.Subscribe<MapEventConcluded>(Handle_MapEventConcluded);
     }
@@ -93,10 +139,9 @@ internal class BattleFinalizeHandler : IHandler
     public void Dispose()
     {
         messageBroker.Unsubscribe<MapEventFinalizeAttempted>(Handle_MapEventFinalizeAttempted);
-        messageBroker.Unsubscribe<NetworkMapEventFinalizeAttempted>(Handle_NetworkMapEventFinalizeAttempted);
-        messageBroker.Unsubscribe<NetworkMapEventFinalized>(Handle_NetworkMapEventFinalized);
         messageBroker.Unsubscribe<NetworkRaidBattleTransition>(Handle_NetworkRaidBattleTransition);
         messageBroker.Unsubscribe<MapEventConcluded>(Handle_MapEventConcluded);
+        finalizeRoute.Dispose();
     }
 
     private void Handle_MapEventFinalizeAttempted(MessagePayload<MapEventFinalizeAttempted> payload)
@@ -105,64 +150,190 @@ internal class BattleFinalizeHandler : IHandler
             return;
 
         if (MapEventConfig.Debug)
-            mapEventLogger.DebugMapEvent(payload.What.MapEvent, "Map event finalize attempted. Sending network message to finalize map event on all clients.");
+            mapEventLogger.DebugMapEvent(payload.What.MapEvent, "Map event finalize attempted through the authority owner.");
 
-        var message = new NetworkMapEventFinalizeAttempted(mapEventId);
         if (ModInformation.IsServer)
         {
-            Handle_NetworkMapEventFinalizeAttempted(new MessagePayload<NetworkMapEventFinalizeAttempted>(payload.Who, message));
+            FinalizeInternal(mapEventId, payload.What.MapEvent);
             return;
         }
 
-        network.SendAll(message);
+        if (!hostRegistry.TryGet(mapEventId, out var assignment) || assignment.Epoch <= 0)
+        {
+            Logger.Warning("Map-event finalize was not submitted because its host generation is unavailable. MapEvent={MapEventId}",
+                mapEventId);
+            RecoverRejectedFinalize();
+            return;
+        }
+
+        finalizeRoute.Submit(new MapEventFinalizeIntent(mapEventId, assignment.Epoch));
     }
 
-    private void Handle_NetworkMapEventFinalizeAttempted(MessagePayload<NetworkMapEventFinalizeAttempted> payload)
+    private AuthorityServerReply<NetworkMapEventFinalized> ExecuteFinalize(
+        AuthorityServerContext context, NetworkMapEventFinalizeAttempted request)
     {
-        var requester = payload.Who as NetPeer;
-
-        // Only the elected battle host may finalize a live shared battle: a client whose local mission
-        // concluded early still runs vanilla's FinalizeEvent back on the map, and applying that here
-        // would tear the battle down under everyone else (forced encounter close mid-mission). No reply
-        // on a refusal — the finalized reply would pull the refused client off the menu vanilla parked
-        // it on. Server-local publishes (requester null) and battles with no elected host pass.
-        if (requester != null && hostRegistry.TryGet(payload.What.MapEventId, out var hostAssignment)
-            && playerManager.TryGetPlayer(requester, out var requestingPlayer)
-            && requestingPlayer.ControllerId != hostAssignment.HostControllerId)
-        {
-            Logger.Information("Refused finalize of {MapEventId} from non-host {ControllerId}",
-                payload.What.MapEventId, requestingPlayer.ControllerId);
-            return;
-        }
-
-        if (!objectManager.TryGetObjectWithLogging(payload.What.MapEventId, out MapEvent mapEvent))
-        {
-            if (requester != null)
-                network.Send(requester, new NetworkMapEventFinalized());
-            else
-                messageBroker.Publish(this, new NetworkMapEventFinalized());
-
-            return;
-        }
+        if (!hostRegistry.TryGet(request.MapEventId, out var assignment) || assignment.Epoch <= 0)
+            return FinalizeReply(context.Header, request, AuthorityResultStatus.Unavailable,
+                "battle-host-not-ready");
+        if (assignment.Epoch != request.HostEpoch)
+            return FinalizeReply(context.Header, request, AuthorityResultStatus.StaleState,
+                "stale-host-epoch");
+        if (!string.Equals(context.Player.ControllerId, assignment.HostControllerId, StringComparison.Ordinal))
+            return FinalizeReply(context.Header, request, AuthorityResultStatus.Unauthorized,
+                "invalid-battle-host");
+        if (!objectManager.TryGetObject<MapEvent>(request.MapEventId, out var mapEvent) || mapEvent == null)
+            return FinalizeReply(context.Header, request, AuthorityResultStatus.Unavailable,
+                "map-event-not-found");
+        if (!objectManager.TryGetObject<MobileParty>(context.Player.MobilePartyId, out var playerParty) ||
+            playerParty?.Party == null || !ReferenceEquals(playerParty.Party.MapEvent, mapEvent) ||
+            mapEvent.FindMapEventParty(playerParty.Party) == null)
+            return FinalizeReply(context.Header, request, AuthorityResultStatus.Unauthorized,
+                "invalid-battle-host");
+        if (mapEvent.IsFinalized)
+            return FinalizeReply(context.Header, request, AuthorityResultStatus.Rejected,
+                "map-event-finalized");
+        if (ShouldContinueRaidAfterResistanceBattle(mapEvent))
+            return FinalizeReply(context.Header, request, AuthorityResultStatus.Unavailable,
+                "raid-transition-server-owned");
 
         if (MapEventConfig.Debug)
-            mapEventLogger.DebugMapEvent(mapEvent, "Handling network map event finalize attempted. Finalizing map event.");
+            mapEventLogger.DebugMapEvent(mapEvent, "Handling authoritative map-event finalize request.");
 
-        if (TryContinueRaidAfterResistanceBattle(mapEvent))
-            return;
-
-        var playerPartyIds = FinalizeAndCollectPlayers(mapEvent);
-
-        // Tell every involved player party to close its encounter menu through the same path. The legacy
-        // requester-only finalized reply tears down a different local path and can leave a stale encounter menu
-        // in live p2p hostile battles when player-party collection races teardown.
-        if (playerPartyIds.Length > 0)
+        var mutationBoundaryCrossed = false;
+        try
         {
-            PvpEncounterCloseSender.Send(network, playerPartyIds, mapEventId: payload.What.MapEventId);
+            var playerPartyIds = FinalizeAndCollectPlayers(mapEvent, markMutationBoundary: () =>
+                mutationBoundaryCrossed = true);
+            if (playerPartyIds.Length > 0)
+                PvpEncounterCloseSender.Send(network, playerPartyIds, mapEventId: request.MapEventId);
+
+            if (objectManager.TryGetObject<MapEvent>(request.MapEventId, out _))
+                return IsolateFinalize(context, request, "finalize-tombstone-missing");
+
+            return FinalizeReply(context.Header, request, AuthorityResultStatus.Accepted,
+                null, finalized: true, statePublished: true);
+        }
+        catch (Exception exception)
+        {
+            Logger.Error(exception,
+                "Map-event finalize failed. RequestId={RequestId} MapEvent={MapEventId} BoundaryCrossed={BoundaryCrossed}",
+                context.Header.RequestId, request.MapEventId, mutationBoundaryCrossed);
+            return mutationBoundaryCrossed
+                ? IsolateFinalize(context, request, "ambiguous-finalize-mutation")
+                : FinalizeReply(context.Header, request, AuthorityResultStatus.ExecutionFailed,
+                    "finalize-execution-failed");
+        }
+    }
+
+    private AuthorityRequestHeader CreateHeader(long requestId)
+    {
+        if (!configAuthority.TryGetCurrent(out var current)) return default;
+        return new AuthorityRequestHeader(current.ProtocolVersion, current.SessionId, requestId, current.Revision);
+    }
+
+    private AuthorityHeaderValidation ValidateHeader(AuthorityRequestHeader header)
+    {
+        if (!configAuthority.TryGetCurrent(out var current))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "config-unavailable");
+        if (header.ProtocolVersion != current.ProtocolVersion ||
+            !string.Equals(header.SessionId, current.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-session");
+        return header.ExpectedRevision == current.Revision
+            ? AuthorityHeaderValidation.Valid
+            : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-state");
+    }
+
+    private static string ValidateFinalizeWireShape(NetworkMapEventFinalizeAttempted request) =>
+        string.IsNullOrWhiteSpace(request.MapEventId) || request.MapEventId.Length > 256 || request.HostEpoch <= 0
+            ? "invalid-map-event-finalize"
+            : null;
+
+    private static AuthorityServerReply<NetworkMapEventFinalized> FinalizeReply(
+        AuthorityRequestHeader header, NetworkMapEventFinalizeAttempted request,
+        AuthorityResultStatus status, string reasonCode, bool finalized = false, bool statePublished = false,
+        bool suppressReply = false) =>
+        new(new NetworkMapEventFinalized(header, status, request.MapEventId,
+            request.HostEpoch, finalized, reasonCode), statePublished, suppressReply);
+
+    private AuthorityServerReply<NetworkMapEventFinalized> IsolateFinalize(
+        AuthorityServerContext context, NetworkMapEventFinalizeAttempted request, string reasonCode)
+    {
+        Logger.Fatal(
+            "Isolating campaign peers after ambiguous map-event finalize. RequestId={RequestId} MapEvent={MapEventId} Reason={Reason}",
+            context.Header.RequestId, request.MapEventId, reasonCode);
+        DisconnectAllCampaignPeers(context.Peer);
+        return FinalizeReply(context.Header, request, AuthorityResultStatus.ExecutionFailed,
+            reasonCode, suppressReply: true);
+    }
+
+    private AuthorityCommitProbeResult ProbeFinalizeCommit(NetworkMapEventFinalized result)
+    {
+        if (result.Status != AuthorityResultStatus.Accepted || !result.Finalized ||
+            string.IsNullOrEmpty(result.MapEventId) || result.HostEpoch <= 0)
+            return AuthorityCommitProbeResult.Invalid;
+        if (objectManager.TryGetObject<MapEvent>(result.MapEventId, out _))
+            return AuthorityCommitProbeResult.Pending;
+
+        if (PlayerEncounter.Current?._mapEvent != null)
+            return AuthorityCommitProbeResult.Pending;
+        return AuthorityCommitProbeResult.Applied;
+    }
+
+    private void PresentFinalizeOutcome(AuthorityClientOutcome<NetworkMapEventFinalized> outcome)
+    {
+        if (outcome.Applied)
+        {
+            RecoverFinalizedMapEvent(outcome.Result.MapEventId);
             return;
         }
 
-        network.Send(requester, new NetworkMapEventFinalized());
+        Logger.Warning("Map-event finalize did not apply. Completion={Completion} Reason={Reason}",
+            outcome.Completion, outcome.ReasonCode);
+        RecoverRejectedFinalize();
+    }
+
+    private void FinalizeInternal(string mapEventId, MapEvent mapEvent)
+    {
+        var mutationBoundaryCrossed = false;
+        try
+        {
+            if (TryContinueRaidAfterResistanceBattle(mapEvent, () => mutationBoundaryCrossed = true))
+                return;
+
+            var playerPartyIds = FinalizeAndCollectPlayers(mapEvent, markMutationBoundary: () =>
+                mutationBoundaryCrossed = true);
+            if (playerPartyIds.Length > 0)
+                PvpEncounterCloseSender.Send(network, playerPartyIds, mapEventId: mapEventId);
+
+            if (objectManager.TryGetObject<MapEvent>(mapEventId, out _))
+                throw new InvalidOperationException("The finalized map event remained registered.");
+        }
+        catch (Exception exception)
+        {
+            Logger.Error(exception,
+                "Internal map-event finalize failed. MapEvent={MapEventId} BoundaryCrossed={BoundaryCrossed}",
+                mapEventId, mutationBoundaryCrossed);
+            if (mutationBoundaryCrossed)
+                DisconnectAllCampaignPeers(null);
+        }
+    }
+
+    private void DisconnectAllCampaignPeers(NetPeer requestingPeer)
+    {
+        try { requestingPeer?.Disconnect(); } catch { }
+        foreach (var player in playerManager.Players)
+        {
+            if (!playerManager.TryGetPeer(player.ControllerId, out var peer) || ReferenceEquals(peer, requestingPeer))
+                continue;
+            try { peer.Disconnect(); } catch { }
+        }
+    }
+
+    private static void RecoverRejectedFinalize()
+    {
+        if (Campaign.Current == null || PlayerEncounter.Current == null) return;
+        try { GameMenu.SwitchToMenu("encounter"); }
+        catch (Exception exception) { Logger.Warning(exception, "Failed to restore encounter menu after finalize rejection"); }
     }
 
     /// <summary>
@@ -189,12 +360,14 @@ internal class BattleFinalizeHandler : IHandler
 
         // Fires automatically on every victory, so guard the game thread: a finalize edge case must not escape
         // and tear down the campaign tick.
+        var mutationBoundaryCrossed = false;
         try
         {
-            if (TryContinueRaidAfterResistanceBattle(mapEvent))
+            if (TryContinueRaidAfterResistanceBattle(mapEvent, () => mutationBoundaryCrossed = true))
                 return;
 
-            var playerPartyIds = FinalizeAndCollectPlayers(mapEvent, knownPlayerPartyIds);
+            var playerPartyIds = FinalizeAndCollectPlayers(mapEvent, knownPlayerPartyIds,
+                () => mutationBoundaryCrossed = true);
 
             if (!closeAlreadySent && playerPartyIds.Length > 0)
                 PvpEncounterCloseSender.Send(network, playerPartyIds, payload.What.SurrenderedPartyId, payload.What.MapEventId);
@@ -202,6 +375,8 @@ internal class BattleFinalizeHandler : IHandler
         catch (Exception e)
         {
             Logger.Error(e, "Failed to auto-finalize concluded map event");
+            if (mutationBoundaryCrossed)
+                DisconnectAllCampaignPeers(null);
         }
     }
 
@@ -210,13 +385,15 @@ internal class BattleFinalizeHandler : IHandler
     /// first (finalize clears them) so they get a reliable server-addressed encounter close instead of each
     /// racing its own local teardown. <see cref="GameThread.Run"/> runs inline when already on the game thread.
     /// </summary>
-    private string[] FinalizeAndCollectPlayers(MapEvent mapEvent, string[] knownPlayerPartyIds = null)
+    private string[] FinalizeAndCollectPlayers(MapEvent mapEvent, string[] knownPlayerPartyIds = null,
+        Action markMutationBoundary = null)
     {
+        markMutationBoundary?.Invoke();
         if (!TryMarkFinalized(mapEvent))
             return MapEventPlayerPartyCollector.Combine(knownPlayerPartyIds);
 
         string[] playerPartyIds = null;
-        GameThread.RunSafe(() =>
+        GameThread.Run(() =>
         {
             playerPartyIds = MapEventPlayerPartyCollector.Combine(
                 knownPlayerPartyIds,
@@ -275,7 +452,7 @@ internal class BattleFinalizeHandler : IHandler
             // After the destroy (same game thread, so behind it on the reliable-ordered channel).
             if (!string.IsNullOrEmpty(defenderVictorySettlementId))
                 network.SendAll(new NetworkPromptSiegeDefenderVictory(defenderVictorySettlementId, defenderVictoryPartyIds));
-        }, blocking: true, context: nameof(FinalizeAndCollectPlayers));
+        }, blocking: true, label: nameof(FinalizeAndCollectPlayers));
         return playerPartyIds ?? Array.Empty<string>();
     }
 
@@ -340,14 +517,14 @@ internal class BattleFinalizeHandler : IHandler
 
         return ids?.ToArray() ?? Array.Empty<string>();
     }
-    private bool TryContinueRaidAfterResistanceBattle(MapEvent mapEvent)
+    private bool TryContinueRaidAfterResistanceBattle(MapEvent mapEvent, Action markMutationBoundary = null)
     {
         var handled = false;
         string[] playerPartyIds = null;
         string settlementId = null;
         string continuedMapEventId = null;
 
-        GameThread.RunSafe(
+        GameThread.Run(
             () =>
             {
                 if (!ShouldContinueRaidAfterResistanceBattle(mapEvent))
@@ -357,6 +534,7 @@ internal class BattleFinalizeHandler : IHandler
                 if (!objectManager.TryGetIdWithLogging(settlement, out settlementId))
                     return;
 
+                markMutationBoundary?.Invoke();
                 if (!TryMarkFinalized(mapEvent))
                     return;
 
@@ -387,7 +565,7 @@ internal class BattleFinalizeHandler : IHandler
                 handled = true;
             },
             blocking: true,
-            context: nameof(TryContinueRaidAfterResistanceBattle));
+            label: nameof(TryContinueRaidAfterResistanceBattle));
 
         if (!handled)
             return false;
@@ -583,11 +761,19 @@ internal class BattleFinalizeHandler : IHandler
                mapEvent.BattleState == BattleState.AttackerVictory;
     }
 
-    private void Handle_NetworkMapEventFinalized(MessagePayload<NetworkMapEventFinalized> payload)
+    private void RecoverFinalizedMapEvent(string mapEventId)
     {
         GameThread.RunSafe(() =>
         {
             if (Campaign.Current == null) return;
+            if (MissionState.Current != null || Mission.Current != null) return;
+            if (PlayerEncounter.Current?.EncounterState == PlayerEncounterState.CaptureHeroes) return;
+
+            var encounterMapEvent = PlayerEncounter.Current?._mapEvent;
+            if (encounterMapEvent != null &&
+                (!objectManager.TryGetId(encounterMapEvent, out var encounterMapEventId) ||
+                 !string.Equals(encounterMapEventId, mapEventId, StringComparison.Ordinal)))
+                return;
 
             // The local player's battle has ended — clear the recorded mode so the encounter-menu gate
             // (BattleModeEncounterOptionsPatch) no longer treats this event as claimed.

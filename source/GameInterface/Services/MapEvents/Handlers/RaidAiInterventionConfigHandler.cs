@@ -1,6 +1,7 @@
 using Common;
 using Common.Messaging;
 using Common.Network;
+using GameInterface.Configuration;
 using GameInterface.Services.GameDebug.Messages;
 using GameInterface.Services.MapEvents.Messages;
 
@@ -10,33 +11,26 @@ internal class RaidAiInterventionConfigHandler : IHandler
 {
     private readonly IMessageBroker messageBroker;
     private readonly INetwork network;
+    private readonly IModConfigAuthority configAuthority;
 
-    public RaidAiInterventionConfigHandler(IMessageBroker messageBroker, INetwork network)
+    public RaidAiInterventionConfigHandler(IMessageBroker messageBroker, INetwork network,
+        IModConfigAuthority configAuthority)
     {
         this.messageBroker = messageBroker;
         this.network = network;
+        this.configAuthority = configAuthority;
 
-        messageBroker.Subscribe<NetworkRequestRaidAiInterventionConfigChange>(Handle_NetworkRequestRaidAiInterventionConfigChange);
         messageBroker.Subscribe<NetworkRaidAiInterventionConfigChanged>(Handle_NetworkRaidAiInterventionConfigChanged);
     }
 
     public void Dispose()
     {
-        messageBroker.Unsubscribe<NetworkRequestRaidAiInterventionConfigChange>(Handle_NetworkRequestRaidAiInterventionConfigChange);
         messageBroker.Unsubscribe<NetworkRaidAiInterventionConfigChanged>(Handle_NetworkRaidAiInterventionConfigChanged);
-    }
-
-    private void Handle_NetworkRequestRaidAiInterventionConfigChange(MessagePayload<NetworkRequestRaidAiInterventionConfigChange> payload)
-    {
-        if (ModInformation.IsClient)
-            return;
-
-        SetAndBroadcast(payload.What.Allow);
     }
 
     private void Handle_NetworkRaidAiInterventionConfigChanged(MessagePayload<NetworkRaidAiInterventionConfigChanged> payload)
     {
-        if (ModInformation.IsServer)
+        if (ModInformation.IsServer || !configAuthority.IsTrustedServer(payload.Who))
             return;
 
         MapEventConfig.AllowRaidAiIntervention = payload.What.Allow;

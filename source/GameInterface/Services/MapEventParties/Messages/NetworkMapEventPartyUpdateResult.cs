@@ -1,10 +1,11 @@
-﻿using Common.Messaging;
+using Common.Messaging;
 using ProtoBuf;
 
-namespace GameInterface.Services.MapEvents.Messages.Leave;
+namespace GameInterface.Services.MapEventParties.Messages;
 
+/// <summary>Correlated result for a server-owned canonical MapEventParty roster snapshot.</summary>
 [ProtoContract(SkipConstructor = true)]
-internal readonly struct NetworkMapEventFinalized : IEvent
+internal readonly struct NetworkMapEventPartyUpdateResult : IEvent
 {
     [ProtoMember(1)] public readonly string SessionId;
     [ProtoMember(2)] public readonly long AuthorityRequestId;
@@ -12,11 +13,12 @@ internal readonly struct NetworkMapEventFinalized : IEvent
     [ProtoMember(4)] public readonly long CommittedRevision;
     [ProtoMember(5)] public readonly string ReasonCode;
     [ProtoMember(6)] public readonly string MapEventId;
-    [ProtoMember(7)] public readonly int HostEpoch;
-    [ProtoMember(8)] public readonly bool Finalized;
+    [ProtoMember(7)] public readonly string MapEventPartyId;
+    [ProtoMember(8)] public readonly int HostEpoch;
+    [ProtoMember(9)] public readonly string RosterFingerprint;
 
-    public NetworkMapEventFinalized(AuthorityRequestHeader header, AuthorityResultStatus status,
-        string mapEventId, int hostEpoch, bool finalized, string reasonCode)
+    public NetworkMapEventPartyUpdateResult(AuthorityRequestHeader header, AuthorityResultStatus status,
+        string mapEventId, string mapEventPartyId, int hostEpoch, string rosterFingerprint, string reasonCode)
     {
         SessionId = header.SessionId;
         AuthorityRequestId = header.RequestId;
@@ -24,8 +26,9 @@ internal readonly struct NetworkMapEventFinalized : IEvent
         CommittedRevision = header.ExpectedRevision;
         ReasonCode = reasonCode;
         MapEventId = mapEventId;
+        MapEventPartyId = mapEventPartyId;
         HostEpoch = hostEpoch;
-        Finalized = finalized;
+        RosterFingerprint = rosterFingerprint;
     }
 
     public AuthorityResultHeader Header => new AuthorityResultHeader(

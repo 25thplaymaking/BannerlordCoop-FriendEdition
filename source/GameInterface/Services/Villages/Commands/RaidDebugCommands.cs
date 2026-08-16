@@ -1,9 +1,7 @@
 using Autofac;
 using Common;
-using Common.Network;
 using GameInterface.Services.MapEvents;
 using GameInterface.Services.MapEvents.Handlers;
-using GameInterface.Services.MapEvents.Messages;
 using System.Collections.Generic;
 using static TaleWorlds.Library.CommandLineFunctionality;
 
@@ -41,19 +39,13 @@ public class RaidDebugCommands
 
     private static string ApplyRaidAiInterventionConfig(bool allow)
     {
-        MapEventConfig.AllowRaidAiIntervention = allow;
+        if (!ModInformation.IsServer)
+            return RaidAiInterventionConfigHandler.StatusText + " (server console only)";
 
-        if (ModInformation.IsServer)
-        {
-            if (ContainerProvider.TryResolve<RaidAiInterventionConfigHandler>(out var handler))
-                handler.SetAndBroadcast(allow);
+        if (!ContainerProvider.TryResolve<RaidAiInterventionConfigHandler>(out var handler))
+            return "Raid AI intervention service is unavailable";
 
-            return RaidAiInterventionConfigHandler.StatusText;
-        }
-
-        if (ContainerProvider.TryResolve<INetwork>(out var network))
-            network.SendAll(new NetworkRequestRaidAiInterventionConfigChange(allow));
-
-        return RaidAiInterventionConfigHandler.StatusText + " (server update requested)";
+        handler.SetAndBroadcast(allow);
+        return RaidAiInterventionConfigHandler.StatusText;
     }
 }

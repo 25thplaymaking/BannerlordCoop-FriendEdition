@@ -1046,7 +1046,8 @@ public class VillageHostileActionTests : MapEventTestBase
         Assert.NotNull(mapEventId);
         Server.NetworkSentMessages.Clear();
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkMapEventFinalizeAttempted(mapEventId!)), MapEventDisabledMethods);
+        Server.Call(() => Server.Resolve<IMessageBroker>().Publish(
+            this, new MapEventConcluded(mapEventId!, new[] { attackerPartyId })), MapEventDisabledMethods);
 
         var transition = Server.NetworkSentMessages.GetMessages<NetworkRaidBattleTransition>().Single();
         Assert.Equal(target.SettlementId, transition.SettlementId);
@@ -1284,7 +1285,11 @@ public class VillageHostileActionTests : MapEventTestBase
             .Append(AccessTools.Method(typeof(GameMenu), nameof(GameMenu.ExitToLast)))
             .ToList();
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkMapEventFinalizeAttempted(mapEventId!)), disabledMethods);
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MapEvent>(mapEventId!, out var mapEvent));
+            Server.Resolve<IMessageBroker>().Publish(this, new MapEventFinalizeAttempted(mapEvent));
+        }, disabledMethods);
         AssertRaidPartyMovedToVillageGate(Server, mobilePartyId, target.SettlementId);
         foreach (var syncedClient in Clients)
         {
@@ -1293,14 +1298,19 @@ public class VillageHostileActionTests : MapEventTestBase
     }
 
     [Fact]
-    public void RaidFinalizeRequest_ForAlreadyDestroyedMapEvent_StillClosesRequesterMenu()
+    public void RaidFinalizeRequest_ForMissingMapEvent_IsTerminallyUnavailable()
     {
         var client = Clients.First();
         Server.NetworkSentMessages.Clear();
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkMapEventFinalizeAttempted("already-finalized-raid")));
+        var header = CreateMapEventRequestHeader(9101);
+        client.Call(() => client.Resolve<INetwork>().SendAll(
+            new NetworkMapEventFinalizeAttempted(header, "already-finalized-raid", 1)));
 
-        Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkMapEventFinalized>());
+        var result = Server.NetworkSentMessages.GetMessages<NetworkMapEventFinalized>().Single();
+        Assert.Equal(AuthorityResultStatus.Unavailable, result.Status);
+        Assert.Equal("battle-host-not-ready", result.ReasonCode);
+        Assert.False(result.Finalized);
     }
 
     [Fact]
@@ -1681,7 +1691,7 @@ public class VillageHostileActionTests : MapEventTestBase
     }
 
     [Fact]
-    public void RaidAiInterventionDebugCommand_ClientRequestUpdatesServerAndClients()
+    public void RaidAiInterventionDebugCommand_IsServerLocalAndReplicatesCanonicalState()
     {
         var client = Clients.First();
         var previous = MapEventConfig.AllowRaidAiIntervention;
@@ -1694,11 +1704,16 @@ public class VillageHostileActionTests : MapEventTestBase
             client.Call(() =>
             {
                 var result = RaidDebugCommands.AllowRaidAiIntervention(new List<string> { "off" });
-                Assert.Contains("server update requested", result);
+                Assert.Contains("server console only", result);
+                Assert.True(MapEventConfig.AllowRaidAiIntervention);
             });
 
-            var request = client.NetworkSentMessages.GetMessages<NetworkRequestRaidAiInterventionConfigChange>().Single();
-            Assert.False(request.Allow);
+            Assert.Empty(client.NetworkSentMessages.GetMessages<NetworkRaidAiInterventionConfigChanged>());
+            Server.Call(() =>
+            {
+                var result = RaidDebugCommands.AllowRaidAiIntervention(new List<string> { "off" });
+                Assert.Contains("disabled", result);
+            });
 
             var update = Server.NetworkSentMessages.GetMessages<NetworkRaidAiInterventionConfigChanged>().Single();
             Assert.False(update.Allow);

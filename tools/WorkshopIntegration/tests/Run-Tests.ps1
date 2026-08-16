@@ -498,13 +498,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Authority audit validator self-tests failed.' 
 & (Join-Path $PSScriptRoot 'Validate-FeatureWiring.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Workshop feature-wiring validation failed.' }
 
-# Real-audit gameplay authority gate (2026-08-14): six modules are fully classified and must
+# Real-audit gameplay authority gate (2026-08-14): seven modules are fully classified and must
 # stay that way. Fourberie carries a reviewed open-route set (un-adapted stealth/fight-club/
 # banditry mission stack + unrouted behavior consequences) held by a shrink-only ratchet:
 # classifying an open route removes it from the snapshot; adding a new open route fails here.
 & (Join-Path $PSScriptRoot 'Validate-GameplayModuleAuthority.ps1') -ModuleId @(
     'UnblockableThrust', 'DismembermentPlus', 'Separatism', 'ImprovedGarrisons',
-    'Bannerlord.Diplomacy', 'PlayerSettlement')
+    'Bannerlord.Diplomacy', 'PlayerSettlement', 'RebellionsAndDemographics')
 if ($LASTEXITCODE -ne 0) { throw 'Gameplay module authority validation failed.' }
 
 $fourberieRatchetPath = Join-Path $PSScriptRoot '..\fourberie-open-routes.json'

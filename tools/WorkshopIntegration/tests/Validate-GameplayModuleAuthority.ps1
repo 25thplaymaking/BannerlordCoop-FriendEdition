@@ -10,7 +10,8 @@ param(
         'ImprovedGarrisons',
         'Fourberie',
         'Bannerlord.Diplomacy',
-        'PlayerSettlement'
+        'PlayerSettlement',
+        'RebellionsAndDemographics'
     ),
     [string]$AuditPath = 'doc\generated\workshop-authority-audit.json'
 )

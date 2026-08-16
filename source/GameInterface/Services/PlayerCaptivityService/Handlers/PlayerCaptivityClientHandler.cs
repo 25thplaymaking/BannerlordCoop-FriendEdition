@@ -275,7 +275,7 @@ internal class PlayerCaptivityClientHandler : IHandler
 
     private static void ShowAuthorityUnavailable(string message)
     {
-        try { InformationManager.DisplayMessage(new InformationMessage(message)); }
+        try { TaleWorlds.Library.InformationManager.DisplayMessage(new TaleWorlds.Library.InformationMessage(message)); }
         catch (Exception exception) { Logger.Warning(exception, "Could not show authority rejection"); }
     }
 

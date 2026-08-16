@@ -6,6 +6,7 @@ using Common.Network.Coalescing;
 using GameInterface.Services.Heroes.Messages.LordConversations;
 using GameInterface.Services.ObjectManager;
 using Serilog;
+using System;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.Party;

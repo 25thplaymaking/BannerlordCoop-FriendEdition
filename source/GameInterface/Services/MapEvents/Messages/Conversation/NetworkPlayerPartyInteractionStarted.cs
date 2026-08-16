@@ -16,18 +16,22 @@ internal readonly struct NetworkPlayerPartyInteractionStarted : ICommand
     public readonly string InitiatorName;
     [ProtoMember(5)]
     public readonly string ResponderName;
+    [ProtoMember(6)]
+    public readonly long Revision;
 
     public NetworkPlayerPartyInteractionStarted(
         string sessionId,
         string initiatorPartyId,
         string responderPartyId,
         string initiatorName,
-        string responderName)
+        string responderName,
+        long revision = 0)
     {
         SessionId = sessionId;
         InitiatorPartyId = initiatorPartyId;
         ResponderPartyId = responderPartyId;
         InitiatorName = initiatorName;
         ResponderName = responderName;
+        Revision = revision;
     }
 }

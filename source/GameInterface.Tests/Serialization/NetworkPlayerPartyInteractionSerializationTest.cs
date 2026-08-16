@@ -1,4 +1,5 @@
 using GameInterface.Services.Inventory.Data;
+using Common.Messaging;
 using GameInterface.Services.MapEvents.Messages.Conversation;
 using GameInterface.Services.MapEvents.PlayerPartyInteractions;
 using GameInterface.Services.TroopRosters.Data;
@@ -176,6 +177,40 @@ public class NetworkPlayerPartyInteractionSerializationTest
 
         Assert.Equal(original.SessionId, result.SessionId);
         Assert.Equal(original.Accepted, result.Accepted);
+    }
+
+    [Fact]
+    public void AuthorityOptionRoute_RoundTrip_PreservesCorrelationAndRevision()
+    {
+        var header = new AuthorityRequestHeader(1, "config-session", 44, 8);
+        var original = new RequestPlayerPartyInteractionOption(
+            header,
+            "interaction-session",
+            expectedInteractionRevision: 12,
+            option: (int)PlayerPartyInteractionOption.AcceptProposal);
+
+        var result = RoundTrip(original);
+
+        Assert.Equal(original.Header.RequestId, result.Header.RequestId);
+        Assert.Equal(original.InteractionSessionId, result.InteractionSessionId);
+        Assert.Equal(original.ExpectedInteractionRevision, result.ExpectedInteractionRevision);
+        Assert.Equal(original.Option, result.Option);
+        var route = (AuthorityRouteAttribute)System.Attribute.GetCustomAttribute(
+            typeof(RequestPlayerPartyInteractionOption), typeof(AuthorityRouteAttribute));
+        Assert.Equal("player-interaction.option", route.RouteId);
+    }
+
+    [Fact]
+    public void ReplicationRevision_RoundTrip_PreservesPostStateMarker()
+    {
+        var state = RoundTrip(new NetworkPlayerPartyInteractionState(
+            "interaction-session", "party", "other", "Other", PlayerPartyInteractionPhase.TradeActive,
+            PlayerPartyInteractionProposal.Trade, new PlayerPartyInteractionOption[0], true, revision: 19));
+        var ended = RoundTrip(new NetworkPlayerPartyInteractionEnded(
+            "interaction-session", "party", "other", PlayerPartyInteractionOutcomeType.TradeAccepted, revision: 20));
+
+        Assert.Equal(19, state.Revision);
+        Assert.Equal(20, ended.Revision);
     }
 
     private static T RoundTrip<T>(T original)

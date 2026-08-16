@@ -1,6 +1,7 @@
 using GameInterface.Services.Inventory.Data;
 using GameInterface.Services.TroopRosters.Data;
 using LiteNetLib;
+using System;
 using System.Collections.Generic;
 
 namespace GameInterface.Services.MapEvents.PlayerPartyInteractions;
@@ -20,6 +21,7 @@ internal sealed class PlayerPartyInteractionSession
     public bool HostileDemandConfirmed { get; set; }
     public bool InitiatorAcceptedTrade { get; set; }
     public bool ResponderAcceptedTrade { get; set; }
+    public bool ResponderAcceptedProposal { get; set; }
     public ItemRosterElementData[] InitiatorOfferedItems { get; set; } = new ItemRosterElementData[0];
     public ItemRosterElementData[] ResponderOfferedItems { get; set; } = new ItemRosterElementData[0];
     public int InitiatorOfferedGold { get; set; }
@@ -32,6 +34,10 @@ internal sealed class PlayerPartyInteractionSession
     public TroopRosterElementData[] ResponderOfferedTroops { get; set; } = new TroopRosterElementData[0];
     public bool InitiatorOfferedPeace { get; set; }
     public bool ResponderOfferedPeace { get; set; }
+    public PlayerPartyInteractionPhase InitiatorPhase { get; set; } = PlayerPartyInteractionPhase.None;
+    public PlayerPartyInteractionPhase ResponderPhase { get; set; } = PlayerPartyInteractionPhase.None;
+    public long Revision { get; private set; } = 1;
+    public DateTime LastActivityUtc { get; private set; } = DateTime.UtcNow;
 
     public HashSet<PlayerPartyInteractionOption> InitiatorOptions { get; } = new HashSet<PlayerPartyInteractionOption>();
     public HashSet<PlayerPartyInteractionOption> InitiatorEnabledOptions { get; } = new HashSet<PlayerPartyInteractionOption>();
@@ -65,6 +71,14 @@ internal sealed class PlayerPartyInteractionSession
 
     public bool IsInitiator(string partyId)
         => partyId == InitiatorPartyId;
+
+    public long AdvanceRevision()
+    {
+        LastActivityUtc = DateTime.UtcNow;
+        return ++Revision;
+    }
+
+    public void Touch() => LastActivityUtc = DateTime.UtcNow;
 
     public void SetTradeOffer(
         string partyId,

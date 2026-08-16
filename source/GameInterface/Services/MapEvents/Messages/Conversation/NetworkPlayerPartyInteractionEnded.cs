@@ -15,16 +15,20 @@ internal readonly struct NetworkPlayerPartyInteractionEnded : ICommand
     public readonly string ResponderPartyId;
     [ProtoMember(4)]
     public readonly PlayerPartyInteractionOutcomeType OutcomeType;
+    [ProtoMember(5)]
+    public readonly long Revision;
 
     public NetworkPlayerPartyInteractionEnded(
         string sessionId,
         string initiatorPartyId,
         string responderPartyId,
-        PlayerPartyInteractionOutcomeType outcomeType)
+        PlayerPartyInteractionOutcomeType outcomeType,
+        long revision = 0)
     {
         SessionId = sessionId;
         InitiatorPartyId = initiatorPartyId;
         ResponderPartyId = responderPartyId;
         OutcomeType = outcomeType;
+        Revision = revision;
     }
 }

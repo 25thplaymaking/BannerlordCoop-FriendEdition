@@ -21,6 +21,7 @@ public static class PlayerPartyInteractionDialogState
 
     private static NetworkPlayerPartyInteractionState currentState;
     private static bool hasState;
+    private static readonly Dictionary<string, long> appliedRevisions = new Dictionary<string, long>();
 
     public static string SessionId => hasState ? currentState.SessionId : null;
     public static string PartyId => hasState ? currentState.PartyId : null;
@@ -31,10 +32,15 @@ public static class PlayerPartyInteractionDialogState
     public static bool InitiatorAcceptedTrade => hasState && currentState.InitiatorAcceptedTrade;
     public static bool ResponderAcceptedTrade => hasState && currentState.ResponderAcceptedTrade;
     public static bool IsHostile => hasState && currentState.IsHostile;
+    public static long Revision => hasState ? currentState.Revision : 0;
     public static bool HasActiveState => hasState;
 
     internal static void Apply(NetworkPlayerPartyInteractionState state)
     {
+        if (hasState && currentState.SessionId == state.SessionId && state.Revision > 0 && currentState.Revision > state.Revision)
+            return;
+        if (state.Revision > 0)
+            appliedRevisions[state.SessionId] = Math.Max(appliedRevisions.TryGetValue(state.SessionId, out var existing) ? existing : 0, state.Revision);
         currentState = state;
         hasState = true;
         RefreshConversation();
@@ -46,6 +52,19 @@ public static class PlayerPartyInteractionDialogState
 
         hasState = false;
         currentState = default;
+    }
+
+    internal static void RecordReplication(string sessionId, long revision)
+    {
+        if (!string.IsNullOrEmpty(sessionId) && revision > 0)
+            appliedRevisions[sessionId] = Math.Max(appliedRevisions.TryGetValue(sessionId, out var existing) ? existing : 0, revision);
+    }
+
+    internal static bool HasAppliedPostState(string sessionId, string partyId, long revision)
+    {
+        if (hasState && currentState.SessionId == sessionId && currentState.PartyId == partyId && currentState.Revision >= revision)
+            return true;
+        return appliedRevisions.TryGetValue(sessionId, out var applied) && applied >= revision;
     }
 
     public static bool HasOption(PlayerPartyInteractionOption option)
@@ -182,7 +201,8 @@ public static class PlayerPartyInteractionDialogState
             currentState.OtherPartyItems,
             GetLocalServiceEnabledOptions(),
             currentState.IsHostile,
-            currentState.VassalUnavailableReason);
+            currentState.VassalUnavailableReason,
+            currentState.Revision);
 
         RefreshConversation();
     }

@@ -4,6 +4,8 @@ using Common.Messaging;
 using Common.Network;
 using Common.Network.Messages;
 using Common.Util;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Inventory.Data;
 using GameInterface.Services.Kingdoms;
 using GameInterface.Services.MapEvents.Messages;
@@ -53,6 +55,34 @@ internal readonly struct PlayerPartyInteractionStartResult
     public string SessionId { get; }
 }
 
+internal readonly struct PlayerPartyInteractionShownIntent
+{
+    public PlayerPartyInteractionShownIntent(string sessionId, long revision) { SessionId = sessionId; Revision = revision; }
+    public string SessionId { get; }
+    public long Revision { get; }
+}
+
+internal readonly struct PlayerPartyInteractionOptionIntent
+{
+    public PlayerPartyInteractionOptionIntent(string sessionId, long revision, PlayerPartyInteractionOption option) { SessionId = sessionId; Revision = revision; Option = option; }
+    public string SessionId { get; }
+    public long Revision { get; }
+    public PlayerPartyInteractionOption Option { get; }
+}
+
+internal readonly struct PlayerPartyTradeOfferIntent
+{
+    public PlayerPartyTradeOfferIntent(string sessionId, long revision, ItemRosterElementData[] items, TroopRosterElementData[] troops, int gold, string[] fiefs, TroopRosterElementData[] prisoners, bool peace)
+    { SessionId = sessionId; Revision = revision; Items = items; Troops = troops; Gold = gold; Fiefs = fiefs; Prisoners = prisoners; Peace = peace; }
+    public string SessionId { get; } public long Revision { get; } public ItemRosterElementData[] Items { get; } public TroopRosterElementData[] Troops { get; } public int Gold { get; } public string[] Fiefs { get; } public TroopRosterElementData[] Prisoners { get; } public bool Peace { get; }
+}
+
+internal readonly struct PlayerPartyTradeAcceptIntent
+{
+    public PlayerPartyTradeAcceptIntent(string sessionId, long revision, bool accepted) { SessionId = sessionId; Revision = revision; Accepted = accepted; }
+    public string SessionId { get; } public long Revision { get; } public bool Accepted { get; }
+}
+
 internal class PlayerPartyInteractionHandler : IHandler
 {
     private static readonly ILogger Logger = LogManager.GetLogger<PlayerPartyInteractionHandler>();
@@ -67,9 +97,15 @@ internal class PlayerPartyInteractionHandler : IHandler
     private readonly IPlayerPartyHostileEncounterService hostileEncounterService;
     private readonly PlayerPartyInteractionOutcomeHandler outcomeHandler;
     private readonly IPlayerClanMembershipService clanMembershipService;
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRouteHandle<PlayerPartyInteractionShownIntent, PlayerPartyInteractionShownResult> shownRoute;
+    private readonly IAuthorityRouteHandle<PlayerPartyInteractionOptionIntent, PlayerPartyInteractionOptionResult> optionRoute;
+    private readonly IAuthorityRouteHandle<PlayerPartyTradeOfferIntent, PlayerPartyTradeOfferResult> tradeOfferRoute;
+    private readonly IAuthorityRouteHandle<PlayerPartyTradeAcceptIntent, PlayerPartyTradeAcceptResult> tradeAcceptRoute;
 
     private readonly ConcurrentDictionary<string, PlayerPartyInteractionSession> sessionsById = new ConcurrentDictionary<string, PlayerPartyInteractionSession>();
     private readonly ConcurrentDictionary<string, string> sessionsByPartyId = new ConcurrentDictionary<string, string>();
+    private readonly ConcurrentDictionary<string, long> endedSessionRevisions = new ConcurrentDictionary<string, long>();
     private readonly object sessionGate = new object();
     private readonly HashSet<string> openedConversationSessionIds = new HashSet<string>();
     private readonly HashSet<string> endedInteractionSessionIds = new HashSet<string>();
@@ -85,7 +121,9 @@ internal class PlayerPartyInteractionHandler : IHandler
         INetworkConfig configuration,
         IPlayerPartyHostileEncounterService hostileEncounterService,
         IKingdomMembershipState kingdomMembershipState,
-        IPlayerClanMembershipService clanMembershipService)
+        IPlayerClanMembershipService clanMembershipService,
+        IModConfigAuthority configAuthority,
+        IAuthorityRequestRouter authorityRequestRouter)
     {
         this.messageBroker = messageBroker;
         this.network = network;
@@ -94,12 +132,36 @@ internal class PlayerPartyInteractionHandler : IHandler
         this.configuration = configuration;
         this.hostileEncounterService = hostileEncounterService;
         this.clanMembershipService = clanMembershipService;
+        this.configAuthority = configAuthority;
         outcomeHandler = new PlayerPartyInteractionOutcomeHandler(objectManager, kingdomMembershipState, clanMembershipService);
+
+        shownRoute = authorityRequestRouter.Register(AuthorityRoute<PlayerPartyInteractionShownIntent, RequestPlayerPartyInteractionShown, PlayerPartyInteractionShownResult>.Define(
+            "player-interaction.shown", AuthorityRouteKind.Command, CreateAuthorityHeader,
+            (intent, header) => new RequestPlayerPartyInteractionShown(header, intent.SessionId, intent.Revision), request => request.Header, result => result.Header,
+            ValidateShownWire, request => request.InteractionSessionId, ValidateAuthorityHeader, ExecuteShown, CreateShownTerminal, ProbeShown,
+            result => ResyncInteraction(result.InteractionSessionId), PresentRouteOutcome, configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+            failClosedOnApplyFailure: false, isExpectedClientResult: (request, result) => string.Equals(request.InteractionSessionId, result.InteractionSessionId, StringComparison.Ordinal)));
+        optionRoute = authorityRequestRouter.Register(AuthorityRoute<PlayerPartyInteractionOptionIntent, RequestPlayerPartyInteractionOption, PlayerPartyInteractionOptionResult>.Define(
+            "player-interaction.option", AuthorityRouteKind.Command, CreateAuthorityHeader,
+            (intent, header) => new RequestPlayerPartyInteractionOption(header, intent.SessionId, intent.Revision, (int)intent.Option), request => request.Header, result => result.Header,
+            ValidateOptionWire, request => request.InteractionSessionId + ":" + request.ExpectedInteractionRevision + ":" + request.Option, ValidateAuthorityHeader, ExecuteOption, CreateOptionTerminal, ProbeOption,
+            result => ResyncInteraction(result.InteractionSessionId), PresentRouteOutcome, configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+            failClosedOnApplyFailure: false, isExpectedClientResult: (request, result) => string.Equals(request.InteractionSessionId, result.InteractionSessionId, StringComparison.Ordinal)));
+        tradeOfferRoute = authorityRequestRouter.Register(AuthorityRoute<PlayerPartyTradeOfferIntent, RequestPlayerPartyTradeOffer, PlayerPartyTradeOfferResult>.Define(
+            "player-interaction.trade-offer", AuthorityRouteKind.Command, CreateAuthorityHeader,
+            (intent, header) => new RequestPlayerPartyTradeOffer(header, intent.SessionId, intent.Revision, intent.Items, intent.Troops, intent.Gold, intent.Fiefs, intent.Prisoners, intent.Peace), request => request.Header, result => result.Header,
+            ValidateTradeOfferWire, BuildTradeOfferKey, ValidateAuthorityHeader, ExecuteTradeOffer, CreateTradeOfferTerminal, ProbeTradeOffer,
+            result => ResyncInteraction(result.InteractionSessionId), PresentRouteOutcome, configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+            failClosedOnApplyFailure: false, isExpectedClientResult: (request, result) => string.Equals(request.InteractionSessionId, result.InteractionSessionId, StringComparison.Ordinal)));
+        tradeAcceptRoute = authorityRequestRouter.Register(AuthorityRoute<PlayerPartyTradeAcceptIntent, RequestPlayerPartyTradeAccept, PlayerPartyTradeAcceptResult>.Define(
+            "player-interaction.trade-accept", AuthorityRouteKind.Command, CreateAuthorityHeader,
+            (intent, header) => new RequestPlayerPartyTradeAccept(header, intent.SessionId, intent.Revision, intent.Accepted), request => request.Header, result => result.Header,
+            ValidateTradeAcceptWire, request => request.InteractionSessionId + ":" + request.ExpectedInteractionRevision + ":" + request.Accepted, ValidateAuthorityHeader, ExecuteTradeAccept, CreateTradeAcceptTerminal, ProbeTradeAccept,
+            result => ResyncInteraction(result.InteractionSessionId), PresentRouteOutcome, configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+            failClosedOnApplyFailure: false, isExpectedClientResult: (request, result) => string.Equals(request.InteractionSessionId, result.InteractionSessionId, StringComparison.Ordinal)));
 
         messageBroker.Subscribe<NetworkPlayerPartyInteractionStarted>(Handle_NetworkPlayerPartyInteractionStarted);
         messageBroker.Subscribe<NetworkPlayerPartyInteractionState>(Handle_NetworkPlayerPartyInteractionState);
-        messageBroker.Subscribe<NetworkSubmitPlayerPartyInteractionOption>(Handle_NetworkSubmitPlayerPartyInteractionOption);
-        messageBroker.Subscribe<NetworkPlayerPartyInteractionShown>(Handle_NetworkPlayerPartyInteractionShown);
         messageBroker.Subscribe<NetworkPlayerPartyInteractionEnded>(Handle_NetworkPlayerPartyInteractionEnded);
         messageBroker.Subscribe<NetworkPlayerPartyInteractionDenied>(Handle_NetworkPlayerPartyInteractionDenied);
         messageBroker.Subscribe<NetworkPlayerPartyHostileEncounterStarted>(Handle_NetworkPlayerPartyHostileEncounterStarted);
@@ -108,7 +170,6 @@ internal class PlayerPartyInteractionHandler : IHandler
         messageBroker.Subscribe<PlayerPartyTradeOfferChanged>(Handle_PlayerPartyTradeOfferChanged);
         messageBroker.Subscribe<PlayerPartyTradeAcceptSelected>(Handle_PlayerPartyTradeAcceptSelected);
         messageBroker.Subscribe<NetworkPlayerPartyTradeOfferUpdated>(Handle_NetworkPlayerPartyTradeOfferUpdated);
-        messageBroker.Subscribe<NetworkPlayerPartyTradeAcceptChanged>(Handle_NetworkPlayerPartyTradeAcceptChanged);
         messageBroker.Subscribe<PlayerDisconnected>(Handle_PlayerDisconnected);
     }
 
@@ -119,8 +180,6 @@ internal class PlayerPartyInteractionHandler : IHandler
 
         messageBroker.Unsubscribe<NetworkPlayerPartyInteractionStarted>(Handle_NetworkPlayerPartyInteractionStarted);
         messageBroker.Unsubscribe<NetworkPlayerPartyInteractionState>(Handle_NetworkPlayerPartyInteractionState);
-        messageBroker.Unsubscribe<NetworkSubmitPlayerPartyInteractionOption>(Handle_NetworkSubmitPlayerPartyInteractionOption);
-        messageBroker.Unsubscribe<NetworkPlayerPartyInteractionShown>(Handle_NetworkPlayerPartyInteractionShown);
         messageBroker.Unsubscribe<NetworkPlayerPartyInteractionEnded>(Handle_NetworkPlayerPartyInteractionEnded);
         messageBroker.Unsubscribe<NetworkPlayerPartyInteractionDenied>(Handle_NetworkPlayerPartyInteractionDenied);
         messageBroker.Unsubscribe<NetworkPlayerPartyHostileEncounterStarted>(Handle_NetworkPlayerPartyHostileEncounterStarted);
@@ -129,8 +188,11 @@ internal class PlayerPartyInteractionHandler : IHandler
         messageBroker.Unsubscribe<PlayerPartyTradeOfferChanged>(Handle_PlayerPartyTradeOfferChanged);
         messageBroker.Unsubscribe<PlayerPartyTradeAcceptSelected>(Handle_PlayerPartyTradeAcceptSelected);
         messageBroker.Unsubscribe<NetworkPlayerPartyTradeOfferUpdated>(Handle_NetworkPlayerPartyTradeOfferUpdated);
-        messageBroker.Unsubscribe<NetworkPlayerPartyTradeAcceptChanged>(Handle_NetworkPlayerPartyTradeAcceptChanged);
         messageBroker.Unsubscribe<PlayerDisconnected>(Handle_PlayerDisconnected);
+        shownRoute.Dispose();
+        optionRoute.Dispose();
+        tradeOfferRoute.Dispose();
+        tradeAcceptRoute.Dispose();
 
         // The dialog state is a process-wide static, not container state: a session that ends mid-dialog
         // would otherwise leave HasActiveState set after this handler's container is torn down, and
@@ -183,7 +245,8 @@ internal class PlayerPartyInteractionHandler : IHandler
             session.InitiatorPartyId,
             session.ResponderPartyId,
             session.InitiatorName,
-            session.ResponderName));
+            session.ResponderName,
+            session.Revision));
 
         SendInitialStates(session);
 
@@ -212,7 +275,7 @@ internal class PlayerPartyInteractionHandler : IHandler
             closedHostileEncounterPartyIds.Remove(message.InitiatorPartyId);
             closedHostileEncounterPartyIds.Remove(message.ResponderPartyId);
 
-            network.SendAll(new NetworkPlayerPartyInteractionShown(message.SessionId, myPartyId));
+            shownRoute.Submit(new PlayerPartyInteractionShownIntent(message.SessionId, message.Revision));
         }, context: "Confirm player-party interaction party");
     }
 
@@ -248,67 +311,10 @@ internal class PlayerPartyInteractionHandler : IHandler
         if (ModInformation.IsServer) return;
 
         var message = payload.What;
-        network.SendAll(new NetworkSubmitPlayerPartyInteractionOption(message.SessionId, message.Option, message.PartyId));
-    }
-
-    private void Handle_NetworkSubmitPlayerPartyInteractionOption(MessagePayload<NetworkSubmitPlayerPartyInteractionOption> payload)
-    {
-        if (ModInformation.IsClient) return;
-        if (!(payload.Who is NetPeer peer)) return;
-
-        var message = payload.What;
-        GameThread.RunSafe(() => ProcessSubmittedOption(peer, message), context: nameof(Handle_NetworkSubmitPlayerPartyInteractionOption));
-    }
-
-    private void ProcessSubmittedOption(NetPeer peer, NetworkSubmitPlayerPartyInteractionOption message)
-    {
-        if (!sessionsById.TryGetValue(message.SessionId, out var session))
-        {
-            Logger.Warning(
-                "[P2POptionTrace] Server ignored player-party dialog option for missing session; sessionId={SessionId} declaredPartyId={DeclaredPartyId} option={Option}",
-                message.SessionId ?? "<none>",
-                message.PartyId ?? "<none>",
-                message.Option);
-            return;
-        }
-
-        if (!TryGetSessionPartyId(session, peer, out var partyId))
-        {
-            Logger.Warning(
-                "[P2POptionTrace] Server ignored player-party dialog option because peer did not match session; sessionId={SessionId} declaredPartyId={DeclaredPartyId} option={Option} initiatorPartyId={InitiatorPartyId} responderPartyId={ResponderPartyId}",
-                message.SessionId ?? "<none>",
-                message.PartyId ?? "<none>",
-                message.Option,
-                session.InitiatorPartyId,
-                session.ResponderPartyId);
-            return;
-        }
-
-        if (partyId == session.InitiatorPartyId)
-        {
-            HandleInitiatorOption(session, message.Option);
-            return;
-        }
-
-        if (partyId == session.ResponderPartyId)
-        {
-            HandleResponderOption(session, message.Option);
-            return;
-        }
-    }
-
-    private void Handle_NetworkPlayerPartyInteractionShown(MessagePayload<NetworkPlayerPartyInteractionShown> payload)
-    {
-        if (ModInformation.IsClient) return;
-        if (!(payload.Who is NetPeer peer)) return;
-
-        var message = payload.What;
-        if (!sessionsById.TryGetValue(message.SessionId, out var session)) return;
-
-        if (message.PartyId == session.ResponderPartyId &&
-            !ReferenceEquals(peer, session.InitiatorPeer) &&
-            session.ResponderPeer == null)
-            session.ResponderPeer = peer;
+        optionRoute.Submit(new PlayerPartyInteractionOptionIntent(
+            message.SessionId,
+            PlayerPartyInteractionDialogState.Revision,
+            message.Option));
     }
 
     private void Handle_NetworkPlayerPartyInteractionEnded(MessagePayload<NetworkPlayerPartyInteractionEnded> payload)
@@ -323,6 +329,7 @@ internal class PlayerPartyInteractionHandler : IHandler
             if (!isLocalInteraction && !IsCurrentLocalInteractionSession(message.SessionId)) return;
 
             endedInteractionSessionIds.Add(message.SessionId);
+            PlayerPartyInteractionDialogState.RecordReplication(message.SessionId, message.Revision);
             PlayerPartyInteractionDialogState.Clear(message.SessionId);
             PlayerPartyTradeContext.End(message.SessionId, message.OutcomeType);
             PlayerPartyTradeOverlay.Instance.Hide(message.SessionId);
@@ -399,9 +406,9 @@ internal class PlayerPartyInteractionHandler : IHandler
             ? ResolveTroopIds(GetOfferedBarterTroops(message.BarterVM))
             : Array.Empty<TroopRosterElementData>();
         var offeredPeace = message.BarterVM != null && HasOfferedPeace(message.BarterVM);
-        network.SendAll(new NetworkPlayerPartyTradeOfferUpdated(
+        tradeOfferRoute.Submit(new PlayerPartyTradeOfferIntent(
             message.SessionId,
-            partyId,
+            PlayerPartyInteractionDialogState.Revision,
             offeredItems,
             offeredTroops,
             offeredGold,
@@ -415,47 +422,22 @@ internal class PlayerPartyInteractionHandler : IHandler
         if (ModInformation.IsServer) return;
 
         var message = payload.What;
-        network.SendAll(new NetworkPlayerPartyTradeAcceptChanged(message.SessionId, message.Accepted));
+        tradeAcceptRoute.Submit(new PlayerPartyTradeAcceptIntent(
+            message.SessionId,
+            PlayerPartyInteractionDialogState.Revision,
+            message.Accepted));
     }
 
     private void Handle_NetworkPlayerPartyTradeOfferUpdated(MessagePayload<NetworkPlayerPartyTradeOfferUpdated> payload)
     {
-        if (ModInformation.IsClient)
-        {
-            var clientMessage = payload.What;
-            GameThread.RunSafe(
-                () => PlayerPartyTradeContext.ApplyOfferUpdate(clientMessage, objectManager),
-                context: "Apply player-party trade offer update");
+        if (ModInformation.IsServer) return;
+
+        var clientMessage = payload.What;
+        if (clientMessage.Revision > 0 && clientMessage.Revision < PlayerPartyInteractionDialogState.Revision)
             return;
-        }
-
-        if (!(payload.Who is NetPeer peer)) return;
-
-        var message = payload.What;
-        if (!sessionsById.TryGetValue(message.SessionId, out var session)) return;
-        if (!TryGetSessionPartyId(session, peer, out var partyId)) return;
-
-        var offeredPeace = message.OfferedPeace && CanOfferPeace(session, partyId);
-        session.SetTradeOffer(
-            partyId,
-            message.OfferedItems,
-            message.OfferedTroops,
-            message.OfferedGold,
-            message.OfferedFiefs,
-            message.OfferedPrisoners,
-            offeredPeace);
-        session.InitiatorAcceptedTrade = false;
-        session.ResponderAcceptedTrade = false;
-        network.SendAll(new NetworkPlayerPartyTradeOfferUpdated(
-            message.SessionId,
-            partyId,
-            message.OfferedItems,
-            message.OfferedTroops,
-            message.OfferedGold,
-            message.OfferedFiefs,
-            message.OfferedPrisoners,
-            offeredPeace));
-        SendTradeStates(session, false);
+        GameThread.RunSafe(
+            () => PlayerPartyTradeContext.ApplyOfferUpdate(clientMessage, objectManager),
+            context: "Apply player-party trade offer update");
     }
 
     private bool CanOfferPeace(PlayerPartyInteractionSession session, string partyId)
@@ -467,27 +449,262 @@ internal class PlayerPartyInteractionHandler : IHandler
         return PlayerPartyPeaceBarterable.CanOfferPeace(party, otherParty);
     }
 
-    private void Handle_NetworkPlayerPartyTradeAcceptChanged(MessagePayload<NetworkPlayerPartyTradeAcceptChanged> payload)
+    // --- Authority-routed client mutations.  The old Network* command packets remain replication-only. ---
+
+    private AuthorityRequestHeader CreateAuthorityHeader(long requestId)
     {
-        if (ModInformation.IsClient) return;
-        if (!(payload.Who is NetPeer peer)) return;
-
-        var message = payload.What;
-        if (!sessionsById.TryGetValue(message.SessionId, out var session)) return;
-        if (!TryGetSessionPartyId(session, peer, out var partyId)) return;
-
-        if (partyId == session.InitiatorPartyId)
-            session.InitiatorAcceptedTrade = message.Accepted;
-        else if (partyId == session.ResponderPartyId)
-            session.ResponderAcceptedTrade = message.Accepted;
-        else
-            return;
-
-        SendTradeStates(session);
-
-        if (session.InitiatorAcceptedTrade && session.ResponderAcceptedTrade)
-            EndSession(session, PlayerPartyInteractionOutcomeType.TradeAccepted);
+        if (!configAuthority.TryGetCurrent(out var snapshot)) return default;
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, requestId, snapshot.Revision);
     }
+
+    private AuthorityHeaderValidation ValidateAuthorityHeader(AuthorityRequestHeader header)
+    {
+        if (!configAuthority.TryGetCurrent(out var snapshot))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "config-unavailable");
+        if (header.ProtocolVersion != snapshot.ProtocolVersion)
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.InvalidRequest, "unsupported-protocol");
+        if (!string.Equals(header.SessionId, snapshot.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-session");
+        return header.ExpectedRevision == snapshot.Revision
+            ? AuthorityHeaderValidation.Valid
+            : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-config");
+    }
+
+    private static string ValidateInteraction(string sessionId, long revision)
+        => string.IsNullOrWhiteSpace(sessionId) || sessionId.Length > AuthorityRequestHeader.MaximumSessionIdLength
+            ? "invalid-interaction-session" : revision < 0 ? "invalid-interaction-revision" : null;
+    private static string ValidateShownWire(RequestPlayerPartyInteractionShown request) => ValidateInteraction(request.InteractionSessionId, request.ExpectedInteractionRevision);
+    private static string ValidateOptionWire(RequestPlayerPartyInteractionOption request)
+        => ValidateInteraction(request.InteractionSessionId, request.ExpectedInteractionRevision) ??
+           (!Enum.IsDefined(typeof(PlayerPartyInteractionOption), request.Option) || request.Option == (int)PlayerPartyInteractionOption.None ? "invalid-option" : null);
+    private static string ValidateTradeAcceptWire(RequestPlayerPartyTradeAccept request) => ValidateInteraction(request.InteractionSessionId, request.ExpectedInteractionRevision);
+    private static string ValidateTradeOfferWire(RequestPlayerPartyTradeOffer request)
+    {
+        var basic = ValidateInteraction(request.InteractionSessionId, request.ExpectedInteractionRevision);
+        if (basic != null) return basic;
+        if (request.OfferedGold < 0 || request.OfferedItems == null || request.OfferedTroops == null || request.OfferedFiefs == null || request.OfferedPrisoners == null) return "invalid-offer";
+        return request.OfferedItems.Length > 128 || request.OfferedTroops.Length > 128 || request.OfferedFiefs.Length > 64 || request.OfferedPrisoners.Length > 128 ? "offer-too-large" : null;
+    }
+    private static string BuildTradeOfferKey(RequestPlayerPartyTradeOffer request)
+        => request.InteractionSessionId + ":" + request.ExpectedInteractionRevision + ":" + request.OfferedGold + ":" + request.OfferedPeace + ":" +
+           string.Join("|", request.OfferedItems.Select(x => x.ItemObjectData.ItemObjectId + ":" + x.ItemObjectData.ItemModifierId + ":" + x.Amount)) + ":" +
+           string.Join("|", request.OfferedTroops.Select(x => x.CharacterId + ":" + x.Number + ":" + x.WoundedNumber + ":" + x.Xp)) + ":" +
+           string.Join("|", request.OfferedFiefs) + ":" + string.Join("|", request.OfferedPrisoners.Select(x => x.CharacterId + ":" + x.Number));
+
+    private AuthorityServerReply<PlayerPartyInteractionShownResult> ExecuteShown(AuthorityServerContext context, RequestPlayerPartyInteractionShown request)
+    {
+        AuthorityServerReply<PlayerPartyInteractionShownResult> reply = default;
+        GameThread.RunSafe(() =>
+        {
+            if (!TryGetRoutableSession(request.InteractionSessionId, request.ExpectedInteractionRevision, context.Peer, out var session, out var partyId, out var status, out var reason))
+            { reply = new AuthorityServerReply<PlayerPartyInteractionShownResult>(ShownResult(context.Header, request.InteractionSessionId, null, RevisionFor(request.InteractionSessionId), status, reason), false); return; }
+            if (partyId == session.ResponderPartyId && session.ResponderPeer == null) session.ResponderPeer = context.Peer;
+            session.Touch();
+            SendInitialStates(session);
+            reply = new AuthorityServerReply<PlayerPartyInteractionShownResult>(ShownResult(context.Header, session.SessionId, partyId, session.Revision, AuthorityResultStatus.Accepted, null), true);
+        }, blocking: true, context: "Route player-party interaction shown");
+        return reply;
+    }
+
+    private AuthorityServerReply<PlayerPartyInteractionOptionResult> ExecuteOption(AuthorityServerContext context, RequestPlayerPartyInteractionOption request)
+    {
+        AuthorityServerReply<PlayerPartyInteractionOptionResult> reply = default;
+        GameThread.RunSafe(() =>
+        {
+            if (!TryGetRoutableSession(request.InteractionSessionId, request.ExpectedInteractionRevision, context.Peer, out var session, out var partyId, out var status, out var reason))
+            { reply = new AuthorityServerReply<PlayerPartyInteractionOptionResult>(OptionResult(context.Header, request.InteractionSessionId, null, RevisionFor(request.InteractionSessionId), status, reason), false); return; }
+            var option = (PlayerPartyInteractionOption)request.Option;
+            if (!IsOptionLegal(session, partyId, option))
+            { reply = new AuthorityServerReply<PlayerPartyInteractionOptionResult>(OptionResult(context.Header, session.SessionId, partyId, session.Revision, AuthorityResultStatus.Rejected, "illegal-option"), false); return; }
+            if (partyId == session.ResponderPartyId && option == PlayerPartyInteractionOption.AcceptProposal && session.Proposal != PlayerPartyInteractionProposal.Trade && !CanApplyAcceptedProposal(session))
+            { reply = new AuthorityServerReply<PlayerPartyInteractionOptionResult>(OptionResult(context.Header, session.SessionId, partyId, session.Revision, AuthorityResultStatus.Unavailable, "proposal-unavailable"), false); return; }
+            if (partyId == session.ResponderPartyId && option == PlayerPartyInteractionOption.AcceptProposal)
+                session.ResponderAcceptedProposal = true;
+            session.AdvanceRevision();
+            if (partyId == session.InitiatorPartyId) HandleInitiatorOption(session, option); else HandleResponderOption(session, option);
+            reply = new AuthorityServerReply<PlayerPartyInteractionOptionResult>(OptionResult(context.Header, session.SessionId, partyId, RevisionFor(session.SessionId), AuthorityResultStatus.Accepted, null), true);
+        }, blocking: true, context: "Route player-party interaction option");
+        return reply;
+    }
+
+    private AuthorityServerReply<PlayerPartyTradeOfferResult> ExecuteTradeOffer(AuthorityServerContext context, RequestPlayerPartyTradeOffer request)
+    {
+        AuthorityServerReply<PlayerPartyTradeOfferResult> reply = default;
+        GameThread.RunSafe(() =>
+        {
+            if (!TryGetRoutableSession(request.InteractionSessionId, request.ExpectedInteractionRevision, context.Peer, out var session, out var partyId, out var status, out var reason))
+            { reply = new AuthorityServerReply<PlayerPartyTradeOfferResult>(TradeOfferResult(context.Header, request.InteractionSessionId, null, RevisionFor(request.InteractionSessionId), status, reason), false); return; }
+            if (session.InitiatorPhase != PlayerPartyInteractionPhase.TradeActive || session.ResponderPhase != PlayerPartyInteractionPhase.TradeActive ||
+                !ValidateCanonicalOffer(session, partyId, request, out reason))
+            { reply = new AuthorityServerReply<PlayerPartyTradeOfferResult>(TradeOfferResult(context.Header, session.SessionId, partyId, session.Revision, AuthorityResultStatus.Rejected, reason ?? "trade-inactive"), false); return; }
+            session.AdvanceRevision();
+            session.SetTradeOffer(partyId, request.OfferedItems, request.OfferedTroops, request.OfferedGold, request.OfferedFiefs, request.OfferedPrisoners, request.OfferedPeace);
+            session.InitiatorAcceptedTrade = false; session.ResponderAcceptedTrade = false;
+            SendTradeOffers(session); SendTradeStates(session, false);
+            reply = new AuthorityServerReply<PlayerPartyTradeOfferResult>(TradeOfferResult(context.Header, session.SessionId, partyId, session.Revision, AuthorityResultStatus.Accepted, null), true);
+        }, blocking: true, context: "Route player-party trade offer");
+        return reply;
+    }
+
+    private AuthorityServerReply<PlayerPartyTradeAcceptResult> ExecuteTradeAccept(AuthorityServerContext context, RequestPlayerPartyTradeAccept request)
+    {
+        AuthorityServerReply<PlayerPartyTradeAcceptResult> reply = default;
+        GameThread.RunSafe(() =>
+        {
+            if (!TryGetRoutableSession(request.InteractionSessionId, request.ExpectedInteractionRevision, context.Peer, out var session, out var partyId, out var status, out var reason))
+            { reply = new AuthorityServerReply<PlayerPartyTradeAcceptResult>(TradeAcceptResult(context.Header, request.InteractionSessionId, null, RevisionFor(request.InteractionSessionId), status, reason), false); return; }
+            if (session.InitiatorPhase != PlayerPartyInteractionPhase.TradeActive || session.ResponderPhase != PlayerPartyInteractionPhase.TradeActive)
+            { reply = new AuthorityServerReply<PlayerPartyTradeAcceptResult>(TradeAcceptResult(context.Header, session.SessionId, partyId, session.Revision, AuthorityResultStatus.Rejected, "trade-inactive"), false); return; }
+            if (request.Accepted && !ValidateCurrentTrade(session, out reason))
+            { reply = new AuthorityServerReply<PlayerPartyTradeAcceptResult>(TradeAcceptResult(context.Header, session.SessionId, partyId, session.Revision, AuthorityResultStatus.Unavailable, reason), false); return; }
+            session.AdvanceRevision();
+            if (partyId == session.InitiatorPartyId) session.InitiatorAcceptedTrade = request.Accepted; else session.ResponderAcceptedTrade = request.Accepted;
+            SendTradeStates(session);
+            if (session.InitiatorAcceptedTrade && session.ResponderAcceptedTrade) EndSession(session, PlayerPartyInteractionOutcomeType.TradeAccepted);
+            reply = new AuthorityServerReply<PlayerPartyTradeAcceptResult>(TradeAcceptResult(context.Header, session.SessionId, partyId, RevisionFor(session.SessionId), AuthorityResultStatus.Accepted, null), true);
+        }, blocking: true, context: "Route player-party trade accept");
+        return reply;
+    }
+
+    private bool TryGetRoutableSession(string sessionId, long expectedRevision, NetPeer peer, out PlayerPartyInteractionSession session,
+        out string partyId, out AuthorityResultStatus status, out string reason)
+    {
+        session = null; partyId = null; status = AuthorityResultStatus.Rejected; reason = "interaction-missing";
+        if (!sessionsById.TryGetValue(sessionId, out session))
+        {
+            if (endedSessionRevisions.ContainsKey(sessionId)) { status = AuthorityResultStatus.StaleState; reason = "interaction-ended"; }
+            return false;
+        }
+        if (DateTime.UtcNow - session.LastActivityUtc > TimeSpan.FromMinutes(5))
+        {
+            EndSession(session, PlayerPartyInteractionOutcomeType.Disconnected);
+            session = null; status = AuthorityResultStatus.Unavailable; reason = "interaction-expired";
+            return false;
+        }
+        if (session.Revision != expectedRevision) { status = AuthorityResultStatus.StaleState; reason = "stale-interaction"; return false; }
+        if (!TryGetSessionPartyId(session, peer, out partyId)) { status = AuthorityResultStatus.Unauthorized; reason = "interaction-controller"; return false; }
+        return true;
+    }
+
+    private long RevisionFor(string sessionId)
+        => sessionsById.TryGetValue(sessionId, out var active) ? active.Revision : endedSessionRevisions.TryGetValue(sessionId, out var ended) ? ended : 0;
+
+    private static bool IsOptionLegal(PlayerPartyInteractionSession session, string partyId, PlayerPartyInteractionOption option)
+    {
+        if (partyId == session.InitiatorPartyId)
+        {
+            if (session.InitiatorPhase == PlayerPartyInteractionPhase.InitialOptions)
+                return session.InitiatorEnabledOptions.Contains(option) && option != PlayerPartyInteractionOption.OfferServices;
+            if (session.InitiatorPhase == PlayerPartyInteractionPhase.ClanJoinConfirm)
+                return option == PlayerPartyInteractionOption.ConfirmJoinClan || option == PlayerPartyInteractionOption.CancelJoinClan;
+            if (session.InitiatorPhase == PlayerPartyInteractionPhase.HostileDemandConfirm)
+                return option == PlayerPartyInteractionOption.ConfirmHostileDemand || option == PlayerPartyInteractionOption.CancelHostileDemand;
+            return session.InitiatorPhase == PlayerPartyInteractionPhase.TradeActive && option == PlayerPartyInteractionOption.Leave;
+        }
+        if (partyId != session.ResponderPartyId) return false;
+        if (session.ResponderPhase == PlayerPartyInteractionPhase.ProposalPending)
+            return option == PlayerPartyInteractionOption.AcceptProposal || option == PlayerPartyInteractionOption.DeclineProposal || option == PlayerPartyInteractionOption.Leave;
+        if (session.ResponderPhase == PlayerPartyInteractionPhase.HostileDemandPending)
+            return option == PlayerPartyInteractionOption.RefuseHostileDemand || option == PlayerPartyInteractionOption.YieldHostileDemand;
+        return session.ResponderPhase == PlayerPartyInteractionPhase.TradeActive && option == PlayerPartyInteractionOption.Leave;
+    }
+
+    private bool CanApplyAcceptedProposal(PlayerPartyInteractionSession session)
+    {
+        if (!objectManager.TryGetObject(session.InitiatorPartyId, out PartyBase initiator) || !objectManager.TryGetObject(session.ResponderPartyId, out PartyBase responder)) return false;
+        switch (session.Proposal)
+        {
+            case PlayerPartyInteractionProposal.JoinClan: return clanMembershipService.CanJoin(initiator, responder);
+            case PlayerPartyInteractionProposal.Marriage: return clanMembershipService.CanMarry(initiator, responder);
+            case PlayerPartyInteractionProposal.TravelTogether: return PlayerPartyTravelGroup.CanCreate(initiator, responder);
+            case PlayerPartyInteractionProposal.Vassal: return IsVassalServiceAvailable(initiator, responder, out _);
+            default: return false;
+        }
+    }
+
+    private bool ValidateCurrentTrade(PlayerPartyInteractionSession session, out string reason)
+    {
+        reason = null;
+        if (!objectManager.TryGetObject(session.InitiatorPartyId, out PartyBase initiator) || !objectManager.TryGetObject(session.ResponderPartyId, out PartyBase responder)) { reason = "party-unavailable"; return false; }
+        return ValidateCanonicalOffer(initiator, responder, session.InitiatorOfferedItems, session.InitiatorOfferedTroops, session.InitiatorOfferedGold, session.InitiatorOfferedFiefs, session.InitiatorOfferedPrisoners, session.InitiatorOfferedPeace, out reason) &&
+               ValidateCanonicalOffer(responder, initiator, session.ResponderOfferedItems, session.ResponderOfferedTroops, session.ResponderOfferedGold, session.ResponderOfferedFiefs, session.ResponderOfferedPrisoners, session.ResponderOfferedPeace, out reason);
+    }
+
+    private bool ValidateCanonicalOffer(PlayerPartyInteractionSession session, string partyId, RequestPlayerPartyTradeOffer request, out string reason)
+    {
+        reason = null;
+        if (!objectManager.TryGetObject(partyId, out PartyBase party) || !objectManager.TryGetObject(session.GetOtherPartyId(partyId), out PartyBase other)) { reason = "party-unavailable"; return false; }
+        return ValidateCanonicalOffer(party, other, request.OfferedItems, request.OfferedTroops, request.OfferedGold, request.OfferedFiefs, request.OfferedPrisoners, request.OfferedPeace, out reason);
+    }
+
+    private bool ValidateCanonicalOffer(PartyBase party, PartyBase other, ItemRosterElementData[] items, TroopRosterElementData[] troops, int gold,
+        string[] fiefs, TroopRosterElementData[] prisoners, bool peace, out string reason)
+    {
+        reason = null;
+        if (gold < 0 || gold > (party.LeaderHero?.Gold ?? 0)) { reason = "invalid-gold"; return false; }
+        if (peace && !PlayerPartyPeaceBarterable.CanOfferPeace(party, other)) { reason = "invalid-peace"; return false; }
+        var itemKeys = new HashSet<string>();
+        foreach (var item in items ?? Array.Empty<ItemRosterElementData>())
+        {
+            var data = item.ItemObjectData;
+            if (item.Amount <= 0 || string.IsNullOrWhiteSpace(data.ItemObjectId) || !itemKeys.Add(data.ItemObjectId + "|" + data.ItemModifierId + "|" + data.ItemModifierNull)) { reason = "invalid-item"; return false; }
+            if (!objectManager.TryGetObject(data.ItemObjectId, out ItemObject itemObject)) { reason = "unknown-item"; return false; }
+            ItemModifier modifier = null;
+            if (!data.ItemModifierNull && !objectManager.TryGetObject(data.ItemModifierId, out modifier)) { reason = "unknown-modifier"; return false; }
+            var element = new EquipmentElement(itemObject, modifier);
+            var available = party.ItemRoster.Where(x => x.EquipmentElement.Equals(element)).Sum(x => x.Amount);
+            if (item.Amount > available) { reason = "item-not-owned"; return false; }
+        }
+        if (!ValidateRosterOffer(party, party.MemberRoster, troops, false, out reason) || !ValidateRosterOffer(party, party.PrisonRoster, prisoners, true, out reason)) return false;
+        var fiefIds = new HashSet<string>();
+        foreach (var fiefId in fiefs ?? Array.Empty<string>())
+        {
+            if (string.IsNullOrWhiteSpace(fiefId) || !fiefIds.Add(fiefId) || !objectManager.TryGetObject(fiefId, out Settlement fief) || fief.OwnerClan?.Leader != party.LeaderHero)
+            { reason = "fief-not-owned"; return false; }
+        }
+        return true;
+    }
+
+    private bool ValidateRosterOffer(PartyBase party, TroopRoster roster, TroopRosterElementData[] requested, bool prisoners, out string reason)
+    {
+        reason = null; var ids = new HashSet<string>();
+        foreach (var entry in requested ?? Array.Empty<TroopRosterElementData>())
+        {
+            if (string.IsNullOrWhiteSpace(entry.CharacterId) || entry.Number <= 0 || entry.WoundedNumber < 0 || entry.WoundedNumber > entry.Number || entry.Xp < 0 || !ids.Add(entry.CharacterId)) { reason = "invalid-troop"; return false; }
+            if (!objectManager.TryGetObject(entry.CharacterId, out CharacterObject character) || (!prisoners && character == party.LeaderHero?.CharacterObject)) { reason = "troop-not-owned"; return false; }
+            if (entry.Number > roster.GetElementNumber(character)) { reason = "troop-not-owned"; return false; }
+        }
+        return true;
+    }
+
+    private PlayerPartyInteractionShownResult ShownResult(AuthorityRequestHeader header, string sessionId, string partyId, long revision, AuthorityResultStatus status, string reason)
+        => new PlayerPartyInteractionShownResult(new AuthorityResultHeader(header.SessionId, header.RequestId, status, revision, reason), sessionId, partyId, revision);
+    private PlayerPartyInteractionOptionResult OptionResult(AuthorityRequestHeader header, string sessionId, string partyId, long revision, AuthorityResultStatus status, string reason)
+        => new PlayerPartyInteractionOptionResult(new AuthorityResultHeader(header.SessionId, header.RequestId, status, revision, reason), sessionId, partyId, revision);
+    private PlayerPartyTradeOfferResult TradeOfferResult(AuthorityRequestHeader header, string sessionId, string partyId, long revision, AuthorityResultStatus status, string reason)
+        => new PlayerPartyTradeOfferResult(new AuthorityResultHeader(header.SessionId, header.RequestId, status, revision, reason), sessionId, partyId, revision);
+    private PlayerPartyTradeAcceptResult TradeAcceptResult(AuthorityRequestHeader header, string sessionId, string partyId, long revision, AuthorityResultStatus status, string reason)
+        => new PlayerPartyTradeAcceptResult(new AuthorityResultHeader(header.SessionId, header.RequestId, status, revision, reason), sessionId, partyId, revision);
+    private PlayerPartyInteractionShownResult CreateShownTerminal(AuthorityRequestHeader h, AuthorityResultStatus s, string r) => ShownResult(h, string.Empty, null, 0, s, r);
+    private PlayerPartyInteractionOptionResult CreateOptionTerminal(AuthorityRequestHeader h, AuthorityResultStatus s, string r) => OptionResult(h, string.Empty, null, 0, s, r);
+    private PlayerPartyTradeOfferResult CreateTradeOfferTerminal(AuthorityRequestHeader h, AuthorityResultStatus s, string r) => TradeOfferResult(h, string.Empty, null, 0, s, r);
+    private PlayerPartyTradeAcceptResult CreateTradeAcceptTerminal(AuthorityRequestHeader h, AuthorityResultStatus s, string r) => TradeAcceptResult(h, string.Empty, null, 0, s, r);
+    private static AuthorityCommitProbeResult ProbeShown(PlayerPartyInteractionShownResult x) => ProbePostState(x.InteractionSessionId, x.PartyId, x.InteractionRevision);
+    private static AuthorityCommitProbeResult ProbeOption(PlayerPartyInteractionOptionResult x) => ProbePostState(x.InteractionSessionId, x.PartyId, x.InteractionRevision);
+    private static AuthorityCommitProbeResult ProbeTradeOffer(PlayerPartyTradeOfferResult x) => ProbePostState(x.InteractionSessionId, x.PartyId, x.InteractionRevision);
+    private static AuthorityCommitProbeResult ProbeTradeAccept(PlayerPartyTradeAcceptResult x) => ProbePostState(x.InteractionSessionId, x.PartyId, x.InteractionRevision);
+    private static AuthorityCommitProbeResult ProbePostState(string sessionId, string partyId, long revision)
+        => string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(partyId) ? AuthorityCommitProbeResult.Invalid :
+           PlayerPartyInteractionDialogState.HasAppliedPostState(sessionId, partyId, revision) ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+    private void ResyncInteraction(string sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId)) return;
+        shownRoute.Submit(new PlayerPartyInteractionShownIntent(sessionId, PlayerPartyInteractionDialogState.Revision));
+    }
+    private static void PresentRouteOutcome(AuthorityClientOutcome<PlayerPartyInteractionShownResult> outcome) { if (!outcome.Applied) ConversationPartyHold.ShowInteractionBlockedMessage(); }
+    private static void PresentRouteOutcome(AuthorityClientOutcome<PlayerPartyInteractionOptionResult> outcome) { if (!outcome.Applied) ConversationPartyHold.ShowInteractionBlockedMessage(); }
+    private static void PresentRouteOutcome(AuthorityClientOutcome<PlayerPartyTradeOfferResult> outcome) { if (!outcome.Applied) ConversationPartyHold.ShowInteractionBlockedMessage(); }
+    private static void PresentRouteOutcome(AuthorityClientOutcome<PlayerPartyTradeAcceptResult> outcome) { if (!outcome.Applied) ConversationPartyHold.ShowInteractionBlockedMessage(); }
 
     private void Handle_PlayerDisconnected(MessagePayload<PlayerDisconnected> payload)
     {
@@ -682,6 +899,7 @@ internal class PlayerPartyInteractionHandler : IHandler
             return;
         }
 
+        if (!session.ResponderAcceptedProposal) return;
         EndSession(session, GetAcceptedOutcome(session.Proposal));
     }
 
@@ -715,7 +933,7 @@ internal class PlayerPartyInteractionHandler : IHandler
 
     private void SendTradeOffers(PlayerPartyInteractionSession session)
     {
-        network.SendAll(new NetworkPlayerPartyTradeOfferUpdated(
+        SendToParticipants(session, new NetworkPlayerPartyTradeOfferUpdated(
             session.SessionId,
             session.InitiatorPartyId,
             session.InitiatorOfferedItems,
@@ -723,9 +941,10 @@ internal class PlayerPartyInteractionHandler : IHandler
             session.InitiatorOfferedGold,
             session.InitiatorOfferedFiefs,
             session.InitiatorOfferedPrisoners,
-            session.InitiatorOfferedPeace));
+            session.InitiatorOfferedPeace,
+            session.Revision));
 
-        network.SendAll(new NetworkPlayerPartyTradeOfferUpdated(
+        SendToParticipants(session, new NetworkPlayerPartyTradeOfferUpdated(
             session.SessionId,
             session.ResponderPartyId,
             session.ResponderOfferedItems,
@@ -733,7 +952,8 @@ internal class PlayerPartyInteractionHandler : IHandler
             session.ResponderOfferedGold,
             session.ResponderOfferedFiefs,
             session.ResponderOfferedPrisoners,
-            session.ResponderOfferedPeace));
+            session.ResponderOfferedPeace,
+            session.Revision));
     }
 
     private void SendInitiatorState(
@@ -743,6 +963,7 @@ internal class PlayerPartyInteractionHandler : IHandler
         PlayerPartyInteractionOption[] options,
         PlayerPartyInteractionOption[] enabledOptions = null)
     {
+        session.InitiatorPhase = phase;
         var partyItems = phase == PlayerPartyInteractionPhase.TradeActive
             ? ResolvePartyItemIds(session.InitiatorPartyId)
             : Array.Empty<ItemRosterElementData>();
@@ -750,7 +971,7 @@ internal class PlayerPartyInteractionHandler : IHandler
             ? ResolvePartyItemIds(session.ResponderPartyId)
             : Array.Empty<ItemRosterElementData>();
 
-        network.SendAll(new NetworkPlayerPartyInteractionState(
+        SendToParticipants(session, new NetworkPlayerPartyInteractionState(
             session.SessionId,
             session.InitiatorPartyId,
             session.ResponderPartyId,
@@ -765,7 +986,8 @@ internal class PlayerPartyInteractionHandler : IHandler
             otherPartyItems,
             enabledOptions,
             session.IsHostile,
-            session.VassalUnavailableReason));
+            session.VassalUnavailableReason,
+            session.Revision));
     }
 
     private void SendResponderState(
@@ -775,6 +997,7 @@ internal class PlayerPartyInteractionHandler : IHandler
         PlayerPartyInteractionOption[] options,
         PlayerPartyInteractionOption[] enabledOptions = null)
     {
+        session.ResponderPhase = phase;
         var partyItems = phase == PlayerPartyInteractionPhase.TradeActive
             ? ResolvePartyItemIds(session.ResponderPartyId)
             : Array.Empty<ItemRosterElementData>();
@@ -782,7 +1005,7 @@ internal class PlayerPartyInteractionHandler : IHandler
             ? ResolvePartyItemIds(session.InitiatorPartyId)
             : Array.Empty<ItemRosterElementData>();
 
-        network.SendAll(new NetworkPlayerPartyInteractionState(
+        SendToParticipants(session, new NetworkPlayerPartyInteractionState(
             session.SessionId,
             session.ResponderPartyId,
             session.InitiatorPartyId,
@@ -797,14 +1020,27 @@ internal class PlayerPartyInteractionHandler : IHandler
             otherPartyItems,
             enabledOptions,
             session.IsHostile,
-            session.VassalUnavailableReason));
+            session.VassalUnavailableReason,
+            session.Revision));
     }
 
     private void EndSession(PlayerPartyInteractionSession session, PlayerPartyInteractionOutcomeType outcomeType)
     {
+        if ((outcomeType == PlayerPartyInteractionOutcomeType.ClanJoinAccepted ||
+             outcomeType == PlayerPartyInteractionOutcomeType.MarriageAccepted ||
+             outcomeType == PlayerPartyInteractionOutcomeType.TravelTogetherAccepted ||
+             outcomeType == PlayerPartyInteractionOutcomeType.VassalAccepted) &&
+            !session.ResponderAcceptedProposal)
+        {
+            Logger.Warning("Refused player-party outcome without a recorded responder acceptance. SessionId={SessionId} Outcome={Outcome}", session.SessionId, outcomeType);
+            return;
+        }
         lock (sessionGate)
         {
             if (!sessionsById.TryRemove(session.SessionId, out _)) return;
+
+            session.AdvanceRevision();
+            endedSessionRevisions[session.SessionId] = session.Revision;
 
             sessionsByPartyId.TryRemove(session.InitiatorPartyId, out _);
             sessionsByPartyId.TryRemove(session.ResponderPartyId, out _);
@@ -814,11 +1050,12 @@ internal class PlayerPartyInteractionHandler : IHandler
         var outcome = new PlayerPartyInteractionOutcome(session, outcomeType);
         outcomeHandler.Handle(outcome);
 
-        network.SendAll(new NetworkPlayerPartyInteractionEnded(
+        SendToParticipants(session, new NetworkPlayerPartyInteractionEnded(
             session.SessionId,
             session.InitiatorPartyId,
             session.ResponderPartyId,
-            outcomeType));
+            outcomeType,
+            session.Revision));
 
         if (outcomeType == PlayerPartyInteractionOutcomeType.HostileDemandAccepted ||
             outcomeType == PlayerPartyInteractionOutcomeType.HostileDemandYielded)
@@ -829,6 +1066,14 @@ internal class PlayerPartyInteractionHandler : IHandler
                 session.ResponderPartyId,
                 outcomeType == PlayerPartyInteractionOutcomeType.HostileDemandYielded);
         }
+    }
+
+    private void SendToParticipants(PlayerPartyInteractionSession session, IMessage message)
+    {
+        if (session?.InitiatorPeer != null)
+            network.Send(session.InitiatorPeer, message);
+        if (session?.ResponderPeer != null && !ReferenceEquals(session.ResponderPeer, session.InitiatorPeer))
+            network.Send(session.ResponderPeer, message);
     }
 
     private void AddInitialOptions(PlayerPartyInteractionSession session, PartyBase initiatorParty, PartyBase responderParty)

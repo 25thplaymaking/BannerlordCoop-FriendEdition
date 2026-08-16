@@ -5,6 +5,7 @@ using TaleWorlds.CampaignSystem.Party;
 namespace GameInterface.Services.Clans.Messages;
 
 [ProtoContract(SkipConstructor = true)]
+[AuthorityRoute("clan.party.behavior.set", AuthorityRouteKind.Command)]
 internal readonly struct UpdatePartyBehaviorOnSelection : ICommand
 {
     [ProtoMember(1)]
@@ -13,9 +14,39 @@ internal readonly struct UpdatePartyBehaviorOnSelection : ICommand
     [ProtoMember(2)]
     public readonly MobileParty.PartyObjective PartyObjective;
 
-    public UpdatePartyBehaviorOnSelection(
-        string mobilePartyId,
-        MobileParty.PartyObjective partyObjective)
+    [ProtoMember(3)]
+    public readonly AuthorityRequestHeader Header;
+
+    public UpdatePartyBehaviorOnSelection(string mobilePartyId, MobileParty.PartyObjective partyObjective, AuthorityRequestHeader header)
+    {
+        MobilePartyId = mobilePartyId;
+        PartyObjective = partyObjective;
+        Header = header;
+    }
+}
+
+[ProtoContract(SkipConstructor = true)]
+internal readonly struct ClanPartyBehaviorChangeResult : ICommand
+{
+    [ProtoMember(1)] public readonly string MobilePartyId;
+    [ProtoMember(2)] public readonly MobileParty.PartyObjective PartyObjective;
+    [ProtoMember(3)] public readonly AuthorityResultHeader Header;
+
+    public ClanPartyBehaviorChangeResult(string mobilePartyId, MobileParty.PartyObjective partyObjective, AuthorityResultHeader header)
+    {
+        MobilePartyId = mobilePartyId;
+        PartyObjective = partyObjective;
+        Header = header;
+    }
+}
+
+[ProtoContract(SkipConstructor = true)]
+internal readonly struct ClanPartyBehaviorApplied : ICommand
+{
+    [ProtoMember(1)] public readonly string MobilePartyId;
+    [ProtoMember(2)] public readonly MobileParty.PartyObjective PartyObjective;
+
+    public ClanPartyBehaviorApplied(string mobilePartyId, MobileParty.PartyObjective partyObjective)
     {
         MobilePartyId = mobilePartyId;
         PartyObjective = partyObjective;

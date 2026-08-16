@@ -76,7 +76,6 @@ internal class BattleSimulationRunHandler : IHandler
         this.mapEventLogger = mapEventLogger;
 
         messageBroker.Subscribe<RequestAdvanceBattleSimulation>(Handle_RequestAdvanceBattleSimulation);
-        messageBroker.Subscribe<NetworkBattleStartRequest>(Handle_NetworkBattleStartRequest);
         messageBroker.Subscribe<NetworkAdvanceBattleSimulation>(Handle_NetworkAdvanceBattleSimulation);
         messageBroker.Subscribe<NetworkBattleSimulationRound>(Handle_NetworkBattleSimulationRound);
         messageBroker.Subscribe<NetworkBattleSimulationLoot>(Handle_NetworkBattleSimulationLoot);
@@ -89,7 +88,6 @@ internal class BattleSimulationRunHandler : IHandler
     public void Dispose()
     {
         messageBroker.Unsubscribe<RequestAdvanceBattleSimulation>(Handle_RequestAdvanceBattleSimulation);
-        messageBroker.Unsubscribe<NetworkBattleStartRequest>(Handle_NetworkBattleStartRequest);
         messageBroker.Unsubscribe<NetworkAdvanceBattleSimulation>(Handle_NetworkAdvanceBattleSimulation);
         messageBroker.Unsubscribe<NetworkBattleSimulationRound>(Handle_NetworkBattleSimulationRound);
         messageBroker.Unsubscribe<NetworkBattleSimulationLoot>(Handle_NetworkBattleSimulationLoot);
@@ -105,77 +103,32 @@ internal class BattleSimulationRunHandler : IHandler
         network.SendAll(new NetworkAdvanceBattleSimulation(payload.What.MapEventId, payload.What.Rounds));
     }
 
-    /// <summary>[Server] Handle a battle-start request for the auto-resolve mode: gate it, set the simulation up
-    /// (no rounds yet; the client paces it via advances), and reply. Requests for other modes are ignored here.</summary>
-    private void Handle_NetworkBattleStartRequest(MessagePayload<NetworkBattleStartRequest> payload)
+    /// <summary>[Server, game thread] Sets up an admitted simulation and queues its canonical state publication.</summary>
+    internal BattleStartDecision TryStartSimulation(string mapEventId, MapEvent mapEvent, NetPeer requestingPeer,
+        MobileParty requestingParty)
     {
-        if (ModInformation.IsClient)
-            return;
-
-        if (payload.What.Mode != (int)BattleStartMode.Simulation)
-            return;
-
-        if (!(payload.Who is NetPeer requestingPeer))
+        bool claimed = false;
+        bool accepted = false;
+        bool activeSimulationAdded = false;
+        IBattleObserver previousObserver = null;
+        try
         {
-            Logger.Error("Received {Message} with no originating peer", nameof(NetworkBattleStartRequest));
-            return;
-        }
-
-        var mapEventId = payload.What.MapEventId;
-
-        if (!objectManager.TryGetObjectWithLogging<MapEvent>(mapEventId, out var mapEvent))
-            return;
-
-        if (mapEvent.HasWinner)
-        {
-            mapEventLogger.DebugMapEvent(mapEvent, "Battle simulation requested for an already finished map event; rejecting");
-            network.Send(requestingPeer, new NetworkBattleStartReply(payload.What.RequestId, false));
-            return;
-        }
-        if (mapEvent.IsUnsupportedMultiPlayerHostileAction())
-        {
-            Logger.Warning("Rejecting battle simulation for map event {MapEventId}: this hostile action does not support multiple player parties", mapEventId);
-            network.Send(requestingPeer, new NetworkBattleSimulationFinished(mapEventId));
-            return;
-        }
-
-        // Server-authoritative mode gate: accept the auto-resolve only if no live mission already owns this event.
-        // On reject the requesting client never opened its scoreboard (the prefix deferred it), so there is nothing
-        // to tear down — the request is simply dropped.
-        if (!ServerBattleModeArbiter.TryClaimSimulation(mapEventId))
-        {
-            mapEventLogger.DebugMapEvent(mapEvent, "Rejecting battle simulation: a live mission is already underway for this event");
-            network.Send(requestingPeer, new NetworkBattleStartReply(payload.What.RequestId, false));
-            return;
-        }
-
-        // Guard against a double-start: two clients can both click auto-resolve for the same event inside the
-        // broadcast-latency window, and TryClaimSimulation lets the second through — it only rejects the OTHER
-        // mode, so an already-simulation claim still succeeds. Without this the second request would set the
-        // simulation up again (overwriting the first's activeSimulations entry, orphaning its observer) and its
-        // requester would also become a pacer. Reject the duplicate so the first stays the sole pacer; the
-        // arbiter claim is left intact (the first still owns it). Reliable on the single network thread: the
-        // first request only returns after its blocking GameThread.Run below has populated activeSimulations.
-        lock (simLock)
-        {
-            if (activeSimulations.ContainsKey(mapEventId))
+            if (mapEvent.IsUnsupportedMultiPlayerHostileAction())
+                return BattleStartDecision.Reject("unsupported-hostile-action");
+            if (!ServerBattleModeArbiter.TryClaimSimulation(mapEventId, out var isNewSimulationClaim))
+                return BattleStartDecision.Reject("conflicting-battle-mode");
+            claimed = isNewSimulationClaim;
+            lock (simLock)
             {
-                mapEventLogger.DebugMapEvent(mapEvent, "Battle simulation already active for this event; rejecting duplicate start");
-                network.Send(requestingPeer, new NetworkBattleStartReply(payload.What.RequestId, false));
-                return;
+                if (activeSimulations.ContainsKey(mapEventId))
+                    return BattleStartDecision.Reject("duplicate-simulation-start");
             }
-        }
 
-        var observer = new ForwardingBattleObserver(objectManager);
-
-        GameThread.RunSafe(() =>
-        {
-            // v1: simulate the full participating troop count (null), not the player's selected subset.
-            var previousObserver = mapEvent.BattleObserver;
+            var observer = new ForwardingBattleObserver(objectManager);
+            previousObserver = mapEvent.BattleObserver;
             mapEvent.BattleObserver = observer;
             mapEvent.SimulateBattleSetup(null);
             observer.FlushRound();
-
             lock (simLock)
             {
                 activeSimulations[mapEventId] = new ActiveSimulation
@@ -185,19 +138,30 @@ internal class BattleSimulationRunHandler : IHandler
                     Observer = observer,
                     PreviousObserver = previousObserver,
                 };
+                activeSimulationAdded = true;
             }
-        }, blocking: true, context: nameof(Handle_NetworkBattleStartRequest));
 
-        // Mirror the simulation onto every other client in this map event. Each client opens the window only if its
-        // own party is in the event; the requesting client and uninvolved clients ignore it. The requester keeps
-        // pacing; spectators replay passively.
-        // Claim the event for the simulation mode on every client (greys the mission option for anyone at the menu),
-        // then open the spectator scoreboards and accept the requester.
-        network.SendAll(new NetworkBattleModeSet(mapEventId, (int)BattleStartMode.Simulation));
-        network.SendAllBut(requestingPeer, new NetworkOpenBattleSimulation(mapEventId));
-        network.Send(requestingPeer, new NetworkBattleStartReply(payload.What.RequestId, true));
-
-        mapEventLogger.DebugMapEvent(mapEvent, "Battle simulation set up; awaiting client-paced advances");
+            // The route sends its result only after these reliable state messages have been queued.
+            network.SendAll(new NetworkBattleModeSet(mapEventId, (int)BattleStartMode.Simulation));
+            network.SendAllBut(requestingPeer, new NetworkOpenBattleSimulation(mapEventId));
+            mapEventLogger.DebugMapEvent(mapEvent, "Battle simulation set up; awaiting client-paced advances");
+            accepted = true;
+            return BattleStartDecision.Accepted();
+        }
+        catch (Exception exception)
+        {
+            Logger.Error(exception, "Failed to set up admitted battle simulation for {MapEventId}", mapEventId);
+            if (activeSimulationAdded)
+            {
+                lock (simLock) activeSimulations.Remove(mapEventId);
+            }
+            if (!accepted) mapEvent.BattleObserver = previousObserver;
+            return BattleStartDecision.Failed("simulation-start-failed");
+        }
+        finally
+        {
+            if (claimed && !accepted) ServerBattleModeArbiter.Release(mapEventId);
+        }
     }
 
     /// <summary>

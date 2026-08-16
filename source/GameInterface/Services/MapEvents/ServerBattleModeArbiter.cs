@@ -38,7 +38,11 @@ internal static class ServerBattleModeArbiter
     /// Try to claim the event for an auto-resolve simulation. Succeeds if the event is unclaimed or already a
     /// simulation; fails only if a live mission already owns the event.
     /// </summary>
-    public static bool TryClaimSimulation(string mapEventId) => TryClaim(mapEventId, Mode.Simulation, out _);
+    public static bool TryClaimSimulation(string mapEventId) => TryClaimSimulation(mapEventId, out _);
+
+    /// <summary>Try to claim simulation mode and report whether this request created the claim.</summary>
+    public static bool TryClaimSimulation(string mapEventId, out bool isNewClaim) =>
+        TryClaim(mapEventId, Mode.Simulation, out isNewClaim);
 
     /// <summary>
     /// True while either resolution mode owns the event. Read-only: lets side-effectful actions that would

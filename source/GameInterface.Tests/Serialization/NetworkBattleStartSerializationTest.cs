@@ -1,4 +1,5 @@
 using GameInterface.Services.MapEvents.Messages.Start;
+using Common.Messaging;
 using ProtoBuf.Meta;
 using System.IO;
 using Xunit;
@@ -55,5 +56,20 @@ public class NetworkBattleStartSerializationTest
 
         Assert.Equal("req-1", result.RequestId);
         Assert.True(result.Accepted);
+    }
+
+    [Fact]
+    public void AuthorityAdapters_RoundTripWithoutRenumberingLegacyFields()
+    {
+        var header = new AuthorityRequestHeader(1, "session", 17, 4);
+        var request = new NetworkBattleStartRequest(header, 0, "mapEvent-7", "attacker-42");
+        var reply = new NetworkBattleStartReply(header, AuthorityResultStatus.Accepted, 0, "mapEvent-7", null);
+
+        Assert.Equal(17, request.Header.RequestId);
+        Assert.Equal("session", request.Header.SessionId);
+        Assert.Equal("17", request.RequestId);
+        Assert.Equal(17, reply.Header.RequestId);
+        Assert.Equal(AuthorityResultStatus.Accepted, reply.Header.Status);
+        Assert.Equal("mapEvent-7", reply.MapEventId);
     }
 }

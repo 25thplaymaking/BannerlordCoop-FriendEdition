@@ -20,6 +20,17 @@ public sealed class AuthorityRouteContractTests
     }
 
     [Fact]
+    public void BattleStartRequest_DeclaresTheRegisteredCommandRoute()
+    {
+        var attribute = (AuthorityRouteAttribute)Attribute.GetCustomAttribute(
+            typeof(NetworkBattleStartRequest), typeof(AuthorityRouteAttribute));
+
+        Assert.NotNull(attribute);
+        Assert.Equal("map-event.battle-start", attribute.RouteId);
+        Assert.Equal(AuthorityRouteKind.Command, attribute.Kind);
+    }
+
+    [Fact]
     public void Router_RefusesARouteWhoseTypedMessageDoesNotDeclareTheSameIdentity()
     {
         using var broker = new MessageBroker();

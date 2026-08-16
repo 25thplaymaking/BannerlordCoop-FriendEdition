@@ -131,7 +131,8 @@ public sealed class AuthorityRoute<TIntent, TRequest, TResult>
         Func<object, bool> isTrustedResultSource,
         AuthorityTimeoutPolicy timeoutPolicy,
         bool requireAuthenticatedPlayer,
-        bool failClosedOnApplyFailure)
+        bool failClosedOnApplyFailure,
+        Func<TRequest, TResult, bool> isExpectedClientResult)
     {
         RouteId = routeId ?? throw new ArgumentNullException(nameof(routeId));
         Kind = kind;
@@ -145,6 +146,7 @@ public sealed class AuthorityRoute<TIntent, TRequest, TResult>
         Execute = execute ?? throw new ArgumentNullException(nameof(execute));
         CreateTerminalResult = createTerminalResult ?? throw new ArgumentNullException(nameof(createTerminalResult));
         ProbeClientCommit = probeClientCommit ?? throw new ArgumentNullException(nameof(probeClientCommit));
+        IsExpectedClientResult = isExpectedClientResult ?? ((_, _) => true);
         RequestResync = requestResync ?? (_ => { });
         PresentTerminalOutcome = presentTerminalOutcome ?? (_ => { });
         IsTrustedResultSource = isTrustedResultSource ?? throw new ArgumentNullException(nameof(isTrustedResultSource));
@@ -165,6 +167,7 @@ public sealed class AuthorityRoute<TIntent, TRequest, TResult>
     public Func<AuthorityServerContext, TRequest, AuthorityServerReply<TResult>> Execute { get; }
     public Func<AuthorityRequestHeader, AuthorityResultStatus, string, TResult> CreateTerminalResult { get; }
     public Func<TResult, AuthorityCommitProbeResult> ProbeClientCommit { get; }
+    public Func<TRequest, TResult, bool> IsExpectedClientResult { get; }
     public Action<TResult> RequestResync { get; }
     public Action<AuthorityClientOutcome<TResult>> PresentTerminalOutcome { get; }
     public Func<object, bool> IsTrustedResultSource { get; }
@@ -191,10 +194,11 @@ public sealed class AuthorityRoute<TIntent, TRequest, TResult>
         Func<object, bool> isTrustedResultSource,
         AuthorityTimeoutPolicy timeoutPolicy,
         bool requireAuthenticatedPlayer = true,
-        bool failClosedOnApplyFailure = false) =>
+        bool failClosedOnApplyFailure = false,
+        Func<TRequest, TResult, bool> isExpectedClientResult = null) =>
         new AuthorityRoute<TIntent, TRequest, TResult>(
             routeId, kind, createHeader, buildRequest, readRequestHeader, readResultHeader,
             validateWireShape, buildCommandKey, validateHeader, execute, createTerminalResult,
             probeClientCommit, requestResync, presentTerminalOutcome, isTrustedResultSource, timeoutPolicy,
-            requireAuthenticatedPlayer, failClosedOnApplyFailure);
+            requireAuthenticatedPlayer, failClosedOnApplyFailure, isExpectedClientResult);
 }

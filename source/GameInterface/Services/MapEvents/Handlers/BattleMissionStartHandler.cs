@@ -29,11 +29,9 @@ using TaleWorlds.ObjectSystem;
 namespace GameInterface.Services.MapEvents.Handlers;
 
 /// <summary>
-/// Owns the live battle-mission start flow (split out of <see cref="BattleHandler"/>). On the server it answers the
-/// mission-mode <see cref="NetworkBattleStartRequest"/>: gate it against <see cref="ServerBattleModeArbiter"/>, apply
-/// the attack's hostile consequences, make the sides mission-ready, reply, send the mission start to participants
-/// (<see cref="NetworkStartAttackMission"/>), and claim the mission mode on every client
-/// (<see cref="NetworkBattleModeSet"/>). Eligible clients in the map event open the coop field-battle mission.
+/// Owns the live battle-mission setup flow (split out of <see cref="BattleHandler"/>). The coordinator admits the
+/// typed request and calls its fixed entry point; this handler applies consequences, prepares sides, publishes the
+/// mission start and canonical mode, then returns a typed execution decision.
 /// </summary>
 internal class BattleMissionStartHandler : IHandler
 {
@@ -75,7 +73,6 @@ internal class BattleMissionStartHandler : IHandler
         this.mapEventLogger = mapEventLogger;
         this.missionInitializerResolver = missionInitializerResolver;
 
-        messageBroker.Subscribe<NetworkBattleStartRequest>(Handle_NetworkBattleStartRequest);
         messageBroker.Subscribe<NetworkStartAttackMission>(Handle_NetworkStartAttackMission);
         messageBroker.Subscribe<NetworkStartSiegeMission>(Handle_NetworkStartSiegeMission);
         messageBroker.Subscribe<MapEventFinalized>(Handle_MapEventFinalized);
@@ -83,7 +80,6 @@ internal class BattleMissionStartHandler : IHandler
 
     public void Dispose()
     {
-        messageBroker.Unsubscribe<NetworkBattleStartRequest>(Handle_NetworkBattleStartRequest);
         messageBroker.Unsubscribe<NetworkStartAttackMission>(Handle_NetworkStartAttackMission);
         messageBroker.Unsubscribe<NetworkStartSiegeMission>(Handle_NetworkStartSiegeMission);
         messageBroker.Unsubscribe<MapEventFinalized>(Handle_MapEventFinalized);
@@ -100,177 +96,60 @@ internal class BattleMissionStartHandler : IHandler
         }
     }
 
-    /// <summary>[Server] Handle a battle-start request for the live-mission mode: gate it, make the sides
-    /// mission-ready, send the mission start to participants, and reply. Other modes are ignored here.</summary>
-    private void Handle_NetworkBattleStartRequest(MessagePayload<NetworkBattleStartRequest> payload)
+    /// <summary>[Server, game thread] Performs mission setup after the coordinator admitted the authenticated party.</summary>
+    internal BattleStartDecision TryStartMission(string mapEventId, MapEvent mapEvent, MobileParty attackerMobileParty,
+        string initiatingPartyId)
     {
-        if (ModInformation.IsClient)
-            return;
-
-        if (payload.What.Mode != (int)BattleStartMode.Mission)
-            return;
-
-        if (!(payload.Who is NetPeer requester))
+        var operation = "validate mission start";
+        bool claimed = false;
+        bool accepted = false;
+        try
         {
-            Logger.Error("Received {Message} with no originating peer", nameof(NetworkBattleStartRequest));
-            return;
-        }
+            if (mapEvent.IsUnsupportedMultiPlayerHostileAction())
+                return BattleStartDecision.Reject("unsupported-hostile-action");
+            if (mapEvent.IsSiegeAssault && mapEvent.MapEventSettlement?.CurrentSiegeState == Settlement.SiegeState.InTheLordsHall)
+                return BattleStartDecision.Reject("unsupported-siege-stage");
+            if (!ServerBattleModeArbiter.TryClaimMission(mapEventId, out var isNewMissionClaim))
+                return BattleStartDecision.Reject("conflicting-battle-mode");
+            if (!isNewMissionClaim)
+                return BattleStartDecision.Reject("duplicate-mission-start");
+            claimed = true;
 
-        // _sides is game state the main-thread tick also touches; mutating it from the
-        // network thread races the tick. Make the sides mission-ready on the main thread.
-        // Re-resolve the event at drain time: it may have finalized between this request
-        // arriving and the queued action running, in which case a captured reference would
-        // point at a torn-down event.
-        GameThread.RunSafe(() =>
-        {
-            var operation = "resolve map event";
+            operation = "apply attack hostile-action consequences";
+            ApplyClientAttackHostileConsequences(mapEvent, attackerMobileParty.Party);
+            operation = "remove wounded non-initiating players";
+            if (!RemoveWoundedNonInitiatorParties(mapEventId, mapEvent, initiatingPartyId))
+                return BattleStartDecision.Reject("map-event-finalized");
+            foreach (var side in mapEvent._sides) side.MakeReadyForMission(null);
 
-            try
+            var participants = GetMissionParticipants(mapEvent);
+            ReserveMissionParticipants(mapEventId, participants);
+            if (mapEvent.IsSiegeAssault)
             {
-                if (!objectManager.TryGetObject(payload.What.MapEventId, out MapEvent mapEvent))
-                    return;
-
-                operation = "validate requesting participant";
-                if (!TryGetRequestingParticipant(requester, payload.What, mapEvent, out var attackerMobileParty))
-                {
-                    Logger.Warning("Rejecting attack mission start for map event {MapEventId}: requester is not an authoritative participant",
-                        payload.What.MapEventId);
-                    network.Send(requester, new NetworkBattleStartReply(payload.What.RequestId, false));
-                    return;
-                }
-
-                operation = "validate hostile action mode";
-                if (mapEvent.IsUnsupportedMultiPlayerHostileAction())
-                {
-                    Logger.Warning("Rejecting attack mission start for map event {MapEventId}: this hostile action does not support multiple player parties", payload.What.MapEventId);
-                    network.Send(requester, new NetworkBattleStartReply(payload.What.RequestId, false));
-                    return;
-                }
-
-                // The lords-hall stage is not supported: CurrentSiegeState never advances past OnTheWalls in
-                // co-op (SiegeMissionEndPatches), so this only trips on a save that carried the state in.
-                // Rejected before the arbiter claim so the event stays open for auto-resolve.
-                operation = "validate siege stage";
-                if (mapEvent.IsSiegeAssault && mapEvent.MapEventSettlement?.CurrentSiegeState == Settlement.SiegeState.InTheLordsHall)
-                {
-                    Logger.Error("Rejecting siege mission for {MapEventId}: lords-hall stage is not supported", payload.What.MapEventId);
-                    network.Send(requester, new NetworkBattleStartReply(payload.What.RequestId, false));
-                    return;
-                }
-
-                // Server-authoritative mode gate: accept the live mission only if no auto-resolve simulation already
-                // owns this event. On reject, don't make the sides mission-ready or reply — the requesting client
-                // waits for NetworkStartAttackMission to open the mission, so it simply stays at the encounter menu.
-                operation = "claim mission mode";
-                if (!ServerBattleModeArbiter.TryClaimMission(payload.What.MapEventId, out var isNewMissionClaim))
-                {
-                    mapEventLogger.DebugMapEvent(mapEvent, "Rejecting attack mission: an auto-resolve simulation is already underway for this event");
-                    network.Send(requester, new NetworkBattleStartReply(payload.What.RequestId, false));
-                    return;
-                }
-
-                mapEventLogger.DebugMapEvent(mapEvent, "Handling network attack mission attempted for map event. Making sides mission-ready and replying with mission start");
-
-                // Apply the diplomatic consequences of the client's attack (war / relation)
-                // authoritatively before the mission opens, reproducing the hostile-action head of
-                // vanilla EncounterAttackConsequence that neither the client nor the server runs.
-                operation = "apply attack hostile-action consequences";
-                ApplyClientAttackHostileConsequences(mapEvent, attackerMobileParty.Party);
-
-                if (isNewMissionClaim)
-                {
-                    operation = "remove wounded non-initiating players";
-                    if (!RemoveWoundedNonInitiatorParties(
-                            payload.What.MapEventId,
-                            mapEvent,
-                            payload.What.AttackerPartyId))
-                    {
-                        ServerBattleModeArbiter.Release(payload.What.MapEventId);
-                        network.Send(requester, new NetworkBattleStartReply(payload.What.RequestId, false));
-                        return;
-                    }
-                }
-
-                operation = "make map event sides mission-ready";
-                foreach (var side in mapEvent._sides)
-                {
-                    side.MakeReadyForMission(null);
-                }
-
-                operation = "snapshot mission participants";
-                var participants = GetMissionParticipants(mapEvent);
-
-                operation = "reserve mission participants";
-                ReserveMissionParticipants(payload.What.MapEventId, participants);
-
-                // Reply first so the requesting client's blocked consequence unblocks before the mission-open
-                // message arrives — the mission then opens off the menu-consequence stack, as in the pre-coordinator
-                // flow, rather than re-entrantly during the blocking wait.
-                operation = "send battle start reply";
-                network.Send(requester, new NetworkBattleStartReply(payload.What.RequestId, true));
-
-                if (mapEvent.IsSiegeAssault)
-                {
-                    operation = "send siege mission snapshot";
-                    var snapshot = siegeMissionSnapshots.GetOrAdd(payload.What.MapEventId, _ => BuildSiegeMissionSnapshot(payload.What.MapEventId, mapEvent));
-                    // Wounded non-initiators were removed above; the client-side eligibility check remains a fallback.
-                    var startMessage = new NetworkStartSiegeMission(
-                        snapshot.MapEventId,
-                        snapshot.WallLevel,
-                        snapshot.WallHitPointRatios,
-                        snapshot.AttackerEngines,
-                        snapshot.DefenderEngines,
-                        payload.What.AttackerPartyId);
-                    SendMissionStart(participants, startMessage);
-                }
-                else
-                {
-                    // Roll the terrain seed once for this map event and reuse it for every entrant.
-                    var randomTerrainSeed = mapEventTerrainSeeds.GetOrAdd(
-                        payload.What.MapEventId,
-                        _ => RollTerrainSeed());
-                    operation = "read campaign atmosphere";
-                    AtmosphereInfo atmosphereOnCampaign = GetOrCreateAtmosphereSnapshot(
-                        payload.What.MapEventId,
-                        () => GetAtmosphereOnCampaign(mapEvent));
-
-                    operation = "send attack mission start";
-                    var startMessage = new NetworkStartAttackMission(
-                        payload.What.MapEventId, randomTerrainSeed, atmosphereOnCampaign,
-                        payload.What.AttackerPartyId);
-                    SendMissionStart(participants, startMessage);
-                }
-
-                // Claim the event for the mission mode on every client, so one still sitting at the encounter menu
-                // greys out the auto-resolve option — a map event is fought as a live mission XOR an auto-resolve,
-                // never both (see BattleModeEncounterOptionsPatch / BattleModeRegistry).
-                operation = "send battle mode";
-                network.SendAll(new NetworkBattleModeSet(payload.What.MapEventId, (int)BattleStartMode.Mission));
+                var snapshot = siegeMissionSnapshots.GetOrAdd(mapEventId, _ => BuildSiegeMissionSnapshot(mapEventId, mapEvent));
+                SendMissionStart(participants, new NetworkStartSiegeMission(snapshot.MapEventId, snapshot.WallLevel,
+                    snapshot.WallHitPointRatios, snapshot.AttackerEngines, snapshot.DefenderEngines, initiatingPartyId));
             }
-            catch (Exception e)
+            else
             {
-                Logger.Error(e, "Failed to {Operation} for {Message}", operation, nameof(NetworkBattleStartRequest));
-                network.Send(requester, new NetworkBattleStartReply(payload.What.RequestId, false));
+                int terrainSeed = mapEventTerrainSeeds.GetOrAdd(mapEventId, _ => RollTerrainSeed());
+                AtmosphereInfo atmosphere = GetOrCreateAtmosphereSnapshot(mapEventId, () => GetAtmosphereOnCampaign(mapEvent));
+                SendMissionStart(participants, new NetworkStartAttackMission(mapEventId, terrainSeed, atmosphere, initiatingPartyId));
             }
-        }, context: nameof(Handle_NetworkBattleStartRequest));
-    }
-
-    private bool TryGetRequestingParticipant(
-        NetPeer requester,
-        NetworkBattleStartRequest request,
-        MapEvent mapEvent,
-        out MobileParty party)
-    {
-        party = null;
-        if (requester == null ||
-            !playerManager.TryGetPlayer(requester, out var player) ||
-            !string.Equals(player.MobilePartyId, request.AttackerPartyId, StringComparison.Ordinal) ||
-            !objectManager.TryGetObject(player.MobilePartyId, out party))
-        {
-            return false;
+            // Publication is intentionally queued before the route emits the correlated Accepted result.
+            network.SendAll(new NetworkBattleModeSet(mapEventId, (int)BattleStartMode.Mission));
+            accepted = true;
+            return BattleStartDecision.Accepted();
         }
-
-        return mapEvent.FindMapEventParty(party.Party) != null;
+        catch (Exception exception)
+        {
+            Logger.Error(exception, "Failed to {Operation} for admitted battle mission", operation);
+            return BattleStartDecision.Failed("mission-start-failed");
+        }
+        finally
+        {
+            if (claimed && !accepted) ServerBattleModeArbiter.Release(mapEventId);
+        }
     }
 
     private IReadOnlyList<MissionParticipant> GetMissionParticipants(MapEvent mapEvent)
@@ -451,7 +330,10 @@ internal class BattleMissionStartHandler : IHandler
     private void Handle_NetworkStartSiegeMission(MessagePayload<NetworkStartSiegeMission> payload)
     {
         var message = payload.What;
-        GameThread.Run(() => OpenSiegeMission(message));
+        // Keep siege on the same two-stage deferral as field missions. A blocking authority submit pumps the
+        // first game-thread action; the actual screen/mission open must wait until the patched consequence exits.
+        GameThread.RunSafe(() => GameThread.EnqueueSafe(() => OpenSiegeMission(message),
+            context: nameof(Handle_NetworkStartSiegeMission)), context: nameof(Handle_NetworkStartSiegeMission));
     }
 
     private void OpenSiegeMission(NetworkStartSiegeMission payload)

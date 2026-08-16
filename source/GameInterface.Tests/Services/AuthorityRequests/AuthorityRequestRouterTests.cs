@@ -58,6 +58,28 @@ public sealed class AuthorityRequestRouterTests
     }
 
     [Fact]
+    public void AcceptedResult_WithMismatchedFeaturePayload_FailsClosedBeforeCommit()
+    {
+        using var broker = new MessageBroker();
+        using var network = new TestNetwork();
+        var server = network.CreatePeer();
+        using var router = new AuthorityRequestRouter(broker, network, new Mock<IPlayerManager>().Object);
+        using var route = router.Register(CreateRoute(() => AuthorityCommitProbeResult.Applied,
+            expected: (request, _) => request.Intent == "expected"));
+
+        var ticket = route.Submit("unexpected");
+        var request = Assert.Single(network.GetPeerMessagesFromType<TestRequest>(server));
+        broker.Publish(server, new TestResult(new AuthorityResultHeader(request.Header.SessionId, request.Header.RequestId,
+            AuthorityResultStatus.Accepted, 3, "")));
+
+        route.Poll();
+
+        Assert.True(ticket.IsCompleted);
+        Assert.Equal(AuthorityClientCompletion.ReplicaApplyFailed, ticket.Outcome.Completion);
+        Assert.Equal("invalid-replica", ticket.Outcome.ReasonCode);
+    }
+
+    [Fact]
     public void ResponseTimeout_RetriesTheSameTypedRequestIdOnce()
     {
         using var broker = new MessageBroker();
@@ -436,7 +458,8 @@ public sealed class AuthorityRequestRouterTests
         AuthorityTimeoutPolicy timeout = null,
         Action<AuthorityClientOutcome<TestResult>> presented = null,
         Func<AuthorityRequestHeader, AuthorityHeaderValidation> validateHeader = null,
-        Func<AuthorityServerContext, TestRequest, AuthorityServerReply<TestResult>> execute = null) =>
+        Func<AuthorityServerContext, TestRequest, AuthorityServerReply<TestResult>> execute = null,
+        Func<TestRequest, TestResult, bool> expected = null) =>
         AuthorityRoute<string, TestRequest, TestResult>.Define(
             "test.route", AuthorityRouteKind.Command,
             id => new AuthorityRequestHeader(1, "session", id, 2),
@@ -454,7 +477,8 @@ public sealed class AuthorityRequestRouterTests
             _ => { },
             presented ?? (_ => { }),
             source => source is NetPeer,
-            timeout ?? AuthorityTimeoutPolicy.CampaignMutation);
+            timeout ?? AuthorityTimeoutPolicy.CampaignMutation,
+            isExpectedClientResult: expected);
 
     private static AuthorityServerReply<TestResult> Accepted(AuthorityRequestHeader header) =>
         new AuthorityServerReply<TestResult>(new TestResult(new AuthorityResultHeader(

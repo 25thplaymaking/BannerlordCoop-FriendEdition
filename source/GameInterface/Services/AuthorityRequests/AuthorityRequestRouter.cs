@@ -264,7 +264,9 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
                     AuthorityCommitProbeResult probe;
                     try
                     {
-                        probe = route.ProbeClientCommit(request.Result);
+                        probe = route.IsExpectedClientResult(request.Request, request.Result)
+                            ? route.ProbeClientCommit(request.Result)
+                            : AuthorityCommitProbeResult.Invalid;
                     }
                     catch (Exception exception)
                     {

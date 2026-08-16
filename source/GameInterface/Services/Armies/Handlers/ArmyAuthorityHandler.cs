@@ -93,13 +93,13 @@ internal sealed class ArmyAuthorityHandler : IHandler
     {
         if (ModInformation.IsServer || !objectManager.TryGetId(p.What.Army, out var armyId) || !objectManager.TryGetId(p.What.MobileParty, out var partyId)) return;
         // Joining an encountered army is the response path; manager-selected parties are leader invitations.
-        if (ReferenceEquals(p.What.MobileParty, MobileParty.MainParty)) inviteResponseRoute.Submit(new InviteResponseIntent(armyId, true));
+        if (PlayerManager.TryGetControlledObjectInfo(p.What.MobileParty, out var control) && control.IsControlled) inviteResponseRoute.Submit(new InviteResponseIntent(armyId, true));
         else inviteRoute.Submit(new InviteIntent(armyId, partyId));
     }
     private void OnRemoved(MessagePayload<MobilePartyInArmyRemoved> p)
     {
         if (ModInformation.IsServer || !objectManager.TryGetId(p.What.Army, out var armyId) || !objectManager.TryGetId(p.What.MobileParty, out var partyId)) return;
-        if (ReferenceEquals(p.What.MobileParty, MobileParty.MainParty)) leaveRoute.Submit(new LeaveIntent(armyId));
+        if (PlayerManager.TryGetControlledObjectInfo(p.What.MobileParty, out var control) && control.IsControlled) leaveRoute.Submit(new LeaveIntent(armyId));
         else kickRoute.Submit(new KickIntent(armyId, partyId));
     }
     private void OnCohesion(MessagePayload<PlayerBoostedArmyCohesion> p)

@@ -1,7 +1,9 @@
 ﻿using Autofac;
 using Common.Messaging;
 using Common.Network;
+using Common.Network.Coalescing;
 using Common.Serialization;
+using Coop.Core.Common.Configuration;
 using GameInterface.AutoSync;
 using GameInterface.Services.Modules;
 using GameInterface.Services.Players;
@@ -30,7 +32,8 @@ public class ContainerTest
             containerBuilder.RegisterInstance(harmony).As<Harmony>().SingleInstance();
 
             RegisterMock<INetwork>(containerBuilder);
-            RegisterMock<INetworkConfig>(containerBuilder);
+            containerBuilder.RegisterType<NetworkConfig>().As<INetworkConfig>().SingleInstance();
+            containerBuilder.RegisterType<SendCoalescer>().As<ISendCoalescer>().SingleInstance();
             RegisterMock<ISerializableTypeMapper>(containerBuilder);
             // Production registers this from Coop.Core's CommonModule; a standalone GameInterface
             // container needs a stand-in or the Workshop manifest warmup fails to activate.
@@ -85,7 +88,8 @@ public class ContainerTest
         containerBuilder.RegisterInstance(MessageBroker.Instance).As<IMessageBroker>().SingleInstance();
 
         RegisterMock<INetwork>(containerBuilder);
-        RegisterMock<INetworkConfig>(containerBuilder);
+        containerBuilder.RegisterType<NetworkConfig>().As<INetworkConfig>().SingleInstance();
+        containerBuilder.RegisterType<SendCoalescer>().As<ISendCoalescer>().SingleInstance();
         RegisterMock<ISerializableTypeMapper>(containerBuilder);
         RegisterMock<IModuleInfoProvider>(containerBuilder);
 

@@ -1,6 +1,7 @@
 ﻿using Autofac;
 using Common.Messaging;
 using Common.Network;
+using Common.Network.Coalescing;
 using Common.Serialization;
 using Coop.Core.Common.Configuration;
 using Coop.Tests.Mocks;
@@ -36,6 +37,7 @@ internal class PatchBootstrap : IDisposable
         builder.RegisterType<MessageBroker>().As<IMessageBroker>().SingleInstance();
         builder.RegisterType<TestNetwork>().As<INetwork>().SingleInstance();
         builder.RegisterType<NetworkConfig>().As<INetworkConfig>().SingleInstance();
+        builder.RegisterType<SendCoalescer>().As<ISendCoalescer>().SingleInstance();
         builder.RegisterType<SerializableTypeMapper>().As<ISerializableTypeMapper>().SingleInstance();
         // Production registers this from Coop.Core's CommonModule; a standalone GameInterface
         // container needs a stand-in or the Workshop manifest warmup fails to activate.

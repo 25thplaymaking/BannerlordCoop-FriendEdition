@@ -1,6 +1,7 @@
 using Common;
 using Common.Messaging;
 using Common.Network;
+using Common.Tests.Utils;
 using GameInterface.Configuration;
 using GameInterface.Services;
 using GameInterface.Services.CampaignService.Messages;
@@ -996,14 +997,16 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
     public void DiplomacyConfigBarrier_SubscribesOnlyToPostCommitAuthorityEvent()
     {
         var broker = new Mock<IMessageBroker>();
-        _ = new DiplomacyCompatibilityHandler(
+        using var routerBroker = new TestMessageBroker();
+        using var router = new AuthorityRequestRouter(
+            routerBroker, new Mock<INetwork>().Object, new Mock<IPlayerManager>().Object);
+        using var handler = new DiplomacyCompatibilityHandler(
             broker.Object,
             new Mock<INetwork>().Object,
             new CountingRuntime(),
             new TestConfigAuthority(CurrentConfigSnapshot()),
             new RecordingUiLifecycle(),
-            new AuthorityRequestRouter(broker.Object, new Mock<INetwork>().Object,
-                new Mock<IPlayerManager>().Object));
+            router);
 
         broker.Verify(value => value.Subscribe(
             It.IsAny<Action<MessagePayload<HostModConfigAccepted>>>()), Times.Once);

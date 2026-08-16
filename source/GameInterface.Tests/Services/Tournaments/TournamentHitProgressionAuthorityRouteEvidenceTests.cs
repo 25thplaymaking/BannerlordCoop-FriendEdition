@@ -100,7 +100,7 @@ public sealed class TournamentHitProgressionAuthorityRouteEvidenceTests
         Assert.Equal(header, request.Header);
         Assert.Equal(header.SessionId, exactResult.Header.SessionId);
         Assert.Equal(header.RequestId, exactResult.Header.RequestId);
-        Assert.Equal(header.ExpectedRevision, exactResult.Header.CommittedRevision);
+        Assert.Equal(data.Revision, exactResult.Header.CommittedRevision);
     }
 
     private static TournamentHitProgressionData HitData(

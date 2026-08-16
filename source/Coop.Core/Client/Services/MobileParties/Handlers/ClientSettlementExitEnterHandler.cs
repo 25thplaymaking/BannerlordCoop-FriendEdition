@@ -89,8 +89,12 @@ public class ClientSettlementExitEnterHandler : IHandler
     private void SubmitPendingStart()
     {
         if (pendingStart == null || pendingStart.RequestId > 0) return;
-        var ticket = startRoute.Submit(new StartIntent(pendingStart.SettlementId));
-        pendingStart.RequestId = ticket.RequestId;
+        // Local header rejection completes synchronously and terminal recovery may clear the
+        // pending object from inside Submit. Never dereference state that callback already unwound.
+        PendingStart submitting = pendingStart;
+        var ticket = startRoute.Submit(new StartIntent(submitting.SettlementId));
+        if (ReferenceEquals(pendingStart, submitting))
+            submitting.RequestId = ticket.RequestId;
     }
 
     private void Handle(MessagePayload<EndSettlementEncounterAttempted> payload)
@@ -106,8 +110,10 @@ public class ClientSettlementExitEnterHandler : IHandler
         }
 
         pendingLeave = new PendingLeave(partyId, settlementId);
+        PendingLeave submitting = pendingLeave;
         var ticket = endRoute.Submit(new EndIntent(settlementId));
-        pendingLeave.RequestId = ticket.RequestId;
+        if (ReferenceEquals(pendingLeave, submitting))
+            submitting.RequestId = ticket.RequestId;
     }
 
     private void Handle(MessagePayload<NetworkStartSettlementEncounter> payload)

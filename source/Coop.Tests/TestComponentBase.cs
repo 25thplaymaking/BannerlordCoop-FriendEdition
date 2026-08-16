@@ -41,6 +41,7 @@ using IGameInterface = GameInterface.IGameInterface;
 using GameInterface.Services.CampaignService.Interfaces;
 using GameInterface.Services.Chat;
 using GameInterface.Services.WorkshopMods.Core;
+using GameInterface.Services.AuthorityRequests;
 using FriendEdition.WorkshopCompatibility;
 
 namespace Coop.Tests;
@@ -139,6 +140,9 @@ internal abstract class TestComponentBase
         RegisterMock<IVillageHostileActionInterface>(builder);
         RegisterMock<IServerOptionsProvider>(builder);
         RegisterMock<ISaveNotificationInterface>(builder);
+        // ServerModule auto-activates routed campaign handlers. Production receives the router
+        // through GameInterfaceModule; these narrow state tests deliberately do not load it.
+        RegisterMock<IAuthorityRequestRouter>(builder);
 
         // ISaveInterface is consumed by TransferSaveState's constructor, which packages a save the
         // moment the state is entered. Give it a non-null default so simply entering the state does

@@ -44,8 +44,8 @@ public sealed class WorkshopManifestProviderTests : IDisposable
 
         Assert.Same(first, lateJoin);
         Assert.Equal(2, discovery.CallCount); // once per peer-role manifest, never per joiner
-        Assert.Equal(10, first.Entries.Length);
-        Assert.Equal(10, server.Entries.Length);
+        Assert.Equal(14, first.Entries.Length);
+        Assert.Equal(14, server.Entries.Length);
         Assert.All(first.Entries, entry => Assert.True(entry.ManagedDistributionComponent));
     }
 

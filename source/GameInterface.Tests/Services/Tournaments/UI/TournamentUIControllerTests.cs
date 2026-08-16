@@ -1,10 +1,14 @@
 using Common.Messaging;
 using Common.Network;
 using Common.Util;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Entity;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.Players;
 using GameInterface.Services.Tournaments;
 using GameInterface.Services.Tournaments.Data;
+using GameInterface.Services.Tournaments.Handlers;
 using GameInterface.Services.Tournaments.Messages;
 using GameInterface.Services.Tournaments.UI;
 using Moq;
@@ -21,11 +25,12 @@ public class TournamentUIControllerTests
     [Fact]
     public void ArenaJoinRequest_CarriesTownSessionAndExpectedRevision()
     {
-        using var controller = CreateController("player-a", out var sent);
+        using var routes = new RouteHarness("player-a");
+        using var controller = CreateController("player-a", out _, routes.Network);
 
         controller.RequestJoin("town-a", "session-a", 17);
 
-        var request = Assert.IsType<NetworkRequestJoinTournament>(Assert.Single(sent));
+        var request = Assert.IsType<NetworkRequestJoinTournament>(Assert.Single(routes.Sent));
         Assert.Equal("town-a", request.TownId);
         Assert.Equal("session-a", request.SessionId);
         Assert.Equal(17, request.ExpectedRevision);
@@ -53,7 +58,8 @@ public class TournamentUIControllerTests
     [Fact]
     public void StalePreparationLeave_RetriesAtCanonicalRevisionUntilAccepted()
     {
-        using var controller = CreateController("player-a", out var sent);
+        using var routes = new RouteHarness("player-a");
+        using var controller = CreateController("player-a", out _, routes.Network);
         var revisionOne = CreateSnapshot("session-a", "town-a", 1, includeLocalContestant: true);
         controller.CacheSnapshot(revisionOne);
 
@@ -65,7 +71,7 @@ public class TournamentUIControllerTests
         controller.RetryPendingPreparationLeave(
             CreateSnapshot("session-a", "town-a", 4, includeLocalContestant: true));
 
-        var requests = sent.Cast<NetworkRequestLeaveTournamentPreparation>().ToArray();
+        var requests = routes.Sent.Cast<NetworkRequestLeaveTournamentPreparation>().ToArray();
         Assert.Equal(2, requests.Length);
         Assert.Equal(1, requests[0].ExpectedRevision);
         Assert.Equal(2, requests[1].ExpectedRevision);
@@ -126,7 +132,8 @@ public class TournamentUIControllerTests
     [Fact]
     public void BetRequests_UseMonotonicPerSessionSequence()
     {
-        using var controller = CreateController("player-a", out var sent);
+        using var routes = new RouteHarness("player-a");
+        using var controller = CreateController("player-a", out _, routes.Network);
         var snapshot = CreateSnapshot(
             "session-a",
             "town-a",
@@ -138,7 +145,7 @@ public class TournamentUIControllerTests
         controller.RequestBet(snapshot, 10);
         controller.RequestBet(snapshot, 20);
 
-        var requests = sent.Cast<NetworkRequestTournamentBet>().ToArray();
+        var requests = routes.Sent.Cast<NetworkRequestTournamentBet>().ToArray();
         Assert.Equal(2, requests.Length);
         Assert.Equal(1, requests[0].Sequence);
         Assert.Equal(2, requests[1].Sequence);
@@ -190,7 +197,8 @@ public class TournamentUIControllerTests
 
     private static TournamentUIController CreateController(
         string controllerId,
-        out List<IMessage> sent)
+        out List<IMessage> sent,
+        INetwork providedNetwork = null)
     {
         sent = new List<IMessage>();
         var captured = sent;
@@ -200,12 +208,75 @@ public class TournamentUIControllerTests
         var controllerIdProvider = new Mock<IControllerIdProvider>();
         controllerIdProvider.SetupGet(value => value.ControllerId).Returns(controllerId);
 
+        var hero = ObjectHelper.SkipConstructor<Hero>();
+        var character = ObjectHelper.SkipConstructor<CharacterObject>();
+        character._heroObject = hero;
+        CharacterObject resolvedCharacter = character;
+        var objectManager = new Mock<IObjectManager>();
+        objectManager.Setup(value => value.TryGetObject("character-a", out resolvedCharacter))
+            .Returns(true);
+        var tournament = new Mock<ITournamentGameInterface>();
+        TournamentBetQuote quote = new(100, 1f);
+        tournament.Setup(value => value.TryGetBetQuote(
+                It.IsAny<TournamentSessionSnapshot>(), hero, "slot-a", out quote))
+            .Returns(true);
+
         return new TournamentUIController(
             new Mock<IMessageBroker>().Object,
-            network.Object,
-            new Mock<IObjectManager>().Object,
+            providedNetwork ?? network.Object,
+            objectManager.Object,
             controllerIdProvider.Object,
-            new Mock<ITournamentGameInterface>().Object);
+            tournament.Object);
+    }
+
+    private sealed class RouteHarness : IDisposable
+    {
+        private readonly AuthorityRequestRouter router;
+        private readonly TournamentSessionHandler handler;
+
+        internal RouteHarness(string controllerId)
+        {
+            var broker = new Mock<IMessageBroker>();
+            var network = new Mock<INetwork>();
+            network.Setup(value => value.SendAll(It.IsAny<IMessage>()))
+                .Callback<IMessage>(message => Sent.Add(message));
+            Network = network.Object;
+
+            ModConfigSnapshot current = new(
+                new string('t', ModConfigSnapshot.SessionIdLength),
+                revision: 1,
+                ModConfigProvider.ModOptions,
+                birthAndDeathEnabled: true);
+            var config = new Mock<IModConfigAuthority>();
+            config.Setup(value => value.TryGetCurrent(out current)).Returns(true);
+
+            var controller = new Mock<IControllerIdProvider>();
+            controller.SetupGet(value => value.ControllerId).Returns(controllerId);
+            router = new AuthorityRequestRouter(
+                broker.Object,
+                Network,
+                new Mock<IPlayerManager>().Object);
+            handler = new TournamentSessionHandler(
+                broker.Object,
+                Network,
+                new Mock<IObjectManager>().Object,
+                new Mock<IPlayerManager>().Object,
+                controller.Object,
+                new Mock<ITournamentSessionRegistry>().Object,
+                new Mock<ITournamentGameInterface>().Object,
+                new Mock<ITournamentNativeRemovalAuthorization>().Object,
+                config.Object,
+                router);
+        }
+
+        internal INetwork Network { get; }
+        internal List<IMessage> Sent { get; } = new();
+
+        public void Dispose()
+        {
+            handler.Dispose();
+            router.Dispose();
+        }
     }
 
     private static TournamentSessionSnapshot CreateSnapshot(

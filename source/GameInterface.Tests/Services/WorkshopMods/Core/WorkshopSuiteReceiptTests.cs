@@ -62,7 +62,7 @@ public sealed class WorkshopSuiteReceiptTests : IDisposable
 
         IReadOnlyList<WorkshopModuleRuntimeInfo> modules = discovery.Discover();
 
-        Assert.Equal(10, modules.Count);
+        Assert.Equal(14, modules.Count);
         Assert.All(modules, module => Assert.True(module.ManagedDistributionComponent));
         Assert.All(modules, module => Assert.True(module.ActivationOrderValid));
         Assert.All(modules.Where(module => module.Expectation.ModuleId != "DismembermentPlus"),

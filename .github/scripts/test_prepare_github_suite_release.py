@@ -51,7 +51,11 @@ class GitHubSuiteReleaseTests(unittest.TestCase):
             assets_path.write_text(json.dumps(assets), encoding="utf-8")
             normalized = validate_descriptor(descriptor, assets_path, "owner/repository")
 
-            self.assertEqual(manifest, normalized)
+            self.assertEqual(manifest["version"], normalized["version"])
+            self.assertEqual(manifest["sha256"], normalized["sha256"])
+            self.assertEqual(manifest["notes"], normalized["notes"])
+            self.assertEqual(manifest["parts"], normalized["parts"])
+            self.assertEqual(manifest["parts"][0]["url"], normalized["clientZipUrl"])
 
     def test_rejects_oversized_parts_and_existing_output(self) -> None:
         with tempfile.TemporaryDirectory() as root_value:

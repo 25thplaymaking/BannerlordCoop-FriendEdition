@@ -56,7 +56,7 @@ The original single-object form remains valid for R2 or any other HTTPS host:
 }
 ```
 
-The no-new-billing GitHub form replaces `clientZipUrl` with ordered parts:
+The no-new-billing GitHub form uses ordered parts:
 
 ```json
 {
@@ -73,8 +73,11 @@ The no-new-billing GitHub form replaces `clientZipUrl` with ordered parts:
 }
 ```
 
-The two payload forms are mutually exclusive. Every part must use HTTPS, contain a positive byte count
-strictly below 2 GiB, and carry an exact SHA-256. The launcher writes parts directly and sequentially
+The immutable descriptor keeps the two payload forms exclusive. The rolling feed additionally carries
+the first part URL as `clientZipUrl` so pre-multipart launchers can validate the feed and self-update;
+multipart-capable launchers always prefer `parts` and never download that compatibility field. Every
+part must use HTTPS, contain a positive byte count strictly below 2 GiB, and carry an exact SHA-256.
+The launcher writes parts directly and sequentially
 into one temporary ZIP, so it does not store a second set of part files. It rejects a wrong response
 length or part digest before extraction, then verifies the complete ZIP through the unchanged hash gate.
 

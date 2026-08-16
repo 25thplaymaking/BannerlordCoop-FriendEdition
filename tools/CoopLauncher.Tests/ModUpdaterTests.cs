@@ -166,6 +166,7 @@ public sealed class ModUpdaterTests
         byte[] first = suiteZip[..split];
         byte[] second = suiteZip[split..];
         UpdateManifest suiteManifest = MultipartManifest("2.0", suiteZip, first, second);
+        suiteManifest.ClientZipUrl = "https://updates.example/legacy-bootstrap-only.zip";
         var requestedParts = new List<string>();
         using var http = new HttpClient(new StubHandler(request =>
         {
@@ -268,7 +269,7 @@ public sealed class ModUpdaterTests
     }
 
     [Fact]
-    public void MultipartManifestRequiresExclusiveSafeSubTwoGiBParts()
+    public void MultipartManifestAllowsSafeLegacyBootstrapUrlAndRequiresSafeSubTwoGiBParts()
     {
         var valid = new UpdateManifest
         {
@@ -288,6 +289,8 @@ public sealed class ModUpdaterTests
         Assert.True(ModUpdater.IsManifestValid(valid));
 
         valid.ClientZipUrl = "https://example.invalid/also-a-zip";
+        Assert.True(ModUpdater.IsManifestValid(valid));
+        valid.ClientZipUrl = "http://example.invalid/unsafe-bootstrap";
         Assert.False(ModUpdater.IsManifestValid(valid));
         valid.ClientZipUrl = "";
         valid.Parts[0].Url = "http://example.invalid/part001";

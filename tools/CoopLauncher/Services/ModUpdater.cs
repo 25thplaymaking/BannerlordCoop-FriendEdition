@@ -307,10 +307,15 @@ public sealed class ModUpdater : IModUpdateService
 
         bool hasSingleUrl = !string.IsNullOrWhiteSpace(manifest.ClientZipUrl);
         UpdatePart[] parts = manifest.Parts ?? [];
-        if (hasSingleUrl)
-            return parts.Length == 0 && TryGetHttpsUri(manifest.ClientZipUrl, out _);
+        if (parts.Length == 0)
+            return hasSingleUrl && TryGetHttpsUri(manifest.ClientZipUrl, out _);
 
-        if (parts.Length is 0 or > 1000)
+        // Multipart-capable launchers always prefer the pinned parts.  A valid single URL may
+        // remain beside them solely so pre-multipart launchers can validate the feed, update the
+        // launcher first, and restart into this code before any suite payload is downloaded.
+        if (hasSingleUrl && !TryGetHttpsUri(manifest.ClientZipUrl, out _))
+            return false;
+        if (parts.Length > 1000)
             return false;
 
         const long githubAssetLimit = 2L * 1024 * 1024 * 1024;

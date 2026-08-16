@@ -63,6 +63,11 @@ def validate_descriptor(descriptor_path: Path, assets_path: Path, repository: st
 
     return {
         "version": version,
+        # Pre-multipart launchers require a syntactically valid clientZipUrl before they will
+        # stage their own launcher update. They never download the suite first. New launchers
+        # prefer the verified parts whenever parts are present, so this first-part URL is only a
+        # bootstrap compatibility field and cannot bypass either the part or whole-archive hash.
+        "clientZipUrl": normalized_parts[0]["url"],
         "sha256": complete_sha,
         "notes": notes.strip(),
         "parts": normalized_parts,

@@ -1,4 +1,7 @@
 using Common.Messaging;
+using GameInterface.Services.AuthorityRequests;
+using GameInterface.Services.Inventory.Data;
+using GameInterface.Services.TroopRosters.Data;
 using ProtoBuf;
 using System;
 
@@ -50,6 +53,7 @@ internal readonly struct NetworkCancelLordBarterAuthorization : ICommand
 }
 
 [ProtoContract(SkipConstructor = true)]
+[AuthorityRoute("barter.lord.commit", AuthorityRouteKind.Command)]
 internal readonly struct NetworkRequestLordBarter : ICommand
 {
     [ProtoMember(1)] public readonly string TargetHeroId;
@@ -59,6 +63,7 @@ internal readonly struct NetworkRequestLordBarter : ICommand
     [ProtoMember(5)] public readonly int Kind;
     [ProtoMember(6)] public readonly string RequestId;
     [ProtoMember(7)] public readonly DefectionPersuasionOutcome[] PersuasionOutcomes;
+    [ProtoMember(8)] public readonly AuthorityRequestHeader Header;
 
     public NetworkRequestLordBarter(
         string targetHeroId,
@@ -76,6 +81,21 @@ internal readonly struct NetworkRequestLordBarter : ICommand
         Kind = (int)kind;
         RequestId = requestId;
         PersuasionOutcomes = persuasionOutcomes ?? Array.Empty<DefectionPersuasionOutcome>();
+        Header = default;
+    }
+
+    public NetworkRequestLordBarter(
+        string targetHeroId,
+        PeaceConversationContext context,
+        string contextId,
+        LordBarterKind kind,
+        PeaceBarterTerm[] terms,
+        string requestId,
+        DefectionPersuasionOutcome[] persuasionOutcomes,
+        AuthorityRequestHeader header)
+        : this(targetHeroId, context, contextId, kind, terms, requestId, persuasionOutcomes)
+    {
+        Header = header;
     }
 }
 
@@ -111,6 +131,7 @@ internal readonly struct NetworkLordBarterResult : ICommand
     [ProtoMember(3)] public readonly int PlayerGold;
     [ProtoMember(4)] public readonly string Reason;
     [ProtoMember(5)] public readonly string RequestId;
+    [ProtoMember(6)] public readonly AuthorityResultHeader Header;
 
     public NetworkLordBarterResult(string contextId, bool accepted, int playerGold, string reason, string requestId)
     {
@@ -119,5 +140,79 @@ internal readonly struct NetworkLordBarterResult : ICommand
         PlayerGold = playerGold;
         Reason = reason;
         RequestId = requestId;
+        Header = default;
+    }
+
+    public NetworkLordBarterResult(string contextId, AuthorityResultHeader header, int playerGold, string requestId)
+    {
+        ContextId = contextId;
+        Accepted = header.Status == AuthorityResultStatus.Accepted;
+        PlayerGold = playerGold;
+        Reason = header.ReasonCode;
+        RequestId = requestId;
+        Header = header;
+    }
+}
+
+/// <summary>Correlated post-mutation witness for a lord barter commit.</summary>
+[ProtoContract(SkipConstructor = true)]
+internal readonly struct NetworkLordBarterDelta : ICommand
+{
+    [ProtoMember(1)] public readonly string SessionId;
+    [ProtoMember(2)] public readonly long AuthorityRequestId;
+    [ProtoMember(3)] public readonly long CommittedRevision;
+    [ProtoMember(4)] public readonly int Kind;
+    [ProtoMember(5)] public readonly string PlayerHeroId;
+    [ProtoMember(6)] public readonly string TargetHeroId;
+    [ProtoMember(7)] public readonly string PlayerPartyId;
+    [ProtoMember(8)] public readonly string TargetPartyId;
+    [ProtoMember(9)] public readonly int PlayerGold;
+    [ProtoMember(10)] public readonly int TargetGold;
+    [ProtoMember(11)] public readonly ItemRosterElementData[] PlayerItems;
+    [ProtoMember(12)] public readonly TroopRosterElementData[] PlayerPrisoners;
+    [ProtoMember(13)] public readonly ItemRosterElementData[] TargetItems;
+    [ProtoMember(14)] public readonly TroopRosterElementData[] TargetPrisoners;
+    [ProtoMember(15)] public readonly long PlayerItemRosterHash;
+    [ProtoMember(16)] public readonly long PlayerPrisonRosterHash;
+    [ProtoMember(17)] public readonly long TargetItemRosterHash;
+    [ProtoMember(18)] public readonly long TargetPrisonRosterHash;
+    [ProtoMember(19)] public readonly PeaceBarterFiefStateData[] Fiefs;
+    [ProtoMember(20)] public readonly PeaceBarterPrisonerStateData[] Prisoners;
+    [ProtoMember(21)] public readonly string DefectingClanId;
+    [ProtoMember(22)] public readonly string DefectingClanKingdomId;
+    [ProtoMember(23)] public readonly bool EngagementEnded;
+
+    public NetworkLordBarterDelta(AuthorityRequestHeader header, LordBarterKind kind,
+        string playerHeroId, string targetHeroId, string playerPartyId, string targetPartyId,
+        int playerGold, int targetGold, ItemRosterElementData[] playerItems,
+        TroopRosterElementData[] playerPrisoners, ItemRosterElementData[] targetItems,
+        TroopRosterElementData[] targetPrisoners, long playerItemRosterHash, long playerPrisonRosterHash,
+        long targetItemRosterHash, long targetPrisonRosterHash, PeaceBarterFiefStateData[] fiefs,
+        PeaceBarterPrisonerStateData[] prisoners, string defectingClanId, string defectingClanKingdomId,
+        bool engagementEnded)
+    {
+        SessionId = header.SessionId;
+        AuthorityRequestId = header.RequestId;
+        CommittedRevision = header.ExpectedRevision;
+        Kind = (int)kind;
+        PlayerHeroId = playerHeroId;
+        TargetHeroId = targetHeroId;
+        PlayerPartyId = playerPartyId;
+        TargetPartyId = targetPartyId;
+        PlayerGold = playerGold;
+        TargetGold = targetGold;
+        PlayerItems = playerItems ?? Array.Empty<ItemRosterElementData>();
+        PlayerPrisoners = playerPrisoners ?? Array.Empty<TroopRosterElementData>();
+        TargetItems = targetItems ?? Array.Empty<ItemRosterElementData>();
+        TargetPrisoners = targetPrisoners ?? Array.Empty<TroopRosterElementData>();
+        PlayerItemRosterHash = playerItemRosterHash;
+        PlayerPrisonRosterHash = playerPrisonRosterHash;
+        TargetItemRosterHash = targetItemRosterHash;
+        TargetPrisonRosterHash = targetPrisonRosterHash;
+        Fiefs = fiefs ?? Array.Empty<PeaceBarterFiefStateData>();
+        Prisoners = prisoners ?? Array.Empty<PeaceBarterPrisonerStateData>();
+        DefectingClanId = defectingClanId;
+        DefectingClanKingdomId = defectingClanKingdomId;
+        EngagementEnded = engagementEnded;
     }
 }

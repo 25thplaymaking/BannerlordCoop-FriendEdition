@@ -2,6 +2,7 @@
 using Common.Network;
 using Common.Util;
 using GameInterface.Policies;
+using GameInterface.Services.Barters.Handlers;
 using GameInterface.Services.Barters.Messages;
 using GameInterface.Services.Heroes.Extensions;
 using GameInterface.Services.ObjectManager;
@@ -73,7 +74,6 @@ internal static class LordBarterPatch
         if (authorizedBarter != barterData ||
             string.IsNullOrEmpty(pendingRequestId) ||
             !ContainerProvider.TryResolve<IObjectManager>(out var objectManager) ||
-            !ContainerProvider.TryResolve<INetwork>(out var network) ||
             !TryCreateTerms(barterData.GetOfferedBarterables(), objectManager, out var terms))
         {
             ShowMessage("Unable to send the lord barter to the server.");
@@ -82,14 +82,14 @@ internal static class LordBarterPatch
 
         requestPending = true;
         pendingUiActive = true;
-        network.SendAll(new NetworkRequestLordBarter(
-            pendingTargetHeroId,
-            pendingContext,
-            pendingContextId,
-            pendingKind,
-            terms.ToArray(),
-            pendingRequestId,
-            CollectDefectionPersuasionOutcomes(pendingKind, barterData?.OtherHero)));
+        if (!LordBarterHandler.TryCommit(new LordBarterIntent(
+                pendingTargetHeroId, pendingContext, pendingContextId, pendingKind, terms.ToArray(), pendingRequestId,
+                CollectDefectionPersuasionOutcomes(pendingKind, barterData?.OtherHero))))
+        {
+            requestPending = false;
+            pendingUiActive = false;
+            ShowMessage("Unable to send the lord barter to the server.");
+        }
         return false;
     }
 
@@ -187,6 +187,13 @@ internal static class LordBarterPatch
         }
 
         MBInformationManager.AddQuickInformation(GameTexts.FindText("str_offer_accepted"));
+    }
+
+    internal static void CompleteFailedRequest(string reason)
+    {
+        requestPending = false;
+        pendingUiActive = false;
+        ShowMessage(string.IsNullOrWhiteSpace(reason) ? "The server could not apply the lord barter." : reason);
     }
 
     /// <summary>

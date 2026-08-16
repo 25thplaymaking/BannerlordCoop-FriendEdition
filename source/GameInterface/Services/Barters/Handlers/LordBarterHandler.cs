@@ -4,16 +4,20 @@ using Common.Messaging;
 using Common.Network;
 using Common.Network.Coalescing;
 using Common.Network.Messages;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Barters.Messages;
 using GameInterface.Services.Barters.Patches;
 using GameInterface.Services.Heroes.Extensions;
 using GameInterface.Services.Kingdoms;
+using GameInterface.Services.Inventory.Data;
 using GameInterface.Services.Locations.Conversations;
 using GameInterface.Services.MapEvents;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
 using GameInterface.Services.Players.Data;
 using GameInterface.Services.SiegeEvents.Interfaces;
+using GameInterface.Services.TroopRosters.Data;
 using LiteNetLib;
 using Serilog;
 using System;
@@ -24,6 +28,7 @@ using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.BarterSystem;
 using TaleWorlds.CampaignSystem.BarterSystem.Barterables;
 using TaleWorlds.CampaignSystem.Party;
+using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 
@@ -44,10 +49,13 @@ internal sealed partial class LordBarterHandler : IHandler
     private readonly ISafePassagePartyResolver safePassagePartyResolver;
     private readonly ISiegeEventInterface siegeEventInterface;
     private readonly ISendCoalescer sendCoalescer;
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRouteHandle<LordBarterIntent, NetworkLordBarterResult> commitRoute;
     private readonly Dictionary<NetPeer, LordBarterAuthorization> authorizations =
         new Dictionary<NetPeer, LordBarterAuthorization>();
-    private readonly Dictionary<NetPeer, NetworkLordBarterResult> completedResults =
-        new Dictionary<NetPeer, NetworkLordBarterResult>();
+    private readonly Dictionary<string, NetworkLordBarterDelta> receivedDeltas =
+        new Dictionary<string, NetworkLordBarterDelta>(StringComparer.Ordinal);
+    private static LordBarterHandler instance;
 
     public LordBarterHandler(
         IMessageBroker messageBroker,
@@ -60,6 +68,8 @@ internal sealed partial class LordBarterHandler : IHandler
         IBarterClientPresentation presentation,
         ISafePassagePartyResolver safePassagePartyResolver,
         ISiegeEventInterface siegeEventInterface,
+        IModConfigAuthority configAuthority,
+        IAuthorityRequestRouter authorityRequestRouter,
         ISendCoalescer sendCoalescer = null)
     {
         this.messageBroker = messageBroker;
@@ -73,10 +83,20 @@ internal sealed partial class LordBarterHandler : IHandler
         this.safePassagePartyResolver = safePassagePartyResolver;
         this.siegeEventInterface = siegeEventInterface;
         this.sendCoalescer = sendCoalescer;
+        this.configAuthority = configAuthority;
+        instance = this;
+        commitRoute = authorityRequestRouter.Register(
+            AuthorityRoute<LordBarterIntent, NetworkRequestLordBarter, NetworkLordBarterResult>.Define(
+                "barter.lord.commit", AuthorityRouteKind.Command, CreateHeader,
+                (intent, header) => new NetworkRequestLordBarter(intent.TargetHeroId, intent.Context,
+                    intent.ContextId, intent.Kind, intent.Terms, intent.ClientRequestId, intent.PersuasionOutcomes, header),
+                request => request.Header, result => result.Header, ValidateWireShape, BuildCommandKey,
+                ValidateHeader, ExecuteCommit, CreateTerminalResult, ProbeClientCommit, _ => { },
+                PresentTerminalOutcome, configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true, isExpectedClientResult: IsExpectedResult));
         messageBroker.Subscribe<NetworkAuthorizeLordBarter>(HandleAuthorization);
         messageBroker.Subscribe<NetworkCancelLordBarterAuthorization>(HandleAuthorizationCanceled);
-        messageBroker.Subscribe<NetworkRequestLordBarter>(HandleRequest);
-        messageBroker.Subscribe<NetworkLordBarterResult>(HandleResult);
+        messageBroker.Subscribe<NetworkLordBarterDelta>(HandleDelta);
         messageBroker.Subscribe<PlayerDisconnected>(HandlePlayerDisconnected);
     }
 
@@ -84,8 +104,7 @@ internal sealed partial class LordBarterHandler : IHandler
     {
         messageBroker.Unsubscribe<NetworkAuthorizeLordBarter>(HandleAuthorization);
         messageBroker.Unsubscribe<NetworkCancelLordBarterAuthorization>(HandleAuthorizationCanceled);
-        messageBroker.Unsubscribe<NetworkRequestLordBarter>(HandleRequest);
-        messageBroker.Unsubscribe<NetworkLordBarterResult>(HandleResult);
+        messageBroker.Unsubscribe<NetworkLordBarterDelta>(HandleDelta);
         messageBroker.Unsubscribe<PlayerDisconnected>(HandlePlayerDisconnected);
 
         // Every other access to these dictionaries happens on the game thread (handlers are drained
@@ -96,12 +115,21 @@ internal sealed partial class LordBarterHandler : IHandler
         GameThread.RunSafe(() =>
         {
             authorizations.Clear();
-            completedResults.Clear();
         },
             blocking: false,
             context: nameof(LordBarterHandler));
 
+        receivedDeltas.Clear();
+        commitRoute.Dispose();
+        if (instance == this) instance = null;
         LordBarterPatch.ClearPendingRequest();
+    }
+
+    internal static bool TryCommit(LordBarterIntent intent)
+    {
+        if (instance == null || ModInformation.IsServer) return false;
+        instance.commitRoute.Submit(intent);
+        return true;
     }
 
     private void HandleAuthorization(MessagePayload<NetworkAuthorizeLordBarter> payload)
@@ -129,60 +157,37 @@ internal sealed partial class LordBarterHandler : IHandler
         GameThread.RunSafe(() =>
         {
             authorizations.Remove(peer);
-            completedResults.Remove(peer);
         }, context: nameof(PlayerDisconnected));
     }
 
-    private void HandleRequest(MessagePayload<NetworkRequestLordBarter> payload)
+    private AuthorityServerReply<NetworkLordBarterResult> ExecuteCommit(
+        AuthorityServerContext context, NetworkRequestLordBarter request)
     {
-        if (ModInformation.IsClient || !(payload.Who is NetPeer peer)) return;
-        var request = payload.What;
-        GameThread.RunSafe(() => ProcessRequest(peer, request), context: nameof(LordBarterHandler));
-    }
-
-    private void HandleResult(MessagePayload<NetworkLordBarterResult> payload)
-    {
-        if (ModInformation.IsServer) return;
-        GameThread.RunSafe(() => LordBarterPatch.CompleteRequest(payload.What, presentation), context: nameof(NetworkLordBarterResult));
-    }
-
-    private void ProcessRequest(NetPeer peer, NetworkRequestLordBarter request)
-    {
+        var peer = context.Peer;
         Hero playerHero = null;
         var mutationStarted = false;
         try
         {
-            if (completedResults.TryGetValue(peer, out var completed) &&
-                completed.RequestId == request.RequestId)
-            {
-                SendResult(peer, completed);
-                return;
-            }
-
             if (!TryResolveContext(peer, request, out playerHero, out var playerParty, out var targetHero, out var targetParty, out var reason))
             {
-                Reject(peer, request, playerHero?.Gold ?? 0, reason);
-                return;
+                return Reject(context.Header, request, playerHero?.Gold ?? 0, reason);
             }
 
             if (!TryGetAuthorization(peer, request, out var authorization, out reason))
             {
-                Reject(peer, request, playerHero.Gold, reason);
-                return;
+                return Reject(context.Header, request, playerHero.Gold, reason);
             }
 
             Kingdom targetKingdom = null;
             if ((LordBarterKind)request.Kind == LordBarterKind.JoinKingdomAsClan &&
                 !objectManager.TryGetObject(authorization.TargetKingdomId, out targetKingdom))
             {
-                Reject(peer, request, playerHero.Gold, "The destination kingdom is no longer available.");
-                return;
+                return Reject(context.Header, request, playerHero.Gold, "The destination kingdom is no longer available.");
             }
 
             if (!CanAuthorizeKind(peer, playerHero, targetHero, request, targetKingdom, out reason))
             {
-                Reject(peer, request, playerHero.Gold, reason);
-                return;
+                return Reject(context.Header, request, playerHero.Gold, reason);
             }
 
             using var playerContext = new BarterPlayerContext(playerHero, playerParty.MobileParty);
@@ -196,8 +201,7 @@ internal sealed partial class LordBarterHandler : IHandler
                     out var barter,
                     out reason))
             {
-                Reject(peer, request, playerHero.Gold, reason);
-                return;
+                return Reject(context.Header, request, playerHero.Gold, reason);
             }
 
             var kind = (LordBarterKind)request.Kind;
@@ -226,14 +230,16 @@ internal sealed partial class LordBarterHandler : IHandler
                 LogOfferValueBreakdown(playerHero, targetHero, targetKingdom, barter, offerValue);
 
                 var shortfall = (int)Math.Ceiling(-offerValue);
-                Reject(
-                    peer,
+                return Reject(
+                    context.Header,
                     request,
                     playerHero.Gold,
                     $"The lord will not accept this offer - it is short by about {shortfall} denars. Offer more than the suggested amount.");
-                return;
             }
 
+            var offeredBarterables = barter.GetOfferedBarterables();
+            if (!CanPublishCanonicalDelta(playerHero, playerParty, targetHero, targetParty, offeredBarterables, kind, out reason))
+                return Reject(context.Header, request, playerHero.Gold, reason);
             authorizations.Remove(peer);
             mutationStarted = true;
 
@@ -251,17 +257,21 @@ internal sealed partial class LordBarterHandler : IHandler
                 isSafePassage,
                 offerValue,
                 safePassageOpponents);
+            if (!IsKindEffectApplied(peer, playerHero, targetHero, kind, targetKingdom))
+                return IsolateAfterMutation(context, request, "lord-kind-postcondition-missing");
+            FlushParty(playerParty);
+            FlushParty(targetParty);
+            if (!PublishCanonicalDelta(context.Header, playerHero, playerParty, targetHero, targetParty,
+                    offeredBarterables, kind, (PeaceConversationContext)request.Context == PeaceConversationContext.MapParty))
+                return IsolateAfterMutation(context, request, "lord-publication-failed");
+            return Accept(context.Header, request, playerHero.Gold);
         }
         catch (Exception exception)
         {
             Logger.Error(exception, "Failed to apply authoritative lord barter");
             if (mutationStarted)
-            {
-                SendAccepted(peer, request, playerHero?.Gold ?? 0);
-                return;
-            }
-
-            Reject(peer, request, playerHero?.Gold ?? 0, "The server could not process the lord barter.");
+                return IsolateAfterMutation(context, request, "lord-ambiguous", exception);
+            return Reject(context.Header, request, playerHero?.Gold ?? 0, "The server could not process the lord barter.");
         }
     }
 
@@ -341,7 +351,6 @@ internal sealed partial class LordBarterHandler : IHandler
         FlushGold(playerHero);
         FlushGold(targetHero);
         FlushHeroDeveloper(playerHero);
-        SendAccepted(peer, request, playerHero.Gold);
     }
 
     /// <summary>
@@ -449,7 +458,6 @@ internal sealed partial class LordBarterHandler : IHandler
             authorization.Kind,
             authorization.TargetKingdomId,
             DateTime.UtcNow.Add(AuthorizationLifetime));
-        completedResults.Remove(peer);
     }
 
     /// <summary>
@@ -895,35 +903,275 @@ internal sealed partial class LordBarterHandler : IHandler
             sendCoalescer.FlushInstance(id, network);
     }
 
-    private void Reject(NetPeer peer, NetworkRequestLordBarter request, int gold, string reason)
+    private AuthorityRequestHeader CreateHeader(long requestId)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot snapshot)) return default;
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, requestId, snapshot.Revision);
+    }
+
+    private AuthorityHeaderValidation ValidateHeader(AuthorityRequestHeader header)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot current))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "config-unavailable");
+        if (header.ProtocolVersion != current.ProtocolVersion)
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.InvalidRequest, "unsupported-protocol");
+        if (!string.Equals(header.SessionId, current.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-session");
+        return header.ExpectedRevision == current.Revision ? AuthorityHeaderValidation.Valid :
+            AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-state");
+    }
+
+    private static string ValidateWireShape(NetworkRequestLordBarter request)
+    {
+        if (string.IsNullOrWhiteSpace(request.RequestId) || request.RequestId.Length > 128 ||
+            string.IsNullOrWhiteSpace(request.TargetHeroId) || request.TargetHeroId.Length > 256 ||
+            string.IsNullOrWhiteSpace(request.ContextId) || request.ContextId.Length > 256 ||
+            !Enum.IsDefined(typeof(PeaceConversationContext), request.Context) ||
+            !Enum.IsDefined(typeof(LordBarterKind), request.Kind) || request.Terms == null || request.Terms.Length > 128 ||
+            request.PersuasionOutcomes == null || request.PersuasionOutcomes.Length > LordBarterPatch.MaxDefectionPersuasionOutcomes)
+            return "invalid-lord-barter";
+        if ((LordBarterKind)request.Kind != LordBarterKind.JoinKingdomAsClan && request.PersuasionOutcomes.Length != 0)
+            return "invalid-lord-persuasion";
+        return request.Terms.Any(term => !Enum.IsDefined(typeof(PeaceBarterTermType), term.Type) || term.Amount <= 0 ||
+            string.IsNullOrWhiteSpace(term.OwnerHeroId) || term.OwnerHeroId.Length > 256 ||
+            (term.ObjectId?.Length ?? 0) > 256 || (term.ItemModifierId?.Length ?? 0) > 256)
+            ? "invalid-lord-barter-term" : null;
+    }
+
+    private static string BuildCommandKey(NetworkRequestLordBarter request) => string.Concat(
+        request.RequestId, ":", request.TargetHeroId, ":", request.Context, ":", request.ContextId, ":", request.Kind, ":",
+        string.Join("|", request.Terms.OrderBy(term => term.Type).ThenBy(term => term.OwnerHeroId, StringComparer.Ordinal)
+            .ThenBy(term => term.ObjectId, StringComparer.Ordinal).ThenBy(term => term.ItemModifierId, StringComparer.Ordinal)
+            .ThenBy(term => term.Amount).Select(term => string.Concat(term.Type, ":", term.OwnerHeroId, ":", term.ObjectId,
+                ":", term.ItemModifierId, ":", term.ItemModifierNull, ":", term.Amount))), ":",
+        string.Join("|", request.PersuasionOutcomes.Select(outcome => string.Concat(outcome.Result, ":", outcome.ArgumentStrength))));
+
+    private static NetworkLordBarterResult CreateTerminalResult(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        new(null, new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason), 0, null);
+
+    private static AuthorityServerReply<NetworkLordBarterResult> Accept(
+        AuthorityRequestHeader header, NetworkRequestLordBarter request, int playerGold) => new(
+        new NetworkLordBarterResult(request.ContextId, new AuthorityResultHeader(header.SessionId, header.RequestId,
+            AuthorityResultStatus.Accepted, header.ExpectedRevision, null), playerGold, request.RequestId), true);
+
+    private static AuthorityServerReply<NetworkLordBarterResult> Reject(
+        AuthorityRequestHeader header, NetworkRequestLordBarter request, int playerGold, string reason)
     {
         Logger.Warning("Rejected lord barter with {TargetHeroId}: {Reason}", request.TargetHeroId, reason);
-        var result = new NetworkLordBarterResult(request.ContextId, false, gold, reason, request.RequestId);
-        SendResult(peer, result);
+        return new AuthorityServerReply<NetworkLordBarterResult>(new NetworkLordBarterResult(request.ContextId,
+            new AuthorityResultHeader(header.SessionId, header.RequestId, AuthorityResultStatus.Rejected,
+                header.ExpectedRevision, reason), playerGold, request.RequestId), false);
     }
 
-    private void SendAccepted(NetPeer peer, NetworkRequestLordBarter request, int gold)
+    private static bool IsExpectedResult(NetworkRequestLordBarter request, NetworkLordBarterResult result) =>
+        result.Header.RequestId == request.Header.RequestId && result.Header.CommittedRevision == request.Header.ExpectedRevision &&
+        string.Equals(result.Header.SessionId, request.Header.SessionId, StringComparison.Ordinal) &&
+        result.ContextId == request.ContextId && result.RequestId == request.RequestId;
+
+    private void HandleDelta(MessagePayload<NetworkLordBarterDelta> payload)
     {
-        var result = new NetworkLordBarterResult(
-            request.ContextId,
-            true,
-            gold,
-            null,
-            request.RequestId);
-        completedResults[peer] = result;
-        SendResult(peer, result);
+        if (ModInformation.IsServer || !configAuthority.IsTrustedServer(payload.Who) ||
+            !configAuthority.TryGetCurrent(out ModConfigSnapshot config)) return;
+        var delta = payload.What;
+        if (delta.AuthorityRequestId <= 0 || delta.CommittedRevision != config.Revision ||
+            !string.Equals(delta.SessionId, config.SessionId, StringComparison.Ordinal)) return;
+        receivedDeltas[DeltaKey(delta.SessionId, delta.AuthorityRequestId, delta.CommittedRevision)] = delta;
     }
 
-    private void SendResult(NetPeer peer, NetworkLordBarterResult result)
+    private AuthorityCommitProbeResult ProbeClientCommit(NetworkLordBarterResult result)
     {
-        try
+        if (result.Header.Status != AuthorityResultStatus.Accepted || !configAuthority.TryGetCurrent(out ModConfigSnapshot config) ||
+            config.Revision != result.Header.CommittedRevision || config.SessionId != result.Header.SessionId ||
+            !receivedDeltas.TryGetValue(DeltaKey(result.Header.SessionId, result.Header.RequestId, result.Header.CommittedRevision), out var delta) ||
+            !objectManager.TryGetObject(delta.PlayerHeroId, out Hero playerHero) || !objectManager.TryGetObject(delta.TargetHeroId, out Hero targetHero) ||
+            playerHero.Gold != delta.PlayerGold || targetHero.Gold != delta.TargetGold ||
+            !MatchesRoster(delta.PlayerPartyId, delta.PlayerItems, delta.PlayerPrisoners, delta.PlayerItemRosterHash, delta.PlayerPrisonRosterHash) ||
+            !MatchesRoster(delta.TargetPartyId, delta.TargetItems, delta.TargetPrisoners, delta.TargetItemRosterHash, delta.TargetPrisonRosterHash) ||
+            !MatchesFiefs(delta.Fiefs) || !MatchesPrisoners(delta.Prisoners) ||
+            ((LordBarterKind)delta.Kind == LordBarterKind.JoinKingdomAsClan && !MatchesDefection(delta)))
+            return AuthorityCommitProbeResult.Pending;
+        return AuthorityCommitProbeResult.Applied;
+    }
+
+    private void PresentTerminalOutcome(AuthorityClientOutcome<NetworkLordBarterResult> outcome)
+    {
+        if (outcome.Applied)
         {
-            network.Send(peer, result);
+            receivedDeltas.Remove(DeltaKey(outcome.Result.Header.SessionId, outcome.Result.Header.RequestId, outcome.Result.Header.CommittedRevision));
+            LordBarterPatch.CompleteRequest(outcome.Result, presentation);
+            return;
         }
-        catch (Exception exception)
+        LordBarterPatch.CompleteFailedRequest(outcome.ReasonCode);
+    }
+
+    private static string DeltaKey(string sessionId, long requestId, long revision) => string.Concat(sessionId, ":", requestId, ":", revision);
+
+    private bool CanPublishCanonicalDelta(Hero playerHero, PartyBase playerParty, Hero targetHero, PartyBase targetParty,
+        IEnumerable<Barterable> offered, LordBarterKind kind, out string reason)
+    {
+        reason = null;
+        if (!objectManager.TryGetId(playerHero, out _) || !objectManager.TryGetId(targetHero, out _) ||
+            !TryPackRoster(playerParty, out _, out _, out _, out _, out _) || !TryPackRoster(targetParty, out _, out _, out _, out _, out _) ||
+            !TryPackFiefs(offered, out _) || !TryPackPrisonerStates(offered, out _))
         {
-            Logger.Error(exception, "Failed to send authoritative lord barter result");
+            reason = "lord-state-unavailable";
+            return false;
         }
+        if (kind == LordBarterKind.JoinKingdomAsClan && targetHero.Clan == null)
+        {
+            reason = "lord-defection-state-unavailable";
+            return false;
+        }
+        return true;
+    }
+
+    private bool PublishCanonicalDelta(AuthorityRequestHeader header, Hero playerHero, PartyBase playerParty,
+        Hero targetHero, PartyBase targetParty, IEnumerable<Barterable> offered, LordBarterKind kind, bool engagementEnded)
+    {
+        if (!objectManager.TryGetId(playerHero, out var playerHeroId) || !objectManager.TryGetId(targetHero, out var targetHeroId) ||
+            !TryPackRoster(playerParty, out var playerPartyId, out var playerItems, out var playerPrisoners, out var playerItemHash, out var playerPrisonHash) ||
+            !TryPackRoster(targetParty, out var targetPartyId, out var targetItems, out var targetPrisoners, out var targetItemHash, out var targetPrisonHash) ||
+            !TryPackFiefs(offered, out var fiefs) || !TryPackPrisonerStates(offered, out var prisoners)) return false;
+        string clanId = null;
+        string kingdomId = null;
+        if (kind == LordBarterKind.JoinKingdomAsClan &&
+            (!objectManager.TryGetId(targetHero.Clan, out clanId) || !objectManager.TryGetId(targetHero.Clan.Kingdom, out kingdomId))) return false;
+        network.SendAll(new NetworkLordBarterDelta(header, kind, playerHeroId, targetHeroId, playerPartyId, targetPartyId,
+            playerHero.Gold, targetHero.Gold, playerItems, playerPrisoners, targetItems, targetPrisoners,
+            playerItemHash, playerPrisonHash, targetItemHash, targetPrisonHash, fiefs, prisoners, clanId, kingdomId, engagementEnded));
+        return true;
+    }
+
+    private bool IsKindEffectApplied(NetPeer peer, Hero playerHero, Hero targetHero, LordBarterKind kind, Kingdom targetKingdom)
+    {
+        if (kind == LordBarterKind.JoinKingdomAsClan)
+            return targetHero.Clan?.Kingdom == targetKingdom && targetKingdom?.Clans.Contains(targetHero.Clan) == true;
+        return kind != LordBarterKind.SafePassage || !conversationPartyTracker.TryGetEngagement(peer, out _);
+    }
+
+    private bool MatchesDefection(NetworkLordBarterDelta delta) =>
+        !string.IsNullOrEmpty(delta.DefectingClanId) && !string.IsNullOrEmpty(delta.DefectingClanKingdomId) &&
+        objectManager.TryGetObject(delta.DefectingClanId, out Clan clan) && objectManager.TryGetId(clan.Kingdom, out var kingdomId) &&
+        kingdomId == delta.DefectingClanKingdomId && clan.Kingdom.Clans.Contains(clan);
+
+    private void FlushParty(PartyBase party)
+    {
+        if (sendCoalescer != null && party != null && objectManager.TryGetId(party, out var partyId)) sendCoalescer.FlushInstance(partyId, network);
+    }
+
+    private bool TryPackRoster(PartyBase party, out string partyId, out ItemRosterElementData[] items,
+        out TroopRosterElementData[] prisoners, out long itemHash, out long prisonerHash)
+    {
+        partyId = null; items = Array.Empty<ItemRosterElementData>(); prisoners = Array.Empty<TroopRosterElementData>(); itemHash = 0; prisonerHash = 0;
+        if (party == null) return true;
+        if (!objectManager.TryGetId(party, out partyId) || !TryPackItems(party.ItemRoster, out items) || !TryPackPrisoners(party.PrisonRoster, out prisoners)) return false;
+        itemHash = HashItems(items); prisonerHash = HashPrisoners(prisoners); return true;
+    }
+
+    private bool MatchesRoster(string partyId, ItemRosterElementData[] items, TroopRosterElementData[] prisoners, long itemHash, long prisonerHash)
+    {
+        if (string.IsNullOrEmpty(partyId)) return itemHash == 0 && prisonerHash == 0;
+        if (!objectManager.TryGetObject(partyId, out PartyBase party) || !TryPackItems(party.ItemRoster, out var localItems) || !TryPackPrisoners(party.PrisonRoster, out var localPrisoners)) return false;
+        return HashItems(localItems) == itemHash && HashPrisoners(localPrisoners) == prisonerHash &&
+            HashItems(items ?? Array.Empty<ItemRosterElementData>()) == itemHash && HashPrisoners(prisoners ?? Array.Empty<TroopRosterElementData>()) == prisonerHash;
+    }
+
+    private bool TryPackItems(ItemRoster roster, out ItemRosterElementData[] data)
+    {
+        var packed = new List<ItemRosterElementData>();
+        foreach (var element in roster)
+        {
+            if (element.Amount <= 0 || element.EquipmentElement.Item == null || !objectManager.TryGetCatalogId(element.EquipmentElement.Item, out var itemId)) { data = null; return false; }
+            string modifierId = null; var noModifier = element.EquipmentElement.ItemModifier == null;
+            if (!noModifier && !objectManager.TryGetId(element.EquipmentElement.ItemModifier, out modifierId)) { data = null; return false; }
+            packed.Add(new ItemRosterElementData(new ItemObjectData(itemId, modifierId, noModifier), element.Amount));
+        }
+        data = packed.OrderBy(item => item.ItemObjectData.ItemObjectId, StringComparer.Ordinal).ThenBy(item => item.ItemObjectData.ItemModifierId, StringComparer.Ordinal).ToArray(); return true;
+    }
+
+    private bool TryPackPrisoners(TroopRoster roster, out TroopRosterElementData[] data)
+    {
+        var packed = new List<TroopRosterElementData>();
+        foreach (var element in roster.GetTroopRoster())
+        {
+            if (element.Character == null || element.Number <= 0 || !objectManager.TryGetId(element.Character, out var characterId)) { data = null; return false; }
+            packed.Add(new TroopRosterElementData(characterId, element.Number, element.WoundedNumber, element.Xp));
+        }
+        data = packed.OrderBy(prisoner => prisoner.CharacterId, StringComparer.Ordinal).ToArray(); return true;
+    }
+
+    private bool TryPackFiefs(IEnumerable<Barterable> barterables, out PeaceBarterFiefStateData[] data)
+    {
+        var packed = new List<PeaceBarterFiefStateData>();
+        foreach (var fief in barterables.OfType<FiefBarterable>())
+        {
+            if (!objectManager.TryGetId(fief.TargetSettlement, out var settlementId) || !objectManager.TryGetId(fief.TargetSettlement.OwnerClan, out var ownerClanId)) { data = null; return false; }
+            packed.Add(new PeaceBarterFiefStateData(settlementId, ownerClanId));
+        }
+        data = packed.OrderBy(fief => fief.SettlementId, StringComparer.Ordinal).ToArray(); return true;
+    }
+
+    private bool TryPackPrisonerStates(IEnumerable<Barterable> barterables, out PeaceBarterPrisonerStateData[] data)
+    {
+        var packed = new List<PeaceBarterPrisonerStateData>();
+        foreach (var barterable in barterables)
+        {
+            Hero prisoner = barterable is TransferPrisonerBarterable transfer ? transfer._prisonerCharacter :
+                barterable is SetPrisonerFreeBarterable released ? released._prisonerCharacter : null;
+            if (prisoner == null) continue;
+            if (!objectManager.TryGetId(prisoner.CharacterObject, out var characterId)) { data = null; return false; }
+            string captorPartyId = null;
+            if (prisoner.PartyBelongedToAsPrisoner != null && !objectManager.TryGetId(prisoner.PartyBelongedToAsPrisoner, out captorPartyId)) { data = null; return false; }
+            packed.Add(new PeaceBarterPrisonerStateData(characterId, prisoner.IsPrisoner, captorPartyId));
+        }
+        data = packed.OrderBy(prisoner => prisoner.HeroId, StringComparer.Ordinal).ToArray(); return true;
+    }
+
+    private bool MatchesFiefs(IEnumerable<PeaceBarterFiefStateData> fiefs) => (fiefs ?? Array.Empty<PeaceBarterFiefStateData>()).All(fief =>
+        objectManager.TryGetObject(fief.SettlementId, out Settlement settlement) && objectManager.TryGetId(settlement.OwnerClan, out var ownerClanId) && ownerClanId == fief.OwnerClanId);
+
+    private bool MatchesPrisoners(IEnumerable<PeaceBarterPrisonerStateData> prisoners)
+    {
+        foreach (var prisoner in prisoners ?? Array.Empty<PeaceBarterPrisonerStateData>())
+        {
+            if (!objectManager.TryGetObject(prisoner.HeroId, out CharacterObject character) || character.HeroObject == null || character.HeroObject.IsPrisoner != prisoner.IsPrisoner) return false;
+            string captorPartyId = null;
+            if (character.HeroObject.PartyBelongedToAsPrisoner != null && !objectManager.TryGetId(character.HeroObject.PartyBelongedToAsPrisoner, out captorPartyId)) return false;
+            if (captorPartyId != prisoner.CaptorPartyId) return false;
+        }
+        return true;
+    }
+
+    private static long HashItems(IEnumerable<ItemRosterElementData> items)
+    {
+        long hash = 1469598103934665603L;
+        foreach (var item in items) { hash = Hash(hash, item.ItemObjectData.ItemObjectId); hash = Hash(hash, item.ItemObjectData.ItemModifierId); hash = Hash(hash, item.Amount); }
+        return hash;
+    }
+
+    private static long HashPrisoners(IEnumerable<TroopRosterElementData> prisoners)
+    {
+        long hash = 1469598103934665603L;
+        foreach (var prisoner in prisoners) { hash = Hash(hash, prisoner.CharacterId); hash = Hash(hash, prisoner.Number); hash = Hash(hash, prisoner.WoundedNumber); hash = Hash(hash, prisoner.Xp); }
+        return hash;
+    }
+
+    private static long Hash(long value, string text) { unchecked { foreach (var character in text ?? string.Empty) value = (value ^ character) * 1099511628211L; return value; } }
+    private static long Hash(long value, int number) => unchecked((value ^ number) * 1099511628211L);
+
+    private AuthorityServerReply<NetworkLordBarterResult> IsolateAfterMutation(AuthorityServerContext context,
+        NetworkRequestLordBarter request, string stage, Exception exception = null)
+    {
+        if (exception == null) Logger.Fatal("Lord barter ambiguity after mutation. Stage={Stage}", stage);
+        else Logger.Fatal(exception, "Lord barter ambiguity after mutation. Stage={Stage}", stage);
+        foreach (var audience in playerManager.Players)
+        {
+            try { if (playerManager.TryGetPeer(audience.ControllerId, out var peer)) peer.Disconnect(); } catch { }
+        }
+        try { context.Peer.Disconnect(); } catch { }
+        return new AuthorityServerReply<NetworkLordBarterResult>(CreateTerminalResult(context.Header,
+            AuthorityResultStatus.ExecutionFailed, "lord-isolated"), false, suppressReply: true);
     }
 
     private sealed class LordBarterAuthorization
@@ -963,4 +1211,27 @@ internal sealed partial class LordBarterHandler : IHandler
                    request.Kind == Kind;
         }
     }
+}
+
+internal readonly struct LordBarterIntent
+{
+    public LordBarterIntent(string targetHeroId, PeaceConversationContext context, string contextId, LordBarterKind kind,
+        PeaceBarterTerm[] terms, string clientRequestId, DefectionPersuasionOutcome[] persuasionOutcomes)
+    {
+        TargetHeroId = targetHeroId;
+        Context = context;
+        ContextId = contextId;
+        Kind = kind;
+        Terms = terms ?? Array.Empty<PeaceBarterTerm>();
+        ClientRequestId = clientRequestId;
+        PersuasionOutcomes = persuasionOutcomes ?? Array.Empty<DefectionPersuasionOutcome>();
+    }
+
+    public string TargetHeroId { get; }
+    public PeaceConversationContext Context { get; }
+    public string ContextId { get; }
+    public LordBarterKind Kind { get; }
+    public PeaceBarterTerm[] Terms { get; }
+    public string ClientRequestId { get; }
+    public DefectionPersuasionOutcome[] PersuasionOutcomes { get; }
 }

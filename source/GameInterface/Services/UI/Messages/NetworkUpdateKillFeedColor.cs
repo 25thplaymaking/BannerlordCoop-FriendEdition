@@ -18,11 +18,22 @@ public readonly struct NetworkUpdateKillFeedColor : IEvent
     [ProtoMember(4)]
     public readonly int Blue;
 
+    // When this update completes an authority command, it binds the replica state to the
+    // accepted request. Snapshot/rejoin updates intentionally retain the default header.
+    [ProtoMember(5)]
+    public readonly AuthorityResultHeader Header;
+
     public NetworkUpdateKillFeedColor(string controllerId, int red, int green, int blue)
+        : this(controllerId, red, green, blue, default)
+    {
+    }
+
+    public NetworkUpdateKillFeedColor(string controllerId, int red, int green, int blue, AuthorityResultHeader header)
     {
         ControllerId = controllerId;
         Red = red;
         Green = green;
         Blue = blue;
+        Header = header;
     }
 }

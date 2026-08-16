@@ -164,6 +164,22 @@ public sealed class FourberieAuthorityTests
     }
 
     [Fact]
+    public void OperationDigest_IsStructuralAndAuthorityHeaderCarriesTheCanonicalRevision()
+    {
+        var request = new NetworkRequestFourberieOperation(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 7, 3, FourberieOperation.EnlistAgentsFromParty,
+            string.Empty, string.Empty, 0, new[] { new FourberieTroopSelection("troop_a", 2) });
+        var changed = new NetworkRequestFourberieOperation(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 7, 3, FourberieOperation.EnlistAgentsFromParty,
+            string.Empty, string.Empty, 0, new[] { new FourberieTroopSelection("troop_a", 3) });
+
+        Assert.True(request.Header.TryValidate(out _));
+        Assert.Equal(3, request.Header.ExpectedRevision);
+        Assert.Equal(64, FourberieOperationProtocol.CommandKey(request).Length);
+        Assert.NotEqual(FourberieOperationProtocol.CommandKey(request), FourberieOperationProtocol.CommandKey(changed));
+    }
+
+    [Fact]
     public void EnslavePrisoners_RequiresSafehouseAndSelectedPrisoners()
     {
         var valid = new NetworkRequestFourberieOperation(

@@ -1096,6 +1096,7 @@
         "0x060006F6"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor criminal-enterprise transaction",
       "capability": "ExplicitOperations",
       "tests": [
@@ -1113,6 +1114,7 @@
         "0x0600067D"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor crime-base-party reset",
       "capability": "ExplicitOperations",
       "tests": [
@@ -1130,6 +1132,7 @@
         "0x060006FA"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor saboteur-party transaction",
       "capability": "ExplicitOperations",
       "tests": [
@@ -1150,6 +1153,7 @@
         "0x0600038A"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor scheme-bonus transaction",
       "capability": "ExplicitOperations",
       "tests": [
@@ -1168,6 +1172,7 @@
         "0x0600086C"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor criminal-role transaction",
       "capability": "ExplicitOperations",
       "tests": [
@@ -1505,6 +1510,7 @@
         "0x0600099D"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor.TryExecute",
       "capability": "ExplicitOperations",
       "tests": [
@@ -2096,6 +2102,7 @@
         "0x06000822"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor scheme transaction",
       "capability": "ExplicitOperations",
       "tests": [
@@ -2129,6 +2136,7 @@
         "0x06000682"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor crime-room settings transaction",
       "capability": "ExplicitOperations",
       "tests": [
@@ -2164,6 +2172,7 @@
         "0x060006A3"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor contract control transaction",
       "capability": "ExplicitOperations",
       "tests": [
@@ -2220,6 +2229,7 @@
         "0x060006B0"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor main crime-base transaction",
       "capability": "ExplicitOperations",
       "tests": [
@@ -2237,6 +2247,7 @@
         "0x060006F2"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor territory removal transaction",
       "capability": "ExplicitOperations",
       "tests": [
@@ -2266,6 +2277,7 @@
         "0x060006FC"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor safehouse abandonment transaction",
       "capability": "ExplicitOperations",
       "tests": [
@@ -2285,6 +2297,7 @@
         "0x060008E7"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor crooked-trader safehouse transactions",
       "capability": "ExplicitOperations",
       "tests": [
@@ -2303,6 +2316,7 @@
         "0x060004C2"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor safehouse establishment transaction",
       "capability": "ExplicitOperations",
       "tests": [
@@ -2321,6 +2335,7 @@
         "0x060008F9"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor safehouse wait transactions",
       "capability": "ExplicitOperations",
       "tests": [
@@ -2338,6 +2353,7 @@
         "0x06000496"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor safehouse return transaction",
       "capability": "ExplicitOperations",
       "tests": [
@@ -2563,6 +2579,7 @@
         "0x060006F0"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor grudge quote and settlement transactions",
       "capability": "ExplicitOperations",
       "tests": [
@@ -2629,6 +2646,7 @@
         "0x06000671"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor contract proposal response transactions",
       "capability": "ExplicitOperations",
       "tests": [
@@ -7509,6 +7527,7 @@
         "0x060007B9"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor.ApplyPresentationState",
       "capability": "CanonicalPresentationState",
       "tests": [
@@ -8326,6 +8345,7 @@
         "0x060005FB"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieInsideMissionAuthority",
       "capability": "InsideMissionOutcome",
       "tests": [
@@ -8498,6 +8518,7 @@
         "0x0600039E"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieAuthorityPatches.EnslavePrisonersConsequencePrefix -> FourberieOperationExecutor",
       "capability": "PrisonerEnslavement",
       "tests": [
@@ -8511,6 +8532,7 @@
         "0x060005FD"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieAuthorityPatches.AlleyAcquisitionPrefix -> AlleyManagementHandler",
       "capability": "AlleyAcquisition",
       "tests": [
@@ -8524,6 +8546,7 @@
         "0x0600042E"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieFightClubAuthority",
       "capability": "FightClubCareerOutcome",
       "tests": [
@@ -8556,6 +8579,7 @@
         "0x060008A2"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationHandler.ApplyFightClubLifecycle",
       "capability": "FightClubLifecycle",
       "tests": [
@@ -8599,6 +8623,7 @@
         "0x06000421"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationHandler.ApplyFightClubMenuRefresh",
       "capability": "FightClubLifecycle",
       "tests": [
@@ -8622,6 +8647,7 @@
         "0x0600092D"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieOperationExecutor.ApplyStealthEvent",
       "capability": "StealthMissionConsequences",
       "tests": [
@@ -8679,6 +8705,7 @@
         "0x06000795"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieAuthorityPatches bandit consequence prefixes -> FourberieOperationExecutor.ApplyBanditEvent",
       "capability": "BanditTransactions",
       "tests": [
@@ -8697,6 +8724,7 @@
         "0x0600074A"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieAuthorityPatches.BanditPreparationPrefix -> FourberieOperationExecutor.ApplyBanditEvent",
       "capability": "BanditPreparedPresentation",
       "tests": [
@@ -8732,6 +8760,7 @@
         "0x06000A15"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieAuthorityPatches.LegacyCallbackPrefix -> FourberieOperationExecutor.ExecuteLegacyCallback",
       "capability": "PinnedCriminalSubmenuConsequences",
       "tests": [
@@ -8751,6 +8780,7 @@
         "0x060007E3"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieAuthorityPatches.ConversationConsequencePrefix -> FourberieOperationExecutor.ApplyConversationEvent",
       "capability": "GangLeaderConversationConsequences",
       "tests": [
@@ -8838,6 +8868,7 @@
         "0x060004BB"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieAuthorityPatches.CampaignConsequencePrefix -> FourberieOperationExecutor.ApplyCampaignConsequence",
       "capability": "FourberieCampaignConsequences",
       "tests": [
@@ -8867,6 +8898,7 @@
         "0x06000621"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieAuthorityPatches.MinorRecruitmentConsequencePrefix -> FourberieOperationExecutor.ApplyMinorRecruitment",
       "capability": "FourberieMinorFactionRecruitment",
       "tests": [
@@ -8880,6 +8912,7 @@
         "0x06000375"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieAuthorityPatches.KingdomLeaveConsequencePrefix -> FourberieOperationExecutor.ApplyKingdomLeave",
       "capability": "FourberieKingdomLeaveChoice",
       "tests": [
@@ -8893,6 +8926,7 @@
         "0x06000313"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieAuthorityPatches.GuardKillConsequencePrefix -> FourberieOperationExecutor.ApplyGuardKills",
       "capability": "FourberieGuardKillJob",
       "tests": [
@@ -8906,6 +8940,7 @@
         "0x060004A3"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieAuthorityPatches.SafehouseEncounterConsequencePrefix -> FourberieOperationExecutor.ApplySafehouseEncounter",
       "capability": "FourberieSafehouseEncounterOutcome",
       "tests": [
@@ -8948,6 +8983,7 @@
         "0x06000835"
       ],
       "disposition": "ServerCommand",
+      "routeId": "workshop.fourberie.gameplay",
       "owner": "FourberieAuthorityPatches.CriminalConsequencePrefix -> FourberieOperationExecutor.ApplyCriminalConsequence",
       "capability": "FourberieCriminalConsequences",
       "tests": [

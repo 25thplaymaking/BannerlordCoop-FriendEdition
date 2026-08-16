@@ -24,6 +24,7 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.Party;
+using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
@@ -54,12 +55,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
     private readonly Harmony harmony;
     private readonly FourberieRevisionGate revisionGate = new FourberieRevisionGate();
     private readonly object snapshotSync = new object();
-    private readonly FourberieRequestLedger<NetPeer> requestLedger = new FourberieRequestLedger<NetPeer>(256);
-    private readonly Dictionary<long, FourberieOperation> pendingOperations = new Dictionary<long, FourberieOperation>();
-    private readonly Dictionary<long, FourberieBanditEvent> pendingBanditEvents = new Dictionary<long, FourberieBanditEvent>();
-    private readonly Dictionary<long, Clan> pendingOperationClans = new Dictionary<long, Clan>();
-    private readonly Dictionary<long, FourberieLocalOperation> pendingCriminalOperations =
-        new Dictionary<long, FourberieLocalOperation>();
+    private readonly IAuthorityRouteHandle<FourberieLocalOperation, NetworkFourberieOperationResult> gameplayRoute;
     private NetworkFourberieContractProposal pendingContractProposal;
     private string shownContractProposalKey;
 
@@ -67,7 +63,6 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
     private string configurationFingerprint;
     private string lastPublishedFingerprint;
     private long serverRevision;
-    private long nextRequestId;
     private bool compatible;
     private bool stateReady;
     private bool objectsRegistered;
@@ -120,9 +115,28 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                 AuthorityTimeoutPolicy.BootstrapQuery,
                 requireAuthenticatedPlayer: false));
 
+        gameplayRoute = authorityRequestRouter.Register(
+            AuthorityRoute<FourberieLocalOperation, NetworkRequestFourberieOperation,
+                NetworkFourberieOperationResult>.Define(
+                "workshop.fourberie.gameplay", AuthorityRouteKind.Command,
+                CreateOperationHeader,
+                BuildOperationRequest,
+                request => request.Header,
+                result => result.Header,
+                request => FourberieOperationProtocol.IsRequestShapeValid(request) ? null : "invalid-fourberie-operation",
+                FourberieOperationProtocol.CommandKey,
+                ValidateOperationHeader,
+                ExecuteOperationRoute,
+                CreateOperationTerminal,
+                ProbeOperationApplied,
+                RequestOperationResync,
+                PresentOperationTerminal,
+                configAuthority.IsTrustedServer,
+                AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: false,
+                isExpectedClientResult: IsExpectedOperationResult));
+
         messageBroker.Subscribe<AllGameObjectsRegistered>(HandleAllGameObjectsRegistered);
-        messageBroker.Subscribe<NetworkRequestFourberieOperation>(HandleOperationRequest);
-        messageBroker.Subscribe<NetworkFourberieOperationResult>(HandleOperationResult);
         messageBroker.Subscribe<NetworkFourberieContractProposal>(HandleContractProposal);
         messageBroker.Subscribe<NetworkFourberieState>(HandleState);
         messageBroker.Subscribe<NetworkFourberieStateQueryResult>(HandleStateQueryResult);
@@ -132,13 +146,12 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
     public void Dispose()
     {
         messageBroker.Unsubscribe<AllGameObjectsRegistered>(HandleAllGameObjectsRegistered);
-        messageBroker.Unsubscribe<NetworkRequestFourberieOperation>(HandleOperationRequest);
-        messageBroker.Unsubscribe<NetworkFourberieOperationResult>(HandleOperationResult);
         messageBroker.Unsubscribe<NetworkFourberieContractProposal>(HandleContractProposal);
         messageBroker.Unsubscribe<NetworkFourberieState>(HandleState);
         messageBroker.Unsubscribe<NetworkFourberieStateQueryResult>(HandleStateQueryResult);
         messageBroker.Unsubscribe<HostModConfigAccepted>(HandleHostModConfigAccepted);
         snapshotRoute.Dispose();
+        gameplayRoute.Dispose();
         if (ReferenceEquals(FourberiePatchRuntime.Current, this)) FourberiePatchRuntime.Current = null;
     }
 
@@ -150,8 +163,22 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
 
     public bool TrySubmit(FourberieLocalOperation operation)
     {
-        if (!ModInformation.IsClient || operation == null || !CanUseGameplayRoute(out var config))
+        if (!ModInformation.IsClient || operation == null || !CanUseGameplayRoute(out _) ||
+            revisionGate.Revision < 0)
             return false;
+
+        gameplayRoute.Submit(operation);
+        return true;
+    }
+
+    private NetworkRequestFourberieOperation BuildOperationRequest(
+        FourberieLocalOperation operation,
+        AuthorityRequestHeader header)
+    {
+        if (operation == null) return new NetworkRequestFourberieOperation(
+            header, 0, string.Empty, string.Empty, string.Empty, 0,
+            Array.Empty<FourberieTroopSelection>(), Array.Empty<FourberieItemSelection>(),
+            Array.Empty<string>(), Array.Empty<FourberieRosterSelection>());
 
         string settlementId = string.Empty;
         string targetId = string.Empty;
@@ -216,11 +243,8 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                 selection.PrisonerDeltaToActor));
         }
 
-        long requestId = Interlocked.Increment(ref nextRequestId);
         var request = new NetworkRequestFourberieOperation(
-            config.SessionId,
-            requestId,
-            revisionGate.Revision,
+            header,
             operation.Operation,
             settlementId,
             targetId,
@@ -230,17 +254,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             items.ToArray(),
             objectIds.ToArray(),
             roster.ToArray());
-        if (!FourberieOperationProtocol.IsRequestShapeValid(request)) return false;
-
-        pendingOperations[requestId] = operation.Operation;
-        if (operation.Operation == FourberieOperation.CommitBanditEvent &&
-            FourberieOperationProtocol.IsBanditEvent(operation.IntValue))
-            pendingBanditEvents[requestId] = (FourberieBanditEvent)operation.IntValue;
-        if (operation.TargetClan != null) pendingOperationClans[requestId] = operation.TargetClan;
-        if (operation.Operation == FourberieOperation.CommitCriminalConsequence)
-            pendingCriminalOperations[requestId] = operation;
-        network.SendAll(request);
-        return true;
+        return request;
     }
 
     public void RunContractTick()
@@ -809,14 +823,9 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
 
         FourberieAuthorityPatches.ResetTickLedger();
         FourberiePartyCommitSuppression.Reset();
-        requestLedger.Reset();
-        pendingOperations.Clear();
-        pendingBanditEvents.Clear();
-        pendingOperationClans.Clear();
         pendingContractProposal = null;
         shownContractProposalKey = null;
         operationExecutor?.Reset();
-        nextRequestId = 0;
         lock (snapshotSync) revisionGate.Reset();
         objectsRegistered = true;
         stateReady = !ModInformation.IsClient;
@@ -910,177 +919,174 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
                capabilityRegistry.IsEnabled(FourberieCapabilitySource.ModuleId, FourberieCapabilitySource.Operation);
     }
 
-    private void HandleOperationRequest(MessagePayload<NetworkRequestFourberieOperation> payload)
+    private AuthorityRequestHeader CreateOperationHeader(long requestId)
     {
-        if (!ModInformation.IsServer || payload.Who is not NetPeer peer) return;
-        GameThread.RunSafe(() => ApplyOperationRequest(peer, payload.What),
-            context: nameof(FourberieCompatibilityHandler));
+        if (!CanUseGameplayRoute(out var config)) return default;
+        return new AuthorityRequestHeader(config.ProtocolVersion, config.SessionId, requestId, revisionGate.Revision);
     }
 
-    private void ApplyOperationRequest(NetPeer peer, NetworkRequestFourberieOperation request)
+    private AuthorityHeaderValidation ValidateOperationHeader(AuthorityRequestHeader header)
     {
-        if (!FourberieOperationProtocol.IsRequestShapeValid(request) ||
-            !CanUseGameplayRoute(out var config))
-        {
-            Logger.Warning("Rejected malformed or unavailable Fourberie operation from peer {Peer}", peer.Id);
-            return;
-        }
-        if (!string.Equals(config.SessionId, request.SessionId, StringComparison.Ordinal))
-        {
-            SendOperationResult(peer, request, FourberieOperationStatus.StaleSession, config.SessionId);
-            return;
-        }
+        if (!CanUseGameplayRoute(out var config))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "fourberie-route-unavailable");
+        if (header.ProtocolVersion != config.ProtocolVersion || !string.Equals(header.SessionId, config.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-config-session");
+        return FourberieOperationProtocol.CanApplyAtRevision(header.ExpectedRevision, serverRevision)
+            ? AuthorityHeaderValidation.Valid
+            : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-fourberie-state");
+    }
 
-        string commandKey = FourberieOperationProtocol.CommandKey(request);
-        FourberieReplayDecision replay = requestLedger.Inspect(
-            peer, request.RequestId, commandKey, out NetworkFourberieOperationResult cached);
-        if (replay == FourberieReplayDecision.Conflict)
-        {
-            DenyPeerOrAbortSession(peer,
-                "reused Fourberie request ID " + request.RequestId + " with different payload");
-            return;
-        }
-        if (replay == FourberieReplayDecision.Replay)
-        {
-            network.Send(peer, cached);
-            SendSnapshotOrAbort(peer, onlyIfChanged: false);
-            return;
-        }
-        if (!FourberieOperationProtocol.CanApplyAtRevision(
-                request.Operation, request.ExpectedRevision, serverRevision))
-        {
-            SendOperationResult(peer, request, FourberieOperationStatus.StaleState, config.SessionId);
-            SendSnapshotOrAbort(peer, onlyIfChanged: false);
-            return;
-        }
-        if (!playerManager.TryGetPlayer(peer, out var player) ||
-            !objectManager.TryGetObject(player.HeroId, out Hero actor) ||
-            !objectManager.TryGetObject(player.MobilePartyId, out MobileParty actorParty) ||
-            actor == null || actorParty == null)
-        {
-            SendOperationResult(peer, request, FourberieOperationStatus.Rejected, config.SessionId);
-            return;
-        }
-
-        FourberieOperationStatus status;
-        int resultValue;
+    private AuthorityServerReply<NetworkFourberieOperationResult> ExecuteOperationRoute(
+        AuthorityServerContext context, NetworkRequestFourberieOperation request)
+    {
+        if (!CanUseGameplayRoute(out _)) return OperationReply(context.Header, request, AuthorityResultStatus.Unavailable, "fourberie-route-unavailable", false, 0, null);
+        if (!objectManager.TryGetObject(context.Player.HeroId, out Hero actor) ||
+            !objectManager.TryGetObject(context.Player.MobilePartyId, out MobileParty actorParty) || actor == null || actorParty == null ||
+            actor.PartyBelongedTo != actorParty || actorParty.LeaderHero != actor)
+            return OperationReply(context.Header, request, AuthorityResultStatus.Unauthorized, "actor-party-mismatch", false, 0, null);
         try
         {
-            status = operationExecutor.TryExecute(actor, actorParty, request, out string failure, out resultValue)
-                ? FourberieOperationStatus.Accepted
-                : FourberieOperationStatus.Rejected;
-            if (failure != null)
-                Logger.Warning("Rejected Fourberie operation {Operation} request {RequestId}: {Failure}",
-                    request.Operation, request.RequestId, failure);
+            FourberieTouchedState before = CaptureTouchedState(actor, actorParty, request);
+            if (!operationExecutor.TryExecute(actor, actorParty, request, out string failure, out int value))
+                return OperationReply(context.Header, request, AuthorityResultStatus.Rejected, "operation-rejected", false, value, null);
+            if (!TryCaptureSnapshot(out var snapshot, out failure)) return IsolateOperation(context, request, "poststate-capture-failed");
+            bool changed = !string.Equals(lastPublishedFingerprint, snapshot.StateFingerprint, StringComparison.OrdinalIgnoreCase);
+            FourberieTouchedState after = CaptureTouchedState(actor, actorParty, request);
+            if (!changed && !PostStateMatches(request, snapshot) && TouchedStateEquals(before, after))
+                return OperationReply(context.Header, request, AuthorityResultStatus.ExecutionFailed,
+                    "missing-canonical-poststate", false, value, after);
+            if (changed)
+            {
+                SendSnapshotOrAbort(null, onlyIfChanged: true);
+                if (serverRevision != snapshot.Revision) return IsolateOperation(context, request, "snapshot-publication-failed");
+            }
+            return OperationReply(context.Header, request, AuthorityResultStatus.Accepted, null, changed, value,
+                after);
         }
-        catch (Exception fatal)
+        catch (Exception exception)
         {
-            DenyPeerOrAbortSession(null,
-                "Fourberie operation " + request.RequestId + " could not roll back: " + fatal.Message);
-            return;
+            Logger.Fatal(exception, "Fourberie operation rollback/publication failed. Route={Route} Request={Request}", context.RouteId, context.Header.RequestId);
+            return IsolateOperation(context, request, "fourberie-isolated");
         }
-
-        if (status == FourberieOperationStatus.Accepted)
-            SendSnapshotOrAbort(peer: null, onlyIfChanged: true);
-        var result = new NetworkFourberieOperationResult(
-            config.SessionId, request.RequestId, status, serverRevision, resultValue);
-        requestLedger.Record(peer, request.RequestId, commandKey, result);
-        network.Send(peer, result);
-        if (status != FourberieOperationStatus.Accepted)
-            SendSnapshotOrAbort(peer, onlyIfChanged: false);
     }
 
-    private void SendOperationResult(
-        NetPeer peer,
-        NetworkRequestFourberieOperation request,
-        FourberieOperationStatus status,
-        string sessionId)
+    private AuthorityServerReply<NetworkFourberieOperationResult> IsolateOperation(AuthorityServerContext context,
+        NetworkRequestFourberieOperation request, string stage)
     {
-        network.Send(peer, new NetworkFourberieOperationResult(
-            sessionId, request.RequestId, status, serverRevision));
+        foreach (var player in playerManager.Players)
+            if (playerManager.IsConnected(player) && playerManager.TryGetPeer(player.ControllerId, out var peer)) peer.Disconnect();
+        return new AuthorityServerReply<NetworkFourberieOperationResult>(
+            CreateOperationResult(context.Header, request, AuthorityResultStatus.ExecutionFailed, stage, false, 0, null), false, true);
     }
 
-    private void HandleOperationResult(MessagePayload<NetworkFourberieOperationResult> payload)
-    {
-        if (!ModInformation.IsClient || payload.Who is not NetPeer serverPeer ||
-            !FourberieSnapshotOriginGuard.IsTrustedServerTransport(serverPeer, localIsClient: true) ||
-            payload.What == null || !pendingOperations.TryGetValue(payload.What.RequestId, out FourberieOperation operation))
-            return;
-        pendingOperations.Remove(payload.What.RequestId);
-        pendingBanditEvents.TryGetValue(payload.What.RequestId, out FourberieBanditEvent banditEvent);
-        pendingBanditEvents.Remove(payload.What.RequestId);
-        pendingOperationClans.TryGetValue(payload.What.RequestId, out Clan targetClan);
-        pendingOperationClans.Remove(payload.What.RequestId);
-        pendingCriminalOperations.TryGetValue(payload.What.RequestId, out FourberieLocalOperation criminalOperation);
-        pendingCriminalOperations.Remove(payload.What.RequestId);
+    private AuthorityServerReply<NetworkFourberieOperationResult> OperationReply(AuthorityRequestHeader header,
+        NetworkRequestFourberieOperation request, AuthorityResultStatus status, string reason, bool changed, int value, FourberieTouchedState touched) =>
+        new AuthorityServerReply<NetworkFourberieOperationResult>(CreateOperationResult(header, request, status, reason, changed, value, touched), changed);
 
-        if (payload.What.Status == FourberieOperationStatus.Accepted)
+    private NetworkFourberieOperationResult CreateOperationResult(AuthorityRequestHeader header,
+        NetworkRequestFourberieOperation request, AuthorityResultStatus status, string reason, bool changed, int value, FourberieTouchedState touched)
+    {
+        string fingerprint = lastPublishedFingerprint ?? string.Empty;
+        return new NetworkFourberieOperationResult(header, request?.Operation ?? 0,
+            status == AuthorityResultStatus.Accepted ? FourberieOperationStatus.Accepted : FourberieOperationStatus.Rejected,
+            status, reason, request == null ? string.Empty : FourberieOperationProtocol.CommandKey(request),
+            serverRevision, fingerprint, changed, value, touched);
+    }
+
+    private NetworkFourberieOperationResult CreateOperationTerminal(AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        CreateOperationResult(header, null, status, reason, false, 0, null);
+
+    private bool IsExpectedOperationResult(NetworkRequestFourberieOperation request, NetworkFourberieOperationResult result) =>
+        result != null && result.Operation == request.Operation &&
+        string.Equals(result.CommandDigest, FourberieOperationProtocol.CommandKey(request), StringComparison.Ordinal);
+
+    private AuthorityCommitProbeResult ProbeOperationApplied(NetworkFourberieOperationResult result)
+    {
+        if (result?.Header.Status != AuthorityResultStatus.Accepted || result.Operation == 0 ||
+            !FourberieStateCodec.IsSha256(result.StateFingerprint)) return AuthorityCommitProbeResult.Invalid;
+        if (result.Operation == FourberieOperation.RequestGrudgeQuote)
+            return result.IntValue is >= 0 and <= FourberieGrudgeAuthority.MaximumPayment ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Invalid;
+        if (revisionGate.Revision != result.Header.CommittedRevision) return AuthorityCommitProbeResult.Pending;
+        if (!FourberieCanonicalState.TryCapture(assembly, objectManager, out _, out string fingerprint, out _)) return AuthorityCommitProbeResult.Pending;
+        if (!string.Equals(fingerprint, result.StateFingerprint, StringComparison.OrdinalIgnoreCase)) return AuthorityCommitProbeResult.Invalid;
+        Hero actor = Hero.MainHero;
+        MobileParty party = MobileParty.MainParty;
+        return actor != null && party != null && TouchedStateEquals(result.TouchedState,
+            CaptureTouchedState(actor, party, new NetworkRequestFourberieOperation(result.Header.SessionId,
+                result.Header.RequestId, result.Header.CommittedRevision, result.Operation,
+                result.TouchedState?.TargetSettlementId, result.TouchedState?.TargetId, string.Empty, result.IntValue,
+                Array.Empty<FourberieTroopSelection>())))
+            ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+    }
+
+    private void RequestOperationResync(NetworkFourberieOperationResult _) => StartSnapshotBootstrap();
+
+    private static bool PostStateMatches(NetworkRequestFourberieOperation request, NetworkFourberieState snapshot)
+    {
+        if (request.Operation == FourberieOperation.RequestGrudgeQuote) return true;
+        int? key = request.Operation switch
         {
-            if (!FourberieOperationProtocol.IsAbsoluteSetting(operation) &&
-                operation != FourberieOperation.RequestGrudgeQuote)
-                InformationManager.DisplayMessage(new InformationMessage("Fourberie action accepted by the co-op server."));
-            if (operation == FourberieOperation.RequestGrudgeQuote && targetClan != null &&
-                payload.What.IntValue >= 0 && payload.What.IntValue <= FourberieGrudgeAuthority.MaximumPayment)
-                ShowGrudgeSettlement(targetClan, payload.What.IntValue);
-            if (operation == FourberieOperation.StartInsuranceScam)
-            {
-                using (new AllowedThread())
-                {
-                    // The result is a network round-trip: by the time it lands the player may have
-                    // already left the encounter, so finishing an already-null one would NRE the tick.
-                    if (PlayerEncounter.Current != null)
-                    {
-                        PlayerEncounter.LeaveSettlement();
-                        PlayerEncounter.Finish(true);
-                    }
-                }
-            }
-            if (operation == FourberieOperation.AbandonTownCrimeBase)
-            {
-                Type behavior = assembly.GetType("Fourberie.FourberieBehavior", false, false);
-                if (behavior != null)
-                    AccessTools.Method(behavior, "DeleteVMLayer", Type.EmptyTypes)?.Invoke(null, null);
-                if (Settlement.CurrentSettlement?.IsTown == true) GameMenu.SwitchToMenu("town");
-            }
-            if (operation == FourberieOperation.AbandonSafehouse)
-            {
-                Type behavior = assembly.GetType("Fourberie.FourberieBehavior", false, false);
-                if (behavior != null)
-                    AccessTools.Method(behavior, "DeleteVMLayer", Type.EmptyTypes)?.Invoke(null, null);
-                GameMenu.SwitchToMenu("hideout_fourberie");
-            }
-            if (operation == FourberieOperation.EstablishSafehouse)
-            {
-                GameMenu.SwitchToMenu("hideout_fourberie");
-                Type behavior = assembly.GetType("Fourberie.FourberieBehavior", false, false);
-                if (behavior != null)
-                    AccessTools.Method(behavior, "SafeHouseVM", Type.EmptyTypes)?.Invoke(null, null);
-            }
-            if (operation == FourberieOperation.StartSafehouseWait)
-                GameMenu.SwitchToMenu("hide_wait_fmenus2");
-            if (operation == FourberieOperation.StopSafehouseWait)
-            {
-                if (PlayerEncounter.Current != null) PlayerEncounter.Current.IsPlayerWaiting = false;
-                GameMenu.SwitchToMenu("safehouse_menu");
-            }
-            if (operation == FourberieOperation.CompleteSafehouseReturn)
-                CompleteSafehouseReturnPresentation();
-            if (operation == FourberieOperation.CommitBanditEvent)
-                FourberieAuthorityPatches.CompleteBanditPresentation(assembly, banditEvent);
-            if (operation == FourberieOperation.CommitCriminalConsequence && criminalOperation != null)
-            {
-                var consequence = (FourberieCriminalConsequence)criminalOperation.IntValue;
-                if (consequence == FourberieCriminalConsequence.RiotResult && payload.What.IntValue is >= 1 and <= 3)
-                    ShowRiotPoliticalChoice(criminalOperation.Settlement, payload.What.IntValue);
-                if (consequence == FourberieCriminalConsequence.BanishRiotActor && payload.What.IntValue == 4)
-                    ShowLeaveKingdomChoice(criminalOperation.Settlement);
-            }
-        }
-        else
-        {
-            InformationManager.DisplayMessage(new InformationMessage(
-                "The Fourberie action could not be applied because its campaign state changed. Reopen the option and try again."));
-        }
+            FourberieOperation.SetCorruptionLevel => 5,
+            FourberieOperation.SetAutoInvestment => 61,
+            FourberieOperation.SetLadsDuty => 1000,
+            FourberieOperation.SetSlavesDuty => 1001,
+            FourberieOperation.EnsureSchemeRoomDefaults => 500,
+            FourberieOperation.ClearDominanceConversation => 92,
+            _ => null,
+        };
+        if (key == null) return false;
+        FourberieStateEntry[] entries = snapshot?.Entries ?? Array.Empty<FourberieStateEntry>();
+        if (request.Operation == FourberieOperation.ClearDominanceConversation)
+            return !entries.Any(entry => entry.Field == "_crimeValue" && entry.Key == "92");
+        int expected = request.Operation == FourberieOperation.EnsureSchemeRoomDefaults ? 2 : request.IntValue;
+        return entries.Any(entry => entry.Field == "_crimeValue" && entry.Key == key.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) &&
+            entry.Value == expected.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    private FourberieTouchedState CaptureTouchedState(Hero actor, MobileParty actorParty,
+        NetworkRequestFourberieOperation request)
+    {
+        object target = null;
+        if (!string.IsNullOrEmpty(request.TargetId)) objectManager.TryGetObject(request.TargetId, out target);
+        MobileParty created = AccessTools.Field(assembly.GetType("Fourberie.FourberieBehavior", false), "_agentsParty")?.GetValue(null) as MobileParty;
+        MobileParty destroyed = AccessTools.Field(assembly.GetType("Fourberie.FourberieBehavior", false), "_crimeBaseParty")?.GetValue(null) as MobileParty;
+        return new FourberieTouchedState(actor.Gold, actor.HitPoints,
+            RosterHash(actorParty.MemberRoster), RosterHash(actorParty.PrisonRoster), ItemHash(actorParty.ItemRoster),
+            PartyId(created), created?.IsActive == true, PartyId(destroyed), destroyed?.IsActive == true,
+            target is Hero hero ? hero.Gold : target is Clan clan ? clan.Gold : 0,
+            target is Hero targetHero ? targetHero.MapFaction?.StringId : target is Clan targetClan ? targetClan.Kingdom?.StringId : string.Empty,
+            request.SettlementId, request.TargetId);
+    }
+
+    private string RosterHash(TroopRoster roster) => FourberieStateCodec.ComputeHash((roster?.GetTroopRoster() ?? Enumerable.Empty<TroopRosterElement>())
+        .Select((element, index) => new FourberieStateEntry("roster", FourberieStateValueKind.TroopRosterElement,
+            objectManager.TryGetId(element.Character, out string id) ? id : string.Empty,
+            element.Number.ToString(System.Globalization.CultureInfo.InvariantCulture), index)));
+
+    private static string ItemHash(ItemRoster roster) => FourberieStateCodec.ComputeHash(Enumerable.Range(0, roster?.Count ?? 0)
+        .Select(index => new FourberieStateEntry("items", FourberieStateValueKind.ItemRosterElement,
+            roster.GetElementCopyAtIndex(index).EquipmentElement.Item?.StringId ?? string.Empty,
+            roster.GetElementCopyAtIndex(index).Amount.ToString(System.Globalization.CultureInfo.InvariantCulture), index)));
+
+    private string PartyId(MobileParty party) => party != null && objectManager.TryGetId(party, out string id) ? id : string.Empty;
+
+    private static bool TouchedStateEquals(FourberieTouchedState left, FourberieTouchedState right) =>
+        left != null && right != null && left.ActorGold == right.ActorGold && left.ActorHitPoints == right.ActorHitPoints &&
+        left.MemberRosterHash == right.MemberRosterHash && left.PrisonRosterHash == right.PrisonRosterHash &&
+        left.ItemRosterHash == right.ItemRosterHash && left.CreatedPartyId == right.CreatedPartyId &&
+        left.CreatedPartyActive == right.CreatedPartyActive && left.DestroyedPartyId == right.DestroyedPartyId &&
+        left.DestroyedPartyActive == right.DestroyedPartyActive && left.TargetGold == right.TargetGold &&
+        left.TargetFactionId == right.TargetFactionId && left.TargetSettlementId == right.TargetSettlementId &&
+        left.TargetId == right.TargetId;
+
+    private void PresentOperationTerminal(AuthorityClientOutcome<NetworkFourberieOperationResult> outcome)
+    {
+        if (outcome.Completion != AuthorityClientCompletion.Applied || outcome.Result == null) return;
+        if (outcome.Result.Operation == FourberieOperation.RequestGrudgeQuote &&
+            objectManager.TryGetObject(outcome.Result.TouchedState?.TargetId, out Clan clan))
+            ShowGrudgeSettlement(clan, outcome.Result.IntValue);
+        else if (!FourberieOperationProtocol.IsAbsoluteSetting(outcome.Result.Operation))
+            InformationManager.DisplayMessage(new InformationMessage("Fourberie action accepted by the co-op server."));
     }
 
     private void ShowRiotPoliticalChoice(Settlement settlement, int choice)

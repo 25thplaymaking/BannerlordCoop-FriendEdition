@@ -3,6 +3,7 @@ using Common.Util;
 using GameInterface.Policies;
 using GameInterface.Services.Barters;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.AuthorityRequests;
 using HarmonyLib;
 using Helpers;
 using System;
@@ -3565,81 +3566,6 @@ internal sealed class FourberieOperationExecutor
         dictionary[key] = ReadInt(dictionary, key) + change;
 }
 
-internal enum FourberieReplayDecision
-{
-    New,
-    Replay,
-    Conflict,
-}
-
-internal sealed class FourberieRequestLedger<TKey>
-{
-    private sealed class Entry
-    {
-        public Entry(string key, NetworkFourberieOperationResult result)
-        {
-            Key = key;
-            Result = result;
-        }
-
-        public string Key { get; }
-        public NetworkFourberieOperationResult Result { get; }
-    }
-
-    private readonly object sync = new object();
-    private readonly Dictionary<TKey, Dictionary<long, Entry>> entries = new Dictionary<TKey, Dictionary<long, Entry>>();
-    private readonly int capacity;
-
-    public FourberieRequestLedger(int capacity)
-    {
-        if (capacity < 1) throw new ArgumentOutOfRangeException(nameof(capacity));
-        this.capacity = capacity;
-    }
-
-    public FourberieReplayDecision Inspect(
-        TKey peer,
-        long requestId,
-        string key,
-        out NetworkFourberieOperationResult result)
-    {
-        lock (sync)
-        {
-            if (!entries.TryGetValue(peer, out var peerEntries) ||
-                !peerEntries.TryGetValue(requestId, out Entry entry))
-            {
-                result = null;
-                return FourberieReplayDecision.New;
-            }
-
-            result = entry.Result;
-            return string.Equals(entry.Key, key, StringComparison.Ordinal)
-                ? FourberieReplayDecision.Replay
-                : FourberieReplayDecision.Conflict;
-        }
-    }
-
-    public void Record(TKey peer, long requestId, string key, NetworkFourberieOperationResult result)
-    {
-        lock (sync)
-        {
-            if (!entries.TryGetValue(peer, out var peerEntries))
-            {
-                peerEntries = new Dictionary<long, Entry>();
-                entries.Add(peer, peerEntries);
-            }
-            if (peerEntries.ContainsKey(requestId)) return;
-            if (peerEntries.Count >= capacity)
-                peerEntries.Remove(peerEntries.Keys.Min());
-            peerEntries.Add(requestId, new Entry(key, result));
-        }
-    }
-
-    public void Reset()
-    {
-        lock (sync) entries.Clear();
-    }
-}
-
 internal static class FourberieCapabilityPolicy
 {
     public static bool IsEnabled(bool optionEnabled, bool routeReady) => optionEnabled && routeReady;
@@ -3651,10 +3577,19 @@ internal sealed class FourberieCapabilitySource : Core.IWorkshopCapabilitySource
     internal const string Operation = "Gameplay";
 
     private readonly Configuration.IModConfig modConfig;
+    private readonly Configuration.IModConfigAuthority configAuthority;
+    private readonly IAuthorityRequestRouter authorityRequestRouter;
+    private readonly FourberieCompatibilityHandler compatibilityHandler;
 
-    public FourberieCapabilitySource(Configuration.IModConfig modConfig)
+    public FourberieCapabilitySource(Configuration.IModConfig modConfig,
+        Configuration.IModConfigAuthority configAuthority = null,
+        IAuthorityRequestRouter authorityRequestRouter = null,
+        FourberieCompatibilityHandler compatibilityHandler = null)
     {
         this.modConfig = modConfig;
+        this.configAuthority = configAuthority;
+        this.authorityRequestRouter = authorityRequestRouter;
+        this.compatibilityHandler = compatibilityHandler;
     }
 
     public IEnumerable<Core.WorkshopCapability> CaptureCapabilities()
@@ -3663,9 +3598,14 @@ internal sealed class FourberieCapabilitySource : Core.IWorkshopCapabilitySource
             ? Configuration.ModConfigProvider.ModOptions
             : new Configuration.ModOptions(modConfig.Data.ModOptions ?? new Configuration.ModOptionsData());
         bool optionEnabled = options.IsWorkshopModuleEnabled(ModuleId);
-        // A compatible patch runtime and state snapshot do not make the legacy command safe.
-        // A real core-owned command route is introduced in Task 6.
-        bool enabled = false;
+        bool snapshotRouteReady = authorityRequestRouter?.IsRegistered("workshop.fourberie.snapshot",
+            AuthorityRouteKind.BootstrapQuery) == true;
+        bool gameplayRouteReady = authorityRequestRouter?.IsRegistered("workshop.fourberie.gameplay",
+            AuthorityRouteKind.Command) == true;
+        bool snapshotCurrent = configAuthority != null && configAuthority.TryGetCurrent(out var config) &&
+            (!ModInformation.IsClient || (compatibilityHandler?.SnapshotReadiness == Core.WorkshopSnapshotReadiness.Ready &&
+                string.Equals(compatibilityHandler.SnapshotSessionId, config.SessionId, StringComparison.Ordinal)));
+        bool enabled = optionEnabled && snapshotRouteReady && gameplayRouteReady && snapshotCurrent;
         yield return new Core.WorkshopCapability(
             ModuleId,
             Operation,

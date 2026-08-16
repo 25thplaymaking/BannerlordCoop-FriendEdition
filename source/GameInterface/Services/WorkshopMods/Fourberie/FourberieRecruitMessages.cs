@@ -1,9 +1,11 @@
 using Common.Messaging;
+using GameInterface.Services.AuthorityRequests;
 using ProtoBuf;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace GameInterface.Services.WorkshopMods.Fourberie;
@@ -246,6 +248,7 @@ internal sealed class FourberieRosterSelection
 }
 
 [ProtoContract(SkipConstructor = true)]
+[AuthorityRoute("workshop.fourberie.gameplay", AuthorityRouteKind.Command)]
 internal sealed class NetworkRequestFourberieOperation : ICommand
 {
     [ProtoMember(1)] public string SessionId { get; private set; }
@@ -260,6 +263,7 @@ internal sealed class NetworkRequestFourberieOperation : ICommand
     [ProtoMember(10)] private FourberieItemSelection[] items;
     [ProtoMember(11)] private string[] objectIds;
     [ProtoMember(12)] private FourberieRosterSelection[] roster;
+    [ProtoMember(13)] public int ConfigProtocolVersion { get; private set; }
 
     public FourberieTroopSelection[] Troops => troops ?? Array.Empty<FourberieTroopSelection>();
     public FourberieItemSelection[] Items => items ?? Array.Empty<FourberieItemSelection>();
@@ -325,7 +329,28 @@ internal sealed class NetworkRequestFourberieOperation : ICommand
         this.items = items ?? Array.Empty<FourberieItemSelection>();
         this.objectIds = objectIds ?? Array.Empty<string>();
         this.roster = roster ?? Array.Empty<FourberieRosterSelection>();
+        ConfigProtocolVersion = 1;
     }
+
+    public NetworkRequestFourberieOperation(
+        AuthorityRequestHeader header,
+        FourberieOperation operation,
+        string settlementId,
+        string targetId,
+        string secondaryTargetId,
+        int intValue,
+        FourberieTroopSelection[] troops,
+        FourberieItemSelection[] items,
+        string[] objectIds,
+        FourberieRosterSelection[] roster)
+        : this(header.SessionId, header.RequestId, header.ExpectedRevision, operation, settlementId, targetId,
+            secondaryTargetId, intValue, troops, items, objectIds, roster)
+    {
+        ConfigProtocolVersion = header.ProtocolVersion;
+    }
+
+    public AuthorityRequestHeader Header =>
+        new AuthorityRequestHeader(ConfigProtocolVersion, SessionId, RequestId, ExpectedRevision);
 }
 
 [ProtoContract(SkipConstructor = true)]
@@ -336,6 +361,13 @@ internal sealed class NetworkFourberieOperationResult : ICommand
     [ProtoMember(3)] public FourberieOperationStatus Status { get; private set; }
     [ProtoMember(4)] public long Revision { get; private set; }
     [ProtoMember(5)] public int IntValue { get; private set; }
+    [ProtoMember(6)] public FourberieOperation Operation { get; private set; }
+    [ProtoMember(7)] public AuthorityResultStatus AuthorityStatus { get; private set; }
+    [ProtoMember(8)] public string ReasonCode { get; private set; }
+    [ProtoMember(9)] public string CommandDigest { get; private set; }
+    [ProtoMember(10)] public string StateFingerprint { get; private set; }
+    [ProtoMember(11)] public bool StateChanged { get; private set; }
+    [ProtoMember(12)] public FourberieTouchedState TouchedState { get; private set; }
 
     private NetworkFourberieOperationResult()
     {
@@ -353,6 +385,76 @@ internal sealed class NetworkFourberieOperationResult : ICommand
         Status = status;
         Revision = revision;
         IntValue = intValue;
+        Operation = 0;
+        AuthorityStatus = status == FourberieOperationStatus.Accepted
+            ? AuthorityResultStatus.Accepted : AuthorityResultStatus.Rejected;
+        ReasonCode = status.ToString();
+        CommandDigest = string.Empty;
+        StateFingerprint = string.Empty;
+        TouchedState = FourberieTouchedState.Empty;
+    }
+
+    public NetworkFourberieOperationResult(
+        AuthorityRequestHeader header,
+        FourberieOperation operation,
+        FourberieOperationStatus legacyStatus,
+        AuthorityResultStatus authorityStatus,
+        string reasonCode,
+        string commandDigest,
+        long committedRevision,
+        string stateFingerprint,
+        bool stateChanged,
+        int intValue,
+        FourberieTouchedState touchedState)
+    {
+        SessionId = header.SessionId;
+        RequestId = header.RequestId;
+        Status = legacyStatus;
+        Revision = committedRevision;
+        IntValue = intValue;
+        Operation = operation;
+        AuthorityStatus = authorityStatus;
+        ReasonCode = reasonCode ?? string.Empty;
+        CommandDigest = commandDigest ?? string.Empty;
+        StateFingerprint = stateFingerprint ?? string.Empty;
+        StateChanged = stateChanged;
+        TouchedState = touchedState ?? FourberieTouchedState.Empty;
+    }
+
+    public AuthorityResultHeader Header =>
+        new AuthorityResultHeader(SessionId, RequestId, AuthorityStatus, Revision, ReasonCode);
+}
+
+[ProtoContract(SkipConstructor = true)]
+internal sealed class FourberieTouchedState
+{
+    [ProtoMember(1)] public int ActorGold { get; private set; }
+    [ProtoMember(2)] public int ActorHitPoints { get; private set; }
+    [ProtoMember(3)] public string MemberRosterHash { get; private set; }
+    [ProtoMember(4)] public string PrisonRosterHash { get; private set; }
+    [ProtoMember(5)] public string ItemRosterHash { get; private set; }
+    [ProtoMember(6)] public string CreatedPartyId { get; private set; }
+    [ProtoMember(7)] public bool CreatedPartyActive { get; private set; }
+    [ProtoMember(8)] public string DestroyedPartyId { get; private set; }
+    [ProtoMember(9)] public bool DestroyedPartyActive { get; private set; }
+    [ProtoMember(10)] public int TargetGold { get; private set; }
+    [ProtoMember(11)] public string TargetFactionId { get; private set; }
+    [ProtoMember(12)] public string TargetSettlementId { get; private set; }
+    [ProtoMember(13)] public string TargetId { get; private set; }
+
+    public static readonly FourberieTouchedState Empty = new FourberieTouchedState();
+    private FourberieTouchedState() { MemberRosterHash = PrisonRosterHash = ItemRosterHash = string.Empty; CreatedPartyId = DestroyedPartyId = TargetFactionId = TargetSettlementId = TargetId = string.Empty; }
+    public FourberieTouchedState(int actorGold, int actorHitPoints, string memberRosterHash, string prisonRosterHash,
+        string itemRosterHash, string createdPartyId, bool createdPartyActive, string destroyedPartyId,
+        bool destroyedPartyActive, int targetGold, string targetFactionId, string targetSettlementId, string targetId)
+    {
+        ActorGold = actorGold; ActorHitPoints = actorHitPoints;
+        MemberRosterHash = memberRosterHash ?? string.Empty; PrisonRosterHash = prisonRosterHash ?? string.Empty;
+        ItemRosterHash = itemRosterHash ?? string.Empty; CreatedPartyId = createdPartyId ?? string.Empty;
+        CreatedPartyActive = createdPartyActive; DestroyedPartyId = destroyedPartyId ?? string.Empty;
+        DestroyedPartyActive = destroyedPartyActive; TargetGold = targetGold;
+        TargetFactionId = targetFactionId ?? string.Empty; TargetSettlementId = targetSettlementId ?? string.Empty;
+        TargetId = targetId ?? string.Empty;
     }
 }
 
@@ -399,7 +501,7 @@ internal static class FourberieOperationProtocol
 
     public static bool IsRequestShapeValid(NetworkRequestFourberieOperation request)
     {
-        if (request == null || request.SessionId == null || request.SessionId.Length != 32 ||
+        if (request == null || !request.Header.TryValidate(out _) || request.SessionId == null || request.SessionId.Length != 32 ||
             !Guid.TryParseExact(request.SessionId, "N", out _) || request.RequestId <= 0 ||
             request.ExpectedRevision < 0 || !Enum.IsDefined(typeof(FourberieOperation), request.Operation) ||
             !IsStableId(request.SettlementId, allowEmpty: true) ||
@@ -640,11 +742,20 @@ internal static class FourberieOperationProtocol
             builder.Append("|roster:").Append(selection.TroopId).Append(':')
                 .Append(selection.MemberDeltaToActor.ToString(CultureInfo.InvariantCulture)).Append(':')
                 .Append(selection.PrisonerDeltaToActor.ToString(CultureInfo.InvariantCulture));
-        return builder.ToString();
+        using (var hash = SHA256.Create())
+        {
+            byte[] bytes = hash.ComputeHash(Encoding.UTF8.GetBytes(builder.ToString()));
+            return string.Concat(bytes.Select(value => value.ToString("x2", CultureInfo.InvariantCulture)));
+        }
     }
 
     public static bool CanApplyAtRevision(FourberieOperation operation, long expected, long current) =>
         expected == current || IsAbsoluteSetting(operation) && expected >= 0 && expected < current;
+
+    public static bool CanApplyAtRevision(long expected, long current) => expected == current;
+
+    public static bool IsIdempotentOrQuery(FourberieOperation operation) =>
+        operation == FourberieOperation.RequestGrudgeQuote || IsAbsoluteSetting(operation);
 
     public static bool IsAbsoluteSetting(FourberieOperation operation) => operation is
         FourberieOperation.SetCorruptionLevel or

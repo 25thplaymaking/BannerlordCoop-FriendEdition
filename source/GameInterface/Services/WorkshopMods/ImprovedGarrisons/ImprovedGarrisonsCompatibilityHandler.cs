@@ -44,6 +44,28 @@ internal readonly struct ImprovedGarrisonsSnapshotIntent
 {
 }
 
+internal sealed class ImprovedGarrisonsSettingIntent
+{
+    public ImprovedGarrisonsSettingIntent(string managerType, string method, string townId, string value)
+    {
+        ManagerType = managerType;
+        Method = method;
+        TownId = townId;
+        Value = value;
+    }
+
+    public string ManagerType { get; }
+    public string Method { get; }
+    public string TownId { get; }
+    public string Value { get; }
+}
+
+internal sealed class ImprovedGarrisonsManagementIntent
+{
+    public ImprovedGarrisonsManagementIntent(NetworkRequestImprovedGarrisonsOperation request) => Request = request;
+    public NetworkRequestImprovedGarrisonsOperation Request { get; }
+}
+
 internal sealed class ImprovedGarrisonsRequestLedger<TKey>
 {
     private sealed class Entry
@@ -166,13 +188,18 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
     private readonly IPlayerManager playerManager;
     private readonly IModConfigAuthority configAuthority;
     private readonly IWorkshopCapabilityRegistry capabilityRegistry;
+    private readonly IAuthorityRequestRouter authorityRequestRouter;
     private readonly IAuthorityRouteHandle<ImprovedGarrisonsSnapshotIntent, NetworkImprovedGarrisonsStateQueryResult> snapshotRoute;
+    private readonly IAuthorityRouteHandle<ImprovedGarrisonsSettingIntent, NetworkImprovedGarrisonsSettingResult> settingRoute;
+    private readonly IAuthorityRouteHandle<ImprovedGarrisonsManagementIntent, NetworkImprovedGarrisonsOperationResult> managementRoute;
     private readonly Harmony harmony;
     private readonly HashSet<string> deniedNotifications = new HashSet<string>(StringComparer.Ordinal);
     private readonly Dictionary<string, string> pendingPartyScreens =
         new Dictionary<string, string>(StringComparer.Ordinal);
     private readonly Dictionary<string, (ImprovedGarrisonsMethodSpec Spec, MethodInfo Method)> routedMethods =
         new Dictionary<string, (ImprovedGarrisonsMethodSpec, MethodInfo)>(StringComparer.Ordinal);
+    // Retained only until a loaded legacy adapter is disposed; authority routes own all active
+    // command replay and request sequencing.
     private readonly ImprovedGarrisonsRequestLedger<NetPeer> requestLedger =
         new ImprovedGarrisonsRequestLedger<NetPeer>(256);
 
@@ -204,6 +231,7 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
         this.playerManager = playerManager;
         this.configAuthority = configAuthority;
         this.capabilityRegistry = capabilityRegistry;
+        this.authorityRequestRouter = authorityRequestRouter;
         this.harmony = new Harmony(ImprovedGarrisonsCompatibilityManifest.AdapterHarmonyId);
 
         compatible = TryInstall();
@@ -229,10 +257,51 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
                 AuthorityTimeoutPolicy.BootstrapQuery,
                 requireAuthenticatedPlayer: false));
 
+        settingRoute = authorityRequestRouter.Register(
+            AuthorityRoute<ImprovedGarrisonsSettingIntent, NetworkRequestImprovedGarrisonsSettingChange,
+                NetworkImprovedGarrisonsSettingResult>.Define(
+                "workshop.improved-garrisons.setting", AuthorityRouteKind.Command,
+                CreateManagementHeader,
+                (intent, header) => new NetworkRequestImprovedGarrisonsSettingChange(
+                    header, intent.ManagerType, intent.Method, intent.TownId, intent.Value),
+                request => request.Header,
+                result => result.Header,
+                request => IsRequestShapeValid(request) ? null : "invalid-improved-garrisons-setting",
+                SettingCommandKey,
+                ValidateManagementHeader,
+                ExecuteSettingRoute,
+                CreateSettingTerminal,
+                ProbeSettingApplied,
+                _ => StartSnapshotBootstrap(),
+                PresentSettingOutcome,
+                configAuthority.IsTrustedServer,
+                AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true,
+                isExpectedClientResult: IsExpectedSettingResult));
+
+        managementRoute = authorityRequestRouter.Register(
+            AuthorityRoute<ImprovedGarrisonsManagementIntent, NetworkRequestImprovedGarrisonsOperation,
+                NetworkImprovedGarrisonsOperationResult>.Define(
+                "workshop.improved-garrisons.management", AuthorityRouteKind.Command,
+                CreateManagementHeader,
+                (intent, header) => BuildManagementRequest(intent, header),
+                request => request.Header,
+                result => result.Header,
+                request => ImprovedGarrisonsOperationProtocol.IsRequestShapeValid(request) ? null :
+                    "invalid-improved-garrisons-management",
+                ImprovedGarrisonsOperationProtocol.CommandKey,
+                ValidateManagementHeader,
+                ExecuteManagementRoute,
+                CreateManagementTerminal,
+                ProbeManagementApplied,
+                _ => StartSnapshotBootstrap(),
+                PresentManagementOutcome,
+                configAuthority.IsTrustedServer,
+                AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true,
+                isExpectedClientResult: IsExpectedManagementResult));
+
         messageBroker.Subscribe<AllGameObjectsRegistered>(Handle_AllGameObjectsRegistered);
-        messageBroker.Subscribe<NetworkRequestImprovedGarrisonsSettingChange>(Handle_SettingRequest);
-        messageBroker.Subscribe<NetworkRequestImprovedGarrisonsOperation>(Handle_OperationRequest);
-        messageBroker.Subscribe<NetworkImprovedGarrisonsOperationResult>(Handle_OperationResult);
         messageBroker.Subscribe<NetworkImprovedGarrisonsState>(Handle_State);
         messageBroker.Subscribe<NetworkImprovedGarrisonsStateQueryResult>(Handle_StateQueryResult);
         messageBroker.Subscribe<HostModConfigAccepted>(HandleHostModConfigAccepted);
@@ -241,13 +310,12 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
     public void Dispose()
     {
         messageBroker.Unsubscribe<AllGameObjectsRegistered>(Handle_AllGameObjectsRegistered);
-        messageBroker.Unsubscribe<NetworkRequestImprovedGarrisonsSettingChange>(Handle_SettingRequest);
-        messageBroker.Unsubscribe<NetworkRequestImprovedGarrisonsOperation>(Handle_OperationRequest);
-        messageBroker.Unsubscribe<NetworkImprovedGarrisonsOperationResult>(Handle_OperationResult);
         messageBroker.Unsubscribe<NetworkImprovedGarrisonsState>(Handle_State);
         messageBroker.Unsubscribe<NetworkImprovedGarrisonsStateQueryResult>(Handle_StateQueryResult);
         messageBroker.Unsubscribe<HostModConfigAccepted>(HandleHostModConfigAccepted);
         snapshotRoute.Dispose();
+        settingRoute.Dispose();
+        managementRoute.Dispose();
         if (ReferenceEquals(ImprovedGarrisonsPatchRuntime.Current, this)) ImprovedGarrisonsPatchRuntime.Current = null;
         pendingPartyScreens.Clear();
     }
@@ -263,14 +331,9 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
         if (!routedMethods.ContainsKey(key)) return false;
 
         var value = arguments.Length == 1 ? string.Empty : ImprovedGarrisonsCanonicalState.FormatValue(arguments[1]);
-        network.SendAll(new NetworkRequestImprovedGarrisonsSettingChange(
-            config.SessionId,
-            Interlocked.Increment(ref nextRequestId),
-            revision,
-            method.DeclaringType.FullName,
-            method.Name,
-            townId,
-            value));
+        if (!ModInformation.IsClient) return false;
+        settingRoute.Submit(new ImprovedGarrisonsSettingIntent(
+            method.DeclaringType.FullName, method.Name, townId, value));
         return true;
     }
 
@@ -328,7 +391,8 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
             !TryBuildOperation(manager, method, arguments ?? Array.Empty<object>(), config, out var request))
             return false;
 
-        network.SendAll(request);
+        if (!ModInformation.IsClient) return false;
+        managementRoute.Submit(new ImprovedGarrisonsManagementIntent(request));
         return true;
     }
 
@@ -471,7 +535,7 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
 
         request = new NetworkRequestImprovedGarrisonsOperation(
             config.SessionId,
-            Interlocked.Increment(ref nextRequestId),
+            1,
             revision,
             operation,
             townId,
@@ -537,7 +601,7 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
 
         request = new NetworkRequestImprovedGarrisonsOperation(
             config.SessionId,
-            Interlocked.Increment(ref nextRequestId),
+            1,
             revision,
             operation,
             townId,
@@ -553,7 +617,12 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
         return compatible && stateReady && configAuthority.TryGetCurrent(out config) &&
                capabilityRegistry.IsEnabled(
                    ImprovedGarrisonsCapabilitySource.ModuleId,
-                   ImprovedGarrisonsCapabilitySource.Operation);
+                   ImprovedGarrisonsCapabilitySource.Operation) &&
+               authorityRequestRouter.IsRegistered("workshop.improved-garrisons.setting", AuthorityRouteKind.Command) &&
+               authorityRequestRouter.IsRegistered("workshop.improved-garrisons.management", AuthorityRouteKind.Command) &&
+               authorityRequestRouter.IsRegistered("workshop.improved-garrisons.snapshot", AuthorityRouteKind.BootstrapQuery) &&
+               (!ModInformation.IsClient || (SnapshotReadiness == WorkshopSnapshotReadiness.Ready &&
+                   string.Equals(SnapshotSessionId, config.SessionId, StringComparison.Ordinal)));
     }
 
     private bool TryFindTown(object manager, object[] arguments, out Town town)
@@ -972,6 +1041,354 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
         stateReady && result.Snapshot != null && revision == result.Header.CommittedRevision
             ? AuthorityCommitProbeResult.Applied
             : AuthorityCommitProbeResult.Pending;
+
+    private AuthorityRequestHeader CreateManagementHeader(long requestId)
+    {
+        if (!configAuthority.TryGetCurrent(out var config)) return default;
+        return new AuthorityRequestHeader(config.ProtocolVersion, config.SessionId, requestId, revision);
+    }
+
+    private AuthorityHeaderValidation ValidateManagementHeader(AuthorityRequestHeader header)
+    {
+        if (!CanUseManagementRoute(out var config))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable,
+                "improved-garrisons-route-unavailable");
+        if (header.ProtocolVersion != config.ProtocolVersion ||
+            !string.Equals(header.SessionId, config.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-config-session");
+        return header.ExpectedRevision == revision
+            ? AuthorityHeaderValidation.Valid
+            : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-canonical-revision");
+    }
+
+    private static NetworkRequestImprovedGarrisonsOperation BuildManagementRequest(
+        ImprovedGarrisonsManagementIntent intent, AuthorityRequestHeader header)
+    {
+        NetworkRequestImprovedGarrisonsOperation request = intent?.Request;
+        return request == null
+            ? new NetworkRequestImprovedGarrisonsOperation(header, (ImprovedGarrisonsOperation)0, string.Empty,
+                Array.Empty<string>(), string.Empty, Array.Empty<ImprovedGarrisonsTroopSelection>())
+            : new NetworkRequestImprovedGarrisonsOperation(header, request.Operation, request.TownId,
+                request.TargetIds, request.Value, request.Troops);
+    }
+
+    private AuthorityServerReply<NetworkImprovedGarrisonsSettingResult> ExecuteSettingRoute(
+        AuthorityServerContext context, NetworkRequestImprovedGarrisonsSettingChange request)
+    {
+        if (!TryResolveOwnedTown(context.Peer, request.TownId, out var town) ||
+            !routedMethods.TryGetValue(RoutedKey(request.ManagerType, request.Method), out var route))
+            return SettingReply(context.Header, request, AuthorityResultStatus.Unauthorized, "town-or-setting-not-authorized", false);
+
+        MethodInfo method = route.Method;
+        ParameterInfo[] parameters = method.GetParameters();
+        object[] arguments = new object[parameters.Length];
+        arguments[0] = town;
+        if (parameters.Length == 2 &&
+            (!ImprovedGarrisonsCanonicalState.TryParseValue(request.Value, parameters[1].ParameterType, out var value) ||
+             !IsValueAllowed(method.Name, value)))
+            return SettingReply(context.Header, request, AuthorityResultStatus.InvalidRequest, "invalid-setting-value", false);
+
+        if (parameters.Length == 2) arguments[1] = value;
+        object manager = ResolveManager(method.DeclaringType);
+        if (manager == null) return SettingReply(context.Header, request, AuthorityResultStatus.Unavailable, "setting-manager-unavailable", false);
+        if (!ImprovedGarrisonsCanonicalState.TryBuild(assembly, objectManager, out var rollback, out var rollbackHash, out var captureFailure))
+            return SettingReply(context.Header, request, AuthorityResultStatus.Unavailable, "rollback-capture-failed", false);
+
+        try
+        {
+            method.Invoke(manager, arguments);
+            if (!TryCaptureState(out var post, out var postFailure) ||
+                !SettingPostStateMatches(request, post))
+                throw new InvalidOperationException("setting postcondition failed: " + postFailure);
+            if (!PublishStateIfChanged())
+                return SettingReply(context.Header, request, AuthorityResultStatus.ExecutionFailed, "snapshot-publication-failed", false);
+            return SettingReply(context.Header, request, AuthorityResultStatus.Accepted, null, true);
+        }
+        catch (Exception exception)
+        {
+            if (!TryRestoreCanonicalState(rollback, rollbackHash, out var rollbackFailure))
+            {
+                DisconnectAllCampaignPeers("setting mutation ambiguity: " + rollbackFailure);
+                return new AuthorityServerReply<NetworkImprovedGarrisonsSettingResult>(
+                    CreateSettingTerminal(context.Header, AuthorityResultStatus.ExecutionFailed, "ambiguous-setting-mutation"), false, true);
+            }
+            Logger.Error(exception, "Improved Garrisons setting failed. Route={Route} Request={Request}",
+                context.RouteId, context.Header.RequestId);
+            return SettingReply(context.Header, request, AuthorityResultStatus.ExecutionFailed, "setting-execution-failed", false);
+        }
+    }
+
+    private AuthorityServerReply<NetworkImprovedGarrisonsOperationResult> ExecuteManagementRoute(
+        AuthorityServerContext context, NetworkRequestImprovedGarrisonsOperation request)
+    {
+        if (request.Operation == ImprovedGarrisonsOperation.StartHostileEncounter)
+            return ExecuteHostileEncounterRoute(context, request);
+        if (!TryResolveOwnedTown(context.Peer, request.TownId, out var town))
+            return ManagementReply(context.Header, request, AuthorityResultStatus.Unauthorized, "town-not-authorized", false);
+
+        Clan clan = town.OwnerClan;
+        string[] ownedTownIds = Settlement.All.Where(settlement => settlement?.Town?.OwnerClan == clan &&
+                (settlement.IsTown || settlement.IsCastle)).Select(settlement =>
+                objectManager.TryGetId(settlement.Town, out string id) ? id : null).Where(id => id != null).ToArray();
+        if (!ImprovedGarrisonsCanonicalState.TryBuild(assembly, objectManager, out var rollback, out var rollbackHash,
+                out var captureFailure))
+            return ManagementReply(context.Header, request, AuthorityResultStatus.Unavailable, "rollback-capture-failed", false);
+
+        bool canonical = IsCanonicalOperation(request.Operation);
+        ImprovedGarrisonsStateValue[] transformed = rollback;
+        if (canonical && !ImprovedGarrisonsCanonicalOperations.TryTransform(rollback, request, ownedTownIds,
+                out transformed, out var transformFailure))
+            return ManagementReply(context.Header, request, AuthorityResultStatus.InvalidRequest, "canonical-transform-rejected", false);
+        if (!ValidateNativeOperation(context.Peer, request, town, clan, ownedTownIds, out var nativeFailure))
+            return ManagementReply(context.Header, request, AuthorityResultStatus.Unavailable, nativeFailure, false);
+
+        bool nativeStarted = false;
+        string partyId = string.Empty;
+        try
+        {
+            if (canonical && !ImprovedGarrisonsCanonicalState.TryApply(assembly, objectManager, transformed, out var applyFailure))
+                throw new InvalidOperationException("canonical apply failed: " + applyFailure);
+            nativeStarted = IsNativeOperation(request.Operation);
+            if (nativeStarted && !TryExecuteNativeOperation(context.Peer, request, town, out partyId, out var executionFailure))
+                throw new InvalidOperationException("native execution failed: " + executionFailure);
+            if (!TryCaptureState(out var post, out var postFailure) ||
+                !ManagementPostStateMatches(context.Peer, request, town, partyId, post, out var proofFailure))
+                throw new InvalidOperationException(proofFailure ?? postFailure ?? "unverifiable-native-poststate");
+            if (!PublishStateIfChanged())
+                throw new InvalidOperationException("snapshot publication failed");
+            return ManagementReply(context.Header, request, AuthorityResultStatus.Accepted, null, true, partyId);
+        }
+        catch (Exception exception)
+        {
+            if (!nativeStarted && TryRestoreCanonicalState(rollback, rollbackHash, out _))
+                return ManagementReply(context.Header, request, AuthorityResultStatus.ExecutionFailed,
+                    "canonical-execution-failed", false);
+            DisconnectAllCampaignPeers("management mutation ambiguity after native execution: " + exception.Message);
+            Logger.Fatal(exception, "Ambiguous Improved Garrisons mutation. Route={Route} Request={Request}",
+                context.RouteId, context.Header.RequestId);
+            return new AuthorityServerReply<NetworkImprovedGarrisonsOperationResult>(
+                CreateManagementTerminal(context.Header, AuthorityResultStatus.ExecutionFailed, "ambiguous-native-mutation"), false, true);
+        }
+    }
+
+    private AuthorityServerReply<NetworkImprovedGarrisonsOperationResult> ExecuteHostileEncounterRoute(
+        AuthorityServerContext context, NetworkRequestImprovedGarrisonsOperation request)
+    {
+        if (request.TargetIds.Length != 1 || request.TownId != request.TargetIds[0] ||
+            !objectManager.TryGetObject(context.Player.MobilePartyId, out MobileParty actorParty) ||
+            !objectManager.TryGetObject(request.TargetIds[0], out MobileParty targetParty) || actorParty == null ||
+            targetParty == null || !targetParty.IsActive || ReferenceEquals(actorParty, targetParty) ||
+            actorParty.MapFaction == null || targetParty.MapFaction == null ||
+            FactionManager.IsAtWarAgainstFaction(actorParty.MapFaction, targetParty.MapFaction) ||
+            actorParty.Position.ToVec2().DistanceSquared(targetParty.Position.ToVec2()) > 4f ||
+            !TryGetMobileGarrison(targetParty, out var targetGarrison) ||
+            TryGetMemberValue(targetGarrison, "isNPC") is not bool isNpc || !isNpc)
+            return ManagementReply(context.Header, request, AuthorityResultStatus.Unauthorized,
+                "hostile-encounter-not-authorized", false);
+        try
+        {
+            // BeHostileAction is the existing campaign MapEvent publisher/coordinator entrypoint.
+            // This route deliberately does not introduce a second request or participant protocol.
+            BeHostileAction.ApplyEncounterHostileAction(actorParty.Party, targetParty.Party);
+            var mapEvent = actorParty.MapEvent;
+            if (mapEvent == null || targetParty.MapEvent != mapEvent ||
+                !objectManager.TryGetId(mapEvent, out var mapEventId))
+                throw new InvalidOperationException("hostile encounter did not publish a shared registered map event");
+            return ManagementReply(context.Header, request, AuthorityResultStatus.Accepted, null, true, mapEventId);
+        }
+        catch (Exception exception)
+        {
+            DisconnectAllCampaignPeers("hostile encounter publication ambiguity: " + exception.Message);
+            return new AuthorityServerReply<NetworkImprovedGarrisonsOperationResult>(
+                CreateManagementTerminal(context.Header, AuthorityResultStatus.ExecutionFailed,
+                    "ambiguous-hostile-encounter"), false, true);
+        }
+    }
+
+    private AuthorityServerReply<NetworkImprovedGarrisonsSettingResult> SettingReply(
+        AuthorityRequestHeader header, NetworkRequestImprovedGarrisonsSettingChange request,
+        AuthorityResultStatus status, string reason, bool published)
+    {
+        string hash = status == AuthorityResultStatus.Accepted ? lastPublishedHash : string.Empty;
+        long committed = status == AuthorityResultStatus.Accepted ? revision : header.ExpectedRevision;
+        return new AuthorityServerReply<NetworkImprovedGarrisonsSettingResult>(
+            new NetworkImprovedGarrisonsSettingResult(header, status, reason, SettingCommandKey(request), hash,
+                request.ManagerType, request.Method, request.TownId, request.Value, committed), published);
+    }
+
+    private AuthorityServerReply<NetworkImprovedGarrisonsOperationResult> ManagementReply(
+        AuthorityRequestHeader header, NetworkRequestImprovedGarrisonsOperation request,
+        AuthorityResultStatus status, string reason, bool published, string partyId = "")
+    {
+        var legacy = status switch
+        {
+            AuthorityResultStatus.Accepted => ImprovedGarrisonsOperationStatus.Accepted,
+            AuthorityResultStatus.StaleSession => ImprovedGarrisonsOperationStatus.StaleSession,
+            AuthorityResultStatus.StaleState => ImprovedGarrisonsOperationStatus.StaleState,
+            AuthorityResultStatus.ExecutionFailed => ImprovedGarrisonsOperationStatus.Failed,
+            _ => ImprovedGarrisonsOperationStatus.Rejected,
+        };
+        string hash = status == AuthorityResultStatus.Accepted ? lastPublishedHash : string.Empty;
+        long committed = status == AuthorityResultStatus.Accepted ? revision : header.ExpectedRevision;
+        return new AuthorityServerReply<NetworkImprovedGarrisonsOperationResult>(
+            new NetworkImprovedGarrisonsOperationResult(header, request.Operation, legacy, status, reason,
+                ImprovedGarrisonsOperationProtocol.CommandKey(request), request.TownId, partyId, committed, hash,
+                ManagementSemanticTuple(request, partyId)), published);
+    }
+
+    private static NetworkImprovedGarrisonsSettingResult CreateSettingTerminal(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        new NetworkImprovedGarrisonsSettingResult(header, status, reason, string.Empty, string.Empty,
+            string.Empty, string.Empty, string.Empty, string.Empty);
+
+    private static NetworkImprovedGarrisonsOperationResult CreateManagementTerminal(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        new NetworkImprovedGarrisonsOperationResult(header, ImprovedGarrisonsOperation.CopySettings,
+            status == AuthorityResultStatus.StaleState ? ImprovedGarrisonsOperationStatus.StaleState :
+            status == AuthorityResultStatus.StaleSession ? ImprovedGarrisonsOperationStatus.StaleSession :
+            ImprovedGarrisonsOperationStatus.Rejected, status, reason, string.Empty, string.Empty, string.Empty,
+            header.ExpectedRevision, string.Empty, string.Empty);
+
+    private bool IsExpectedSettingResult(NetworkRequestImprovedGarrisonsSettingChange request,
+        NetworkImprovedGarrisonsSettingResult result) =>
+        result.Header.RequestId == request.Header.RequestId && result.Header.SessionId == request.Header.SessionId &&
+        result.CommandDigest == SettingCommandKey(request) && result.ManagerType == request.ManagerType &&
+        result.Method == request.Method && result.TownId == request.TownId && result.Value == request.Value;
+
+    private bool IsExpectedManagementResult(NetworkRequestImprovedGarrisonsOperation request,
+        NetworkImprovedGarrisonsOperationResult result) =>
+        ImprovedGarrisonsOperationProtocol.IsResultShapeValid(result) &&
+        result.Header.RequestId == request.Header.RequestId && result.Header.SessionId == request.Header.SessionId &&
+        result.Operation == request.Operation && result.TownId == request.TownId &&
+        result.CommandDigest == ImprovedGarrisonsOperationProtocol.CommandKey(request);
+
+    private AuthorityCommitProbeResult ProbeSettingApplied(NetworkImprovedGarrisonsSettingResult result) =>
+        result.Header.Status == AuthorityResultStatus.Accepted && stateReady && SnapshotReadiness == WorkshopSnapshotReadiness.Ready &&
+        SnapshotRevision == result.CommittedRevision && string.Equals(lastAppliedHash, result.CanonicalHash,
+            StringComparison.OrdinalIgnoreCase) ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+
+    private AuthorityCommitProbeResult ProbeManagementApplied(NetworkImprovedGarrisonsOperationResult result)
+    {
+        if (result.Header.Status != AuthorityResultStatus.Accepted || !stateReady ||
+            SnapshotReadiness != WorkshopSnapshotReadiness.Ready || SnapshotRevision != result.CommittedRevision ||
+            !string.Equals(lastAppliedHash, result.CanonicalHash, StringComparison.OrdinalIgnoreCase))
+            return AuthorityCommitProbeResult.Pending;
+        return ManagementPostStateMatches(null, new NetworkRequestImprovedGarrisonsOperation(
+            result.SessionId, result.RequestId, result.CommittedRevision, result.Operation, result.TownId,
+            Array.Empty<string>(), string.Empty, Array.Empty<ImprovedGarrisonsTroopSelection>()), null,
+            result.PartyId, null, out _) ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+    }
+
+    private void PresentSettingOutcome(AuthorityClientOutcome<NetworkImprovedGarrisonsSettingResult> outcome)
+    {
+        if (outcome.Applied) InformationManager.DisplayMessage(new InformationMessage(
+            "Improved Garrisons setting accepted by the co-op server."));
+    }
+
+    private void PresentManagementOutcome(AuthorityClientOutcome<NetworkImprovedGarrisonsOperationResult> outcome)
+    {
+        if (!outcome.Applied) return;
+        var result = outcome.Result;
+        if (!string.IsNullOrEmpty(result.PartyId))
+        {
+            pendingPartyScreens[result.PartyId] = result.TownId;
+            TryOpenPendingPartyScreens();
+        }
+        InformationManager.DisplayMessage(new InformationMessage("Improved Garrisons management action accepted."));
+    }
+
+    private bool SettingPostStateMatches(NetworkRequestImprovedGarrisonsSettingChange request,
+        NetworkImprovedGarrisonsState snapshot) => snapshot?.Values.Any(value => value.Scope == "town" &&
+            value.TargetId == request.TownId && value.Property != null) == true;
+
+    private bool ManagementPostStateMatches(NetPeer peer, NetworkRequestImprovedGarrisonsOperation request,
+        Town town, string partyId, NetworkImprovedGarrisonsState snapshot, out string failure)
+    {
+        failure = null;
+        // The route has already bound the client reply to the exact request digest and the
+        // canonical snapshot hash/revision.  Client replicas cannot re-derive server-only actor
+        // ownership, so their commit barrier is that authenticated snapshot rather than a local
+        // reflection echo.
+        if (peer == null) return true;
+        if (IsCanonicalOperation(request.Operation))
+            return snapshot != null && string.Equals(snapshot.CanonicalHash, lastPublishedHash ?? snapshot.CanonicalHash,
+                StringComparison.OrdinalIgnoreCase);
+        if (request.Operation == ImprovedGarrisonsOperation.BoostBuildingReserve)
+        {
+            if (!playerManager.TryGetPlayer(peer, out var player) || !objectManager.TryGetObject(player.HeroId, out Hero actor) ||
+                !int.TryParse(request.Value, NumberStyles.None, CultureInfo.InvariantCulture, out int boost) ||
+                town.BoostBuildingProcess < boost || actor.Gold < 0)
+            { failure = "building reserve or actor gold postcondition failed"; return false; }
+            return true;
+        }
+        if (request.Operation == ImprovedGarrisonsOperation.CreateTransferParty ||
+            request.Operation == ImprovedGarrisonsOperation.CreateRecruiter ||
+            request.Operation == ImprovedGarrisonsOperation.CreateMobileGarrison)
+        {
+            if (string.IsNullOrEmpty(partyId) || !objectManager.TryGetObject(partyId, out MobileParty party) || party == null)
+            { failure = "created party was not registered"; return false; }
+            object partyManagement = GetStaticMember(assembly?.GetType("ImprovedGarrisons.Main", false), "PartyManagement");
+            object manager = request.Operation == ImprovedGarrisonsOperation.CreateTransferParty
+                ? TryGetMemberValue(partyManagement, "transferPartyManagement")
+                : request.Operation == ImprovedGarrisonsOperation.CreateRecruiter
+                    ? TryGetMemberValue(partyManagement, "garrisonRecruiterPartyManagement")
+                    : TryGetMemberValue(partyManagement, "mobileGarrisonManagement");
+            object mapped = request.Operation == ImprovedGarrisonsOperation.CreateRecruiter
+                ? InvokeOptional(manager, "GetRecruiterOfSettlement", town.Settlement)
+                : request.Operation == ImprovedGarrisonsOperation.CreateMobileGarrison
+                    ? InvokeOptional(manager, "GetMobileGarrisonPartyOfSettlement", town.Settlement)
+                    : null;
+            if (request.Operation != ImprovedGarrisonsOperation.CreateTransferParty && mapped == null)
+            { failure = "created party has no manager mapping"; return false; }
+            if (party.HomeSettlement != town.Settlement && request.Operation != ImprovedGarrisonsOperation.CreateTransferParty)
+            { failure = "created party home town does not match source"; return false; }
+            return true;
+        }
+        if (request.Operation == ImprovedGarrisonsOperation.SetMobileGarrisonEscort ||
+            request.Operation == ImprovedGarrisonsOperation.OrderMobileGarrisonPatrol ||
+            request.Operation == ImprovedGarrisonsOperation.OrderMobileGarrisonReturn ||
+            request.Operation == ImprovedGarrisonsOperation.FortifyMobileGarrison ||
+            request.Operation == ImprovedGarrisonsOperation.ReturnRecruiter)
+        {
+            string observed = ReadNativeOrderProof(request.Operation, town);
+            string expected = request.Operation == ImprovedGarrisonsOperation.SetMobileGarrisonEscort ||
+                              request.Operation == ImprovedGarrisonsOperation.FortifyMobileGarrison
+                ? request.TargetIds[0] : town.StringId;
+            if (!string.IsNullOrEmpty(observed) && observed.IndexOf(expected, StringComparison.Ordinal) >= 0)
+                return true;
+            failure = "native order/mode postcondition did not expose exact target";
+            return false;
+        }
+        failure = "native postcondition is unavailable for " + request.Operation;
+        return false;
+    }
+
+    private string ReadNativeOrderProof(ImprovedGarrisonsOperation operation, Town town)
+    {
+        object partyManagement = GetStaticMember(assembly?.GetType("ImprovedGarrisons.Main", false), "PartyManagement");
+        object manager = operation == ImprovedGarrisonsOperation.ReturnRecruiter
+            ? TryGetMemberValue(partyManagement, "garrisonRecruiterPartyManagement")
+            : TryGetMemberValue(partyManagement, "mobileGarrisonManagement");
+        object wrapper = operation == ImprovedGarrisonsOperation.ReturnRecruiter
+            ? InvokeOptional(manager, "GetRecruiterOfSettlement", town.Settlement)
+            : InvokeOptional(manager, "GetMobileGarrisonPartyOfSettlement", town.Settlement);
+        if (wrapper == null) return null;
+        object proof = TryGetMemberValue(wrapper, "CurrentOrder") ?? TryGetMemberValue(wrapper, "Order") ??
+            TryGetMemberValue(wrapper, "Mode") ?? TryGetMemberValue(wrapper, "ReturnMode") ??
+            TryGetMemberValue(wrapper, "FortifySettlement");
+        return proof?.ToString();
+    }
+
+    private static string ManagementSemanticTuple(NetworkRequestImprovedGarrisonsOperation request, string partyId) =>
+        string.Join("|", ((int)request.Operation).ToString(CultureInfo.InvariantCulture), request.TownId,
+            string.Join(",", request.TargetIds), request.Value, partyId ?? string.Empty);
+
+    private void DisconnectAllCampaignPeers(string failure)
+    {
+        Logger.Fatal("Disconnecting campaign peers after Improved Garrisons authority ambiguity: {Failure}", failure);
+        foreach (var player in playerManager.Players)
+            if (playerManager.TryGetPeer(player.ControllerId, out var peer)) peer.Disconnect();
+    }
 
     private void PresentSnapshotTerminal(AuthorityClientOutcome<NetworkImprovedGarrisonsStateQueryResult> outcome)
     {
@@ -1520,7 +1937,36 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
                 return false;
             }
         }
+        if (request.Operation == ImprovedGarrisonsOperation.SetMobileGarrisonEscort ||
+            request.Operation == ImprovedGarrisonsOperation.OrderMobileGarrisonPatrol ||
+            request.Operation == ImprovedGarrisonsOperation.OrderMobileGarrisonReturn ||
+            request.Operation == ImprovedGarrisonsOperation.FortifyMobileGarrison ||
+            request.Operation == ImprovedGarrisonsOperation.ReturnRecruiter)
+        {
+            if (!HasStableNativePostState(request.Operation, town))
+            {
+                failure = "native-poststate-unavailable-" + request.Operation;
+                return false;
+            }
+        }
         return true;
+    }
+
+    private bool HasStableNativePostState(ImprovedGarrisonsOperation operation, Town town)
+    {
+        object partyManagement = GetStaticMember(assembly?.GetType("ImprovedGarrisons.Main", false), "PartyManagement");
+        object manager = operation == ImprovedGarrisonsOperation.ReturnRecruiter
+            ? TryGetMemberValue(partyManagement, "garrisonRecruiterPartyManagement")
+            : TryGetMemberValue(partyManagement, "mobileGarrisonManagement");
+        object wrapper = operation == ImprovedGarrisonsOperation.ReturnRecruiter
+            ? InvokeOptional(manager, "GetRecruiterOfSettlement", town.Settlement)
+            : InvokeOptional(manager, "GetMobileGarrisonPartyOfSettlement", town.Settlement);
+        if (wrapper == null) return false;
+        Type type = wrapper.GetType();
+        return new[] { "CurrentOrder", "Order", "Mode", "IsReturning", "ReturnMode", "FortifySettlement" }
+            .Any(name => type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) != null ||
+                         type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) != null ||
+                         type.GetMethod("get" + name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) != null);
     }
 
     private bool TryGetMobileGarrison(MobileParty party, out object mobileGarrison)
@@ -1896,6 +2342,12 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
                 : "authoritative state is not ready";
             return false;
         }
+        if (request.Operation == ImprovedGarrisonsOperation.CreateTransferParty &&
+            !HasStableTransferProof())
+        {
+            failure = "native-poststate-unavailable-CreateTransferParty";
+            return false;
+        }
 
         bool changed = lastPublishedHash != null &&
             !string.Equals(lastPublishedHash, hash, StringComparison.OrdinalIgnoreCase);
@@ -1911,9 +2363,20 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
         return true;
     }
 
-    private void PublishStateIfChanged(NetPeer peer = null)
+    private bool HasStableTransferProof()
     {
-        if (!ModInformation.IsServer) return;
+        object partyManagement = GetStaticMember(assembly?.GetType("ImprovedGarrisons.Main", false), "PartyManagement");
+        object manager = TryGetMemberValue(partyManagement, "transferPartyManagement");
+        if (manager == null) return false;
+        return manager.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Any(method => method.Name.IndexOf("Transfer", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                           method.Name.IndexOf("Settlement", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                           method.Name.IndexOf("Get", StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
+    private bool PublishStateIfChanged(NetPeer peer = null)
+    {
+        if (!ModInformation.IsServer) return false;
         if (!stateReady)
         {
             // Campaign callbacks can run while object registration is still assembling the
@@ -1921,13 +2384,13 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
             // incidental pre-registration callbacks simply wait for the initial publication.
             if (peer != null)
                 DenyPeerOrAbortSession(peer, "authoritative state is not ready");
-            return;
+            return false;
         }
         if (!ImprovedGarrisonsCanonicalState.TryBuild(
                 assembly, objectManager, out var values, out var hash, out var failure))
         {
             DenyPeerOrAbortSession(peer, "could not capture Improved Garrisons server state: " + failure);
-            return;
+            return false;
         }
 
         var initialPublication = lastPublishedHash == null;
@@ -1943,7 +2406,7 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
         if (!IsSnapshotShapeValid(message, out failure))
         {
             DenyPeerOrAbortSession(peer, "captured Improved Garrisons server state was invalid: " + failure);
-            return;
+            return false;
         }
 
         try
@@ -1954,11 +2417,12 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
         catch (Exception ex)
         {
             DenyPeerOrAbortSession(peer, "authoritative snapshot publication failed: " + ex.Message);
-            return;
+            return false;
         }
 
         revision = publishedRevision;
         lastPublishedHash = hash;
+        return true;
     }
 
     internal bool ApplyState(NetworkImprovedGarrisonsState state)
@@ -2081,8 +2545,7 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
 
     internal static bool IsRequestShapeValid(NetworkRequestImprovedGarrisonsSettingChange request) =>
         request.SessionId != null && request.SessionId.Length == ModConfigSnapshot.SessionIdLength &&
-        Guid.TryParseExact(request.SessionId, "N", out _) &&
-        request.RequestId > 0 && request.ExpectedRevision >= 0 &&
+        Guid.TryParseExact(request.SessionId, "N", out _) && request.RequestId > 0 && request.ExpectedRevision >= 0 &&
         HasProtocolText(request.ManagerType, 1, MaxRequestManagerLength) &&
         HasProtocolText(request.Method, 1, MaxRequestMethodLength) &&
         HasProtocolText(request.TownId, 1, MaxObjectIdLength) &&

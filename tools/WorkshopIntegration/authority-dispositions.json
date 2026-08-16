@@ -675,6 +675,7 @@
       ],
       "disposition": "ServerCommand",
       "owner": "GameInterface.Services.WorkshopMods.ImprovedGarrisons.ImprovedGarrisonsCompatibilityHandler",
+      "routeId": "workshop.improved-garrisons.management",
       "capability": "Management",
       "tests": [
         "ImprovedGarrisonsManagementOperationTests.ManagementOperation_RoundTripsAuthenticatedConcurrencyAndStableSelections",
@@ -1064,6 +1065,7 @@
       ],
       "disposition": "ServerCommand",
       "owner": "ImprovedGarrisonsCompatibilityHandler authenticated building-reserve operation",
+      "routeId": "workshop.improved-garrisons.management",
       "capability": "Management",
       "tests": [
         "ImprovedGarrisonsManagementOperationTests.BuildingReserveOperation_RequiresOnlyAPositiveServerCheckedAmount",

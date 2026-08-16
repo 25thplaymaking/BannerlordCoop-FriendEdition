@@ -50,6 +50,7 @@ internal sealed class ImprovedGarrisonsTroopSelection
     }
 }
 
+[AuthorityRoute("workshop.improved-garrisons.management", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 internal sealed class NetworkRequestImprovedGarrisonsOperation : ICommand
 {
@@ -61,6 +62,7 @@ internal sealed class NetworkRequestImprovedGarrisonsOperation : ICommand
     [ProtoMember(6)] private string[] targetIds;
     [ProtoMember(7)] public string Value { get; private set; }
     [ProtoMember(8)] private ImprovedGarrisonsTroopSelection[] troops;
+    [ProtoMember(9)] public int ConfigProtocolVersion { get; private set; }
 
     public string[] TargetIds => targetIds ?? Array.Empty<string>();
     public ImprovedGarrisonsTroopSelection[] Troops => troops ?? Array.Empty<ImprovedGarrisonsTroopSelection>();
@@ -77,7 +79,8 @@ internal sealed class NetworkRequestImprovedGarrisonsOperation : ICommand
         string townId,
         string[] targetIds,
         string value,
-        ImprovedGarrisonsTroopSelection[] troops)
+        ImprovedGarrisonsTroopSelection[] troops,
+        int configProtocolVersion = 0)
     {
         SessionId = sessionId;
         RequestId = requestId;
@@ -87,7 +90,19 @@ internal sealed class NetworkRequestImprovedGarrisonsOperation : ICommand
         this.targetIds = targetIds ?? Array.Empty<string>();
         Value = value ?? string.Empty;
         this.troops = troops ?? Array.Empty<ImprovedGarrisonsTroopSelection>();
+        ConfigProtocolVersion = configProtocolVersion;
     }
+
+    public NetworkRequestImprovedGarrisonsOperation(
+        AuthorityRequestHeader header, ImprovedGarrisonsOperation operation, string townId, string[] targetIds,
+        string value, ImprovedGarrisonsTroopSelection[] troops)
+        : this(header.SessionId, header.RequestId, header.ExpectedRevision, operation, townId, targetIds, value,
+            troops, header.ProtocolVersion)
+    {
+    }
+
+    public AuthorityRequestHeader Header =>
+        new AuthorityRequestHeader(ConfigProtocolVersion, SessionId, RequestId, ExpectedRevision);
 }
 
 internal enum ImprovedGarrisonsOperationStatus
@@ -108,6 +123,12 @@ internal sealed class NetworkImprovedGarrisonsOperationResult : ICommand
     [ProtoMember(4)] public ImprovedGarrisonsOperationStatus Status { get; private set; }
     [ProtoMember(5)] public string TownId { get; private set; }
     [ProtoMember(6)] public string PartyId { get; private set; }
+    [ProtoMember(7)] public AuthorityResultStatus AuthorityStatus { get; private set; }
+    [ProtoMember(8)] public string ReasonCode { get; private set; }
+    [ProtoMember(9)] public string CommandDigest { get; private set; }
+    [ProtoMember(10)] public long CommittedRevision { get; private set; }
+    [ProtoMember(11)] public string CanonicalHash { get; private set; }
+    [ProtoMember(12)] public string PostState { get; private set; }
 
     public NetworkImprovedGarrisonsOperationResult()
     {
@@ -127,7 +148,37 @@ internal sealed class NetworkImprovedGarrisonsOperationResult : ICommand
         Status = status;
         TownId = townId;
         PartyId = partyId ?? string.Empty;
+        AuthorityStatus = status == ImprovedGarrisonsOperationStatus.Accepted
+            ? AuthorityResultStatus.Accepted : AuthorityResultStatus.Rejected;
+        ReasonCode = status.ToString();
+        CommandDigest = string.Empty;
+        CommittedRevision = 0;
+        CanonicalHash = string.Empty;
+        PostState = string.Empty;
     }
+
+    public NetworkImprovedGarrisonsOperationResult(
+        AuthorityRequestHeader header, ImprovedGarrisonsOperation operation,
+        ImprovedGarrisonsOperationStatus status, AuthorityResultStatus authorityStatus, string reasonCode,
+        string commandDigest, string townId, string partyId, long committedRevision, string canonicalHash,
+        string postState)
+    {
+        SessionId = header.SessionId;
+        RequestId = header.RequestId;
+        Operation = operation;
+        Status = status;
+        TownId = townId ?? string.Empty;
+        PartyId = partyId ?? string.Empty;
+        AuthorityStatus = authorityStatus;
+        ReasonCode = reasonCode ?? string.Empty;
+        CommandDigest = commandDigest ?? string.Empty;
+        CommittedRevision = committedRevision;
+        CanonicalHash = canonicalHash ?? string.Empty;
+        PostState = postState ?? string.Empty;
+    }
+
+    public AuthorityResultHeader Header =>
+        new AuthorityResultHeader(SessionId, RequestId, AuthorityStatus, CommittedRevision, ReasonCode);
 }
 
 internal static class ImprovedGarrisonsOperationProtocol

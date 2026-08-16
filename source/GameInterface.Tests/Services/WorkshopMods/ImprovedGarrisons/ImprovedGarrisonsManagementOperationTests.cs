@@ -1,4 +1,7 @@
 using GameInterface.Services.WorkshopMods.ImprovedGarrisons;
+using Common.Messaging;
+using GameInterface.Services.AuthorityRequests;
+using System;
 using ProtoBuf;
 using System.IO;
 using System.Linq;
@@ -8,6 +11,41 @@ namespace GameInterface.Tests.Services.WorkshopMods.ImprovedGarrisons;
 
 public sealed class ImprovedGarrisonsManagementOperationTests
 {
+    [Fact]
+    public void SettingAndManagementRequests_DeclareTheirExactTypedAuthorityRoutes()
+    {
+        var setting = (AuthorityRouteAttribute)Attribute.GetCustomAttribute(
+            typeof(NetworkRequestImprovedGarrisonsSettingChange), typeof(AuthorityRouteAttribute));
+        var management = (AuthorityRouteAttribute)Attribute.GetCustomAttribute(
+            typeof(NetworkRequestImprovedGarrisonsOperation), typeof(AuthorityRouteAttribute));
+        var header = new AuthorityRequestHeader(7, "9d80f6d4ae2a4f7db912829fd7a3a284", 71, 9);
+        var request = new NetworkRequestImprovedGarrisonsOperation(header,
+            ImprovedGarrisonsOperation.CreateGlobalTemplate, "town-source", Array.Empty<string>(), "all",
+            Array.Empty<ImprovedGarrisonsTroopSelection>());
+
+        Assert.Equal("workshop.improved-garrisons.setting", setting.RouteId);
+        Assert.Equal("workshop.improved-garrisons.management", management.RouteId);
+        Assert.Equal(AuthorityRouteKind.Command, setting.Kind);
+        Assert.Equal(header.SessionId, request.Header.SessionId);
+        Assert.Equal(header.RequestId, request.Header.RequestId);
+        Assert.Equal(header.ExpectedRevision, request.Header.ExpectedRevision);
+    }
+
+    [Fact]
+    public void ManagementResult_BindsDigestCanonicalCommitAndSemanticPostState()
+    {
+        var header = new AuthorityRequestHeader(7, "9d80f6d4ae2a4f7db912829fd7a3a284", 72, 10);
+        var result = new NetworkImprovedGarrisonsOperationResult(header,
+            ImprovedGarrisonsOperation.CreateMobileGarrison, ImprovedGarrisonsOperationStatus.Accepted,
+            AuthorityResultStatus.Accepted, null, "digest", "town-a", "party-a", 12,
+            new string('a', 64), "6|town-a|||party-a");
+
+        Assert.Equal(12, result.Header.CommittedRevision);
+        Assert.Equal("digest", result.CommandDigest);
+        Assert.Equal("party-a", result.PartyId);
+        Assert.Equal("6|town-a|||party-a", result.PostState);
+    }
+
     [Fact]
     public void CompleteManagementSurface_HasNoDeniedOperations()
     {

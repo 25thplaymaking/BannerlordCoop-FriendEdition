@@ -543,9 +543,21 @@ internal sealed class BanditBarterHandler : IHandler
         return null;
     }
 
-    private static string BuildCommandKey(NetworkRequestBanditBarter request) => string.Concat(
-        request.BanditPartyId.Length, ":", request.BanditPartyId, ":", request.PlayerGold, ":",
-        request.PlayerItems.Length, ":", request.PlayerPrisoners.Length);
+    private static string BuildCommandKey(NetworkRequestBanditBarter request)
+    {
+        // The replay ledger must distinguish offers with equal list lengths. This is a compact
+        // structural digest of every client-supplied term, not a valuation decision.
+        var items = string.Join("|", (request.PlayerItems ?? Array.Empty<ItemRosterElementData>())
+            .OrderBy(item => item.ItemObjectData.ItemObjectId, StringComparer.Ordinal)
+            .ThenBy(item => item.ItemObjectData.ItemModifierId, StringComparer.Ordinal)
+            .Select(item => string.Concat(item.ItemObjectData.ItemObjectId, ":", item.ItemObjectData.ItemModifierId,
+                ":", item.ItemObjectData.ItemModifierNull, ":", item.Amount)));
+        var prisoners = string.Join("|", (request.PlayerPrisoners ?? Array.Empty<TroopRosterElementData>())
+            .OrderBy(prisoner => prisoner.CharacterId, StringComparer.Ordinal)
+            .Select(prisoner => string.Concat(prisoner.CharacterId, ":", prisoner.Number, ":",
+                prisoner.WoundedNumber, ":", prisoner.Xp)));
+        return string.Concat(request.BanditPartyId, ":", request.PlayerGold, ":", items, ":", prisoners);
+    }
 
     private static NetworkBanditBarterResult CreateTerminalResult(
         AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>

@@ -117,8 +117,8 @@ For suites too large for one host asset, provide ordered `parts`:
 The published suite feed may retain a valid `clientZipUrl` beside `parts` as a bootstrap field for
 pre-multipart launchers. Multipart-capable launchers always prefer `parts`; they never download that
 legacy field. Each part must be HTTPS, positive and strictly below 2 GiB, and SHA-256-pinned. Parts are
-verified while being appended directly to one temporary ZIP; the complete
-ZIP is then checked against the manifest's top-level `sha256` and installed through the same rollback
+verified while being appended directly to one temporary ZIP; interrupted part downloads resume with a
+verified HTTP byte range. The complete ZIP is then checked against the manifest's top-level `sha256` and installed through the same rollback
 path. Existing single-URL GitHub and R2 feeds remain unchanged.
 
 The launcher extracts each verified zip into a private staging directory on the same volume, then

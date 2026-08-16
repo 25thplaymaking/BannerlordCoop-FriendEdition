@@ -32,13 +32,31 @@ public record NetworkBreakSiegeApproved : IEvent
     [ProtoMember(3)]
     public bool BattleLeaveApplied { get; }
 
+    /// <summary>Correlation and status for the canonical authority route.</summary>
+    [ProtoMember(4)]
+    public AuthorityResultHeader Header { get; }
+
+    /// <summary>The party whose camp/battle membership was authoritatively removed.</summary>
+    [ProtoMember(5)]
+    public string PartyId { get; }
+
+    /// <summary>Whether another besieging party still owns the siege after this leave.</summary>
+    [ProtoMember(6)]
+    public bool SiegeContinues { get; }
+
     public NetworkBreakSiegeApproved(
         SiegeBreakOutcome outcome,
         bool finishLocalMenus = true,
-        bool battleLeaveApplied = false)
+        bool battleLeaveApplied = false,
+        AuthorityResultHeader header = default,
+        string partyId = null,
+        bool siegeContinues = false)
     {
         Outcome = outcome;
         FinishLocalMenus = finishLocalMenus;
         BattleLeaveApplied = battleLeaveApplied;
+        Header = header;
+        PartyId = partyId;
+        SiegeContinues = siegeContinues;
     }
 }

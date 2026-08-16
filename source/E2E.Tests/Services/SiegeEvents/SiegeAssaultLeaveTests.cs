@@ -4,6 +4,7 @@ using Coop.Core.Client.Services.SiegeEvents.Messages;
 using Coop.Core.Server.Services.SiegeEvents.Messages;
 using E2E.Tests.Environment.Instance;
 using E2E.Tests.Services.MapEvents;
+using GameInterface.Configuration;
 using GameInterface.Services.MapEvents;
 using GameInterface.Services.MapEvents.Handlers;
 using GameInterface.Services.MapEvents.Logging;
@@ -65,7 +66,8 @@ public class SiegeAssaultLeaveTests : MapEventTestBase
 
         leavingClient.Call(() =>
         {
-            leavingClient.Resolve<INetwork>().SendAll(new NetworkRequestBreakSiege(partyId, finishLocalMenus: true));
+            leavingClient.Resolve<INetwork>().SendAll(new NetworkRequestBreakSiege(
+                partyId, true, CreateAuthorityHeader(leavingClient)));
         }, MapEventDisabledMethods
             .Concat(SiegeCreationDisabledMethods)
             .Append(AccessTools.Method(typeof(GameMenu), nameof(GameMenu.ExitToLast)))
@@ -266,5 +268,11 @@ public class SiegeAssaultLeaveTests : MapEventTestBase
             Assert.Equal(expectMapEvent, party.MapEvent != null);
             Assert.Equal(expectCamp, party.BesiegerCamp != null);
         });
+    }
+
+    private static AuthorityRequestHeader CreateAuthorityHeader(EnvironmentInstance client)
+    {
+        Assert.True(client.Resolve<IModConfigAuthority>().TryGetCurrent(out var snapshot));
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, 1, snapshot.Revision);
     }
 }

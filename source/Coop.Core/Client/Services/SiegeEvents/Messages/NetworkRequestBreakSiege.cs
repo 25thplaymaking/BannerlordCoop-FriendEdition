@@ -6,6 +6,7 @@ namespace Coop.Core.Client.Services.SiegeEvents.Messages;
 /// <summary>
 /// Client asks the server to remove its party from its siege camp.
 /// </summary>
+[AuthorityRoute("siege.break", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 public record NetworkRequestBreakSiege : ICommand
 {
@@ -19,9 +20,16 @@ public record NetworkRequestBreakSiege : ICommand
     [ProtoMember(2)]
     public bool FinishLocalMenus { get; }
 
-    public NetworkRequestBreakSiege(string partyId, bool finishLocalMenus = true)
+    [ProtoMember(3)]
+    public AuthorityRequestHeader Header { get; }
+
+    public NetworkRequestBreakSiege(
+        string partyId,
+        bool finishLocalMenus = true,
+        AuthorityRequestHeader header = default)
     {
         PartyId = partyId;
         FinishLocalMenus = finishLocalMenus;
+        Header = header;
     }
 }

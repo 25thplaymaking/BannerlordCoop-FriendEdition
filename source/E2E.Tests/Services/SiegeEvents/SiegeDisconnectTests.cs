@@ -7,6 +7,7 @@ using E2E.Tests.Environment.Instance;
 using E2E.Tests.Environment.MockEngine;
 using E2E.Tests.Services.MapEvents;
 using E2E.Tests.Util;
+using GameInterface.Configuration;
 using GameInterface.Services.MapEvents.Messages;
 using GameInterface.Services.MapEvents.Messages.Leave;
 using GameInterface.Services.MapEventSides.Messages;
@@ -208,7 +209,7 @@ public class SiegeDisconnectTests : MapEventTestBase
         using var menuCalls = new GameMenuCallCounter();
         Server.SimulateMessage(
             requestingClient.NetPeer,
-            new NetworkRequestBreakSiege(partyId, finishLocalMenus));
+            new NetworkRequestBreakSiege(partyId, finishLocalMenus, CreateAuthorityHeader(requestingClient)));
 
         var approval = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkBreakSiegeApproved>());
         Assert.Equal(SiegeBreakOutcome.Applied, approval.Outcome);
@@ -795,6 +796,12 @@ public class SiegeDisconnectTests : MapEventTestBase
             Assert.True(instance.ObjectManager.TryGetObject<MobileParty>(partyId, out var party));
             Assert.Equal(expectCamp, party.BesiegerCamp != null);
         });
+    }
+
+    private static AuthorityRequestHeader CreateAuthorityHeader(EnvironmentInstance client)
+    {
+        Assert.True(client.Resolve<IModConfigAuthority>().TryGetCurrent(out var snapshot));
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, 1, snapshot.Revision);
     }
 
     private sealed class GameMenuCallCounter : IDisposable

@@ -1,4 +1,5 @@
 ﻿using Common;
+using Common.Messaging;
 using Common.Network;
 using Common.Tests.Utils;
 using Common.Util;
@@ -90,7 +91,7 @@ public class SiegeTerminationRoleTests
     [Theory]
     [InlineData(SiegeBreakOutcome.Applied)]
     [InlineData(SiegeBreakOutcome.AlreadyLeft)]
-    public void BreakApproval_WhenMenusNeedContinuation_FinishesLocalSiegeLeave(
+    public void UncorrelatedBreakApproval_DoesNotFinishLocalSiegeLeave(
         SiegeBreakOutcome outcome)
     {
         var broker = new TestMessageBroker();
@@ -109,14 +110,14 @@ public class SiegeTerminationRoleTests
 
         siegeEventInterface.Verify(
             value => value.FinishLocalPlayerSiegeLeave(),
-            Times.Once);
+            Times.Never);
     }
 
     [Theory]
     [InlineData(SiegeBreakOutcome.Applied, false, false)]
     [InlineData(SiegeBreakOutcome.Applied, true, true)]
     [InlineData(SiegeBreakOutcome.Rejected, true, false)]
-    public void BreakApproval_WhenAnotherFlowOwnsContinuation_DoesNotFinishLocalMenus(
+    public void UncorrelatedBreakApproval_WhenAnotherFlowOwnsContinuation_DoesNotFinishLocalMenus(
         SiegeBreakOutcome outcome,
         bool finishLocalMenus,
         bool battleLeaveApplied)
@@ -142,16 +143,23 @@ public class SiegeTerminationRoleTests
     }
 
     [Fact]
-    public void BreakApproval_ProtobufPreservesBothContinuationFlags()
+    public void BreakApproval_ProtobufPreservesContinuationAndAuthorityFields()
     {
         var message = RoundTrip(new NetworkBreakSiegeApproved(
             SiegeBreakOutcome.Applied,
             finishLocalMenus: false,
-            battleLeaveApplied: true));
+            battleLeaveApplied: true,
+            header: new AuthorityResultHeader("session", 1, AuthorityResultStatus.Accepted, 2, null),
+            partyId: "party_1",
+            siegeContinues: true));
 
         Assert.Equal(SiegeBreakOutcome.Applied, message.Outcome);
         Assert.False(message.FinishLocalMenus);
         Assert.True(message.BattleLeaveApplied);
+        Assert.Equal("session", message.Header.SessionId);
+        Assert.Equal(1, message.Header.RequestId);
+        Assert.Equal("party_1", message.PartyId);
+        Assert.True(message.SiegeContinues);
     }
 
     [Fact]

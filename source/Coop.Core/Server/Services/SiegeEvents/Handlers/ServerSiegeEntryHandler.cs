@@ -48,6 +48,7 @@ internal class ServerSiegeEntryHandler : IHandler
     private readonly IModConfigAuthority configAuthority;
     private readonly IAuthorityRouteHandle<SiegeEntryIntent, NetworkBesiegeSettlementApproved> besiegeRoute;
     private readonly IAuthorityRouteHandle<SiegeEntryIntent, NetworkJoinSiegeCampApproved> joinRoute;
+    private readonly IAuthorityRouteHandle<SiegeBreakIntent, NetworkBreakSiegeApproved> breakRoute;
 
     public ServerSiegeEntryHandler(
         IMessageBroker messageBroker,
@@ -84,7 +85,14 @@ internal class ServerSiegeEntryHandler : IHandler
                 ValidateHeader, ExecuteJoin, CreateJoinTerminalResult, _ => AuthorityCommitProbeResult.Pending,
                 _ => { }, _ => { }, configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
                 failClosedOnApplyFailure: true, isExpectedClientResult: IsExpectedJoinResult));
-        messageBroker.Subscribe<NetworkRequestBreakSiege>(HandleBreak);
+        breakRoute = authorityRequestRouter.Register(
+            AuthorityRoute<SiegeBreakIntent, NetworkRequestBreakSiege, NetworkBreakSiegeApproved>.Define(
+                "siege.break", AuthorityRouteKind.Command, CreateHeader,
+                (intent, header) => new NetworkRequestBreakSiege(intent.PartyId, intent.FinishLocalMenus, header),
+                request => request.Header, result => result.Header, ValidateBreakWireShape, BuildBreakCommandKey,
+                ValidateHeader, ExecuteBreak, CreateBreakTerminalResult, _ => AuthorityCommitProbeResult.Pending,
+                _ => { }, _ => { }, configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true, isExpectedClientResult: IsExpectedBreakResult));
         messageBroker.Subscribe<NetworkRequestSiegeAssault>(HandleAssault);
         messageBroker.Subscribe<SiegeAssaultStarted>(HandleAssaultStarted);
         messageBroker.Subscribe<SiegePreparationStarted>(HandlePreparationStarted);
@@ -339,6 +347,10 @@ internal class ServerSiegeEntryHandler : IHandler
     private static string ValidateJoinWireShape(NetworkRequestJoinSiegeCamp request) =>
         ValidateEntryIdentifiers(request.PartyId, request.SettlementId);
 
+    private static string ValidateBreakWireShape(NetworkRequestBreakSiege request) =>
+        string.IsNullOrWhiteSpace(request.PartyId) || request.PartyId.Length > 256
+            ? "invalid-siege-break-party" : null;
+
     private static string ValidateEntryIdentifiers(string partyId, string settlementId) =>
         string.IsNullOrWhiteSpace(partyId) || partyId.Length > 256 ||
         string.IsNullOrWhiteSpace(settlementId) || settlementId.Length > 256
@@ -349,6 +361,9 @@ internal class ServerSiegeEntryHandler : IHandler
 
     private static string BuildJoinCommandKey(NetworkRequestJoinSiegeCamp request) =>
         BuildEntryCommandKey(request.PartyId, request.SettlementId);
+
+    private static string BuildBreakCommandKey(NetworkRequestBreakSiege request) =>
+        string.Concat(request.PartyId.Length, ":", request.PartyId, ":", request.FinishLocalMenus);
 
     private static string BuildEntryCommandKey(string partyId, string settlementId) =>
         string.Concat(partyId.Length, ":", partyId, ":", settlementId.Length, ":", settlementId);
@@ -525,6 +540,16 @@ internal class ServerSiegeEntryHandler : IHandler
         string.Equals(request.PartyId, result.PartyId, StringComparison.Ordinal) &&
         string.Equals(request.SettlementId, result.SettlementId, StringComparison.Ordinal);
 
+    private static NetworkBreakSiegeApproved CreateBreakTerminalResult(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        new(SiegeBreakOutcome.Rejected, false, false,
+            new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason));
+
+    private static bool IsExpectedBreakResult(NetworkRequestBreakSiege request,
+        NetworkBreakSiegeApproved result) =>
+        string.Equals(request.PartyId, result.PartyId, StringComparison.Ordinal) &&
+        request.FinishLocalMenus == result.FinishLocalMenus;
+
     private enum SiegeEntryAction
     {
         Besiege,
@@ -541,6 +566,18 @@ internal class ServerSiegeEntryHandler : IHandler
 
         public string PartyId { get; }
         public string SettlementId { get; }
+    }
+
+    private readonly struct SiegeBreakIntent
+    {
+        public SiegeBreakIntent(string partyId, bool finishLocalMenus)
+        {
+            PartyId = partyId;
+            FinishLocalMenus = finishLocalMenus;
+        }
+
+        public string PartyId { get; }
+        public bool FinishLocalMenus { get; }
     }
 
     private readonly struct SiegeEntryDecision
@@ -563,50 +600,125 @@ internal class ServerSiegeEntryHandler : IHandler
         public static SiegeEntryDecision Isolated(string reason) => new(AuthorityResultStatus.ExecutionFailed, reason, false, true);
     }
 
-    private void HandleBreak(MessagePayload<NetworkRequestBreakSiege> payload)
+    private AuthorityServerReply<NetworkBreakSiegeApproved> ExecuteBreak(
+        AuthorityServerContext context,
+        NetworkRequestBreakSiege request)
     {
-        var obj = payload.What;
-        var peer = (NetPeer)payload.Who;
+        if (!string.Equals(context.Player.MobilePartyId, request.PartyId, StringComparison.Ordinal))
+            return RejectBreak(context, request, "invalid-requester");
+        if (!objectManager.TryGetObjectWithLogging<MobileParty>(context.Player.MobilePartyId, out var party))
+            return RejectBreak(context, request, "party-not-found");
+        if (!party.IsActive || party.Party == null)
+            return RejectBreak(context, request, "party-inactive");
 
-        GameThread.RunSafe(() =>
+        bool mutationStarted = false;
+        string stage = "validate-siege-break";
+        try
         {
-            if (!objectManager.TryGetObjectWithLogging<MobileParty>(obj.PartyId, out var party)) return;
-
             if (party.MapEvent?.IsSiegeAssault == true &&
                 party.Party.Side == BattleSideEnum.Attacker)
             {
+                stage = "publish-battle-leave";
+                mutationStarted = true;
                 messageBroker.Publish(
                     party,
-                    new PlayerLeaveBattleAttempted(party.Party, obj.FinishLocalMenus));
-                network.Send(peer, new NetworkBreakSiegeApproved(
-                    SiegeBreakOutcome.Applied,
-                    obj.FinishLocalMenus,
-                    battleLeaveApplied: true));
-                return;
+                    new PlayerLeaveBattleAttempted(party.Party, request.FinishLocalMenus));
+                if (party.MapEvent != null || party.BesiegerCamp != null)
+                    throw new InvalidOperationException("Siege assault leave did not remove the party from its battle and camp.");
+
+                return AcceptBreak(context, request, battleLeaveApplied: true, siegeContinues: false);
             }
 
+            if (party.MapEvent != null)
+                return RejectBreak(context, request, "invalid-battle-phase");
             if (party.BesiegerCamp == null)
-            {
-                Logger.Information("Party {PartyId} already left its siege camp", obj.PartyId);
-                network.Send(peer, new NetworkBreakSiegeApproved(
-                    SiegeBreakOutcome.AlreadyLeft,
-                    obj.FinishLocalMenus));
-                return;
-            }
+                return RejectBreak(context, request, "not-siege-participant");
 
-            siegeEventInterface.BreakSiege(party);
+            var camp = party.BesiegerCamp;
+            stage = "remove-party-from-siege-camp";
+            mutationStarted = true;
+            // This intentionally isolates only the requester. In particular, an army leader's
+            // attached AI/player parties must retain the siege graph for "leave it to the others".
+            siegeEventInterface.BreakSiegeForPartyOnly(party);
+            if (party.BesiegerCamp != null)
+                throw new InvalidOperationException("Siege camp membership remained after party-only leave.");
 
-            network.Send(peer, new NetworkBreakSiegeApproved(
-                SiegeBreakOutcome.Applied,
-                obj.FinishLocalMenus));
-        });
+            bool siegeContinues = camp.SiegeEvent?.BesiegerCamp?.LeaderParty != null;
+            return AcceptBreak(context, request, battleLeaveApplied: false, siegeContinues);
+        }
+        catch (Exception exception)
+        {
+            Logger.Error(exception,
+                "Siege break failed. Route={Route} SessionId={SessionId} RequestId={RequestId} Party={PartyId} Stage={Stage}",
+                context.RouteId, context.Header.SessionId, context.Header.RequestId, request.PartyId, stage);
+            if (!mutationStarted)
+                return FailedBreak(context, request, "siege-break-failed");
+
+            // The native setters can publish graph changes before an exception. Do not report an
+            // ambiguous departure to a client whose replica could now be divergent.
+            try { context.Peer.Disconnect(); }
+            catch (Exception disconnectException) { Logger.Fatal(disconnectException, "Could not isolate siege-break peer"); }
+            return new AuthorityServerReply<NetworkBreakSiegeApproved>(
+                CreateBreakResult(context.Header, request, AuthorityResultStatus.ExecutionFailed,
+                    "siege-break-isolated", SiegeBreakOutcome.Rejected, false, false),
+                statePublished: false,
+                suppressReply: true);
+        }
     }
+
+    private static AuthorityServerReply<NetworkBreakSiegeApproved> AcceptBreak(
+        AuthorityServerContext context,
+        NetworkRequestBreakSiege request,
+        bool battleLeaveApplied,
+        bool siegeContinues) =>
+        new(CreateBreakResult(context.Header, request, AuthorityResultStatus.Accepted, null,
+                SiegeBreakOutcome.Applied, battleLeaveApplied, siegeContinues), statePublished: true);
+
+    private static AuthorityServerReply<NetworkBreakSiegeApproved> FailedBreak(
+        AuthorityServerContext context,
+        NetworkRequestBreakSiege request,
+        string reason) =>
+        new(CreateBreakResult(context.Header, request, AuthorityResultStatus.ExecutionFailed, reason,
+            SiegeBreakOutcome.Rejected, false, false), statePublished: false);
+
+    private AuthorityServerReply<NetworkBreakSiegeApproved> RejectBreak(
+        AuthorityServerContext context,
+        NetworkRequestBreakSiege request,
+        string reason)
+    {
+        network.Send(context.Peer, new SendInformationMessage($"Unable to leave the siege: {GetBreakFailureMessage(reason)}."));
+        return new AuthorityServerReply<NetworkBreakSiegeApproved>(
+            CreateBreakResult(context.Header, request, AuthorityResultStatus.Rejected, reason,
+                SiegeBreakOutcome.Rejected, false, false), statePublished: false);
+    }
+
+    private static NetworkBreakSiegeApproved CreateBreakResult(
+        AuthorityRequestHeader header,
+        NetworkRequestBreakSiege request,
+        AuthorityResultStatus status,
+        string reason,
+        SiegeBreakOutcome outcome,
+        bool battleLeaveApplied,
+        bool siegeContinues) =>
+        new(outcome, request.FinishLocalMenus, battleLeaveApplied,
+            new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason),
+            request.PartyId, siegeContinues);
+
+    private static string GetBreakFailureMessage(string reason) => reason switch
+    {
+        "invalid-requester" => "your party is not controlled by you",
+        "party-not-found" => "your party is no longer available",
+        "party-inactive" => "your party is inactive",
+        "invalid-battle-phase" => "your party cannot leave this battle through the siege menu",
+        "not-siege-participant" => "your party is no longer participating in this siege",
+        _ => "the server could not apply the request",
+    };
 
     public void Dispose()
     {
         besiegeRoute.Dispose();
         joinRoute.Dispose();
-        messageBroker.Unsubscribe<NetworkRequestBreakSiege>(HandleBreak);
+        breakRoute.Dispose();
         messageBroker.Unsubscribe<NetworkRequestSiegeAssault>(HandleAssault);
         messageBroker.Unsubscribe<SiegeAssaultStarted>(HandleAssaultStarted);
         messageBroker.Unsubscribe<SiegePreparationStarted>(HandlePreparationStarted);

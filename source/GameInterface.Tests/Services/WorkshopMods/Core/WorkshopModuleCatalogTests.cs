@@ -37,8 +37,18 @@ public class WorkshopModuleCatalogTests
         Assert.Equal(4, modules.Count(module => module.Role == WorkshopModuleRole.Framework));
         Assert.Single(modules.Where(module =>
             module.Profile == WorkshopCompatibilityProfile.DeterministicMission));
-        Assert.Equal(4, modules.Count(module =>
-            module.Profile == WorkshopCompatibilityProfile.ServerAuthoritativeCampaign));
+        Assert.Equal(
+            new[]
+            {
+                "ImprovedGarrisons",
+                "Fourberie",
+                "Bannerlord.Diplomacy",
+                "PlayerSettlement",
+                "RebellionsAndDemographics",
+            },
+            modules
+                .Where(module => module.Profile == WorkshopCompatibilityProfile.ServerAuthoritativeCampaign)
+                .Select(module => module.ModuleId));
 
         Assert.DoesNotContain(modules, module => module.ModuleId == "RBM");
         Assert.All(modules.Where(module => module.ModuleId != "RebellionsAndDemographics"), module =>
@@ -50,6 +60,12 @@ public class WorkshopModuleCatalogTests
             module.ModuleId == "RebellionsAndDemographics"));
         Assert.False(held.FeatureActiveExpectedOnServer);
         Assert.False(held.FeatureActiveExpectedOnClient);
+
+        Assert.Collection(
+            modules.Where(module => module.ModuleId.StartsWith("OpenSource")),
+            module => AssertActiveAllPeersExactGearModule(module, "OpenSourceSaddlery"),
+            module => AssertActiveAllPeersExactGearModule(module, "OpenSourceWeaponry"),
+            module => AssertActiveAllPeersExactGearModule(module, "OpenSourceArmory"));
 
         // PlayerSettlement and the asset-only Open Source modules must load before Coop. The
         // former re-guards load-time patches; the latter supply the canonical item definitions.
@@ -81,5 +97,17 @@ public class WorkshopModuleCatalogTests
         Assert.Equal(id, module.ModuleId);
         Assert.Equal(workshopId, module.WorkshopId);
         Assert.Equal(version, module.Version);
+    }
+
+    private static void AssertActiveAllPeersExactGearModule(
+        WorkshopModuleExpectation module,
+        string moduleId)
+    {
+        Assert.Equal(moduleId, module.ModuleId);
+        Assert.Equal(WorkshopModuleRole.Presentation, module.Role);
+        Assert.Equal(WorkshopCompatibilityProfile.AllPeersExact, module.Profile);
+        Assert.True(module.FeatureActiveExpectedOnServer);
+        Assert.True(module.FeatureActiveExpectedOnClient);
+        Assert.True(module.LoadsBeforeCoop);
     }
 }

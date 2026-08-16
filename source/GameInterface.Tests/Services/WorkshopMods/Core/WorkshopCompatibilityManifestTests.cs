@@ -21,7 +21,6 @@ public class WorkshopCompatibilityManifestTests
 
         Assert.True(roundTrip.TryValidateWireShape(out string error), error);
         Assert.Equal(original.ManifestSha256, roundTrip.ManifestSha256);
-        Assert.Equal(10, roundTrip.Entries.Length);
         Assert.Equal(WorkshopPeerRole.Client, roundTrip.PeerRole);
         Assert.Equal(160, roundTrip.Entries.Single(entry => entry.ModuleId == "PlayerSettlement").LoadOrder);
 
@@ -29,12 +28,19 @@ public class WorkshopCompatibilityManifestTests
         // dictates it. The explicit Harmony check proves a true Active actually crossed the
         // wire; without it an all-false wire bug would pass vacuously.
         var catalog = new FriendEditionWorkshopModuleCatalog();
+        Assert.Equal(
+            catalog.Modules.Select(module => module.ModuleId).OrderBy(moduleId => moduleId),
+            roundTrip.Entries.Select(entry => entry.ModuleId).OrderBy(moduleId => moduleId));
         Assert.All(roundTrip.Entries, entry =>
         {
             Assert.True(catalog.TryGet(entry.ModuleId, out WorkshopModuleExpectation expectation));
             Assert.Equal(expectation.FeatureActiveExpectedOnClient, entry.Active);
         });
         Assert.True(roundTrip.Entries.Single(entry => entry.ModuleId == "Bannerlord.Harmony").Active);
+        Assert.All(roundTrip.Entries.Where(entry => entry.ModuleId.StartsWith("OpenSource")), entry =>
+            Assert.True(entry.Active));
+        Assert.False(roundTrip.Entries.Single(entry =>
+            entry.ModuleId == "RebellionsAndDemographics").Active);
     }
 
     [Fact]

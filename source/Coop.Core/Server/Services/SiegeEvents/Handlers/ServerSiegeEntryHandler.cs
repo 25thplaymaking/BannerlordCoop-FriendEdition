@@ -332,7 +332,7 @@ internal class ServerSiegeEntryHandler : IHandler
                 request.PartyId,
                 mapEventId));
             return new AuthorityServerReply<NetworkSiegeAssaultApproved>(
-                CreateAssaultResult(context.Header, request, AuthorityResultStatus.Accepted, null), statePublished: true);
+                CreateAssaultResult(context.Header, request, AuthorityResultStatus.Accepted, null, leaderId, mapEventId), statePublished: true);
         }
         catch (Exception exception)
         {
@@ -454,18 +454,24 @@ internal class ServerSiegeEntryHandler : IHandler
         AuthorityRequestHeader header,
         NetworkRequestSiegeAssault request,
         AuthorityResultStatus status,
-        string reason) =>
+        string reason,
+        string attackerPartyId = null,
+        string mapEventId = null) =>
         new(status == AuthorityResultStatus.Accepted,
             new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason),
             request.PartyId,
-            request.SettlementId);
+            request.SettlementId,
+            attackerPartyId,
+            mapEventId);
 
     private static bool IsExpectedAssaultResult(
         NetworkRequestSiegeAssault request,
         NetworkSiegeAssaultApproved result) =>
         result.Approved == (result.Header.Status == AuthorityResultStatus.Accepted) &&
         string.Equals(request.PartyId, result.PartyId, StringComparison.Ordinal) &&
-        string.Equals(request.SettlementId, result.SettlementId, StringComparison.Ordinal);
+        string.Equals(request.SettlementId, result.SettlementId, StringComparison.Ordinal) &&
+        (result.Header.Status != AuthorityResultStatus.Accepted ||
+            (!string.IsNullOrWhiteSpace(result.AttackerPartyId) && !string.IsNullOrWhiteSpace(result.MapEventId)));
 
     private AuthorityServerReply<NetworkBreakInContinuationApproved> RejectBreakIn(
         AuthorityServerContext context,

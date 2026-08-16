@@ -2215,8 +2215,6 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
             enterSettlement: false);
         client.NetworkSentMessages.Clear();
         Server.NetworkSentMessages.Clear();
-        client.Call(() =>
-            client.Resolve<ClientSiegeEntryHandler>().BreakInContinuationTimeout = TimeSpan.Zero);
 
         var captureRequestDisabledMethods = MapEventDisabledMethods
             .Append(GetNetworkRoutingMethod())
@@ -2254,11 +2252,7 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
 
         client.NetworkSentMessages.Clear();
         client.Call(InvokeBreakInContinuation, captureRequestDisabledMethods);
-
-        var firstRequestId = breakInRequest.RequestId;
-        breakInRequest = Assert.Single(
-            client.NetworkSentMessages.GetMessages<NetworkRequestBreakInContinuation>());
-        Assert.NotEqual(firstRequestId, breakInRequest.RequestId);
+        Assert.Empty(client.NetworkSentMessages.GetMessages<NetworkRequestBreakInContinuation>());
         client.Call(() =>
         {
             stagedLocationEncounter = PlayerEncounter.LocationEncounter;
@@ -2304,7 +2298,7 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
             settlementEntry.SettlementId);
         var breakInApproval = Assert.Single(
             Server.NetworkSentMessages.GetMessages<NetworkBreakInContinuationApproved>());
-        Assert.Equal(breakInRequest.RequestId, breakInApproval.RequestId);
+        Assert.Equal(breakInRequest.Header.RequestId, breakInApproval.Header.RequestId);
         Assert.True(breakInApproval.Approved);
         Assert.Empty(client.NetworkSentMessages.GetMessages<NetworkRequestConversation>());
         AssertPartyEnteredSettlement(Server, playerMobilePartyId, siege.SettlementId);
@@ -2327,7 +2321,14 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
             .Append(AccessTools.Method(typeof(PlayerSiege), nameof(PlayerSiege.StartSiegePreparation)))
             .ToList();
         client.Call(
-            () => client.SimulateMessage(Server.NetPeer, breakInApproval),
+            () =>
+            {
+                client.SimulateMessage(Server.NetPeer, new NetworkPartyEnterSettlement(
+                    ObjectManager.Compact(siege.SettlementId, typeof(Settlement)),
+                    ObjectManager.Compact(playerMobilePartyId, typeof(MobileParty)),
+                    breakInApproval.Header));
+                client.SimulateMessage(Server.NetPeer, breakInApproval);
+            },
             captureContinuationDisabledMethods);
 
         var request = Assert.Single(client.NetworkSentMessages.GetMessages<NetworkRequestConversation>());
@@ -2368,8 +2369,6 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
             playerPartyId,
             siege.SettlementId,
             enterSettlement: false);
-        client.Call(() =>
-            client.Resolve<ClientSiegeEntryHandler>().BreakInContinuationTimeout = TimeSpan.FromMinutes(1));
         client.NetworkSentMessages.Clear();
 
         var captureRequestDisabledMethods = MapEventDisabledMethods
@@ -2387,12 +2386,12 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
 
         var retainedRequest = Assert.Single(
             client.NetworkSentMessages.GetMessages<NetworkRequestBreakInContinuation>());
-        Assert.Equal(request.RequestId, retainedRequest.RequestId);
+        Assert.Equal(request.Header.RequestId, retainedRequest.Header.RequestId);
         client.Call(() => Assert.Same(stagedLocationEncounter, PlayerEncounter.LocationEncounter));
     }
 
     [Fact]
-    public void BreakInContinuation_TimedOutRequestRetriesAndIgnoresStaleApproval()
+    public void BreakInContinuation_PendingRouteSuppressesRetryAndUnwindsOnRejectedResult()
     {
         var (client, _, playerPartyId, _) = CreateTwoPlayerParties();
         var siege = CreateSyncedSiege();
@@ -2425,8 +2424,6 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
                 Assert.Equal(AiBehavior.EngageParty, playerParty.MobileParty.DefaultBehavior);
             }, MapEventDisabledMethods);
         }
-        client.Call(() =>
-            client.Resolve<ClientSiegeEntryHandler>().BreakInContinuationTimeout = TimeSpan.Zero);
         client.NetworkSentMessages.Clear();
         LocationEncounter? previousLocationEncounter = null;
         client.Call(() => previousLocationEncounter = PlayerEncounter.LocationEncounter);
@@ -2445,28 +2442,22 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
 
         client.NetworkSentMessages.Clear();
         client.Call(InvokeBreakInContinuation, captureRequestDisabledMethods);
-
-        var replacementRequest = Assert.Single(
-            client.NetworkSentMessages.GetMessages<NetworkRequestBreakInContinuation>());
-        Assert.NotEqual(firstRequest.RequestId, replacementRequest.RequestId);
-        LocationEncounter? replacementLocationEncounter = null;
-        client.Call(() => replacementLocationEncounter = PlayerEncounter.LocationEncounter);
-        Assert.NotNull(replacementLocationEncounter);
+        Assert.Empty(client.NetworkSentMessages.GetMessages<NetworkRequestBreakInContinuation>());
+        client.Call(() => Assert.Same(firstStagedLocationEncounter, PlayerEncounter.LocationEncounter));
 
         client.SimulateMessage(
             Server.NetPeer,
             new NetworkBreakInContinuationApproved(
-                firstRequest.RequestId,
+                null,
                 firstRequest.SettlementId,
-                approved: false));
-        client.Call(() => Assert.Same(replacementLocationEncounter, PlayerEncounter.LocationEncounter));
-
-        client.SimulateMessage(
-            Server.NetPeer,
-            new NetworkBreakInContinuationApproved(
-                replacementRequest.RequestId,
-                replacementRequest.SettlementId,
-                approved: false));
+                approved: false,
+                new AuthorityResultHeader(
+                    firstRequest.Header.SessionId,
+                    firstRequest.Header.RequestId,
+                    AuthorityResultStatus.Rejected,
+                    firstRequest.Header.ExpectedRevision,
+                    "cannot-continue-break-in"),
+                firstRequest.PartyId));
         client.Call(() =>
         {
             Assert.Null(PlayerEncounter.Current);
@@ -2554,7 +2545,13 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
             Server.NetPeer,
             new NetworkPartyEnterSettlement(
                 ObjectManager.Compact(siege.SettlementId, typeof(Settlement)),
-                ObjectManager.Compact(playerMobilePartyId, typeof(MobileParty))));
+                ObjectManager.Compact(playerMobilePartyId, typeof(MobileParty)),
+                new AuthorityResultHeader(
+                    request.Header.SessionId,
+                    request.Header.RequestId,
+                    AuthorityResultStatus.Accepted,
+                    request.Header.ExpectedRevision,
+                    null)));
         AssertPartyEnteredSettlement(client, playerMobilePartyId, siege.SettlementId);
 
         PlayerEncounter? changedEncounter = null;
@@ -2571,9 +2568,16 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
         client.SimulateMessage(
             Server.NetPeer,
             new NetworkBreakInContinuationApproved(
-                request.RequestId,
+                null,
                 request.SettlementId,
-                approved: true));
+                approved: true,
+                new AuthorityResultHeader(
+                    request.Header.SessionId,
+                    request.Header.RequestId,
+                    AuthorityResultStatus.Accepted,
+                    request.Header.ExpectedRevision,
+                    null),
+                request.PartyId));
 
         Assert.Empty(client.NetworkSentMessages.GetMessages<NetworkRequestConversation>());
         AssertPartyEnteredSettlement(client, playerMobilePartyId, siege.SettlementId);

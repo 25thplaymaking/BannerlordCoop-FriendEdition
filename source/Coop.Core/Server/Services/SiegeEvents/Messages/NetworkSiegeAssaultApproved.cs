@@ -15,16 +15,24 @@ public record NetworkSiegeAssaultApproved : IEvent
     public string PartyId { get; }
     [ProtoMember(4)]
     public string SettlementId { get; }
+    [ProtoMember(5)]
+    public string AttackerPartyId { get; }
+    [ProtoMember(6)]
+    public string MapEventId { get; }
 
     public NetworkSiegeAssaultApproved(
         bool approved,
         AuthorityResultHeader header,
         string partyId,
-        string settlementId)
+        string settlementId,
+        string attackerPartyId = null,
+        string mapEventId = null)
     {
         Approved = approved;
         Header = header;
         PartyId = partyId;
         SettlementId = settlementId;
+        AttackerPartyId = attackerPartyId;
+        MapEventId = mapEventId;
     }
 }

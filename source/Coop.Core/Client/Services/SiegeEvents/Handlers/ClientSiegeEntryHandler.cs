@@ -67,8 +67,6 @@ internal class ClientSiegeEntryHandler : IHandler
         }
     }
 
-    internal TimeSpan BreakInContinuationTimeout { get; set; }
-
     // Kept for focused legacy unit tests that exercise only the unrelated break/termination UI path.
     internal ClientSiegeEntryHandler(
         IMessageBroker messageBroker,
@@ -96,7 +94,6 @@ internal class ClientSiegeEntryHandler : IHandler
         this.siegeEventInterface = siegeEventInterface;
         this.loadingInterface = loadingInterface;
         this.configAuthority = configAuthority;
-        BreakInContinuationTimeout = configuration.ObjectCreationTimeout;
         if (authorityRequestRouter != null && configAuthority != null)
         {
             besiegeRoute = authorityRequestRouter.Register(
@@ -200,7 +197,7 @@ internal class ClientSiegeEntryHandler : IHandler
     private void HandleCorrelatedSettlementEntry(MessagePayload<NetworkPartyEnterSettlement> payload)
     {
         var obj = payload.What;
-        if (obj.Header.RequestId <= 0) return;
+        if (obj.Header.RequestId <= 0 || configAuthority?.IsTrustedServer(payload.Who) != true) return;
         lastBreakInState = new CorrelatedBreakInState(obj.Header, obj.PartyId, obj.SettlementId);
     }
 
@@ -360,6 +357,10 @@ internal class ClientSiegeEntryHandler : IHandler
     {
         var obj = payload.What;
 
+        // A prompt can create a local encounter, so neither its presentation nor its route proof
+        // may be accepted from a peer that has not passed the server trust gate.
+        if (configAuthority?.IsTrustedServer(payload.Who) != true) return;
+
         GameThread.RunSafe(() =>
         {
             if (obj.Header.RequestId > 0)
@@ -367,7 +368,8 @@ internal class ClientSiegeEntryHandler : IHandler
                     obj.Header,
                     obj.RequestingPartyId,
                     obj.SettlementId,
-                    obj.MapEventId);
+                    obj.MapEventId,
+                    obj.AttackerPartyId);
             if (!objectManager.TryGetObjectWithLogging<MobileParty>(obj.AttackerPartyId, out var attackerParty)) return;
             if (!objectManager.TryGetObjectWithLogging<Settlement>(obj.SettlementId, out var settlement)) return;
 
@@ -557,9 +559,19 @@ internal class ClientSiegeEntryHandler : IHandler
     private AuthorityCommitProbeResult ProbeAssaultCommit(NetworkSiegeAssaultApproved result)
     {
         var state = lastAssaultState;
-        if (state == null || !HeadersMatch(state.Header, result.Header) ||
+        if (state == null) return AuthorityCommitProbeResult.Pending;
+        if (IsSameAuthorityRequest(state.Header, result.Header) &&
+            (!HeadersMatch(state.Header, result.Header) ||
+             !string.Equals(state.RequestingPartyId, result.PartyId, StringComparison.Ordinal) ||
+             !string.Equals(state.SettlementId, result.SettlementId, StringComparison.Ordinal) ||
+             !string.Equals(state.AttackerPartyId, result.AttackerPartyId, StringComparison.Ordinal) ||
+             !string.Equals(state.MapEventId, result.MapEventId, StringComparison.Ordinal)))
+            return AuthorityCommitProbeResult.Invalid;
+        if (!HeadersMatch(state.Header, result.Header) ||
             !string.Equals(state.RequestingPartyId, result.PartyId, StringComparison.Ordinal) ||
-            !string.Equals(state.SettlementId, result.SettlementId, StringComparison.Ordinal))
+            !string.Equals(state.SettlementId, result.SettlementId, StringComparison.Ordinal) ||
+            !string.Equals(state.AttackerPartyId, result.AttackerPartyId, StringComparison.Ordinal) ||
+            !string.Equals(state.MapEventId, result.MapEventId, StringComparison.Ordinal))
             return AuthorityCommitProbeResult.Pending;
         if (!objectManager.TryGetObject<MobileParty>(result.PartyId, out var party) ||
             !objectManager.TryGetObject<Settlement>(result.SettlementId, out var settlement) ||
@@ -568,7 +580,11 @@ internal class ClientSiegeEntryHandler : IHandler
 
         return ReferenceEquals(settlement.Party?.MapEvent, mapEvent) &&
             ReferenceEquals(party.MapEvent, mapEvent) &&
-            mapEvent.IsSiegeAssault && party.Party.Side == BattleSideEnum.Attacker
+            mapEvent.IsSiegeAssault && party.Party.Side == BattleSideEnum.Attacker &&
+            objectManager.TryGetId(mapEvent.AttackerSide?.LeaderParty, out var authoritativeAttackerId) &&
+            objectManager.TryGetId(settlement.SiegeEvent?.BesiegerCamp?.LeaderParty, out var campLeaderId) &&
+            string.Equals(campLeaderId, result.AttackerPartyId, StringComparison.Ordinal) &&
+            string.Equals(authoritativeAttackerId, result.AttackerPartyId, StringComparison.Ordinal)
             ? AuthorityCommitProbeResult.Applied
             : AuthorityCommitProbeResult.Pending;
     }
@@ -576,7 +592,13 @@ internal class ClientSiegeEntryHandler : IHandler
     private AuthorityCommitProbeResult ProbeBreakInCommit(NetworkBreakInContinuationApproved result)
     {
         var state = lastBreakInState;
-        if (state == null || !HeadersMatch(state.Header, result.Header) ||
+        if (state == null) return AuthorityCommitProbeResult.Pending;
+        if (IsSameAuthorityRequest(state.Header, result.Header) &&
+            (!HeadersMatch(state.Header, result.Header) ||
+             !string.Equals(state.PartyId, result.PartyId, StringComparison.Ordinal) ||
+             !string.Equals(state.SettlementId, result.SettlementId, StringComparison.Ordinal)))
+            return AuthorityCommitProbeResult.Invalid;
+        if (!HeadersMatch(state.Header, result.Header) ||
             !string.Equals(state.PartyId, result.PartyId, StringComparison.Ordinal) ||
             !string.Equals(state.SettlementId, result.SettlementId, StringComparison.Ordinal) ||
             !objectManager.TryGetObject<MobileParty>(result.PartyId, out var party) ||
@@ -591,6 +613,9 @@ internal class ClientSiegeEntryHandler : IHandler
     private static bool HeadersMatch(AuthorityResultHeader left, AuthorityResultHeader right) =>
         left.RequestId == right.RequestId && left.CommittedRevision == right.CommittedRevision &&
         left.Status == right.Status && string.Equals(left.SessionId, right.SessionId, StringComparison.Ordinal);
+
+    private static bool IsSameAuthorityRequest(AuthorityResultHeader left, AuthorityResultHeader right) =>
+        left.RequestId == right.RequestId && string.Equals(left.SessionId, right.SessionId, StringComparison.Ordinal);
 
     private bool HasCanonicalCampMembership(string partyId, string settlementId, bool requireLeader)
     {
@@ -774,18 +799,25 @@ internal class ClientSiegeEntryHandler : IHandler
 
     private sealed class CorrelatedAssaultState
     {
-        public CorrelatedAssaultState(AuthorityResultHeader header, string requestingPartyId, string settlementId, string mapEventId)
+        public CorrelatedAssaultState(
+            AuthorityResultHeader header,
+            string requestingPartyId,
+            string settlementId,
+            string mapEventId,
+            string attackerPartyId)
         {
             Header = header;
             RequestingPartyId = requestingPartyId;
             SettlementId = settlementId;
             MapEventId = mapEventId;
+            AttackerPartyId = attackerPartyId;
         }
 
         public AuthorityResultHeader Header { get; }
         public string RequestingPartyId { get; }
         public string SettlementId { get; }
         public string MapEventId { get; }
+        public string AttackerPartyId { get; }
     }
 
     private sealed class CorrelatedBreakInState

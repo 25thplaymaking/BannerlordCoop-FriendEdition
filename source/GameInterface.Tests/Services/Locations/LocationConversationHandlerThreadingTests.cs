@@ -37,12 +37,6 @@ public sealed class LocationConversationHandlerThreadingTests
             using var messageBroker = new MessageBroker();
             using var network = new TestNetwork();
             using var tracker = new LocationConversationTracker(new Mock<IObjectManager>().Object);
-            using var handler = new LocationConversationHandler(
-                messageBroker,
-                network,
-                tracker,
-                new Mock<IPlayerManager>().Object);
-
             var peer = network.CreatePeer();
             Assert.True(tracker.TryBeginEngagement(peer, "location|player", "location|npc"));
 
@@ -64,8 +58,8 @@ public sealed class LocationConversationHandlerThreadingTests
                 GameThread.RunSafe(() =>
                     engagementWasActiveForEarlierWork = tracker.TryGetEngagement(peer, out _));
 
-                // The later conversation-end packet must enqueue its release behind that validation.
-                messageBroker.Publish(peer, new NetworkLocationConversationEnded());
+                // The authority end executor queues release after earlier authorization validation.
+                GameThread.RunSafe(() => tracker.TryEndEngagement(peer, out _));
             }
             finally
             {

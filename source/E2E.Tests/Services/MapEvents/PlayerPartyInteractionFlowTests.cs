@@ -3003,7 +3003,6 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
             AssertPeaceMade(environmentClient, playerClanId, targetClanId);
         }
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkLocationConversationEnded()));
     }
 
     [Fact]
@@ -3078,7 +3077,6 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
         });
         AssertWarListsContainEachOther(Server, playerClanId, targetClanId);
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkLocationConversationEnded()));
     }
 
     [Fact]

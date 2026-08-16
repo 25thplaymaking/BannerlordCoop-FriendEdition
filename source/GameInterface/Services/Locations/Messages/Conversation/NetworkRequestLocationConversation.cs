@@ -1,4 +1,5 @@
 using Common.Messaging;
+using GameInterface.Services.AuthorityRequests;
 using ProtoBuf;
 
 namespace GameInterface.Services.Locations.Messages.Conversation;
@@ -10,6 +11,7 @@ namespace GameInterface.Services.Locations.Messages.Conversation;
 /// <see cref="Generation"/> so the client can ignore a stale reply for a request it has since abandoned.
 /// </summary>
 [ProtoContract(SkipConstructor = true)]
+[AuthorityRoute("location.conversation.begin", AuthorityRouteKind.Command)]
 internal readonly struct NetworkRequestLocationConversation : ICommand
 {
     [ProtoMember(1)]
@@ -18,11 +20,13 @@ internal readonly struct NetworkRequestLocationConversation : ICommand
     public readonly string CharacterId;
     [ProtoMember(3)]
     public readonly int Generation;
+    [ProtoMember(4)] public readonly AuthorityRequestHeader Header;
 
-    public NetworkRequestLocationConversation(string locationId, string characterId, int generation)
+    public NetworkRequestLocationConversation(string locationId, string characterId, int generation, AuthorityRequestHeader header = default)
     {
         LocationId = locationId;
         CharacterId = characterId;
         Generation = generation;
+        Header = header;
     }
 }

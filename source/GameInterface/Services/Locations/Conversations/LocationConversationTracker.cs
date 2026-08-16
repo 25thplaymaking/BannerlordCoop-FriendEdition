@@ -1,5 +1,7 @@
 ﻿using Common.Messaging;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.Locations.Messages.Conversation;
+using System;
 using System.Collections.Generic;
 
 namespace GameInterface.Services.Locations.Conversations;
@@ -40,6 +42,11 @@ internal sealed class LocationConversationTracker : IHandler
     private readonly object stateLock = new object();
     private readonly Dictionary<string, object> engagerByNpcKey = new Dictionary<string, object>();
     private readonly Dictionary<object, Engagement> engagementByEngager = new Dictionary<object, Engagement>();
+    private readonly Dictionary<string, Lease> leasesById = new Dictionary<string, Lease>();
+    private readonly Dictionary<object, string> leaseByOwner = new Dictionary<object, string>();
+    private readonly Dictionary<string, Lease> replicas = new Dictionary<string, Lease>();
+    private string replicaSessionId;
+    private long leaseRevision;
 
     private volatile bool isEmpty = true;
 
@@ -64,6 +71,7 @@ internal sealed class LocationConversationTracker : IHandler
         {
             engagerByNpcKey.Clear();
             engagementByEngager.Clear();
+            leasesById.Clear(); leaseByOwner.Clear(); replicas.Clear(); replicaSessionId = null;
             isEmpty = true;
         }
 
@@ -75,6 +83,51 @@ internal sealed class LocationConversationTracker : IHandler
     /// character template in two different locations is tracked separately.
     /// </summary>
     public static string ComposeKey(string locationId, string characterId) => $"{locationId}|{characterId}";
+
+    internal readonly struct Lease
+    {
+        public Lease(string id, long revision, bool active, object owner, string sessionId, string locationId, string ownerCharacterId, string targetCharacterId)
+        { Id=id; Revision=revision; Active=active; Owner=owner; SessionId=sessionId; LocationId=locationId; OwnerCharacterId=ownerCharacterId; TargetCharacterId=targetCharacterId; }
+        public string Id { get; } public long Revision { get; } public bool Active { get; } public object Owner { get; }
+        public string SessionId { get; } public string LocationId { get; } public string OwnerCharacterId { get; } public string TargetCharacterId { get; }
+    }
+
+    internal Lease BeginLease(object owner, string sessionId, string locationId, string ownerCharacterId, string targetCharacterId)
+    {
+        lock (stateLock)
+        {
+            var lease = new Lease(Guid.NewGuid().ToString("N"), ++leaseRevision, true, owner, sessionId, locationId, ownerCharacterId, targetCharacterId);
+            leasesById[lease.Id] = lease; leaseByOwner[owner] = lease.Id; return lease;
+        }
+    }
+    internal bool TryGetLease(string id, out Lease lease) { lock (stateLock) return leasesById.TryGetValue(id, out lease); }
+    internal bool TryGetActiveLeaseByOwner(object owner, out Lease lease)
+    { lock (stateLock) { lease=default; return owner != null && leaseByOwner.TryGetValue(owner, out var id) && leasesById.TryGetValue(id,out lease) && lease.Active; } }
+    internal bool TryEndLease(object owner, string id, out Lease ended)
+    {
+        lock (stateLock)
+        {
+            ended=default; if (!leasesById.TryGetValue(id, out var lease) || !ReferenceEquals(lease.Owner, owner)) return false;
+            if (!lease.Active) { ended=lease; return true; }
+            ended = new Lease(lease.Id, ++leaseRevision, false, lease.Owner, lease.SessionId, lease.LocationId, lease.OwnerCharacterId, lease.TargetCharacterId);
+            leasesById[id]=ended; leaseByOwner.Remove(owner); return true;
+        }
+    }
+    internal void ResetReplicaSession(string sessionId) { lock(stateLock) { replicaSessionId=sessionId; replicas.Clear(); } }
+    internal bool ApplyLeaseState(NetworkLocationConversationLeaseState state)
+    {
+        lock(stateLock)
+        {
+            if (replicaSessionId != state.SessionId) return false;
+            if (replicas.TryGetValue(state.LeaseId,out var current) && current.Revision >= state.Revision)
+                return current.Revision == state.Revision && current.Active == state.IsActive && current.LocationId == state.LocationId && current.OwnerCharacterId == state.OwnerCharacterId && current.TargetCharacterId == state.TargetCharacterId;
+            replicas[state.LeaseId]=new Lease(state.LeaseId,state.Revision,state.IsActive,null,state.SessionId,state.LocationId,state.OwnerCharacterId,state.TargetCharacterId); return true;
+        }
+    }
+    internal bool IsReplicaLease(string sessionId, string id, long revision, bool active, string locationId, string ownerCharacterId, string targetCharacterId)
+    { lock(stateLock) return replicaSessionId==sessionId && replicas.TryGetValue(id,out var x) && x.Revision==revision && x.Active==active &&
+        (locationId == null || x.LocationId==locationId) && (ownerCharacterId == null || x.OwnerCharacterId==ownerCharacterId) &&
+        (targetCharacterId == null || x.TargetCharacterId==targetCharacterId); }
 
     /// <summary>
     /// Begins (or refreshes) <paramref name="engagerKey"/>'s engagement of the given NPC. Both the

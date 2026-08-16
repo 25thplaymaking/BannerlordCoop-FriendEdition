@@ -1,9 +1,12 @@
 ﻿using Common.Network;
+using Common.Messaging;
 using Common.Util;
 using E2E.Tests.Environment.Instance;
 using E2E.Tests.Services.MapEvents;
 using GameInterface.Services.Entity;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Locations.Conversations;
+using GameInterface.Services.Locations.Conversations.Handlers;
 using GameInterface.Services.Locations.Messages.Conversation;
 using GameInterface.Services.MapEvents.Messages.Conversation;
 using GameInterface.Services.MapEvents.PlayerPartyInteractions;
@@ -66,20 +69,17 @@ public sealed class LocationConversationFlowTests : MapEventTestBase
         }, MapEventDisabledMethods);
 
         Server.NetworkSentMessages.Clear();
-        initiatorClient.Call(() =>
-            initiatorClient.Resolve<INetwork>().SendAll(new NetworkRequestLocationConversation(
-                "test_location",
-                receiverCharacterId,
-                generation: 1)));
+        initiatorClient.Call(() => initiatorClient.Resolve<LocationConversationHandler>().SubmitConversation(
+            new NetworkRequestLocationConversation("test_location", receiverCharacterId, generation: 1)));
 
         var started = Server.NetworkSentMessages.GetMessages<NetworkPlayerInteractionStarted>().Single();
         Assert.Equal(receiverPartyId, started.DefenderPartyId);
         Assert.True(started.IsLocationInteraction);
-        Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkAllowLocationConversation>());
+        var accepted = Server.NetworkSentMessages.GetMessages<NetworkLocationConversationBeginResult>().Single();
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkPlayerPartyInteractionStarted>());
 
         Server.NetworkSentMessages.Clear();
-        initiatorClient.Call(() => initiatorClient.Resolve<INetwork>().SendAll(new NetworkLocationConversationEnded()));
+        initiatorClient.Call(() => initiatorClient.Resolve<LocationConversationHandler>().SubmitConversationEnd(accepted.LeaseId));
 
         var ended = Server.NetworkSentMessages.GetMessages<NetworkPlayerInteractionEnded>().Single();
         Assert.Equal(receiverPartyId, ended.DefenderPartyId);
@@ -97,19 +97,13 @@ public sealed class LocationConversationFlowTests : MapEventTestBase
         var secondPartyId = GetPartyBaseId(secondPlayer.MobilePartyId);
 
         Server.NetworkSentMessages.Clear();
-        firstClient.Call(() =>
-            firstClient.Resolve<INetwork>().SendAll(new NetworkRequestLocationConversation(
-                "test_location",
-                secondPlayer.CharacterId,
-                generation: 1)));
-        secondClient.Call(() =>
-            secondClient.Resolve<INetwork>().SendAll(new NetworkRequestLocationConversation(
-                "test_location",
-                firstPlayer.CharacterId,
-                generation: 2)));
+        firstClient.Call(() => firstClient.Resolve<LocationConversationHandler>().SubmitConversation(
+            new NetworkRequestLocationConversation("test_location", secondPlayer.CharacterId, generation: 1)));
+        secondClient.Call(() => secondClient.Resolve<LocationConversationHandler>().SubmitConversation(
+            new NetworkRequestLocationConversation("test_location", firstPlayer.CharacterId, generation: 2)));
 
-        var allowed = Server.NetworkSentMessages.GetMessages<NetworkAllowLocationConversation>().Single();
-        var denied = Server.NetworkSentMessages.GetMessages<NetworkLocationConversationDenied>().Single();
+        var allowed = Server.NetworkSentMessages.GetMessages<NetworkLocationConversationBeginResult>().Single(x => x.Header.Status == AuthorityResultStatus.Accepted);
+        var denied = Server.NetworkSentMessages.GetMessages<NetworkLocationConversationBeginResult>().Single(x => x.Header.Status != AuthorityResultStatus.Accepted);
         var started = Server.NetworkSentMessages.GetMessages<NetworkPlayerInteractionStarted>().Single();
 
         Assert.Equal(1, allowed.Generation);

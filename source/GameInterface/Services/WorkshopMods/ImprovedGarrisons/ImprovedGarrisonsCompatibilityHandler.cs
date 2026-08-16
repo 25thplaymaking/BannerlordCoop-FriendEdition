@@ -888,6 +888,69 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
         StartSnapshotBootstrap();
     }
 
+    private void Handle_State(MessagePayload<NetworkImprovedGarrisonsState> payload)
+    {
+        if (!compatible || !ModInformation.IsClient || payload.Who is not NetPeer serverPeer ||
+            !ImprovedGarrisonsSnapshotOriginGuard.IsTrustedServerTransport(serverPeer, localIsClient: true))
+            return;
+
+        GameThread.RunSafe(() =>
+        {
+            if (TryApplyState(payload.What, out var rejection))
+            {
+                stateReady = true;
+                SnapshotReadiness = WorkshopSnapshotReadiness.Ready;
+                if (configAuthority.TryGetCurrent(out var config)) SnapshotSessionId = config.SessionId;
+                SnapshotRevision = payload.What.Revision;
+                TryOpenPendingPartyScreens();
+                return;
+            }
+
+            stateReady = false;
+            Logger.Fatal("Disconnecting from the Coop server because Improved Garrisons state could not be accepted: {Failure}",
+                rejection);
+            try
+            {
+                InformationManager.DisplayMessage(new InformationMessage(
+                    "Improved Garrisons compatibility validation failed. The co-op connection was closed to prevent a divergent campaign. " +
+                    rejection));
+            }
+            catch (Exception displayException)
+            {
+                Logger.Error(displayException, "Could not display the Improved Garrisons compatibility failure");
+            }
+            finally
+            {
+                serverPeer.Disconnect();
+            }
+        }, context: nameof(ImprovedGarrisonsCompatibilityHandler));
+    }
+
+    private void Handle_StateQueryResult(MessagePayload<NetworkImprovedGarrisonsStateQueryResult> payload)
+    {
+        if (!compatible || !ModInformation.IsClient || payload?.Who is not NetPeer serverPeer ||
+            !configAuthority.IsTrustedServer(serverPeer) || payload.What.Header.Status != AuthorityResultStatus.Accepted ||
+            payload.What.Snapshot == null)
+            return;
+
+        GameThread.RunSafe(() =>
+        {
+            if (TryApplyState(payload.What.Snapshot, out var failure))
+            {
+                stateReady = true;
+                SnapshotReadiness = WorkshopSnapshotReadiness.Ready;
+                if (configAuthority.TryGetCurrent(out var config)) SnapshotSessionId = config.SessionId;
+                SnapshotRevision = payload.What.Snapshot.Revision;
+                TryOpenPendingPartyScreens();
+                return;
+            }
+            stateReady = false;
+            Logger.Fatal("Disconnecting from the Coop server because Improved Garrisons state could not be accepted: {Failure}",
+                failure);
+            serverPeer.Disconnect();
+        }, context: nameof(ImprovedGarrisonsCompatibilityHandler));
+    }
+
     private void StartSnapshotBootstrap()
     {
         if (!compatible || !objectsRegistered || !ModInformation.IsClient || stateReady ||
@@ -977,12 +1040,13 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
         ParameterInfo[] parameters = method.GetParameters();
         object[] arguments = new object[parameters.Length];
         arguments[0] = town;
-        if (parameters.Length == 2 &&
-            (!ImprovedGarrisonsCanonicalState.TryParseValue(request.Value, parameters[1].ParameterType, out var value) ||
-             !IsValueAllowed(method.Name, value)))
-            return SettingReply(context.Header, request, AuthorityResultStatus.InvalidRequest, "invalid-setting-value", false);
-
-        if (parameters.Length == 2) arguments[1] = value;
+        if (parameters.Length == 2)
+        {
+            if (!ImprovedGarrisonsCanonicalState.TryParseValue(request.Value, parameters[1].ParameterType, out var value) ||
+                !IsValueAllowed(method.Name, value))
+                return SettingReply(context.Header, request, AuthorityResultStatus.InvalidRequest, "invalid-setting-value", false);
+            arguments[1] = value;
+        }
         object manager = ResolveManager(method.DeclaringType);
         if (manager == null) return SettingReply(context.Header, request, AuthorityResultStatus.Unavailable, "setting-manager-unavailable", false);
         if (!ImprovedGarrisonsCanonicalState.TryBuild(assembly, objectManager, out var rollback, out var rollbackHash, out var captureFailure))
@@ -1045,9 +1109,10 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
             nativeStarted = IsNativeOperation(request.Operation);
             if (nativeStarted && !TryExecuteNativeOperation(context.Peer, request, town, out partyId, out var executionFailure))
                 throw new InvalidOperationException("native execution failed: " + executionFailure);
-            if (!TryCaptureState(out var post, out var postFailure) ||
-                !ManagementPostStateMatches(context.Peer, request, town, partyId, post, out var proofFailure))
-                throw new InvalidOperationException(proofFailure ?? postFailure ?? "unverifiable-native-poststate");
+            if (!TryCaptureState(out var post, out var postFailure))
+                throw new InvalidOperationException(postFailure ?? "native poststate capture failed");
+            if (!ManagementPostStateMatches(context.Peer, request, town, partyId, post, out var proofFailure))
+                throw new InvalidOperationException(proofFailure ?? "unverifiable-native-poststate");
             if (!PublishStateIfChanged())
                 throw new InvalidOperationException("snapshot publication failed");
             return ManagementReply(context.Header, request, AuthorityResultStatus.Accepted, null, true, partyId);
@@ -1762,13 +1827,6 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
                 : "authoritative state is not ready";
             return false;
         }
-        if (request.Operation == ImprovedGarrisonsOperation.CreateTransferParty &&
-            !HasStableTransferProof())
-        {
-            failure = "native-poststate-unavailable-CreateTransferParty";
-            return false;
-        }
-
         bool changed = lastPublishedHash != null &&
             !string.Equals(lastPublishedHash, hash, StringComparison.OrdinalIgnoreCase);
         long publishedRevision = changed ? revision + 1 : revision;

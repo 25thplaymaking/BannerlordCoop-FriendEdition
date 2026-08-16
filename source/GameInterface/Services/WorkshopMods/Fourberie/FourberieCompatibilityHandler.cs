@@ -184,30 +184,30 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         string targetId = string.Empty;
         string secondaryTargetId = string.Empty;
         if (operation.Settlement != null && !objectManager.TryGetId(operation.Settlement, out settlementId))
-            return false;
+            return InvalidOperationRequest(header);
         int targetKinds = (operation.TargetHero != null ? 1 : 0) +
                           (operation.TargetClan != null ? 1 : 0) +
                           (operation.TargetObject != null ? 1 : 0);
-        if (targetKinds > 1) return false;
+        if (targetKinds > 1) return InvalidOperationRequest(header);
         if (operation.TargetHero != null && !objectManager.TryGetId(operation.TargetHero, out targetId))
-            return false;
+            return InvalidOperationRequest(header);
         if (operation.TargetClan != null && !objectManager.TryGetId(operation.TargetClan, out targetId))
-            return false;
+            return InvalidOperationRequest(header);
         if (operation.TargetObject != null && !objectManager.TryGetId(operation.TargetObject, out targetId))
-            return false;
+            return InvalidOperationRequest(header);
         if (operation.SecondarySettlement != null &&
             !objectManager.TryGetId(operation.SecondarySettlement, out secondaryTargetId))
-            return false;
+            return InvalidOperationRequest(header);
         if (!string.IsNullOrEmpty(operation.SecondaryId))
         {
-            if (!string.IsNullOrEmpty(secondaryTargetId)) return false;
+            if (!string.IsNullOrEmpty(secondaryTargetId)) return InvalidOperationRequest(header);
             secondaryTargetId = operation.SecondaryId;
         }
 
         var objectIds = new List<string>();
         foreach (object target in operation.TargetObjects)
         {
-            if (target == null || !objectManager.TryGetId(target, out string objectId)) return false;
+            if (target == null || !objectManager.TryGetId(target, out string objectId)) return InvalidOperationRequest(header);
             objectIds.Add(objectId);
         }
 
@@ -215,7 +215,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         foreach (FourberieLocalTroopSelection troop in operation.Troops)
         {
             if (troop?.Troop == null || !objectManager.TryGetId(troop.Troop, out string troopId))
-                return false;
+                return InvalidOperationRequest(header);
             troops.Add(new FourberieTroopSelection(troopId, troop.Count));
         }
 
@@ -225,10 +225,10 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             ItemObject itemObject = item?.EquipmentElement.Item;
             ItemModifier modifier = item?.EquipmentElement.ItemModifier;
             if (itemObject == null || !objectManager.TryGetId(itemObject, out string itemId))
-                return false;
+                return InvalidOperationRequest(header);
             string modifierId = string.Empty;
             if (modifier != null && !objectManager.TryGetId(modifier, out modifierId))
-                return false;
+                return InvalidOperationRequest(header);
             items.Add(new FourberieItemSelection(itemId, modifierId, item.DeltaToSafehouse));
         }
 
@@ -236,7 +236,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
         foreach (FourberieLocalRosterSelection selection in operation.Roster)
         {
             if (selection?.Troop == null || !objectManager.TryGetId(selection.Troop, out string troopId))
-                return false;
+                return InvalidOperationRequest(header);
             roster.Add(new FourberieRosterSelection(
                 troopId,
                 selection.MemberDeltaToActor,
@@ -256,6 +256,11 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
             roster.ToArray());
         return request;
     }
+
+    private static NetworkRequestFourberieOperation InvalidOperationRequest(AuthorityRequestHeader header) =>
+        new NetworkRequestFourberieOperation(header, 0, string.Empty, string.Empty, string.Empty, 0,
+            Array.Empty<FourberieTroopSelection>(), Array.Empty<FourberieItemSelection>(),
+            Array.Empty<string>(), Array.Empty<FourberieRosterSelection>());
 
     public void RunContractTick()
     {

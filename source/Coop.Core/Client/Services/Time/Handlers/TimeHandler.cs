@@ -24,7 +24,6 @@ namespace Coop.Core.Client.Services.Time.Handlers
         private static readonly ILogger Logger = LogManager.GetLogger<TimeHandler>();
 
         private readonly IMessageBroker messageBroker;
-        private readonly INetwork network;
         private readonly ITimeControlInterface timeControlInterface;
         private readonly IModConfigAuthority configAuthority;
         private readonly IAuthorityRouteHandle<TimeControlEnum, NetworkTimeSpeedChangeResult> timeRoute;
@@ -35,7 +34,6 @@ namespace Coop.Core.Client.Services.Time.Handlers
             IModConfigAuthority configAuthority = null, IAuthorityRequestRouter authorityRequestRouter = null)
         {
             this.messageBroker = messageBroker;
-            this.network = network;
             this.timeControlInterface = timeControlInterface;
             this.configAuthority = configAuthority;
             if (configAuthority != null && authorityRequestRouter != null)
@@ -80,7 +78,7 @@ namespace Coop.Core.Client.Services.Time.Handlers
             Logger.Verbose("Client changing time to {mode} from server", newMode);
 
             if (timeRoute != null) timeRoute.Submit(newMode);
-            else network.SendAll(new NetworkRequestTimeSpeedChange(newMode));
+            else Logger.Warning("Time speed request ignored because the authority route is unavailable");
         }
 
         internal void Handle_NetworkMapEventLockChanged(MessagePayload<NetworkMapEventLockChanged> obj)

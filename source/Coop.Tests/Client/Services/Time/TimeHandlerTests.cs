@@ -3,11 +3,14 @@ using Common.Tests.Utils;
 using Coop.Core.Client.Services.Time.Handlers;
 using Coop.Core.Server.Services.Time.Messages;
 using Coop.Tests.Mocks;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.GameDebug.Messages;
 using GameInterface.Services.Heroes.Enum;
 using GameInterface.Services.Heroes.Interaces;
 using GameInterface.Services.Heroes.Messages;
 using GameInterface.Services.MapEvents;
+using GameInterface.Services.Players;
 using Moq;
 using System.Linq;
 using Xunit;
@@ -35,13 +38,16 @@ namespace Coop.Tests.Client.Services.Time
         }
 
         [Fact]
-        public void TimeSpeedChanged_Publishes_NetworkRequestTimeSpeedChange()
+        public void TimeSpeedChanged_SubmitsTypedAuthorityRequest()
         {
             // Arrange
             var broker = new TestMessageBroker();
             var network = new TestNetwork();
             var mockTimeControlInterface = new Mock<ITimeControlInterface>();
-            var handler = new TimeHandler(broker, network, mockTimeControlInterface.Object);
+            var playerManager = new Mock<IPlayerManager>();
+            using var router = new AuthorityRequestRouter(broker, network, playerManager.Object);
+            var handler = new TimeHandler(broker, network, mockTimeControlInterface.Object,
+                CreateConfigAuthority(), router);
             var payload = new TimeSpeedChangedAttempted(TimeControlEnum.Play_1x);
             var message = new MessagePayload<TimeSpeedChangedAttempted>(null, payload);
 
@@ -56,6 +62,8 @@ namespace Coop.Tests.Client.Services.Time
             Assert.IsType<NetworkRequestTimeSpeedChange>(sentMessages.First());
             var networkRequestTimeSpeedChange = (NetworkRequestTimeSpeedChange)sentMessages.First();
             Assert.Equal(message.What.NewControlMode, networkRequestTimeSpeedChange.NewControlMode);
+            Assert.Equal(1, networkRequestTimeSpeedChange.Header.RequestId);
+            Assert.Equal(1, networkRequestTimeSpeedChange.Header.ExpectedRevision);
         }
 
         [Fact]
@@ -162,14 +170,17 @@ namespace Coop.Tests.Client.Services.Time
         }
 
         [Fact]
-        public void TimeSpeedChanged_WhenFastForwardBlockedByMapEvent_StillAllowsNormalSpeed()
+        public void TimeSpeedChanged_WhenFastForwardBlockedByMapEvent_StillSubmitsNormalSpeedRoute()
         {
             // Arrange
             var broker = new TestMessageBroker();
             var network = new TestNetwork();
             var peer = network.CreatePeer();
             var mockTimeControlInterface = new Mock<ITimeControlInterface>();
-            var handler = new TimeHandler(broker, network, mockTimeControlInterface.Object);
+            var playerManager = new Mock<IPlayerManager>();
+            using var router = new AuthorityRequestRouter(broker, network, playerManager.Object);
+            var handler = new TimeHandler(broker, network, mockTimeControlInterface.Object,
+                CreateConfigAuthority(), router);
 
             handler.Handle_NetworkMapEventLockChanged(
                 new MessagePayload<NetworkMapEventLockChanged>(null, new NetworkMapEventLockChanged(1)));
@@ -183,6 +194,17 @@ namespace Coop.Tests.Client.Services.Time
             Assert.Single(sent);
             Assert.IsType<NetworkRequestTimeSpeedChange>(sent.First());
             Assert.Equal(TimeControlEnum.Play_1x, ((NetworkRequestTimeSpeedChange)sent.First()).NewControlMode);
+            Assert.Equal(1, ((NetworkRequestTimeSpeedChange)sent.First()).Header.RequestId);
+        }
+
+        private static IModConfigAuthority CreateConfigAuthority()
+        {
+            var authority = new Mock<IModConfigAuthority>();
+            var snapshot = new ModConfigSnapshot("0123456789abcdef0123456789abcdef", 1,
+                new ModOptions(new ModOptionsData()), birthAndDeathEnabled: true);
+            authority.Setup(x => x.TryGetCurrent(out snapshot)).Returns(true);
+            authority.Setup(x => x.IsTrustedServer(It.IsAny<object>())).Returns(true);
+            return authority.Object;
         }
     }
 }

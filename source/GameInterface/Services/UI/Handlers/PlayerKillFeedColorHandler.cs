@@ -9,11 +9,10 @@ using GameInterface.Services.Players;
 using GameInterface.Services.UI.CoopOptions;
 using GameInterface.Services.UI.CoopOptions.Providers.KillFeedTab;
 using GameInterface.Services.UI.Messages;
-using LiteNetLib;
 using Serilog;
-using System.Linq;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace GameInterface.Services.UI.Handlers;
 
@@ -71,8 +70,6 @@ public class PlayerKillFeedColorHandler : IHandler
 
         messageBroker.Subscribe<PlayerKillFeedColorSelected>(Handle_PlayerKillFeedColorSelected);
         messageBroker.Subscribe<PlayerKillFeedColorResendRequested>(Handle_PlayerKillFeedColorResendRequested);
-        if (colorRoute == null)
-            messageBroker.Subscribe<NetworkRequestKillFeedColor>(Handle_NetworkRequestKillFeedColor);
         messageBroker.Subscribe<NetworkUpdateKillFeedColor>(Handle_NetworkUpdateKillFeedColor);
     }
 
@@ -80,8 +77,6 @@ public class PlayerKillFeedColorHandler : IHandler
     {
         messageBroker.Unsubscribe<PlayerKillFeedColorSelected>(Handle_PlayerKillFeedColorSelected);
         messageBroker.Unsubscribe<PlayerKillFeedColorResendRequested>(Handle_PlayerKillFeedColorResendRequested);
-        if (colorRoute == null)
-            messageBroker.Unsubscribe<NetworkRequestKillFeedColor>(Handle_NetworkRequestKillFeedColor);
         messageBroker.Unsubscribe<NetworkUpdateKillFeedColor>(Handle_NetworkUpdateKillFeedColor);
         colorRoute?.Dispose();
     }
@@ -94,7 +89,7 @@ public class PlayerKillFeedColorHandler : IHandler
 
         CacheLocalColor(color);
         if (colorRoute != null) colorRoute.Submit(color);
-        else network.SendAll(new NetworkRequestKillFeedColor(color.Red, color.Green, color.Blue));
+        else Logger.Warning("Kill-feed colour request ignored because the authority route is unavailable");
     }
 
     private void Handle_PlayerKillFeedColorResendRequested(MessagePayload<PlayerKillFeedColorResendRequested> payload)
@@ -105,44 +100,7 @@ public class PlayerKillFeedColorHandler : IHandler
 
         CacheLocalColor(color);
         if (colorRoute != null) colorRoute.Submit(color);
-        else network.SendAll(new NetworkRequestKillFeedColor(color.Red, color.Green, color.Blue));
-    }
-
-    private void Handle_NetworkRequestKillFeedColor(MessagePayload<NetworkRequestKillFeedColor> payload)
-    {
-        if (ModInformation.IsClient) return;
-
-        var request = payload.What;
-        if (!PlayerKillFeedColor.TryCreate(request.Red, request.Green, request.Blue, out var color))
-        {
-            Logger.Warning("Ignoring invalid kill-feed color request: {Red}, {Green}, {Blue}",
-                request.Red, request.Green, request.Blue);
-            return;
-        }
-
-        if (payload.Who is not NetPeer peer)
-        {
-            Logger.Warning("Ignoring kill-feed color request without a network peer");
-            return;
-        }
-
-        if (!playerManager.TryGetPlayer(peer, out var player))
-        {
-            Logger.Warning("Ignoring kill-feed color request from an unregistered peer");
-            return;
-        }
-
-        foreach (var knownColor in colorService.GetColors().Where(kvp => kvp.Key != player.ControllerId))
-        {
-            network.Send(peer, new NetworkUpdateKillFeedColor(
-                knownColor.Key,
-                knownColor.Value.Red,
-                knownColor.Value.Green,
-                knownColor.Value.Blue));
-        }
-
-        colorService.SetColor(player.ControllerId, color);
-        network.SendAll(new NetworkUpdateKillFeedColor(player.ControllerId, color.Red, color.Green, color.Blue));
+        else Logger.Warning("Kill-feed colour resend ignored because the authority route is unavailable");
     }
 
     private void Handle_NetworkUpdateKillFeedColor(MessagePayload<NetworkUpdateKillFeedColor> payload)
@@ -204,6 +162,15 @@ public class PlayerKillFeedColorHandler : IHandler
             AuthorityResultStatus.Accepted, revision, null);
         try
         {
+            foreach (var knownColor in colorService.GetColors().Where(kvp => kvp.Key != context.Player.ControllerId))
+            {
+                network.Send(context.Peer, new NetworkUpdateKillFeedColor(
+                    knownColor.Key,
+                    knownColor.Value.Red,
+                    knownColor.Value.Green,
+                    knownColor.Value.Blue));
+            }
+
             colorService.SetColor(context.Player.ControllerId, color);
             network.SendAll(new NetworkUpdateKillFeedColor(context.Player.ControllerId, color.Red, color.Green, color.Blue,
                 stateHeader));

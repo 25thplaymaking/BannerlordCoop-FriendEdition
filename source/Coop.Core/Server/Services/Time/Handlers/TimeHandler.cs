@@ -60,28 +60,12 @@ public class TimeHandler : IHandler
                     isExpectedClientResult: (_, result) => Enum.IsDefined(typeof(TimeControlEnum), result.EffectiveMode)));
         }
         this.messageBroker.Subscribe<TimeSpeedChangedAttempted>(Handle_TimeSpeedChanged);
-        if (timeRoute == null)
-            this.messageBroker.Subscribe<NetworkRequestTimeSpeedChange>(Handle_NetworkRequestTimeSpeedChange);
     }
 
     public void Dispose()
     {
         messageBroker.Unsubscribe<TimeSpeedChangedAttempted>(Handle_TimeSpeedChanged);
-        if (timeRoute == null)
-            messageBroker.Unsubscribe<NetworkRequestTimeSpeedChange>(Handle_NetworkRequestTimeSpeedChange);
         timeRoute?.Dispose();
-    }
-
-    internal void Handle_NetworkRequestTimeSpeedChange(MessagePayload<NetworkRequestTimeSpeedChange> obj)
-    {
-        var peer = obj.Who as NetPeer;
-
-        Logger.Information(
-            "Peer requested time control: peer={PeerId} mode={RequestedMode}",
-            peer?.Id,
-            obj.What.NewControlMode);
-
-        timeControlInterface.ServerSetTimeControl(obj.What.NewControlMode);
     }
 
     internal void Handle_TimeSpeedChanged(MessagePayload<TimeSpeedChangedAttempted> obj)

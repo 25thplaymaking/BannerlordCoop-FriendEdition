@@ -1,6 +1,8 @@
 ﻿using Common;
 using Common.Messaging;
 using Common.Network;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Entity;
 using GameInterface.Services.Players;
 using GameInterface.Services.UI;
@@ -141,6 +143,7 @@ public class PlayerKillFeedColorTests
             IMessage sentMessage = null!;
             network.Setup(n => n.SendAll(It.IsAny<IMessage>()))
                 .Callback<IMessage>(message => sentMessage = message);
+            using var router = new AuthorityRequestRouter(broker, network.Object, playerManager.Object);
 
             using var handler = new PlayerKillFeedColorHandler(
                 broker,
@@ -148,7 +151,9 @@ public class PlayerKillFeedColorTests
                 playerManager.Object,
                 colorService,
                 optionsStore,
-                controllerIdProvider);
+                controllerIdProvider,
+                CreateConfigAuthority(),
+                router);
 
             var color = new PlayerKillFeedColor(11, 22, 33);
             broker.Publish(this, new PlayerKillFeedColorSelected(color));
@@ -160,6 +165,8 @@ public class PlayerKillFeedColorTests
             Assert.Equal(color.Red, request.Red);
             Assert.Equal(color.Green, request.Green);
             Assert.Equal(color.Blue, request.Blue);
+            Assert.Equal(1, request.Header.RequestId);
+            Assert.Equal(1, request.Header.ExpectedRevision);
             network.Verify(n => n.SendAll(It.IsAny<IMessage>()), Times.Once);
         }
         finally
@@ -190,6 +197,7 @@ public class PlayerKillFeedColorTests
             IMessage sentMessage = null!;
             network.Setup(n => n.SendAll(It.IsAny<IMessage>()))
                 .Callback<IMessage>(message => sentMessage = message);
+            using var router = new AuthorityRequestRouter(broker, network.Object, playerManager.Object);
 
             using var handler = new PlayerKillFeedColorHandler(
                 broker,
@@ -197,7 +205,9 @@ public class PlayerKillFeedColorTests
                 playerManager.Object,
                 colorService,
                 optionsStore,
-                controllerIdProvider);
+                controllerIdProvider,
+                CreateConfigAuthority(),
+                router);
 
             broker.Publish(this, new PlayerKillFeedColorResendRequested());
 
@@ -208,6 +218,8 @@ public class PlayerKillFeedColorTests
             Assert.Equal(color.Red, request.Red);
             Assert.Equal(color.Green, request.Green);
             Assert.Equal(color.Blue, request.Blue);
+            Assert.Equal(1, request.Header.RequestId);
+            Assert.Equal(1, request.Header.ExpectedRevision);
             network.Verify(n => n.SendAll(It.IsAny<IMessage>()), Times.Once);
         }
         finally
@@ -234,6 +246,16 @@ public class PlayerKillFeedColorTests
     private static string CreateTempFilePath()
     {
         return Path.Combine(Path.GetTempPath(), $"BannerlordCoop-{Guid.NewGuid():N}.json");
+    }
+
+    private static IModConfigAuthority CreateConfigAuthority()
+    {
+        var authority = new Mock<IModConfigAuthority>();
+        var snapshot = new ModConfigSnapshot("0123456789abcdef0123456789abcdef", 1,
+            new ModOptions(new ModOptionsData()), birthAndDeathEnabled: true);
+        authority.Setup(x => x.TryGetCurrent(out snapshot)).Returns(true);
+        authority.Setup(x => x.IsTrustedServer(It.IsAny<object>())).Returns(true);
+        return authority.Object;
     }
 
     private class TestOptionsStore : ICoopOptionsStore

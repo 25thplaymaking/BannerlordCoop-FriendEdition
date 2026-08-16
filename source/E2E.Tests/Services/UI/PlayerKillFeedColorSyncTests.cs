@@ -1,3 +1,4 @@
+using Common.Messaging;
 using Common.Network;
 using E2E.Tests.Environment;
 using E2E.Tests.Environment.Instance;
@@ -136,7 +137,7 @@ public class PlayerKillFeedColorSyncTests : IDisposable
     private static void SendColor(EnvironmentInstance client, PlayerKillFeedColor color)
     {
         client.Call(() =>
-            client.Resolve<INetwork>().SendAll(new NetworkRequestKillFeedColor(color.Red, color.Green, color.Blue)));
+            client.Resolve<IMessageBroker>().Publish(client, new PlayerKillFeedColorSelected(color)));
     }
 
     private static void AssertStored(EnvironmentInstance instance, string controllerId, PlayerKillFeedColor expected)

@@ -27,11 +27,15 @@ internal static class RebellionsAndDemographicsRuntime
 
     internal static void PurgeUpstreamAfterSubModuleLoad() => Current?.PurgeUpstreamAfterSubModuleLoad();
 
-    internal static bool InterceptTryStartRebellion(Kingdom kingdom, List<Clan> pool, bool isForcedDebug) =>
-        Current?.InterceptTryStartRebellion(kingdom, pool, isForcedDebug) ?? false;
+    // Upstream parameter names are not part of the binary contract. Harmony's positional aliases
+    // keep this private-method prefix valid across the pinned assembly's symbol stripping.
+    internal static bool InterceptTryStartRebellion(Kingdom __0, List<Clan> __1, bool __2) =>
+        Current?.InterceptTryStartRebellion(__0, __1, __2) ?? false;
 
     internal static bool GuardPopulationAppTick() => !ModInformation.IsServer;
 
-    internal static bool IssueDefeatChoice(Kingdom rebels) => !(Current?.IssueDefeatChoice(rebels) == true);
-    internal static bool IssueUltimatumChoice(Kingdom kingdom, List<Clan> rebels) => !(Current?.IssueUltimatumChoice(kingdom, rebels) == true);
+    internal static bool IssueDefeatChoice(Kingdom __0) => Current == null
+        ? !ModInformation.IsServer : !Current.IssueDefeatChoice(__0);
+    internal static bool IssueUltimatumChoice(Kingdom __0, List<Clan> __1) => Current == null
+        ? !ModInformation.IsServer : !Current.IssueUltimatumChoice(__0, __1);
 }

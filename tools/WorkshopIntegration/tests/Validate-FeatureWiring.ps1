@@ -3,13 +3,15 @@
 [CmdletBinding()]
 param(
     [switch]$Release,
-    [string]$RepoRoot = (Join-Path $PSScriptRoot '..\..\..'),
+    [string]$RepoRoot = '',
     [string]$LedgerPath = 'tools\WorkshopIntegration\workshop-feature-wiring.json',
     [string]$InputsPath = 'deploy\bannerlord-1.4.8-inputs.json'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Join-Path $PSScriptRoot '..\..\..' }
 
 $repo = [IO.Path]::GetFullPath($RepoRoot)
 function Resolve-RepoPath([string]$path) {

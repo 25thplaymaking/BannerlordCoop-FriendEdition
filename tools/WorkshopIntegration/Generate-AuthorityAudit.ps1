@@ -2,7 +2,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$RepoRoot = (Join-Path $PSScriptRoot '..\..'),
+    [string]$RepoRoot = '',
     [string]$InventoryPath = 'doc\generated\workshop-function-inventory.json',
     [string]$PolicyPath = 'tools\WorkshopIntegration\authority-dispositions.json',
     [string]$OutputPath = 'doc\generated\workshop-authority-audit.json'
@@ -10,6 +10,8 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Join-Path $PSScriptRoot '..\..' }
 
 function Resolve-RepoPath {
     param([string]$Repo, [string]$Path)

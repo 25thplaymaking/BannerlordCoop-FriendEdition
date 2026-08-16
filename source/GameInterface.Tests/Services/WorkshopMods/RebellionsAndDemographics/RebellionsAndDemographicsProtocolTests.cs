@@ -1,10 +1,13 @@
 using Common.Messaging;
 using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.WorkshopMods.RebellionsAndDemographics;
+using HarmonyLib;
 using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Xunit;
 
 namespace GameInterface.Tests.Services.WorkshopMods.RebellionsAndDemographics;
@@ -39,6 +42,104 @@ public sealed class RebellionsAndDemographicsProtocolTests
     }
 
     [Fact]
+    public void PinnedWorkshopBinary_PatchAllIsPurgedAndLifecycleGuardsSurvive_WhenLocalAuditPayloadIsPresent()
+    {
+        const string path = @"P:\SteamLibrary\steamapps\workshop\content\261550\3644127631\bin\Win64_Shipping_Client\RebellionsAndDemographics.dll";
+        if (!File.Exists(path)) return; // CI validates the staged package, not this local Workshop source.
+
+        Assembly upstream = Assembly.LoadFrom(path);
+        Type subModule = upstream.GetType("RebellionsAndDemographics.SubModule", throwOnError: true);
+        MethodInfo onLoad = subModule.GetMethod("OnSubModuleLoad", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        MethodInfo onGameStart = subModule.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Single(method => method.Name == "OnGameStart" && method.GetParameters().Length == 2);
+        MethodInfo onMission = subModule.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Single(method => method.Name == "OnMissionBehaviorInitialize" && method.GetParameters().Length == 1);
+        Type rebellionCore = upstream.GetType("RebellionsAndDemographics.RebellionCoreBehavior", throwOnError: true);
+        MethodInfo tryStart = rebellionCore.GetMethod("TryStartRebellion", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo processDefeat = rebellionCore.GetMethod("ProcessRebelDefeat", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo triggerUltimatum = rebellionCore.GetMethod("TriggerPlayerUltimatum", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(onLoad);
+        Assert.NotNull(tryStart);
+        Assert.NotNull(processDefeat);
+        Assert.NotNull(triggerUltimatum);
+
+        var adapter = new Harmony(RebellionsAndDemographicsHarmonyIsolation.AdapterOwner);
+        var handler = (RebellionsAndDemographicsCompatibilityHandler)RuntimeHelpers.GetUninitializedObject(
+            typeof(RebellionsAndDemographicsCompatibilityHandler));
+        typeof(RebellionsAndDemographicsCompatibilityHandler).GetField("harmony", BindingFlags.Instance | BindingFlags.NonPublic)
+            .SetValue(handler, adapter);
+        RebellionsAndDemographicsRuntime.Current = handler;
+        try
+        {
+            bool installed = (bool)typeof(RebellionsAndDemographicsCompatibilityHandler)
+                .GetMethod("TryInstall", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(handler, null);
+            Assert.True(installed);
+            AssertPrefix(onGameStart, adapter.Id);
+            AssertPrefix(onMission, adapter.Id);
+            AssertPrefix(tryStart, adapter.Id);
+            AssertPrefix(processDefeat, adapter.Id);
+            AssertPrefix(triggerUltimatum, adapter.Id);
+
+            // This executes the upstream PatchAll. The adapter's previously installed postfix must
+            // remove every upstream-owned patch before control returns.
+            onLoad.Invoke(Activator.CreateInstance(subModule), null);
+            Assert.All(Harmony.GetAllPatchedMethods(), original => Assert.DoesNotContain(
+                Enumerate(Harmony.GetPatchInfo(original)), patch => patch.owner == RebellionsAndDemographicsHarmonyIsolation.UpstreamOwner ||
+                    patch.PatchMethod?.DeclaringType?.Assembly == upstream));
+            AssertPrefix(onGameStart, adapter.Id);
+            AssertPrefix(onMission, adapter.Id);
+        }
+        finally
+        {
+            RebellionsAndDemographicsRuntime.Current = null;
+            adapter.UnpatchAll(RebellionsAndDemographicsHarmonyIsolation.AdapterOwner);
+        }
+    }
+
+    [Fact]
+    public void PinnedAllowlist_HasNoDependencyOnOmittedBehaviorSingletons_WhenLocalAuditPayloadIsPresent()
+    {
+        const string binaryPath = @"P:\SteamLibrary\steamapps\workshop\content\261550\3644127631\bin\Win64_Shipping_Client\RebellionsAndDemographics.dll";
+        if (!File.Exists(binaryPath)) return;
+
+        string inventoryPath = Path.Combine(Directory.GetCurrentDirectory(), "doc", "generated", "workshop-function-inventory.json");
+        Assert.True(File.Exists(inventoryPath), "The generated pinned-binary inventory is required for the local dependency-closure audit.");
+
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(inventoryPath));
+        JsonElement assembly = document.RootElement.GetProperty("assemblies").EnumerateArray()
+            .Single(value => value.GetProperty("moduleId").GetString() == "RebellionsAndDemographics");
+        string[] allowlisted = { "PopulationBehavior", "PlagueBehavior", "RebellionCoreBehavior", "RecruitmentLimiterBehavior", "DemographicsBehavior" };
+        string[] omitted = { "Corruption", "Government", "Stability", "ShadowGarrison", "Schism", "Strike", "DiplomacyDialog" };
+
+        var forbidden = assembly.GetProperty("methods").EnumerateArray()
+            .Where(method => allowlisted.Any(type => IsBehaviorMember(method.GetProperty("declaringType").GetString(), type)))
+            .SelectMany(method => method.GetProperty("authorityEvidence").GetProperty("calledMembers").EnumerateArray())
+            .Select(value => value.GetString())
+            .Where(member => member != null && omitted.Any(type => IsBehaviorMember(member, type)))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Empty(forbidden);
+    }
+
+    private static bool IsBehaviorMember(string member, string type) =>
+        member.StartsWith("RebellionsAndDemographics." + type, StringComparison.Ordinal) &&
+        (member.Length == "RebellionsAndDemographics.".Length + type.Length ||
+         member["RebellionsAndDemographics.".Length + type.Length] is '.' or '+');
+
+    private static System.Collections.Generic.IEnumerable<Patch> Enumerate(Patches patches)
+    {
+        if (patches == null) yield break;
+        foreach (var patch in patches.Prefixes) yield return patch;
+        foreach (var patch in patches.Postfixes) yield return patch;
+        foreach (var patch in patches.Transpilers) yield return patch;
+        foreach (var patch in patches.Finalizers) yield return patch;
+    }
+
+    private static void AssertPrefix(MethodBase method, string owner) =>
+        Assert.Contains(Harmony.GetPatchInfo(method).Prefixes, patch => patch.owner == owner);
+
+    [Fact]
     public void CanonicalState_UsesStructuredBoundedCultures_AndCorrelatedPromptTombstone()
     {
         var lease = new RdPromptLease("lease-a", RdPromptKind.Defeat, "session-a", "hero-owner", "rebels",
@@ -51,6 +152,7 @@ public sealed class RebellionsAndDemographicsProtocolTests
 
         Assert.Equal(64, state.Fingerprint.Length);
         Assert.Equal(new[] { "empire", "vlandia" }, state.Settlements.Single().Cultures.Select(value => value.CultureId));
+        Assert.All(state.Settlements.Single().Cultures, culture => Assert.DoesNotContain("CultureObject", culture.CultureId));
         Assert.Single(state.PromptTombstones);
         Assert.Equal(Header.RequestId, state.PromptTombstones[0].AuthorityRequestId);
         Assert.True(state.PromptTombstones[0].Completed);

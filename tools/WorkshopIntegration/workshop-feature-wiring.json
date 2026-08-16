@@ -66,6 +66,51 @@
       ]
     },
     {
+      "moduleId": "OpenSourceSaddlery",
+      "version": "v2.0.0",
+      "role": "content-only-equipment",
+      "featureFamilies": [
+        {
+          "id": "equipment-content",
+          "playerFunction": "Load the pinned saddlery assets on every campaign peer without executable behavior or client-owned mutation.",
+          "status": "VerifiedWired",
+          "owner": "FriendEditionWorkshopModuleCatalog",
+          "routes": ["exact active module order", "content-only SubModule descriptor"],
+          "tests": ["WorkshopModuleCatalogTests.AssertActiveAllPeersExactGearModule"]
+        }
+      ]
+    },
+    {
+      "moduleId": "OpenSourceWeaponry",
+      "version": "v2.0.1",
+      "role": "content-only-equipment",
+      "featureFamilies": [
+        {
+          "id": "equipment-content",
+          "playerFunction": "Load the pinned weapon assets on every campaign peer without executable behavior or client-owned mutation.",
+          "status": "VerifiedWired",
+          "owner": "FriendEditionWorkshopModuleCatalog",
+          "routes": ["exact active module order", "content-only SubModule descriptor"],
+          "tests": ["WorkshopModuleCatalogTests.AssertActiveAllPeersExactGearModule"]
+        }
+      ]
+    },
+    {
+      "moduleId": "OpenSourceArmory",
+      "version": "v2.0.0",
+      "role": "content-only-equipment",
+      "featureFamilies": [
+        {
+          "id": "equipment-content",
+          "playerFunction": "Load the pinned armory assets on every campaign peer without executable behavior or client-owned mutation.",
+          "status": "VerifiedWired",
+          "owner": "FriendEditionWorkshopModuleCatalog",
+          "routes": ["exact active module order", "content-only SubModule descriptor"],
+          "tests": ["WorkshopModuleCatalogTests.AssertActiveAllPeersExactGearModule"]
+        }
+      ]
+    },
+    {
       "moduleId": "ImprovedGarrisons",
       "version": "v4.2.0.7",
       "role": "client-ui-server-gameplay",

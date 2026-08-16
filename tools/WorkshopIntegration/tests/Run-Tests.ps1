@@ -34,6 +34,16 @@ function Write-TestModule {
     Write-TestFile -Path (Join-Path $Root "bin\Win64_Shipping_Client\$Dll") -Content "$Id runtime"
 }
 
+# Windows PowerShell 5.1's ConvertFrom-Json rejects JSONC.  Launcher configuration intentionally
+# retains full-line operator comments, so strip only those lines rather than changing the launcher
+# format or touching URL/string content.
+function Read-JsonWithFullLineComments {
+    param([string]$Path)
+    $jsonc = Get-Content -LiteralPath $Path -Raw
+    $json = [regex]::Replace($jsonc, '(?m)^\s*//.*(?:\r?\n|$)', '')
+    return $json | ConvertFrom-Json
+}
+
 function Write-TestContentOnlyModule {
     param([string]$Root, [string]$Id, [string]$Name, [string]$Version)
     New-Item -ItemType Directory -Path $Root -Force | Out-Null
@@ -119,7 +129,7 @@ $invalidWithinCohort = & $workshopModule {
     (New-LoadOrderFixture -ModuleId 'GameplayB' -LoadOrder 100)
 )
 Assert-True (-not $invalidWithinCohort) 'numeric Workshop order must still be preserved within an activation cohort'
-$launcherConfig = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\CoopLauncher\launcher-config.json') -Raw | ConvertFrom-Json
+$launcherConfig = Read-JsonWithFullLineComments (Join-Path $repoRoot 'tools\CoopLauncher\launcher-config.json')
 $authorityPolicy = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\WorkshopIntegration\authority-dispositions.json') -Raw | ConvertFrom-Json
 $launcherOrder = @(([string]$launcherConfig.moduleToken).Split('*') | Where-Object { $_ -and $_ -notin @('_MODULES_') })
 Assert-True (($launcherOrder -join ',') -ceq ($approvedActiveOrder -join ',')) 'launcher token must match the approved active loadout'

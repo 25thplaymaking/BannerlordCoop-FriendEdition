@@ -463,7 +463,13 @@ internal sealed class RebellionsAndDemographicsCompatibilityHandler : IHandler
 
     private bool IssuePrompt(RdPromptKind kind, Kingdom kingdom, List<Clan> clans)
     {
-        if (!ModInformation.IsServer || kingdom == null || clans == null || clans.Count == 0 || !configAuthority.TryGetCurrent(out var config)) return false;
+        if (!ModInformation.IsServer) return false;
+        if (kingdom == null || clans == null || clans.Count == 0 || !configAuthority.TryGetCurrent(out var config))
+        {
+            compatible = false;
+            DisconnectAllCampaignPeers("prompt issuance precondition unavailable");
+            return true;
+        }
         Hero owner = kind == RdPromptKind.Ultimatum ? kingdom.Leader : Clan.PlayerClan?.Leader;
         if (owner == null || !objectManager.TryGetId(owner, out var ownerHeroId) || !TryGetPeer(ownerHeroId, out var peer))
         {
@@ -487,7 +493,11 @@ internal sealed class RebellionsAndDemographicsCompatibilityHandler : IHandler
         var ids = new List<string>();
         foreach (var clan in clans) if (objectManager.TryGetId(clan, out var id)) ids.Add(id);
         if (ids.Count != clans.Count || ids.Any(string.IsNullOrWhiteSpace))
-            return false;
+        {
+            compatible = false;
+            DisconnectAllCampaignPeers("prompt issuance could not resolve every clan identity");
+            return true;
+        }
         string leaseId = Guid.NewGuid().ToString("N");
         int cost = kind == RdPromptKind.Ultimatum ? clans.Sum(clan => clan.Tier * 50000 + clan.Fiefs.Count * 100000) : 0;
         long issuedRevision = revision + 1;
@@ -784,7 +794,7 @@ internal sealed class RebellionsAndDemographicsCompatibilityHandler : IHandler
             var cultureValues = new List<RdCulturePopulationState>();
             if (cultures != null) foreach (DictionaryEntry culture in cultures)
             {
-                string cultureId = culture.Key?.ToString() ?? string.Empty;
+                string cultureId = culture.Key is CultureObject cultureObject ? cultureObject.StringId : culture.Key as string ?? string.Empty;
                 if (cultureId.Length > 0 && cultureId.Length <= 96 && culture.Value is int count && count >= 0)
                     cultureValues.Add(new RdCulturePopulationState(cultureId, count));
             }

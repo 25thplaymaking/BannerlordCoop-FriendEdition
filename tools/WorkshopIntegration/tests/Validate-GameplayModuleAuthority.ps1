@@ -2,7 +2,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$RepoRoot = (Join-Path $PSScriptRoot '..\..\..'),
+    [string]$RepoRoot = '',
     [string[]]$ModuleId = @(
         'UnblockableThrust',
         'DismembermentPlus',
@@ -18,6 +18,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+    $RepoRoot = Join-Path $PSScriptRoot '..\..\..'
+}
 $repo = [IO.Path]::GetFullPath($RepoRoot)
 $resolvedAudit = if ([IO.Path]::IsPathRooted($AuditPath)) {
     [IO.Path]::GetFullPath($AuditPath)

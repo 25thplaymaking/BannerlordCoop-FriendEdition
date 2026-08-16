@@ -2,12 +2,14 @@
 
 [CmdletBinding()]
 param(
-    [string]$RepoRoot = (Join-Path $PSScriptRoot '..\..'),
+    [string]$RepoRoot = '',
     [string]$OutputPath = 'doc\generated\workshop-function-inventory.json'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Join-Path $PSScriptRoot '..\..' }
 
 $repo = [IO.Path]::GetFullPath($RepoRoot)
 $resolvedOutput = if ([IO.Path]::IsPathRooted($OutputPath)) {

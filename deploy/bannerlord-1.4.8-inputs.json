@@ -126,12 +126,12 @@
   },
   "managedSuite": {
     "suiteId": "friend-edition-private-workshop-suite",
-    "moduleCount": 10,
-    "rootManifestSha256": "197e5f5069d8ff308f1e2b8cf37a358bb5595865b87a936d72e6b74b1b33edcb",
-    "managedReceiptFileSha256": "b6b9cd635277716b3c9254a8a84937518ca350abc511f43b70084774e50ca3b0",
-    "receiptSha256": "d202ef52ef632708bb86dd0851e34d9e84473d73921847833ed31ae69f4b9362",
-    "archiveSha256": "d6821bc28d0e3d24f36dd95a29f6ac62c60a0130e4178471a3955291fe6e683a",
-    "verifiedFileCount": 851,
+    "moduleCount": 14,
+    "rootManifestSha256": "cba0d547af5f681b250dd20a0199c8063af8f072a6f62830bd5271ffdff78315",
+    "managedReceiptFileSha256": "b57520c81bba925013fdfe95b8fefcee6a2bf6f30025a561b7bc20368197206a",
+    "receiptSha256": "0f43cc7b782bd4f5e2dc734ae4924d2515bb5eb17ff618c6a7141f2e494a30d1",
+    "archiveSha256": "cd5bde97bc84d4d5f6a289348ffe7ac5e852b833f38688924ad63401f2541f9c",
+    "verifiedFileCount": 1170,
     "sourceWorkshopSnapshotsUnchanged": true,
     "modules": [
       {
@@ -177,6 +177,39 @@
         "configurationSha256": "738afecd6a3331220cdd3ae20af1264fb098bdec65d5f15d2d0363e5377ccbd4",
         "sourceFileCount": 116,
         "stagedFileCount": 116
+      },
+      {
+        "moduleId": "OpenSourceSaddlery",
+        "workshopId": "3010990914",
+        "steamManifestId": "5590992806248040986",
+        "version": "v2.0.0",
+        "sourceDigest": "c0703ce571017ce16605c0bcf9ef159a4a4bba18895912dddfab6ceece1de2bc",
+        "contentSha256": "f63cdc1912f19c935e00255699e5b7acdae8f2f6891aa94cf5446234e780f9f9",
+        "configurationSha256": "95553471ae8378e00ed408e99050c833def7d2de6e254e646037fe6a90d1a210",
+        "sourceFileCount": 251,
+        "stagedFileCount": 251
+      },
+      {
+        "moduleId": "OpenSourceWeaponry",
+        "workshopId": "3010984416",
+        "steamManifestId": "228880600705709326",
+        "version": "v2.0.1",
+        "sourceDigest": "4051213f5c64dddad3bc97a5b3dbd241c044d277517b01c41c17e416bd09ca77",
+        "contentSha256": "80ffbc7cb2744c1a1e03971ebae8b61ba8fac126682a00600a650440338b5d41",
+        "configurationSha256": "9f8778ae6938a3dba1a07397adfd896aafe9447285d3463e37ece7c1038f6a99",
+        "sourceFileCount": 19,
+        "stagedFileCount": 19
+      },
+      {
+        "moduleId": "OpenSourceArmory",
+        "workshopId": "3011479883",
+        "steamManifestId": "6047321499764171194",
+        "version": "v2.0.0",
+        "sourceDigest": "1d0aa348a0ab591b8ab69f1ec4f12f530c5034bbd8e3a95368324ad067f2c6da",
+        "contentSha256": "db26719181e2dc107d172aaff4a6c791707c7e190d4ddd2887f2c0cc63fde830",
+        "configurationSha256": "0b79e0b83f8fcc88cee89be43eb21f3baa89ed124a42ed08e0f8a43e46b88706",
+        "sourceFileCount": 39,
+        "stagedFileCount": 39
       },
       {
         "moduleId": "ImprovedGarrisons",
@@ -243,6 +276,17 @@
         "configurationSha256": "b6966432588f052336d89c02defd9c3cc1a6af9a5bcca1888962d885912fb5f9",
         "sourceFileCount": 85,
         "stagedFileCount": 81
+      },
+      {
+        "moduleId": "RebellionsAndDemographics",
+        "workshopId": "3644127631",
+        "steamManifestId": "5679238579592221906",
+        "version": "v3.0.1",
+        "sourceDigest": "9a68290a384191b89217f397e89d37e0361e5943e5619dbc9ef6a7315093cad2",
+        "contentSha256": "7b62b533e7abcf21ba0964db6c76d73fb8cc383d330e9c56fbcba7337842b589",
+        "configurationSha256": "6fc955a4dd41fa12b428289899991ec3d16a8530011e378613cb58fc35e516cb",
+        "sourceFileCount": 7,
+        "stagedFileCount": 7
       }
     ]
   }

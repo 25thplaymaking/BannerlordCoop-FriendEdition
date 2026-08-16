@@ -4,6 +4,8 @@ using Common.Messaging;
 using Common.Network;
 using Common.Network.Coalescing;
 using Common.Network.Messages;
+using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Barters.Messages;
 using GameInterface.Services.Barters.Patches;
 using GameInterface.Services.Heroes.Extensions;
@@ -36,7 +38,9 @@ namespace GameInterface.Services.Barters.Handlers;
 internal sealed class MarriageBarterHandler : IHandler
 {
     private static readonly ILogger Logger = LogManager.GetLogger<MarriageBarterHandler>();
-    private static readonly TimeSpan AuthorizationLifetime = TimeSpan.FromMinutes(15);
+    // A lease is intentionally short: the server validates the live conversation again at commit,
+    // but never lets a client keep a standing authority to marry after walking away.
+    private static readonly TimeSpan AuthorizationLifetime = TimeSpan.FromMinutes(1);
 
     private readonly IMessageBroker messageBroker;
     private readonly INetwork network;
@@ -47,8 +51,16 @@ internal sealed class MarriageBarterHandler : IHandler
     private readonly LocationConversationTracker locationConversationTracker;
     private readonly IBarterClientPresentation barterClientPresentation;
     private readonly ISendCoalescer sendCoalescer;
-    private readonly Dictionary<NetPeer, MarriageAuthorization> authorizations =
-        new Dictionary<NetPeer, MarriageAuthorization>();
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRouteHandle<MarriageBarterAuthorizeIntent, NetworkMarriageBarterAuthorizationResult> authorizeRoute;
+    private readonly IAuthorityRouteHandle<MarriageBarterCommitIntent, NetworkMarriageBarterResult> commitRoute;
+    // Leases belong to a transport peer + campaign session, not to a client-provided request id.
+    // Consumed and expired entries are deliberately retained as tombstones for the session.
+    private readonly Dictionary<string, MarriageAuthorization> marriageLeases =
+        new Dictionary<string, MarriageAuthorization>(StringComparer.Ordinal);
+    private readonly Dictionary<string, NetworkMarriageBarterDelta> receivedDeltas =
+        new Dictionary<string, NetworkMarriageBarterDelta>(StringComparer.Ordinal);
+    private static MarriageBarterHandler instance;
 
     public MarriageBarterHandler(
         IMessageBroker messageBroker,
@@ -59,6 +71,8 @@ internal sealed class MarriageBarterHandler : IHandler
         ConversationPartyTracker conversationPartyTracker,
         LocationConversationTracker locationConversationTracker,
         IBarterClientPresentation barterClientPresentation,
+        IModConfigAuthority configAuthority,
+        IAuthorityRequestRouter authorityRequestRouter,
         ISendCoalescer sendCoalescer = null)
     {
         this.messageBroker = messageBroker;
@@ -70,45 +84,47 @@ internal sealed class MarriageBarterHandler : IHandler
         this.locationConversationTracker = locationConversationTracker;
         this.barterClientPresentation = barterClientPresentation;
         this.sendCoalescer = sendCoalescer;
+        this.configAuthority = configAuthority;
+        instance = this;
 
-        messageBroker.Subscribe<NetworkAuthorizeMarriageBarter>(HandleAuthorization);
-        messageBroker.Subscribe<NetworkCancelMarriageBarterAuthorization>(HandleAuthorizationCanceled);
-        messageBroker.Subscribe<NetworkRequestMarriageBarter>(HandleRequest);
-        messageBroker.Subscribe<NetworkMarriageBarterResult>(HandleResult);
+        authorizeRoute = authorityRequestRouter.Register(
+            AuthorityRoute<MarriageBarterAuthorizeIntent, NetworkAuthorizeMarriageBarter,
+                NetworkMarriageBarterAuthorizationResult>.Define(
+                "barter.marriage.authorize", AuthorityRouteKind.Command, CreateHeader,
+                (intent, header) => new NetworkAuthorizeMarriageBarter(intent.ClientRequestId,
+                    intent.CounterpartyHeroId, intent.Context, intent.ContextId, intent.HeroBeingProposedToId,
+                    intent.ProposingHeroId, header), request => request.Header, result => result.Header,
+                ValidateAuthorizeWireShape, BuildAuthorizeKey, ValidateHeader, ExecuteAuthorization,
+                CreateAuthorizationTerminal, _ => AuthorityCommitProbeResult.Applied, _ => { },
+                PresentAuthorizationOutcome, configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true, isExpectedClientResult: (request, result) =>
+                    request.RequestId == result.RequestId));
+        commitRoute = authorityRequestRouter.Register(
+            AuthorityRoute<MarriageBarterCommitIntent, NetworkRequestMarriageBarter,
+                NetworkMarriageBarterResult>.Define(
+                "barter.marriage.commit", AuthorityRouteKind.Command, CreateHeader,
+                (intent, header) => new NetworkRequestMarriageBarter(intent.CounterpartyHeroId, intent.Context,
+                    intent.ContextId, intent.HeroBeingProposedToId, intent.ProposingHeroId, intent.Terms,
+                    intent.ClientRequestId, intent.LeaseId, header), request => request.Header, result => result.Header,
+                ValidateCommitWireShape, BuildCommitKey, ValidateHeader, ExecuteCommit, CreateCommitTerminal,
+                ProbeClientCommit, _ => { }, PresentCommitOutcome, configAuthority.IsTrustedServer,
+                AuthorityTimeoutPolicy.CampaignMutation, failClosedOnApplyFailure: true,
+                isExpectedClientResult: IsExpectedCommitResult));
+
+        messageBroker.Subscribe<NetworkMarriageBarterDelta>(HandleDelta);
         messageBroker.Subscribe<PlayerDisconnected>(HandlePlayerDisconnected);
     }
 
     public void Dispose()
     {
-        messageBroker.Unsubscribe<NetworkAuthorizeMarriageBarter>(HandleAuthorization);
-        messageBroker.Unsubscribe<NetworkCancelMarriageBarterAuthorization>(HandleAuthorizationCanceled);
-        messageBroker.Unsubscribe<NetworkRequestMarriageBarter>(HandleRequest);
-        messageBroker.Unsubscribe<NetworkMarriageBarterResult>(HandleResult);
+        messageBroker.Unsubscribe<NetworkMarriageBarterDelta>(HandleDelta);
         messageBroker.Unsubscribe<PlayerDisconnected>(HandlePlayerDisconnected);
-        authorizations.Clear();
+        authorizeRoute.Dispose();
+        commitRoute.Dispose();
+        marriageLeases.Clear();
+        receivedDeltas.Clear();
+        if (instance == this) instance = null;
         MarriageBarterPatch.ClearPendingRequest();
-    }
-
-    private void HandleAuthorization(MessagePayload<NetworkAuthorizeMarriageBarter> payload)
-    {
-        if (ModInformation.IsClient || !(payload.Who is NetPeer peer)) return;
-
-        var request = payload.What;
-        GameThread.RunSafe(
-            () => ProcessAuthorization(peer, request),
-            context: nameof(NetworkAuthorizeMarriageBarter));
-    }
-
-    private void HandleAuthorizationCanceled(MessagePayload<NetworkCancelMarriageBarterAuthorization> payload)
-    {
-        if (ModInformation.IsClient || !(payload.Who is NetPeer peer)) return;
-
-        var requestId = payload.What.RequestId;
-        GameThread.RunSafe(() =>
-        {
-            if (authorizations.TryGetValue(peer, out var authorization) && authorization.RequestId == requestId)
-                authorizations.Remove(peer);
-        }, context: nameof(NetworkCancelMarriageBarterAuthorization));
     }
 
     private void HandlePlayerDisconnected(MessagePayload<PlayerDisconnected> payload)
@@ -117,53 +133,38 @@ internal sealed class MarriageBarterHandler : IHandler
 
         var peer = payload.What.PlayerId;
         GameThread.RunSafe(
-            () => authorizations.Remove(peer),
+            () => TombstonePeerLeases(peer),
             context: nameof(PlayerDisconnected));
     }
 
-    private void HandleRequest(MessagePayload<NetworkRequestMarriageBarter> payload)
+    internal static bool TryAuthorize(MarriageBarterAuthorizeIntent intent)
     {
-        if (ModInformation.IsClient) return;
-
-        var sender = payload.Who;
-        var request = payload.What;
-        GameThread.RunSafe(() => ProcessRequest(sender, request), context: nameof(MarriageBarterHandler));
+        if (instance == null || ModInformation.IsServer) return false;
+        instance.authorizeRoute.Submit(intent);
+        return true;
     }
 
-    private void HandleResult(MessagePayload<NetworkMarriageBarterResult> payload)
+    internal static bool TryCommit(MarriageBarterCommitIntent intent)
     {
-        if (ModInformation.IsServer) return;
-
-        GameThread.RunSafe(() =>
-        {
-            if (MarriageBarterPatch.CompleteRequest(payload.What, barterClientPresentation) && !payload.What.Accepted)
-                network.SendAll(new NetworkRequestRomanceStateSync());
-        }, context: nameof(NetworkMarriageBarterResult));
+        if (instance == null || ModInformation.IsServer) return false;
+        instance.commitRoute.Submit(intent);
+        return true;
     }
 
-    private void ProcessRequest(object sender, NetworkRequestMarriageBarter request)
+    private AuthorityServerReply<NetworkMarriageBarterResult> ExecuteCommit(
+        AuthorityServerContext context, NetworkRequestMarriageBarter request)
     {
-        if (!TryResolveRequester(sender, out var peer, out var player, out var playerHero, out var requesterReason))
-        {
-            if (peer != null)
-                Reject(peer, request, 0, requesterReason);
-            return;
-        }
+        if (!TryResolveRequester(context.Peer, out _, out var player, out var playerHero, out var requesterReason))
+            return Reject(context.Header, request, 0, requesterReason);
 
         using var playerContext = new BarterPlayerContext(
             playerHero,
             GetPlayerParty(player, playerHero)?.MobileParty);
-        var mutationApplied = false;
+        var mutationStarted = false;
         try
         {
-            if (!TryConsumeAuthorization(peer, request))
-            {
-                Reject(peer, request, playerHero.Gold, "The marriage barter is no longer authorized.");
-                return;
-            }
-
             if (!TryResolveMarriageContext(
-                    peer,
+                    context.Peer,
                     player,
                     playerHero,
                     request.CounterpartyHeroId,
@@ -171,14 +172,13 @@ internal sealed class MarriageBarterHandler : IHandler
                     request.ContextId,
                     request.HeroBeingProposedToId,
                     request.ProposingHeroId,
-                    requireActiveConversation: false,
+                    requireActiveConversation: true,
                     out var counterpartyHero,
                     out var heroBeingProposedTo,
                     out var proposingHero,
                     out var reason))
             {
-                Reject(peer, request, playerHero.Gold, reason);
-                return;
+                return Reject(context.Header, request, playerHero.Gold, reason);
             }
 
             if (!TryBuildMarriageBarter(
@@ -191,112 +191,59 @@ internal sealed class MarriageBarterHandler : IHandler
                     out var barterData,
                     out reason))
             {
-                Reject(peer, request, playerHero.Gold, reason);
-                return;
+                return Reject(context.Header, request, playerHero.Gold, reason);
             }
 
             var barterManager = BarterManager.Instance;
             if (barterManager == null)
             {
-                Reject(peer, request, playerHero.Gold, "The marriage offer is not acceptable.");
-                return;
+                return Reject(context.Header, request, playerHero.Gold, "The marriage offer is not acceptable.");
             }
 
             var offerValue = barterManager.GetOfferValueForFaction(barterData, counterpartyHero.Clan);
             if (offerValue < -0.01f)
             {
-                Reject(peer, request, playerHero.Gold, "The marriage offer is not acceptable.");
-                return;
+                return Reject(context.Header, request, playerHero.Gold, "The marriage offer is not acceptable.");
             }
+            // This is the final reversible boundary. The lease binds the exact server-authorized
+            // participants and session; terms above were rebuilt and valued from live server state.
+            if (!TryConsumeLease(context, request))
+                return Reject(context.Header, request, playerHero.Gold, "The marriage barter is no longer authorized.");
+            if (!CanPublishCanonicalDelta(playerHero, counterpartyHero, heroBeingProposedTo, proposingHero, out reason))
+                return Reject(context.Header, request, playerHero.Gold, reason);
 
-            ApplyMarriage(
-                peer,
-                request,
-                playerHero,
-                barterData,
-                heroBeingProposedTo,
-                proposingHero,
-                offerValue,
-                ref mutationApplied);
+            mutationStarted = true;
+            var offeredBarterables = barterData.GetOfferedBarterables();
+            foreach (var barterable in offeredBarterables) barterable.Apply();
+            CampaignEventDispatcher.Instance.OnBarterAccepted(playerHero, barterData.OtherHero, offeredBarterables);
+            ApplyOverpayRelationBonus(playerHero, barterData.OtherHero, MathF.Max(0f, offerValue));
+            if (heroBeingProposedTo.Spouse != proposingHero || proposingHero.Spouse != heroBeingProposedTo)
+                return IsolateAfterMutation(context, request, "marriage-postcondition-missing");
+
+            FlushHeroGold(playerHero);
+            FlushHeroGold(counterpartyHero);
+            FlushHeroGold(heroBeingProposedTo);
+            FlushHeroGold(proposingHero);
+            if (!PublishCanonicalDelta(context.Header, request, playerHero, counterpartyHero, heroBeingProposedTo, proposingHero))
+                return IsolateAfterMutation(context, request, "marriage-publication-failed");
+            return Accept(context.Header, request, playerHero.Gold);
         }
         catch (Exception exception)
         {
             Logger.Error(exception, "Failed to apply an authoritative marriage barter");
-            if (mutationApplied)
-            {
-                // The marriage is already done server-side; telling the client it failed would be
-                // the desync, not the fix. Report success and let the replicated state stand.
-                Accept(peer, request, playerHero.Gold);
-                return;
-            }
-
-            Reject(
-                peer,
-                request,
-                playerHero.Gold,
-                "The server could not process the marriage offer.");
+            if (mutationStarted) return IsolateAfterMutation(context, request, "marriage-ambiguous", exception);
+            return Reject(context.Header, request, playerHero.Gold, "The server could not process the marriage offer.");
         }
     }
 
-    /// <summary>
-    /// Commits the marriage and reports success.
-    /// </summary>
-    /// <remarks>
-    /// Sets <paramref name="mutationApplied"/> as soon as the barterables land. Past that point the
-    /// marriage and any gold have already moved on the authoritative server, so nothing here may be
-    /// reported as a rejection - the client would roll its UI back over a change that really happened.
-    /// </remarks>
-    private void ApplyMarriage(
-        NetPeer peer,
-        NetworkRequestMarriageBarter request,
-        Hero playerHero,
-        BarterData barterData,
-        Hero heroBeingProposedTo,
-        Hero proposingHero,
-        float offerValue,
-        ref bool mutationApplied)
+    private AuthorityServerReply<NetworkMarriageBarterAuthorizationResult> ExecuteAuthorization(
+        AuthorityServerContext context, NetworkAuthorizeMarriageBarter request)
     {
-        var offeredBarterables = barterData.GetOfferedBarterables();
-        foreach (var barterable in offeredBarterables)
-            barterable.Apply();
-
-        mutationApplied = true;
-
-        CampaignEventDispatcher.Instance.OnBarterAccepted(playerHero, barterData.OtherHero, offeredBarterables);
-        ApplyOverpayRelationBonus(playerHero, barterData.OtherHero, MathF.Max(0f, offerValue));
-
-        if (heroBeingProposedTo.Spouse != proposingHero || proposingHero.Spouse != heroBeingProposedTo)
-        {
-            // The barterables have already been applied and any gold has already moved, so this
-            // cannot be reported as a rejection - that is the desync, not the fix. Report success
-            // and let the replicated state stand; log it, because a spouse link that did not take
-            // is a real problem worth seeing even though the client must not roll back.
-            Logger.Error(
-                "Marriage barter applied but the spouse links did not take: {Proposing} <-> {Proposed}",
-                proposingHero?.StringId,
-                heroBeingProposedTo?.StringId);
-        }
-
-        FlushHeroGold(playerHero);
-        FlushHeroGold(barterData.OtherHero);
-        FlushHeroGold(heroBeingProposedTo);
-        FlushHeroGold(proposingHero);
-        Accept(peer, request, playerHero.Gold);
-    }
-
-    private void ProcessAuthorization(NetPeer peer, NetworkAuthorizeMarriageBarter request)
-    {
-        if (string.IsNullOrEmpty(request.RequestId))
-        {
-            Logger.Warning("Rejected marriage barter authorization from peer {Peer}: the request id is empty", peer.Id);
-            return;
-        }
-
-        if (!TryResolveRequester(peer, out _, out var player, out var playerHero, out var reason))
-            return;
+        if (!TryResolveRequester(context.Peer, out _, out var player, out var playerHero, out var reason))
+            return RejectAuthorization(context.Header, request, reason);
 
         if (!TryResolveMarriageContext(
-                peer,
+                context.Peer,
                 player,
                 playerHero,
                 request.CounterpartyHeroId,
@@ -310,43 +257,44 @@ internal sealed class MarriageBarterHandler : IHandler
                 out _,
                 out reason))
         {
-            Logger.Warning(
-                "Rejected marriage barter authorization {RequestId} from peer {Peer}: {Reason}",
-                request.RequestId,
-                peer.Id,
-                reason);
-            // Tell the player immediately; a silent refusal here left the propose button dead
-            // with no explanation until the actual request bounced.
-            network.Send(peer, new NetworkRomanceRequestRejected(reason));
-            return;
+            return RejectAuthorization(context.Header, request, reason);
         }
 
-        authorizations[peer] = new MarriageAuthorization(
-            request.RequestId,
+        TombstonePeerLeases(context.Peer);
+        var leaseId = Guid.NewGuid().ToString("N");
+        marriageLeases[leaseId] = new MarriageAuthorization(
+            leaseId,
+            context.Peer,
+            context.Header.SessionId,
             request.CounterpartyHeroId,
             request.Context,
             request.ContextId,
             request.HeroBeingProposedToId,
             request.ProposingHeroId,
             DateTime.UtcNow.Add(AuthorizationLifetime));
+        return new AuthorityServerReply<NetworkMarriageBarterAuthorizationResult>(
+            new NetworkMarriageBarterAuthorizationResult(request.RequestId, leaseId,
+                new AuthorityResultHeader(context.Header.SessionId, context.Header.RequestId,
+                    AuthorityResultStatus.Accepted, context.Header.ExpectedRevision, null)), statePublished: true);
     }
 
-    private bool TryConsumeAuthorization(NetPeer peer, NetworkRequestMarriageBarter request)
+    private bool TryConsumeLease(AuthorityServerContext context, NetworkRequestMarriageBarter request)
     {
-        if (string.IsNullOrEmpty(request.RequestId) ||
-            !authorizations.TryGetValue(peer, out var authorization))
+        if (string.IsNullOrEmpty(request.LeaseId) ||
+            !marriageLeases.TryGetValue(request.LeaseId, out var authorization))
             return false;
 
-        if (authorization.ExpiresAtUtc <= DateTime.UtcNow)
+        if (authorization.ExpiresAtUtc <= DateTime.UtcNow || authorization.Consumed || authorization.Owner != context.Peer ||
+            !string.Equals(authorization.SessionId, context.Header.SessionId, StringComparison.Ordinal))
         {
-            authorizations.Remove(peer);
+            authorization.Tombstone();
             return false;
         }
 
         if (!authorization.Matches(request))
             return false;
 
-        authorizations.Remove(peer);
+        authorization.Consume();
         return true;
     }
 
@@ -744,45 +692,204 @@ internal sealed class MarriageBarterHandler : IHandler
         sendCoalescer.FlushInstance(heroId, network);
     }
 
-    private void Accept(NetPeer peer, NetworkRequestMarriageBarter request, int playerGold)
+    private AuthorityRequestHeader CreateHeader(long requestId)
     {
-        network.Send(peer, new NetworkMarriageBarterResult(
-            request.CounterpartyHeroId,
-            request.HeroBeingProposedToId,
-            request.ProposingHeroId,
-            true,
-            playerGold,
-            requestId: request.RequestId));
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot snapshot)) return default;
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, requestId, snapshot.Revision);
     }
 
-    private void Reject(NetPeer peer, NetworkRequestMarriageBarter request, int playerGold, string reason)
+    private AuthorityHeaderValidation ValidateHeader(AuthorityRequestHeader header)
     {
-        Logger.Warning(
-            "Rejected marriage barter with {CounterpartyHeroId}: {Reason}",
-            request.CounterpartyHeroId,
-            reason);
-        network.Send(peer, new NetworkMarriageBarterResult(
-            request.CounterpartyHeroId,
-            request.HeroBeingProposedToId,
-            request.ProposingHeroId,
-            false,
-            playerGold,
-            reason,
-            request.RequestId));
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot current))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "config-unavailable");
+        if (header.ProtocolVersion != current.ProtocolVersion)
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.InvalidRequest, "unsupported-protocol");
+        if (!string.Equals(header.SessionId, current.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-session");
+        return header.ExpectedRevision == current.Revision
+            ? AuthorityHeaderValidation.Valid
+            : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-state");
     }
+
+    private static string ValidateAuthorizeWireShape(NetworkAuthorizeMarriageBarter request) =>
+        ValidateParticipants(request.RequestId, request.CounterpartyHeroId, request.Context, request.ContextId,
+            request.HeroBeingProposedToId, request.ProposingHeroId);
+
+    private static string ValidateCommitWireShape(NetworkRequestMarriageBarter request)
+    {
+        var failure = ValidateParticipants(request.RequestId, request.CounterpartyHeroId, request.Context,
+            request.ContextId, request.HeroBeingProposedToId, request.ProposingHeroId);
+        if (failure != null || string.IsNullOrWhiteSpace(request.LeaseId) || request.LeaseId.Length > 64 ||
+            request.Terms == null || request.Terms.Length > 128) return failure ?? "invalid-marriage-commit";
+        return request.Terms.Any(term => !Enum.IsDefined(typeof(MarriageBarterTermType), term.Type) || term.Amount <= 0 ||
+            string.IsNullOrWhiteSpace(term.OwnerHeroId) || term.OwnerHeroId.Length > 256 ||
+            (term.ObjectId?.Length ?? 0) > 256 || (term.ItemModifierId?.Length ?? 0) > 256)
+            ? "invalid-marriage-barter-term" : null;
+    }
+
+    private static string ValidateParticipants(string requestId, string counterpartyHeroId, int context, string contextId,
+        string heroBeingProposedToId, string proposingHeroId)
+    {
+        return string.IsNullOrWhiteSpace(requestId) || requestId.Length > 128 ||
+            string.IsNullOrWhiteSpace(counterpartyHeroId) || counterpartyHeroId.Length > 256 ||
+            string.IsNullOrWhiteSpace(contextId) || contextId.Length > 256 ||
+            string.IsNullOrWhiteSpace(heroBeingProposedToId) || heroBeingProposedToId.Length > 256 ||
+            string.IsNullOrWhiteSpace(proposingHeroId) || proposingHeroId.Length > 256 ||
+            !Enum.IsDefined(typeof(MarriageConversationContext), context) ? "invalid-marriage-barter" : null;
+    }
+
+    private static string BuildAuthorizeKey(NetworkAuthorizeMarriageBarter request) => string.Concat(
+        request.RequestId, ":", request.CounterpartyHeroId, ":", request.Context, ":", request.ContextId, ":",
+        request.HeroBeingProposedToId, ":", request.ProposingHeroId);
+
+    private static string BuildCommitKey(NetworkRequestMarriageBarter request) => string.Concat(request.LeaseId, ":",
+        BuildAuthorizeKey(new NetworkAuthorizeMarriageBarter(request.RequestId, request.CounterpartyHeroId,
+            (MarriageConversationContext)request.Context, request.ContextId, request.HeroBeingProposedToId,
+            request.ProposingHeroId)), ":", string.Join("|", request.Terms.OrderBy(term => term.Type)
+            .ThenBy(term => term.OwnerHeroId, StringComparer.Ordinal).ThenBy(term => term.ObjectId, StringComparer.Ordinal)
+            .ThenBy(term => term.ItemModifierId, StringComparer.Ordinal).ThenBy(term => term.Amount)
+            .Select(term => string.Concat(term.Type, ":", term.OwnerHeroId, ":", term.ObjectId, ":", term.ItemModifierId,
+                ":", term.ItemModifierNull, ":", term.Amount))));
+
+    private static NetworkMarriageBarterAuthorizationResult CreateAuthorizationTerminal(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        new(null, null, new AuthorityResultHeader(header.SessionId, header.RequestId, status, header.ExpectedRevision, reason));
+
+    private static NetworkMarriageBarterResult CreateCommitTerminal(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        new(null, null, null, new AuthorityResultHeader(header.SessionId, header.RequestId, status,
+            header.ExpectedRevision, reason), 0, null);
+
+    private static AuthorityServerReply<NetworkMarriageBarterAuthorizationResult> RejectAuthorization(
+        AuthorityRequestHeader header, NetworkAuthorizeMarriageBarter request, string reason) =>
+        new(new NetworkMarriageBarterAuthorizationResult(request.RequestId, null,
+            new AuthorityResultHeader(header.SessionId, header.RequestId, AuthorityResultStatus.Rejected,
+                header.ExpectedRevision, reason)), false);
+
+    private static AuthorityServerReply<NetworkMarriageBarterResult> Accept(AuthorityRequestHeader header,
+        NetworkRequestMarriageBarter request, int playerGold) => new(new NetworkMarriageBarterResult(
+            request.CounterpartyHeroId, request.HeroBeingProposedToId, request.ProposingHeroId,
+            new AuthorityResultHeader(header.SessionId, header.RequestId, AuthorityResultStatus.Accepted,
+                header.ExpectedRevision, null), playerGold, request.RequestId), true);
+
+    private static AuthorityServerReply<NetworkMarriageBarterResult> Reject(AuthorityRequestHeader header,
+        NetworkRequestMarriageBarter request, int playerGold, string reason) => new(new NetworkMarriageBarterResult(
+            request.CounterpartyHeroId, request.HeroBeingProposedToId, request.ProposingHeroId,
+            new AuthorityResultHeader(header.SessionId, header.RequestId, AuthorityResultStatus.Rejected,
+                header.ExpectedRevision, reason), playerGold, request.RequestId), false);
+
+    private void HandleDelta(MessagePayload<NetworkMarriageBarterDelta> payload)
+    {
+        if (ModInformation.IsServer || !configAuthority.IsTrustedServer(payload.Who) ||
+            !configAuthority.TryGetCurrent(out ModConfigSnapshot config)) return;
+        var delta = payload.What;
+        if (delta.AuthorityRequestId <= 0 || delta.CommittedRevision != config.Revision ||
+            !string.Equals(delta.SessionId, config.SessionId, StringComparison.Ordinal)) return;
+        receivedDeltas[DeltaKey(delta.SessionId, delta.AuthorityRequestId, delta.CommittedRevision)] = delta;
+    }
+
+    private AuthorityCommitProbeResult ProbeClientCommit(NetworkMarriageBarterResult result)
+    {
+        if (result.Header.Status != AuthorityResultStatus.Accepted || !configAuthority.TryGetCurrent(out ModConfigSnapshot config) ||
+            config.Revision != result.Header.CommittedRevision || config.SessionId != result.Header.SessionId ||
+            !receivedDeltas.TryGetValue(DeltaKey(result.Header.SessionId, result.Header.RequestId,
+                result.Header.CommittedRevision), out var delta) ||
+            !TryResolveHero(delta.PlayerHeroId, out var playerHero) || !TryResolveHero(delta.CounterpartyHeroId, out var counterpartyHero) ||
+            !TryResolveHero(delta.HeroBeingProposedToId, out var proposedHero) || !TryResolveHero(delta.ProposingHeroId, out var proposingHero) ||
+            playerHero.Gold != delta.PlayerGold || counterpartyHero.Gold != delta.CounterpartyGold ||
+            proposedHero.Gold != delta.HeroBeingProposedToGold || proposingHero.Gold != delta.ProposingHeroGold ||
+            proposedHero.Spouse != proposingHero || proposingHero.Spouse != proposedHero ||
+            (int)Romance.GetRomanticLevel(proposedHero, proposingHero) != delta.RomanceLevel)
+            return AuthorityCommitProbeResult.Pending;
+        return AuthorityCommitProbeResult.Applied;
+    }
+
+    private static bool IsExpectedCommitResult(NetworkRequestMarriageBarter request, NetworkMarriageBarterResult result) =>
+        result.Header.RequestId == request.Header.RequestId && result.Header.CommittedRevision == request.Header.ExpectedRevision &&
+        string.Equals(result.Header.SessionId, request.Header.SessionId, StringComparison.Ordinal) &&
+        result.RequestId == request.RequestId && result.CounterpartyHeroId == request.CounterpartyHeroId &&
+        result.HeroBeingProposedToId == request.HeroBeingProposedToId && result.ProposingHeroId == request.ProposingHeroId;
+
+    private static void PresentAuthorizationOutcome(AuthorityClientOutcome<NetworkMarriageBarterAuthorizationResult> outcome) =>
+        MarriageBarterPatch.CompleteAuthorization(outcome.Result, outcome.Applied ? null : outcome.ReasonCode);
+
+    private void PresentCommitOutcome(AuthorityClientOutcome<NetworkMarriageBarterResult> outcome)
+    {
+        if (outcome.Applied && outcome.Result.Header.Status == AuthorityResultStatus.Accepted)
+        {
+            receivedDeltas.Remove(DeltaKey(outcome.Result.Header.SessionId, outcome.Result.Header.RequestId,
+                outcome.Result.Header.CommittedRevision));
+            MarriageBarterPatch.CompleteRequest(outcome.Result, barterClientPresentation);
+            return;
+        }
+        MarriageBarterPatch.CompleteFailedRequest(outcome.ReasonCode);
+    }
+
+    private bool CanPublishCanonicalDelta(Hero playerHero, Hero counterpartyHero, Hero proposedHero, Hero proposingHero,
+        out string reason)
+    {
+        reason = null;
+        if (!objectManager.TryGetId(playerHero, out _) || !objectManager.TryGetId(counterpartyHero, out _) ||
+            !objectManager.TryGetId(proposedHero, out _) || !objectManager.TryGetId(proposingHero, out _))
+        {
+            reason = "The marriage result cannot be safely synchronized.";
+            return false;
+        }
+        return true;
+    }
+
+    private bool PublishCanonicalDelta(AuthorityRequestHeader header, NetworkRequestMarriageBarter request,
+        Hero playerHero, Hero counterpartyHero, Hero proposedHero, Hero proposingHero)
+    {
+        if (!objectManager.TryGetId(playerHero, out var playerId) || !objectManager.TryGetId(counterpartyHero, out var counterpartyId) ||
+            !objectManager.TryGetId(proposedHero, out var proposedId) || !objectManager.TryGetId(proposingHero, out var proposingId) ||
+            !objectManager.TryGetId(proposedHero.Spouse, out var proposedSpouseId) ||
+            !objectManager.TryGetId(proposingHero.Spouse, out var proposingSpouseId)) return false;
+        network.SendAll(new NetworkMarriageBarterDelta(header, playerId, counterpartyId, proposedId, proposingId,
+            proposedSpouseId, proposingSpouseId, (int)Romance.GetRomanticLevel(proposedHero, proposingHero),
+            playerHero.Gold, counterpartyHero.Gold, proposedHero.Gold, proposingHero.Gold, request.Context, request.ContextId));
+        return true;
+    }
+
+    private AuthorityServerReply<NetworkMarriageBarterResult> IsolateAfterMutation(AuthorityServerContext context,
+        NetworkRequestMarriageBarter request, string stage, Exception exception = null)
+    {
+        if (exception == null) Logger.Fatal("Marriage barter ambiguity after mutation. Stage={Stage}", stage);
+        else Logger.Fatal(exception, "Marriage barter ambiguity after mutation. Stage={Stage}", stage);
+        foreach (var audience in playerManager.Players)
+        {
+            try { if (playerManager.TryGetPeer(audience.ControllerId, out var peer)) peer.Disconnect(); } catch { }
+        }
+        try { context.Peer.Disconnect(); } catch { }
+        return new AuthorityServerReply<NetworkMarriageBarterResult>(CreateCommitTerminal(context.Header,
+            AuthorityResultStatus.ExecutionFailed, "marriage-isolated"), false, suppressReply: true);
+    }
+
+    private void TombstonePeerLeases(NetPeer peer)
+    {
+        foreach (var lease in marriageLeases.Values.Where(lease => lease.Owner == peer)) lease.Tombstone();
+    }
+
+    private static string DeltaKey(string sessionId, long requestId, long revision) =>
+        string.Concat(sessionId, ":", requestId, ":", revision);
 
     private sealed class MarriageAuthorization
     {
-        public string RequestId { get; }
+        public string LeaseId { get; }
+        public NetPeer Owner { get; }
+        public string SessionId { get; }
         private string CounterpartyHeroId { get; }
         private int Context { get; }
         private string ContextId { get; }
         private string HeroBeingProposedToId { get; }
         private string ProposingHeroId { get; }
         public DateTime ExpiresAtUtc { get; }
+        public bool Consumed { get; private set; }
 
         public MarriageAuthorization(
-            string requestId,
+            string leaseId,
+            NetPeer owner,
+            string sessionId,
             string counterpartyHeroId,
             int context,
             string contextId,
@@ -790,7 +897,9 @@ internal sealed class MarriageBarterHandler : IHandler
             string proposingHeroId,
             DateTime expiresAtUtc)
         {
-            RequestId = requestId;
+            LeaseId = leaseId;
+            Owner = owner;
+            SessionId = sessionId;
             CounterpartyHeroId = counterpartyHeroId;
             Context = context;
             ContextId = contextId;
@@ -800,11 +909,58 @@ internal sealed class MarriageBarterHandler : IHandler
         }
 
         public bool Matches(NetworkRequestMarriageBarter request)
-            => RequestId == request.RequestId &&
-               CounterpartyHeroId == request.CounterpartyHeroId &&
+            => CounterpartyHeroId == request.CounterpartyHeroId &&
                Context == request.Context &&
                ContextId == request.ContextId &&
                HeroBeingProposedToId == request.HeroBeingProposedToId &&
                ProposingHeroId == request.ProposingHeroId;
+
+        public void Consume() => Consumed = true;
+        public void Tombstone() => Consumed = true;
+    }
+
+    internal readonly struct MarriageBarterAuthorizeIntent
+    {
+        public MarriageBarterAuthorizeIntent(string clientRequestId, string counterpartyHeroId,
+            MarriageConversationContext context, string contextId, string heroBeingProposedToId, string proposingHeroId)
+        {
+            ClientRequestId = clientRequestId;
+            CounterpartyHeroId = counterpartyHeroId;
+            Context = context;
+            ContextId = contextId;
+            HeroBeingProposedToId = heroBeingProposedToId;
+            ProposingHeroId = proposingHeroId;
+        }
+        public string ClientRequestId { get; }
+        public string CounterpartyHeroId { get; }
+        public MarriageConversationContext Context { get; }
+        public string ContextId { get; }
+        public string HeroBeingProposedToId { get; }
+        public string ProposingHeroId { get; }
+    }
+
+    internal readonly struct MarriageBarterCommitIntent
+    {
+        public MarriageBarterCommitIntent(string clientRequestId, string leaseId, string counterpartyHeroId,
+            MarriageConversationContext context, string contextId, string heroBeingProposedToId, string proposingHeroId,
+            MarriageBarterTerm[] terms)
+        {
+            ClientRequestId = clientRequestId;
+            LeaseId = leaseId;
+            CounterpartyHeroId = counterpartyHeroId;
+            Context = context;
+            ContextId = contextId;
+            HeroBeingProposedToId = heroBeingProposedToId;
+            ProposingHeroId = proposingHeroId;
+            Terms = terms ?? Array.Empty<MarriageBarterTerm>();
+        }
+        public string ClientRequestId { get; }
+        public string LeaseId { get; }
+        public string CounterpartyHeroId { get; }
+        public MarriageConversationContext Context { get; }
+        public string ContextId { get; }
+        public string HeroBeingProposedToId { get; }
+        public string ProposingHeroId { get; }
+        public MarriageBarterTerm[] Terms { get; }
     }
 }

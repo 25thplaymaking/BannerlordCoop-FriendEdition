@@ -1,7 +1,9 @@
 ﻿using Common;
 using Common.Network;
 using GameInterface.Policies;
+using GameInterface.Services.Barters.Handlers;
 using GameInterface.Services.Barters.Messages;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Heroes.Extensions;
 using GameInterface.Services.ObjectManager;
 using HarmonyLib;
@@ -21,8 +23,10 @@ internal static class MarriageBarterPatch
 {
     private static BarterData authorizedBarter;
     private static bool requestPending;
+    private static bool authorizationPending;
     private static bool pendingUiActive;
     private static string pendingRequestId;
+    private static string pendingLeaseId;
     private static string pendingCounterpartyHeroId;
     private static string pendingHeroBeingProposedToId;
     private static string pendingProposingHeroId;
@@ -42,8 +46,7 @@ internal static class MarriageBarterPatch
             return;
         }
 
-        if (authorizedBarter != null)
-            CancelAuthorization();
+        if (authorizedBarter != null) ClearPendingRequest();
 
         var marriageBarterable = args.GetBarterables().OfType<MarriageBarterable>().FirstOrDefault();
         if (marriageBarterable == null ||
@@ -67,8 +70,7 @@ internal static class MarriageBarterPatch
         if (requestPending) return false;
 
         if (authorizedBarter != barterData ||
-            string.IsNullOrEmpty(pendingRequestId) ||
-            !ContainerProvider.TryResolve<INetwork>(out var network) ||
+            string.IsNullOrEmpty(pendingRequestId) || string.IsNullOrEmpty(pendingLeaseId) || authorizationPending ||
             !ContainerProvider.TryResolve<IObjectManager>(out var objectManager))
         {
             ShowMessage("Unable to send the marriage offer to the server.");
@@ -83,14 +85,14 @@ internal static class MarriageBarterPatch
 
         requestPending = true;
         pendingUiActive = true;
-        network.SendAll(new NetworkRequestMarriageBarter(
-            pendingCounterpartyHeroId,
-            pendingContext,
-            pendingContextId,
-            pendingHeroBeingProposedToId,
-            pendingProposingHeroId,
-            terms.ToArray(),
-            pendingRequestId));
+        if (!MarriageBarterHandler.TryCommit(new MarriageBarterCommitIntent(pendingRequestId, pendingLeaseId,
+                pendingCounterpartyHeroId, pendingContext, pendingContextId, pendingHeroBeingProposedToId,
+                pendingProposingHeroId, terms.ToArray())))
+        {
+            requestPending = false;
+            pendingUiActive = false;
+            ShowMessage("Unable to send the marriage offer to the server.");
+        }
         return false;
     }
 
@@ -101,7 +103,7 @@ internal static class MarriageBarterPatch
         if (barterData != authorizedBarter) return true;
         if (requestPending) return false;
 
-        CancelAuthorization();
+        ClearPendingRequest();
         return true;
     }
 
@@ -157,12 +159,36 @@ internal static class MarriageBarterPatch
         return true;
     }
 
+    internal static void CompleteAuthorization(NetworkMarriageBarterAuthorizationResult result, string failure)
+    {
+        if (!authorizationPending || authorizedBarter == null || result.RequestId != pendingRequestId) return;
+        authorizationPending = false;
+        if (result.Header.Status == AuthorityResultStatus.Accepted && !string.IsNullOrWhiteSpace(result.LeaseId))
+        {
+            pendingLeaseId = result.LeaseId;
+            return;
+        }
+        ClearPendingRequest();
+        ShowMessage(string.IsNullOrWhiteSpace(failure) ? "The server could not authorize the marriage barter." : failure);
+    }
+
+    internal static void CompleteFailedRequest(string reason)
+    {
+        var shouldReauthorize = pendingUiActive;
+        var barter = authorizedBarter;
+        ClearPendingRequest();
+        if (shouldReauthorize && barter != null) TryReauthorize(barter);
+        ShowMessage(string.IsNullOrWhiteSpace(reason) ? "The server could not apply the marriage barter." : reason);
+    }
+
     internal static void ClearPendingRequest()
     {
         authorizedBarter = null;
         requestPending = false;
+        authorizationPending = false;
         pendingUiActive = false;
         pendingRequestId = null;
+        pendingLeaseId = null;
         pendingCounterpartyHeroId = null;
         pendingHeroBeingProposedToId = null;
         pendingProposingHeroId = null;
@@ -173,7 +199,6 @@ internal static class MarriageBarterPatch
     private static bool TryAuthorize(BarterData barterData, MarriageBarterable marriageBarterable)
     {
         if (!ContainerProvider.TryResolve<IObjectManager>(out var objectManager) ||
-            !ContainerProvider.TryResolve<INetwork>(out var network) ||
             !objectManager.TryGetId(barterData.OtherHero, out var counterpartyHeroId) ||
             !objectManager.TryGetId(marriageBarterable.HeroBeingProposedTo, out var heroBeingProposedToId) ||
             !objectManager.TryGetId(marriageBarterable.ProposingHero, out var proposingHeroId) ||
@@ -185,18 +210,19 @@ internal static class MarriageBarterPatch
         var requestId = Guid.NewGuid().ToString("N");
         authorizedBarter = barterData;
         pendingRequestId = requestId;
+        pendingLeaseId = null;
         pendingCounterpartyHeroId = counterpartyHeroId;
         pendingHeroBeingProposedToId = heroBeingProposedToId;
         pendingProposingHeroId = proposingHeroId;
         pendingContext = context;
         pendingContextId = contextId;
-        network.SendAll(new NetworkAuthorizeMarriageBarter(
-            requestId,
-            counterpartyHeroId,
-            context,
-            contextId,
-            heroBeingProposedToId,
-            proposingHeroId));
+        authorizationPending = MarriageBarterHandler.TryAuthorize(new MarriageBarterAuthorizeIntent(requestId,
+            counterpartyHeroId, context, contextId, heroBeingProposedToId, proposingHeroId));
+        if (!authorizationPending)
+        {
+            ClearPendingRequest();
+            return false;
+        }
         return true;
     }
 
@@ -205,14 +231,6 @@ internal static class MarriageBarterPatch
         var marriageBarterable = barterData.GetBarterables().OfType<MarriageBarterable>().FirstOrDefault();
         if (marriageBarterable != null)
             TryAuthorize(barterData, marriageBarterable);
-    }
-
-    private static void CancelAuthorization()
-    {
-        var requestId = pendingRequestId;
-        ClearPendingRequest();
-        if (!string.IsNullOrEmpty(requestId) && ContainerProvider.TryResolve<INetwork>(out var network))
-            network.SendAll(new NetworkCancelMarriageBarterAuthorization(requestId));
     }
 
     internal static bool TryGetConversationContext(

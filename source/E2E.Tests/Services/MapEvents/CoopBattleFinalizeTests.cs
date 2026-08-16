@@ -7,6 +7,7 @@ using Common.Network;
 using Common.Util;
 using E2E.Tests.Environment.Instance;
 using E2E.Tests.Environment.MockEngine;
+using E2E.Tests.Util;
 using GameInterface.Registry.Auto;
 using GameInterface.Services.MapEvents;
 using GameInterface.Services.MapEvents.Handlers;
@@ -63,11 +64,8 @@ public class CoopBattleFinalizeTests : MapEventTestBase
         try
         {
             var initiatorClient = Clients.First();
-            initiatorClient.Call(() => initiatorClient.Resolve<INetwork>().SendAll(new NetworkBattleStartRequest(
-                Guid.NewGuid().ToString(),
-                (int)BattleStartMode.Mission,
-                setup.ctx.MapEventId,
-                setup.initiatorPartyId)), MapEventDisabledMethods);
+            initiatorClient.Call(() => initiatorClient.Resolve<INetwork>().SendAll(BattleStartTestRequest.Create(
+                initiatorClient, BattleStartMode.Mission, setup.ctx.MapEventId, setup.initiatorPartyId)), MapEventDisabledMethods);
 
             var reply = Server.NetworkSentMessages.GetMessages<NetworkBattleStartReply>().Single();
             Assert.False(reply.Accepted);

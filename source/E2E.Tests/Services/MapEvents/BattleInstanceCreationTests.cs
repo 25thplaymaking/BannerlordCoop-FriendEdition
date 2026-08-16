@@ -2,6 +2,7 @@
 using Common.Network;
 using Common.Util;
 using E2E.Tests.Environment.Instance;
+using E2E.Tests.Util;
 using E2E.Tests.Services.Missions;
 using GameInterface.Services.MapEvents;
 using GameInterface.Services.MapEvents.Handlers;
@@ -106,11 +107,8 @@ public class BattleInstanceCreationTests : MissionTestEnvironment
                     reservedControllers.Add(payload.What.ControllerId);
             });
 
-            client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkBattleStartRequest(
-                Guid.NewGuid().ToString(),
-                (int)BattleStartMode.Mission,
-                mapEventId,
-                partyIds[0])), MapEventDisabledMethods);
+            client.Call(() => client.Resolve<INetwork>().SendAll(BattleStartTestRequest.Create(
+                client, BattleStartMode.Mission, mapEventId, partyIds[0])), MapEventDisabledMethods);
 
             // The server hands the mission to each authoritative participant, carrying the battle's unique
             // map-event id (BR-104), rather than opening a mission itself (BR-002 para 2).

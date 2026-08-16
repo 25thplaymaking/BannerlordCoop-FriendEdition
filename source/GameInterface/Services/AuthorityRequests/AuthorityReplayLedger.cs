@@ -15,14 +15,16 @@ internal enum AuthorityReplayDecision
 
 internal readonly struct AuthorityReplayInspection<TResult>
 {
-    public AuthorityReplayInspection(AuthorityReplayDecision decision, TResult result)
+    public AuthorityReplayInspection(AuthorityReplayDecision decision, TResult result, bool suppressReply = false)
     {
         Decision = decision;
         Result = result;
+        SuppressReply = suppressReply;
     }
 
     public AuthorityReplayDecision Decision { get; }
     public TResult Result { get; }
+    public bool SuppressReply { get; }
 }
 
 /// <summary>Bounded, per-peer idempotency store for one typed authority route.</summary>
@@ -61,15 +63,17 @@ internal sealed class AuthorityReplayLedger<TResult>
 
         return new AuthorityReplayInspection<TResult>(
             entry.Completed ? AuthorityReplayDecision.Completed : AuthorityReplayDecision.InFlight,
-            entry.Result);
+            entry.Result, entry.SuppressReply);
     }
 
-    public void Complete(NetPeer peer, string sessionId, string routeId, long requestId, TResult result)
+    public void Complete(NetPeer peer, string sessionId, string routeId, long requestId, TResult result,
+        bool suppressReply = false)
     {
         var key = new ReplayKey(peer, sessionId, routeId, requestId);
         if (!entries.TryGetValue(key, out var entry)) return;
 
         entry.Result = result;
+        entry.SuppressReply = suppressReply;
         entry.Completed = true;
         entry.LastAccess = ++sequence;
     }
@@ -149,6 +153,7 @@ internal sealed class AuthorityReplayLedger<TResult>
 
         public string CommandKey { get; }
         public TResult Result { get; set; }
+        public bool SuppressReply { get; set; }
         public bool Completed { get; set; }
         public long LastAccess { get; set; }
     }

@@ -98,11 +98,13 @@ internal class BattleMissionStartHandler : IHandler
 
     /// <summary>[Server, game thread] Performs mission setup after the coordinator admitted the authenticated party.</summary>
     internal BattleStartDecision TryStartMission(string mapEventId, MapEvent mapEvent, MobileParty attackerMobileParty,
-        string initiatingPartyId)
+        string initiatingPartyId, long requestId)
     {
         var operation = "validate mission start";
+        var publicationStage = "not-started";
         bool claimed = false;
         bool accepted = false;
+        bool publicationStarted = false;
         try
         {
             if (mapEvent.IsUnsupportedMultiPlayerHostileAction())
@@ -127,6 +129,8 @@ internal class BattleMissionStartHandler : IHandler
             if (mapEvent.IsSiegeAssault)
             {
                 var snapshot = siegeMissionSnapshots.GetOrAdd(mapEventId, _ => BuildSiegeMissionSnapshot(mapEventId, mapEvent));
+                publicationStage = "siege-mission-start";
+                publicationStarted = true;
                 SendMissionStart(participants, new NetworkStartSiegeMission(snapshot.MapEventId, snapshot.WallLevel,
                     snapshot.WallHitPointRatios, snapshot.AttackerEngines, snapshot.DefenderEngines, initiatingPartyId));
             }
@@ -134,9 +138,12 @@ internal class BattleMissionStartHandler : IHandler
             {
                 int terrainSeed = mapEventTerrainSeeds.GetOrAdd(mapEventId, _ => RollTerrainSeed());
                 AtmosphereInfo atmosphere = GetOrCreateAtmosphereSnapshot(mapEventId, () => GetAtmosphereOnCampaign(mapEvent));
+                publicationStage = "field-mission-start";
+                publicationStarted = true;
                 SendMissionStart(participants, new NetworkStartAttackMission(mapEventId, terrainSeed, atmosphere, initiatingPartyId));
             }
             // Publication is intentionally queued before the route emits the correlated Accepted result.
+            publicationStage = "battle-mode-set";
             network.SendAll(new NetworkBattleModeSet(mapEventId, (int)BattleStartMode.Mission));
             accepted = true;
             return BattleStartDecision.Accepted();
@@ -144,11 +151,33 @@ internal class BattleMissionStartHandler : IHandler
         catch (Exception exception)
         {
             Logger.Error(exception, "Failed to {Operation} for admitted battle mission", operation);
-            return BattleStartDecision.Failed("mission-start-failed");
+            if (publicationStarted)
+            {
+                Logger.Fatal("Partial authority publication; isolating mission participants. Route={Route} RequestId={RequestId} Event={Event} Mode={Mode} Stage={Stage}",
+                    "map-event.battle-start", requestId, mapEventId, BattleStartMode.Mission, publicationStage);
+                DisconnectMapEventParticipants(mapEvent);
+            }
+            return publicationStarted
+                ? BattleStartDecision.Isolated("mission-start-partial-publication")
+                : BattleStartDecision.Failed("mission-start-failed");
         }
         finally
         {
-            if (claimed && !accepted) ServerBattleModeArbiter.Release(mapEventId);
+            // Once any canonical state packet has been queued, leave the claim in place on failure: another
+            // mode must not mutate an event whose clients may already have observed mission state.
+            if (claimed && !accepted && !publicationStarted) ServerBattleModeArbiter.Release(mapEventId);
+        }
+    }
+
+    private void DisconnectMapEventParticipants(MapEvent mapEvent)
+    {
+        foreach (var player in playerManager.Players)
+        {
+            if (!objectManager.TryGetObject<MobileParty>(player.MobilePartyId, out var party) ||
+                mapEvent.FindMapEventParty(party.Party) == null ||
+                !playerManager.TryGetPeer(player.ControllerId, out var peer))
+                continue;
+            peer.Disconnect();
         }
     }
 

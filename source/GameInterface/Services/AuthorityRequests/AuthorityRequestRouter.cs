@@ -463,7 +463,7 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             }
             if (replay.Decision == AuthorityReplayDecision.Completed)
             {
-                SendCached(peer, header, replay.Result);
+                if (!replay.SuppressReply) SendCached(peer, header, replay.Result);
                 return;
             }
             if (replay.Decision == AuthorityReplayDecision.InFlight) return;
@@ -491,10 +491,12 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
         private void ExecuteServer(NetPeer peer, Player player, AuthorityRequestHeader header, TRequest request)
         {
             TResult result;
+            bool suppressReply = false;
             try
             {
                 var reply = route.Execute(new AuthorityServerContext(peer, player, header, route.RouteId), request);
                 result = reply.Result;
+                suppressReply = reply.SuppressReply;
                 AuthorityResultHeader resultHeader = route.ReadResultHeader(result);
                 if (!resultHeader.TryValidate(out var failure) || resultHeader.RequestId != header.RequestId ||
                     !string.Equals(resultHeader.SessionId, header.SessionId, StringComparison.Ordinal))
@@ -524,8 +526,8 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
                 result = route.CreateTerminalResult(header, AuthorityResultStatus.ExecutionFailed, "executor-threw");
             }
 
-            replayLedger.Complete(peer, header.SessionId, route.RouteId, header.RequestId, result);
-            SendCached(peer, header, result);
+            replayLedger.Complete(peer, header.SessionId, route.RouteId, header.RequestId, result, suppressReply);
+            if (!suppressReply) SendCached(peer, header, result);
         }
 
         private void SendTerminal(NetPeer peer, AuthorityRequestHeader header, TResult result)

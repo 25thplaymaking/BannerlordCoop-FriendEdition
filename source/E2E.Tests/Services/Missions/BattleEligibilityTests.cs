@@ -1,5 +1,6 @@
 ﻿using Common.Network;
 using Common.Util;
+using E2E.Tests.Util;
 using GameInterface.Services.MapEvents;
 using GameInterface.Services.MapEvents.Handlers;
 using GameInterface.Services.MapEvents.Messages.Start;
@@ -102,11 +103,8 @@ public class BattleEligibilityTests : MissionTestEnvironment
         try
         {
             Server.NetworkSentMessages.Clear();
-            clients[2].Call(() => clients[2].Resolve<INetwork>().SendAll(new NetworkBattleStartRequest(
-                Guid.NewGuid().ToString(),
-                (int)BattleStartMode.Mission,
-                mapEventId,
-                outsiderPartyId)), MapEventDisabledMethods);
+            clients[2].Call(() => clients[2].Resolve<INetwork>().SendAll(BattleStartTestRequest.Create(
+                clients[2], BattleStartMode.Mission, mapEventId, outsiderPartyId)), MapEventDisabledMethods);
 
             Assert.False(Server.NetworkSentMessages.GetMessages<NetworkBattleStartReply>().Single().Accepted);
             Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkStartAttackMission>());
@@ -118,11 +116,8 @@ public class BattleEligibilityTests : MissionTestEnvironment
             Server.NetworkSentMessages.Clear();
             Server.InternalMessages.Clear();
 
-            clients[0].Call(() => clients[0].Resolve<INetwork>().SendAll(new NetworkBattleStartRequest(
-                Guid.NewGuid().ToString(),
-                (int)BattleStartMode.Mission,
-                mapEventId,
-                partyIds[0])), MapEventDisabledMethods);
+            clients[0].Call(() => clients[0].Resolve<INetwork>().SendAll(BattleStartTestRequest.Create(
+                clients[0], BattleStartMode.Mission, mapEventId, partyIds[0])), MapEventDisabledMethods);
 
             Assert.True(Server.NetworkSentMessages.GetMessages<NetworkBattleStartReply>().Single().Accepted);
             Assert.Equal(2, Server.NetworkSentMessages.GetMessages<NetworkStartAttackMission>().Count());

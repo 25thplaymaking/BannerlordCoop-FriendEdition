@@ -4,6 +4,7 @@ using Common.Logging;
 using Common.Messaging;
 using Common.Network;
 using Common.Util;
+using GameInterface.Configuration;
 using GameInterface.Registry.Auto;
 using GameInterface.Services.GameDebug.Messages;
 using GameInterface.Services.MobileParties.Data;
@@ -30,6 +31,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Threading;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.CampaignBehaviors;
@@ -54,6 +56,7 @@ public class MapEventDebugCommands
 {
     private static readonly ILogger Logger = LogManager.GetLogger<MapEventDebugCommands>();
     private static LateJoinModeFixture lateJoinModeFixture;
+    private static long debugBattleStartRequestId;
 
     private sealed class LateJoinModeFixture
     {
@@ -2095,11 +2098,12 @@ public class MapEventDebugCommands
 
         // Route the first player's Attack through the real server handler. The resulting mission-start and mode
         // broadcasts reach PlayerTwo before its party belongs to the event, reproducing the missed-claim timing.
-        messageBroker.Publish(firstPeer, new NetworkBattleStartRequest(
-            Guid.NewGuid().ToString(),
-            (int)BattleStartMode.Mission,
-            mapEventId,
-            firstMobilePartyId));
+        if (!TryPublishCanonicalBattleStart(messageBroker, firstPeer, BattleStartMode.Mission, mapEventId,
+                firstMobilePartyId, out var requestFailure))
+        {
+            CleanupLateJoinModeFixture(messageBroker, behaviorSnapshot, objectManager);
+            return requestFailure;
+        }
 
         return $"Late-join field-battle fixture created and first mission requested: mapEvent={mapEventId}, " +
                $"eventType={mapEvent.EventType}, opponent={opponentParty.Name} ({opponentParty.StringId}), " +
@@ -2189,14 +2193,30 @@ public class MapEventDebugCommands
         if (missionMembership.IsControllerInMission(fixture.JoiningControllerId))
             return $"Player {fixture.JoiningControllerId} already entered the field battle mission.";
 
-        messageBroker.Publish(joiningPeer, new NetworkBattleStartRequest(
-            Guid.NewGuid().ToString(),
-            (int)BattleStartMode.Mission,
-            fixture.MapEventId,
-            fixture.JoiningPlayerMobilePartyId));
+        if (!TryPublishCanonicalBattleStart(messageBroker, joiningPeer, BattleStartMode.Mission, fixture.MapEventId,
+                fixture.JoiningPlayerMobilePartyId, out var requestFailure))
+            return requestFailure;
 
         return $"Late joiner mission requested: mapEvent={fixture.MapEventId}, " +
                $"joiningPlayer={fixture.JoiningControllerId}, mode=Mission.";
+    }
+
+    private static bool TryPublishCanonicalBattleStart(IMessageBroker messageBroker, LiteNetLib.NetPeer peer,
+        BattleStartMode mode, string mapEventId, string attackerPartyId, out string failure)
+    {
+        if (!ContainerProvider.TryResolve<IModConfigAuthority>(out var configAuthority) ||
+            !configAuthority.TryGetCurrent(out var snapshot))
+        {
+            failure = "The authoritative mod-config snapshot is unavailable; cannot submit battle start.";
+            return false;
+        }
+
+        long requestId = Interlocked.Increment(ref debugBattleStartRequestId);
+        messageBroker.Publish(peer, new NetworkBattleStartRequest(
+            new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, requestId, snapshot.Revision),
+            (int)mode, mapEventId, attackerPartyId));
+        failure = null;
+        return true;
     }
 
 #if DEBUG

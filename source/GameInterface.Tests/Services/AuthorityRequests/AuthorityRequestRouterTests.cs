@@ -453,6 +453,35 @@ public sealed class AuthorityRequestRouterTests
         });
     }
 
+    [Fact]
+    public void IsolatedPartialPublication_DoesNotSendOrReplayATerminalResult()
+    {
+        RunAsServer(() =>
+        {
+            using var broker = new MessageBroker();
+            using var network = new TestNetwork();
+            var peer = network.CreatePeer();
+            var manager = AuthenticatedManager(peer);
+            int executions = 0;
+            using var router = new AuthorityRequestRouter(broker, network, manager.Object);
+            using var route = router.Register(CreateRoute(() => AuthorityCommitProbeResult.Pending,
+                execute: (_, request) =>
+                {
+                    executions++;
+                    return new AuthorityServerReply<TestResult>(new TestResult(new AuthorityResultHeader(
+                        "session", request.Header.RequestId, AuthorityResultStatus.ExecutionFailed, 0,
+                        "partial-publication")), false, suppressReply: true);
+                }));
+
+            var request = new TestRequest(new AuthorityRequestHeader(1, "session", 88, 2), "isolated");
+            broker.Publish(peer, request);
+            broker.Publish(peer, request);
+
+            Assert.Equal(1, executions);
+            Assert.Empty(network.GetPeerMessagesFromType<TestResult>(peer));
+        });
+    }
+
     private static AuthorityRoute<string, TestRequest, TestResult> CreateRoute(
         Func<AuthorityCommitProbeResult> probe,
         AuthorityTimeoutPolicy timeout = null,

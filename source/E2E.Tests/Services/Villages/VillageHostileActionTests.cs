@@ -1438,11 +1438,8 @@ public class VillageHostileActionTests : MapEventTestBase
         }, MapEventDisabledMethods);
 
         Server.NetworkSentMessages.Clear();
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkBattleStartRequest(
-            Guid.NewGuid().ToString(),
-            (int)BattleStartMode.Mission,
-            mapEventId!,
-            playerMobilePartyId)), MapEventDisabledMethods);
+        client.Call(() => client.Resolve<INetwork>().SendAll(BattleStartTestRequest.Create(
+            client, BattleStartMode.Mission, mapEventId!, playerMobilePartyId)), MapEventDisabledMethods);
 
         Assert.Equal(mapEventId, Server.NetworkSentMessages.GetMessages<NetworkStartAttackMission>().Single().MapEventId);
 
@@ -2189,11 +2186,8 @@ public class VillageHostileActionTests : MapEventTestBase
 
             Server.NetworkSentMessages.Clear();
 
-            client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkBattleStartRequest(
-                Guid.NewGuid().ToString(),
-                (int)BattleStartMode.Mission,
-                raidMapEventId!,
-                joinerMobilePartyId)), MapEventDisabledMethods);
+            client.Call(() => client.Resolve<INetwork>().SendAll(BattleStartTestRequest.Create(
+                client, BattleStartMode.Mission, raidMapEventId!, joinerMobilePartyId)), MapEventDisabledMethods);
 
             Assert.True(Server.NetworkSentMessages.GetMessages<NetworkBattleStartReply>().Single().Accepted);
             Assert.Equal(raidMapEventId, Server.NetworkSentMessages.GetMessages<NetworkStartAttackMission>().Single().MapEventId);
@@ -2370,11 +2364,8 @@ public class VillageHostileActionTests : MapEventTestBase
 
         Server.NetworkSentMessages.Clear();
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkBattleStartRequest(
-            Guid.NewGuid().ToString(),
-            (int)BattleStartMode.Mission,
-            hostileAction.MapEventId,
-            hostileAction.AttackerMobilePartyId)), MapEventDisabledMethods);
+        client.Call(() => client.Resolve<INetwork>().SendAll(BattleStartTestRequest.Create(
+            client, BattleStartMode.Mission, hostileAction.MapEventId, hostileAction.AttackerMobilePartyId)), MapEventDisabledMethods);
 
         var start = Server.NetworkSentMessages.GetMessages<NetworkStartAttackMission>().Single();
         Assert.Equal(hostileAction.MapEventId, start.MapEventId);
@@ -2397,11 +2388,8 @@ public class VillageHostileActionTests : MapEventTestBase
 
         Server.NetworkSentMessages.Clear();
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkBattleStartRequest(
-            Guid.NewGuid().ToString(),
-            (int)BattleStartMode.Mission,
-            hostileAction.MapEventId,
-            hostileAction.AttackerMobilePartyId)), MapEventDisabledMethods);
+        client.Call(() => client.Resolve<INetwork>().SendAll(BattleStartTestRequest.Create(
+            client, BattleStartMode.Mission, hostileAction.MapEventId, hostileAction.AttackerMobilePartyId)), MapEventDisabledMethods);
 
         var starts = Server.NetworkSentMessages.GetMessages<NetworkStartAttackMission>().ToArray();
         Assert.Equal(2, starts.Length);
@@ -2453,11 +2441,8 @@ public class VillageHostileActionTests : MapEventTestBase
         Server.Resolve<IMessageBroker>().Subscribe<BattleJoinCancelled>(payload => cancelled = payload.What);
         Server.NetworkSentMessages.Clear();
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkBattleStartRequest(
-            Guid.NewGuid().ToString(),
-            (int)BattleStartMode.Mission,
-            hostileAction.MapEventId,
-            hostileAction.AttackerMobilePartyId)), MapEventDisabledMethods);
+        client.Call(() => client.Resolve<INetwork>().SendAll(BattleStartTestRequest.Create(
+            client, BattleStartMode.Mission, hostileAction.MapEventId, hostileAction.AttackerMobilePartyId)), MapEventDisabledMethods);
 
         var left = Server.NetworkSentMessages.GetMessages<NetworkPartyLeftBattle>().Single();
         Assert.Equal(woundedPartyId, left.PartyId);
@@ -2511,11 +2496,8 @@ public class VillageHostileActionTests : MapEventTestBase
         try
         {
             Server.NetworkSentMessages.Clear();
-            firstClient.Call(() => firstClient.Resolve<INetwork>().SendAll(new NetworkBattleStartRequest(
-                Guid.NewGuid().ToString(),
-                (int)BattleStartMode.Mission,
-                hostileAction.MapEventId,
-                firstPlayerMobilePartyId!)), MapEventDisabledMethods);
+            firstClient.Call(() => firstClient.Resolve<INetwork>().SendAll(BattleStartTestRequest.Create(
+                firstClient, BattleStartMode.Mission, hostileAction.MapEventId, firstPlayerMobilePartyId!)), MapEventDisabledMethods);
             Assert.True(Server.NetworkSentMessages.GetMessages<NetworkBattleStartReply>().Single().Accepted);
             Assert.Equal(2, Server.NetworkSentMessages.GetMessages<NetworkStartAttackMission>().Count());
 
@@ -2531,11 +2513,8 @@ public class VillageHostileActionTests : MapEventTestBase
 
             Server.NetworkSentMessages.Clear();
 
-            secondClient.Call(() => secondClient.Resolve<INetwork>().SendAll(new NetworkBattleStartRequest(
-                Guid.NewGuid().ToString(),
-                (int)BattleStartMode.Mission,
-                hostileAction.MapEventId,
-                secondPlayerMobilePartyId!)), MapEventDisabledMethods);
+            secondClient.Call(() => secondClient.Resolve<INetwork>().SendAll(BattleStartTestRequest.Create(
+                secondClient, BattleStartMode.Mission, hostileAction.MapEventId, secondPlayerMobilePartyId!)), MapEventDisabledMethods);
 
             Assert.True(Server.NetworkSentMessages.GetMessages<NetworkBattleStartReply>().Single().Accepted);
             Assert.Equal(2, Server.NetworkSentMessages.GetMessages<NetworkStartAttackMission>().Count());
@@ -2610,11 +2589,8 @@ public class VillageHostileActionTests : MapEventTestBase
 
         Server.NetworkSentMessages.Clear();
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkBattleStartRequest(
-            Guid.NewGuid().ToString(),
-            (int)BattleStartMode.Mission,
-            hostileAction.MapEventId,
-            hostileAction.AttackerMobilePartyId)), MapEventDisabledMethods);
+        client.Call(() => client.Resolve<INetwork>().SendAll(BattleStartTestRequest.Create(
+            client, BattleStartMode.Mission, hostileAction.MapEventId, hostileAction.AttackerMobilePartyId)), MapEventDisabledMethods);
 
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkStartAttackMission>());
 
@@ -2637,11 +2613,8 @@ public class VillageHostileActionTests : MapEventTestBase
 
         Server.NetworkSentMessages.Clear();
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkBattleStartRequest(
-            Guid.NewGuid().ToString(),
-            (int)BattleStartMode.Simulation,
-            hostileAction.MapEventId,
-            hostileAction.AttackerMobilePartyId)), MapEventDisabledMethods);
+        client.Call(() => client.Resolve<INetwork>().SendAll(BattleStartTestRequest.Create(
+            client, BattleStartMode.Simulation, hostileAction.MapEventId, hostileAction.AttackerMobilePartyId)), MapEventDisabledMethods);
 
         var open = Server.NetworkSentMessages.GetMessages<NetworkOpenBattleSimulation>().Single();
         Assert.Equal(hostileAction.MapEventId, open.MapEventId);
@@ -2675,11 +2648,8 @@ public class VillageHostileActionTests : MapEventTestBase
 
         Server.NetworkSentMessages.Clear();
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkBattleStartRequest(
-            Guid.NewGuid().ToString(),
-            (int)BattleStartMode.Simulation,
-            hostileAction.MapEventId,
-            hostileAction.AttackerMobilePartyId)), MapEventDisabledMethods);
+        client.Call(() => client.Resolve<INetwork>().SendAll(BattleStartTestRequest.Create(
+            client, BattleStartMode.Simulation, hostileAction.MapEventId, hostileAction.AttackerMobilePartyId)), MapEventDisabledMethods);
 
         var finished = Server.NetworkSentMessages.GetMessages<NetworkBattleSimulationFinished>().Single();
         Assert.Equal(hostileAction.MapEventId, finished.MapEventId);

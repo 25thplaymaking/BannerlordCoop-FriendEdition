@@ -11,6 +11,7 @@ using GameInterface.Services.MapEvents.Messages.Start;
 using GameInterface.Services.MobileParties.Extensions;
 using GameInterface.Services.MapEventSides.Messages;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.Players;
 using LiteNetLib;
 using Serilog;
 using System;
@@ -51,6 +52,7 @@ internal class BattleSimulationRunHandler : IHandler
     private readonly IMessageBroker messageBroker;
     private readonly INetwork network;
     private readonly IObjectManager objectManager;
+    private readonly IPlayerManager playerManager;
     private readonly IMapEventLogger mapEventLogger;
 
     private sealed class ActiveSimulation
@@ -68,12 +70,14 @@ internal class BattleSimulationRunHandler : IHandler
         IMessageBroker messageBroker,
         INetwork network,
         IObjectManager objectManager,
-        IMapEventLogger mapEventLogger)
+        IMapEventLogger mapEventLogger,
+        IPlayerManager playerManager)
     {
         this.messageBroker = messageBroker;
         this.network = network;
         this.objectManager = objectManager;
         this.mapEventLogger = mapEventLogger;
+        this.playerManager = playerManager;
 
         messageBroker.Subscribe<RequestAdvanceBattleSimulation>(Handle_RequestAdvanceBattleSimulation);
         messageBroker.Subscribe<NetworkAdvanceBattleSimulation>(Handle_NetworkAdvanceBattleSimulation);
@@ -105,11 +109,13 @@ internal class BattleSimulationRunHandler : IHandler
 
     /// <summary>[Server, game thread] Sets up an admitted simulation and queues its canonical state publication.</summary>
     internal BattleStartDecision TryStartSimulation(string mapEventId, MapEvent mapEvent, NetPeer requestingPeer,
-        MobileParty requestingParty)
+        MobileParty requestingParty, long requestId)
     {
         bool claimed = false;
         bool accepted = false;
         bool activeSimulationAdded = false;
+        bool publicationStarted = false;
+        string publicationStage = "not-started";
         IBattleObserver previousObserver = null;
         try
         {
@@ -142,7 +148,10 @@ internal class BattleSimulationRunHandler : IHandler
             }
 
             // The route sends its result only after these reliable state messages have been queued.
+            publicationStage = "battle-mode-set";
+            publicationStarted = true;
             network.SendAll(new NetworkBattleModeSet(mapEventId, (int)BattleStartMode.Simulation));
+            publicationStage = "open-battle-simulation";
             network.SendAllBut(requestingPeer, new NetworkOpenBattleSimulation(mapEventId));
             mapEventLogger.DebugMapEvent(mapEvent, "Battle simulation set up; awaiting client-paced advances");
             accepted = true;
@@ -151,16 +160,39 @@ internal class BattleSimulationRunHandler : IHandler
         catch (Exception exception)
         {
             Logger.Error(exception, "Failed to set up admitted battle simulation for {MapEventId}", mapEventId);
-            if (activeSimulationAdded)
+            if (activeSimulationAdded && !publicationStarted)
             {
                 lock (simLock) activeSimulations.Remove(mapEventId);
             }
-            if (!accepted) mapEvent.BattleObserver = previousObserver;
-            return BattleStartDecision.Failed("simulation-start-failed");
+            if (!accepted && !publicationStarted) mapEvent.BattleObserver = previousObserver;
+            if (publicationStarted)
+            {
+                Logger.Fatal("Partial authority publication; isolating simulation participants. Route={Route} RequestId={RequestId} Event={Event} Mode={Mode} Stage={Stage}",
+                    "map-event.battle-start", requestId, mapEventId, BattleStartMode.Simulation, publicationStage);
+                DisconnectSimulationParticipants(mapEvent);
+            }
+            return publicationStarted
+                ? BattleStartDecision.Isolated("simulation-start-partial-publication")
+                : BattleStartDecision.Failed("simulation-start-failed");
         }
         finally
         {
-            if (claimed && !accepted) ServerBattleModeArbiter.Release(mapEventId);
+            // Preserve the claim after a partial publication; handing this event to the other mode would
+            // compound a transport failure into conflicting authoritative mutation.
+            if (claimed && !accepted && !publicationStarted) ServerBattleModeArbiter.Release(mapEventId);
+        }
+    }
+
+    private void DisconnectSimulationParticipants(MapEvent mapEvent)
+    {
+        // ActiveSimulation retains the requester until this disconnect reaches the existing orphan cleanup path.
+        foreach (var player in playerManager.Players)
+        {
+            if (!objectManager.TryGetObject<MobileParty>(player.MobilePartyId, out var party) ||
+                mapEvent.FindMapEventParty(party.Party) == null ||
+                !playerManager.TryGetPeer(player.ControllerId, out var peer))
+                continue;
+            peer.Disconnect();
         }
     }
 

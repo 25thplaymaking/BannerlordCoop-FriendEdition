@@ -1,4 +1,5 @@
 ﻿using Common.Network;
+using E2E.Tests.Util;
 using GameInterface.Services.MapEvents;
 using GameInterface.Services.MapEvents.Handlers;
 using GameInterface.Services.MapEvents.Messages.Start;
@@ -43,11 +44,8 @@ public class BattleModeExclusionTests : MapEventTestBase
             Server.NetworkSentMessages.Clear();
 
             // A second player selects "Send Troops" (auto-resolve) for the SAME event.
-            client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkBattleStartRequest(
-                Guid.NewGuid().ToString(),
-                (int)BattleStartMode.Simulation,
-                ctx.MapEventId,
-                ctx.AttackerPartyId)), MapEventDisabledMethods);
+            client.Call(() => client.Resolve<INetwork>().SendAll(BattleStartTestRequest.Create(
+                client, BattleStartMode.Simulation, ctx.MapEventId, ctx.AttackerPartyId)), MapEventDisabledMethods);
 
             // The auto-resolve is refused end-to-end: rejected reply, no spectator window opened, no mode claimed.
             var reply = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkBattleStartReply>());
@@ -87,11 +85,8 @@ public class BattleModeExclusionTests : MapEventTestBase
             Server.NetworkSentMessages.Clear();
 
             // A player now presses "Attack" (open the live mission) for the SAME event.
-            client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkBattleStartRequest(
-                Guid.NewGuid().ToString(),
-                (int)BattleStartMode.Mission,
-                ctx.MapEventId,
-                ctx.AttackerPartyId)), MapEventDisabledMethods);
+            client.Call(() => client.Resolve<INetwork>().SendAll(BattleStartTestRequest.Create(
+                client, BattleStartMode.Mission, ctx.MapEventId, ctx.AttackerPartyId)), MapEventDisabledMethods);
 
             // The mission start is refused end-to-end: rejected reply, no mission broadcast, no mode claimed.
             var reply = Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkBattleStartReply>());

@@ -62,14 +62,17 @@ public readonly struct AuthorityServerContext
 
 public readonly struct AuthorityServerReply<TResult> where TResult : IMessage
 {
-    public AuthorityServerReply(TResult result, bool statePublished)
+    public AuthorityServerReply(TResult result, bool statePublished, bool suppressReply = false)
     {
         Result = result;
         StatePublished = statePublished;
+        SuppressReply = suppressReply;
     }
 
     public TResult Result { get; }
     public bool StatePublished { get; }
+    /// <summary>Used only after the request peer has been deliberately isolated following a partial publication.</summary>
+    public bool SuppressReply { get; }
 }
 
 public readonly struct AuthorityClientOutcome<TResult> where TResult : IMessage

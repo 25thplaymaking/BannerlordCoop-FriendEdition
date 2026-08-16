@@ -26,19 +26,22 @@ internal enum BattleStartMode
 /// <summary>Feature-owned result of executing one already-admitted battle start.</summary>
 internal readonly struct BattleStartDecision
 {
-    private BattleStartDecision(AuthorityResultStatus status, string reasonCode, bool statePublished)
+    private BattleStartDecision(AuthorityResultStatus status, string reasonCode, bool statePublished, bool suppressReply)
     {
         Status = status;
         ReasonCode = reasonCode;
         StatePublished = statePublished;
+        SuppressReply = suppressReply;
     }
 
     public AuthorityResultStatus Status { get; }
     public string ReasonCode { get; }
     public bool StatePublished { get; }
-    public static BattleStartDecision Accepted() => new(AuthorityResultStatus.Accepted, null, true);
-    public static BattleStartDecision Reject(string reasonCode) => new(AuthorityResultStatus.Rejected, reasonCode, false);
-    public static BattleStartDecision Failed(string reasonCode) => new(AuthorityResultStatus.ExecutionFailed, reasonCode, false);
+    public bool SuppressReply { get; }
+    public static BattleStartDecision Accepted() => new(AuthorityResultStatus.Accepted, null, true, false);
+    public static BattleStartDecision Reject(string reasonCode) => new(AuthorityResultStatus.Rejected, reasonCode, false, false);
+    public static BattleStartDecision Failed(string reasonCode) => new(AuthorityResultStatus.ExecutionFailed, reasonCode, false, false);
+    public static BattleStartDecision Isolated(string reasonCode) => new(AuthorityResultStatus.ExecutionFailed, reasonCode, false, true);
 }
 
 internal readonly struct BattleStartIntent
@@ -105,8 +108,7 @@ internal class BattleStartCoordinator : IHandler
                 timeoutPolicy: new AuthorityTimeoutPolicy(configuration.ObjectCreationTimeout,
                     configuration.ObjectCreationTimeout, retryCount: 1),
                 failClosedOnApplyFailure: true,
-                isExpectedClientResult: (request, result) => request.Mode == result.Mode &&
-                    string.Equals(request.MapEventId, result.MapEventId, StringComparison.Ordinal)));
+                isExpectedClientResult: IsExpectedClientResult));
 
         Instance = this;
     }
@@ -178,21 +180,26 @@ internal class BattleStartCoordinator : IHandler
             return Reply(context.Header, request, BattleStartDecision.Reject("attacker-party-mismatch"));
 
         BattleStartDecision decision = request.Mode == (int)BattleStartMode.Mission
-            ? missionStartHandler.TryStartMission(request.MapEventId, mapEvent, party, context.Player.MobilePartyId)
-            : simulationRunHandler.TryStartSimulation(request.MapEventId, mapEvent, context.Peer, party);
+            ? missionStartHandler.TryStartMission(request.MapEventId, mapEvent, party, context.Player.MobilePartyId,
+                context.Header.RequestId)
+            : simulationRunHandler.TryStartSimulation(request.MapEventId, mapEvent, context.Peer, party,
+                context.Header.RequestId);
         return Reply(context.Header, request, decision);
     }
 
     private static AuthorityServerReply<NetworkBattleStartReply> Reply(AuthorityRequestHeader header,
         NetworkBattleStartRequest request, BattleStartDecision decision) =>
         new(new NetworkBattleStartReply(header, decision.Status, request.Mode, request.MapEventId, decision.ReasonCode),
-            decision.StatePublished);
+            decision.StatePublished, decision.SuppressReply);
 
     private static NetworkBattleStartReply CreateTerminalResult(AuthorityRequestHeader header,
         AuthorityResultStatus status, string reasonCode) =>
         new(header, status, (int)BattleStartMode.Unclaimed, null, reasonCode);
 
-    private static AuthorityCommitProbeResult ProbeClientCommit(NetworkBattleStartReply result)
+    internal static bool IsExpectedClientResult(NetworkBattleStartRequest request, NetworkBattleStartReply result) =>
+        request.Mode == result.Mode && string.Equals(request.MapEventId, result.MapEventId, StringComparison.Ordinal);
+
+    internal static AuthorityCommitProbeResult ProbeClientCommit(NetworkBattleStartReply result)
     {
         if (result.Mode == (int)BattleStartMode.Mission)
             return BattleModeRegistry.IsMission(result.MapEventId)

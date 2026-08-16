@@ -6,6 +6,35 @@
     "Replication",
     "Internal"
   ],
-  "messageDispositions": [],
+  "messageDispositions": [
+    {
+      "messageType": "GameInterface.Services.Chat.Messages.NetworkRequestChatParticipants",
+      "disposition": "BootstrapQuery",
+      "reason": "read-only-chat-participant-snapshot-query",
+      "owner": "GameInterface.Services.Chat.ChatService",
+      "tests": [
+        "ChatServiceTests.RequestParticipants_AsksServerForLiveMembership"
+      ]
+    },
+    {
+      "messageType": "GameInterface.Services.GameDebug.Metrics.NetworkRequestPartySyncPerformanceSnapshot",
+      "disposition": "BootstrapQuery",
+      "reason": "diagnostic-read-only-performance-snapshot-query",
+      "owner": "GameInterface.Services.GameDebug.Metrics.PartySyncPerformanceHandler",
+      "tests": [
+        "PartySyncPerformanceLogsTests.RequestSnapshot_SendsRequestAndSuppressesPendingDuplicate",
+        "PartySyncPerformanceLogsTests.Request_OnServer_SendsSnapshotToRequestingPeer"
+      ]
+    },
+    {
+      "messageType": "GameInterface.Services.MobileParties.Messages.NetworkRequestMercenaryStockSync",
+      "disposition": "BootstrapQuery",
+      "reason": "read-only-canonical-mercenary-stock-bootstrap-query",
+      "owner": "GameInterface.Services.MobileParties.Handlers.MercenaryStockHandler",
+      "tests": [
+        "MercenaryStockHandlerTests.Handle_CampaignReady_Client_RequestsStockSync"
+      ]
+    }
+  ],
   "bypassExemptions": []
 }

@@ -72,6 +72,7 @@ public sealed class NetworkRequestInternalProbe : Common.Messaging.ICommand { }
 public sealed class RouteContractTests {
   public void CommandRoute() { var request = new RequestA(); var route = "fixture.command"; }
   public void BootstrapRoute() { var request = new RequestB(); var route = "fixture.bootstrap"; }
+  public void InternalProbe() { var request = new NetworkRequestInternalProbe(); }
 }
 '@
     foreach ($module in @('GameInterface', 'Coop.Core')) {
@@ -84,7 +85,7 @@ public sealed class RouteContractTests {
   "schemaVersion": 1,
   "allowedMessageDispositions": ["Command", "BootstrapQuery", "Replication", "Internal"],
   "messageDispositions": [
-    { "messageType": "NetworkRequestInternalProbe", "disposition": "Internal", "owner": "Fixture", "tests": ["RouteContractTests"] }
+    { "messageType": "NetworkRequestInternalProbe", "disposition": "Internal", "reason": "fixture-local-control-message", "owner": "NetworkRequestInternalProbe", "tests": ["RouteContractTests.InternalProbe"] }
   ],
   "bypassExemptions": []
 }
@@ -100,6 +101,26 @@ public sealed class RouteContractTests {
     Assert-True ([int]$catalog.summary.capabilitySourceCount -eq 1) 'current-session Ready capability source was not validated'
     Assert-True (@($catalog.routes | Where-Object { [string]$_.routeId -ceq 'fixture.command' -and [string]$_.resultTypes[0] -ceq 'ResultA' }).Count -eq 1) 'typed request/result contract was not recovered'
     Assert-True (@($catalog.messageDispositions | Where-Object { [string]$_.messageType -ceq 'NetworkRequestInternalProbe' -and [string]$_.disposition -ceq 'Internal' }).Count -eq 1) 'checked Internal request disposition was not applied'
+
+    $invalidPolicy = Join-Path $testRoot 'tools\WorkshopIntegration\invalid-route-audit-policy.json'
+    Write-Utf8File $invalidPolicy @'
+{
+  "schemaVersion": 1,
+  "allowedMessageDispositions": ["Command", "BootstrapQuery", "Replication", "Internal"],
+  "messageDispositions": [
+    { "messageType": "NetworkRequestInternalProbe", "disposition": "Internal", "reason": "fixture-local-control-message", "owner": "NetworkRequestInternalProbe", "tests": ["RouteContractTests.MissingFocusedTest"] }
+  ],
+  "bypassExemptions": []
+}
+'@
+    $missingEvidenceRejected = $false
+    try {
+        & $generator -RepoRoot $testRoot -AssemblyPaths @(
+            'source\GameInterface\bin\Release\net8.0\GameInterface.dll',
+            'source\Coop.Core\bin\Release\net8.0\Coop.Core.dll') -RoutePolicyPath $invalidPolicy -InspectorProjectPath (Join-Path $repoRoot 'tools\WorkshopIntegration\AssemblyInspector\FriendEdition.WorkshopAssemblyInspector.csproj') -OutputPath $output -Release
+    }
+    catch { $missingEvidenceRejected = $_.Exception.Message.Contains('Unknown message disposition test') }
+    Assert-True $missingEvidenceRejected 'message disposition accepted a nonexistent focused test'
 
     Add-Content -LiteralPath (Join-Path $testRoot 'source\GameInterface\Routes.cs') -Value @'
 public sealed class LegacyBypass { public void Wire(MessageBroker broker) { broker.Subscribe<RequestA>(); } }
@@ -118,6 +139,7 @@ public sealed class MessageBroker { public void Subscribe<T>() { } }
 
     Write-Host 'PASS: compiled routes reconcile across GameInterface and Coop.Core with typed owners/results/tests'
     Write-Host 'PASS: request taxonomy applies explicit Internal dispositions'
+    Write-Host 'PASS: request taxonomy rejects nonexistent focused evidence'
     Write-Host 'PASS: release audit rejects direct routed-command bypasses'
 }
 finally {

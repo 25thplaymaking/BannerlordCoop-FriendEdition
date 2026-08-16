@@ -184,6 +184,24 @@ foreach ($rule in @($routePolicy.messageDispositions)) {
     $typeName = [string]$rule.messageType
     if ($messageRuleByType.ContainsKey($typeName)) { throw "Duplicate message disposition: $typeName" }
     if ([string]$rule.disposition -notin $allowedMessageDispositions) { throw "Unknown message disposition '$($rule.disposition)' for $typeName" }
+    $reason = if ($null -eq $rule.PSObject.Properties['reason']) { '' } else { [string]$rule.reason }
+    $owner = if ($null -eq $rule.PSObject.Properties['owner']) { '' } else { [string]$rule.owner }
+    [array]$policyTests = if ($null -eq $rule.PSObject.Properties['tests']) { @() } else { @($rule.tests) }
+    if ([string]::IsNullOrWhiteSpace($reason) -or [string]::IsNullOrWhiteSpace($owner) -or $policyTests.Count -eq 0) {
+        throw "Incomplete message disposition: module=<policy> message=$typeName route=<none> owner=$owner test=$($policyTests -join ',')"
+    }
+    $ownerSymbol = ($owner -split '\.')[-1]
+    [array]$ownerMatches = @($productionSources | Where-Object { [regex]::IsMatch([string]$sourceContent[$_.FullName], "\b$([regex]::Escape($ownerSymbol))\b") })
+    if ($ownerMatches.Count -eq 0) {
+        throw "Unknown message disposition owner: module=<policy> message=$typeName route=<none> owner=$owner test=$($policyTests -join ',')"
+    }
+    foreach ($test in $policyTests) {
+        $testSymbol = ([string]$test -split '\.')[-1]
+        [array]$testMatches = @($testSources | Where-Object { [regex]::IsMatch([string]$sourceContent[$_.FullName], "\b$([regex]::Escape($testSymbol))\b") })
+        if ($testMatches.Count -eq 0) {
+            throw "Unknown message disposition test: module=<policy> message=$typeName route=<none> owner=$owner test=$test"
+        }
+    }
     $messageRuleByType.Add($typeName, $rule)
 }
 $messages = New-Object Collections.Generic.List[object]
@@ -195,14 +213,27 @@ foreach ($assembly in $inspections) {
         $leafName = ($typeName -split '[.+]')[-1]
         $isRequestLike = $null -ne $type.authorityRoute -or $leafName -match '(?i)(Request|Requested|Attempt|Submit|Submission)'
         if (-not $isRequestLike) { continue }
+        $messageSources = @($productionSources | Where-Object {
+            [regex]::IsMatch([string]$sourceContent[$_.FullName], "(?m)\b(?:class|record|struct)\s+$([regex]::Escape($leafName))\b")
+        } | ForEach-Object { Get-RelativeRepoPath $repo $_.FullName } | Sort-Object -Unique)
+        $messageTests = @($testSources | Where-Object {
+            [regex]::IsMatch([string]$sourceContent[$_.FullName], "\b$([regex]::Escape($leafName))\b")
+        } | ForEach-Object { Get-RelativeRepoPath $repo $_.FullName } | Sort-Object -Unique)
         $disposition = if ($null -ne $type.authorityRoute) {
             if ([int]$type.authorityRoute.kind -eq 1) { 'BootstrapQuery' } else { 'Command' }
         }
         elseif ($messageRuleByType.ContainsKey($typeName)) { [string]$messageRuleByType[$typeName].disposition }
         else { 'Unclassified' }
-        $messages.Add([ordered]@{ module = [string]$assembly.moduleId; messageType = $typeName; disposition = $disposition })
+        $messages.Add([ordered]@{ module = [string]$assembly.moduleId; messageType = $typeName; disposition = $disposition; sourcePaths = $messageSources; tests = $messageTests })
         if ($disposition -ceq 'Unclassified') {
-            Add-Issue $issues "module=$($assembly.moduleId) message=$typeName route=<none> owner=<missing> test=<missing>: request-like ICommand has no Command/BootstrapQuery/Replication/Internal disposition"
+            $ownerLabel = if ($messageSources.Count -eq 0) { '<missing>' } else { $messageSources -join ',' }
+            $testLabel = if ($messageTests.Count -eq 0) { '<missing>' } else { $messageTests -join ',' }
+            Add-Issue $issues "module=$($assembly.moduleId) message=$typeName route=<none> owner=$ownerLabel test=$testLabel`: request-like ICommand has no Command/BootstrapQuery/Replication/Internal disposition"
+        }
+        elseif ($null -eq $type.authorityRoute -and $disposition -ceq 'Command') {
+            $ownerLabel = if ($messageSources.Count -eq 0) { '<missing>' } else { $messageSources -join ',' }
+            $testLabel = if ($messageTests.Count -eq 0) { '<missing>' } else { $messageTests -join ',' }
+            Add-Issue $issues "module=$($assembly.moduleId) message=$typeName route=<none> owner=$ownerLabel test=$testLabel`: Command disposition has no compiled AuthorityRoute"
         }
     }
 }
@@ -219,9 +250,8 @@ foreach ($route in $routes) {
         $content = [string]$sourceContent[$file.FullName]
         $operation = $null
         if ([regex]::IsMatch($content, "Subscribe\s*<\s*$([regex]::Escape($requestName))\s*>")) { $operation = 'Subscribe' }
-        $directNew = [regex]::IsMatch($content, "(?s)\bnew\s+$([regex]::Escape($requestName))\b.{0,500}?\.Send(?:Immediate|All|AllBut)?\s*\(")
         $sendThenNew = [regex]::IsMatch($content, "(?s)\.Send(?:Immediate|All|AllBut)?\s*\(.{0,500}?\bnew\s+$([regex]::Escape($requestName))\b")
-        if ($directNew -or $sendThenNew) { $operation = if ($null -eq $operation) { 'Send' } else { 'Send+Subscribe' } }
+        if ($sendThenNew) { $operation = if ($null -eq $operation) { 'Send' } else { 'Send+Subscribe' } }
         if ($null -eq $operation) { continue }
         $bypasses.Add([ordered]@{ module = [string]$route.module; sourcePath = Get-RelativeRepoPath $repo $file.FullName; messageType = [string]$route.requestType; routeId = [string]$route.routeId; operation = $operation })
     }
@@ -256,10 +286,17 @@ foreach ($file in $productionSources) {
         elseif ([string]$routeConstantByName[$name] -cne $route) { $routeConstantByName[$name] = $null }
     }
 }
+$inactiveHoldProperty = $authorityPolicy.PSObject.Properties['inactiveModuleHolds']
+$inactiveModuleHolds = if ($null -eq $inactiveHoldProperty) { @() } else { @($inactiveHoldProperty.Value) }
 $capabilities = New-Object Collections.Generic.List[object]
 foreach ($file in $productionSources | Where-Object { [regex]::IsMatch([string]$sourceContent[$_.FullName], 'class\s+[A-Za-z_][A-Za-z0-9_]*\s*:\s*(?:Core\.)?IWorkshopCapabilitySource') }) {
     $content = [string]$sourceContent[$file.FullName]
     $relative = Get-RelativeRepoPath $repo $file.FullName
+    $moduleMatch = [regex]::Match($content, 'const\s+string\s+ModuleId\s*=\s*"(?<module>[^"]+)"')
+    $moduleId = if ($moduleMatch.Success) { $moduleMatch.Groups['module'].Value } else { '' }
+    $hold = @($inactiveModuleHolds | Where-Object { [string]$_.moduleId -ceq $moduleId })
+    $heldUnavailable = $hold.Count -eq 1 -and [string]$hold[0].disposition -in @('Unsupported', 'GuardedFeatureBlocked') -and
+        $content.Contains('false') -and $content.Contains([string]$hold[0].reason)
     $routeIds = New-Object Collections.Generic.List[string]
     foreach ($match in [regex]::Matches($content, 'IsRegistered\s*\(\s*(?<route>[^,\r\n]+)')) {
         $expression = $match.Groups['route'].Value.Trim()
@@ -271,10 +308,12 @@ foreach ($file in $productionSources | Where-Object { [regex]::IsMatch([string]$
         if (-not [string]::IsNullOrWhiteSpace($routeId) -and -not $routeIds.Contains($routeId)) { $routeIds.Add($routeId) }
     }
     $routeIds = @($routeIds | Sort-Object -Unique)
-    $capabilities.Add([ordered]@{ sourcePath = $relative; routeIds = $routeIds; ready = $content.Contains('WorkshopSnapshotReadiness.Ready'); currentSession = $content.Contains('SessionId') })
-    if ($routeIds.Count -eq 0) { Add-Issue $issues "module=GameInterface message=WorkshopCapability route=<missing> owner=$relative test=<missing>: capability declares no literal registered route" }
+    $ready = $content.Contains('WorkshopSnapshotReadiness.Ready') -or $content.Contains('configAuthority.TryGetCurrent')
+    $currentSession = $content.Contains('SessionId') -or $content.Contains('configAuthority.TryGetCurrent')
+    $capabilities.Add([ordered]@{ moduleId = $moduleId; sourcePath = $relative; routeIds = $routeIds; ready = $ready; currentSession = $currentSession; heldUnavailable = $heldUnavailable })
+    if (-not $heldUnavailable -and $routeIds.Count -eq 0) { Add-Issue $issues "module=GameInterface message=WorkshopCapability route=<missing> owner=$relative test=<missing>: capability declares no literal registered route" }
     foreach ($routeId in $routeIds) { if (-not $routeById.ContainsKey($routeId)) { Add-Issue $issues "module=GameInterface message=WorkshopCapability route=$routeId owner=$relative test=<missing>: capability references an unregistered route" } }
-    if (-not $content.Contains('WorkshopSnapshotReadiness.Ready') -or -not $content.Contains('SessionId')) { Add-Issue $issues "module=GameInterface message=WorkshopCapability route=$($routeIds -join ',') owner=$relative test=<missing>: capability is not gated by current-session Ready" }
+    if (-not $heldUnavailable -and (-not $ready -or -not $currentSession)) { Add-Issue $issues "module=GameInterface message=WorkshopCapability route=$($routeIds -join ',') owner=$relative test=<missing>: capability is not gated by current-session Ready" }
 }
 
 $catalog = [ordered]@{

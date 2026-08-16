@@ -264,9 +264,18 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
                     AuthorityCommitProbeResult probe;
                     try
                     {
-                        probe = route.IsExpectedClientResult(request.Request, request.Result)
-                            ? route.ProbeClientCommit(request.Result)
-                            : AuthorityCommitProbeResult.Invalid;
+                        // A result that does not describe the submitted feature intent cannot be
+                        // repaired by applying a generic resync: it is not evidence for this
+                        // request. Complete the ticket before any feature commit probe can run.
+                        if (!route.IsExpectedClientResult(request.Request, request.Result))
+                        {
+                            lifecycle.ReplicaApplyFailed(request.Header.RequestId.ToString(), "invalid-replica");
+                            CompletePending(request, AuthorityClientCompletion.ReplicaApplyFailed, request.Result,
+                                "invalid-replica");
+                            continue;
+                        }
+
+                        probe = route.ProbeClientCommit(request.Result);
                     }
                     catch (Exception exception)
                     {

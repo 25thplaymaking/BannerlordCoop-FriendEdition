@@ -478,7 +478,7 @@ public sealed class AuthorityRequestRouterTests
             broker.Publish(peer, request);
 
             Assert.Equal(1, executions);
-            Assert.Empty(network.GetPeerMessagesFromType<TestResult>(peer));
+            Assert.False(network.SentNetworkMessages.ContainsKey(peer.Id));
         });
     }
 

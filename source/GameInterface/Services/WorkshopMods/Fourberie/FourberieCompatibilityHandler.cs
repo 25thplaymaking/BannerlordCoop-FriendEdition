@@ -837,6 +837,13 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
     private void HandleHostModConfigAccepted(MessagePayload<HostModConfigAccepted> payload)
     {
         if (payload?.What.Snapshot == null || !configAuthority.IsCurrent(payload.What.Snapshot)) return;
+        if (ModInformation.IsClient && !string.Equals(SnapshotSessionId, payload.What.Snapshot.SessionId, StringComparison.Ordinal))
+        {
+            stateReady = false;
+            SnapshotReadiness = WorkshopSnapshotReadiness.Unknown;
+            SnapshotRevision = -1;
+            lock (snapshotSync) revisionGate.Reset();
+        }
         StartSnapshotBootstrap();
     }
 
@@ -1272,7 +1279,7 @@ internal sealed class FourberieCompatibilityHandler : IHandler, IFourberiePatchR
 
     private void HandleContractProposal(MessagePayload<NetworkFourberieContractProposal> payload)
     {
-        if (!compatible || !ModInformation.IsClient || payload.Who is not NetPeer serverPeer ||
+        if (!compatible || !ModInformation.IsClient || !configAuthority.TryGetCurrent(out _) || payload.Who is not NetPeer serverPeer ||
             !FourberieSnapshotOriginGuard.IsTrustedServerTransport(serverPeer, localIsClient: true) ||
             !FourberieOperationProtocol.IsProposalShapeValid(payload.What))
             return;

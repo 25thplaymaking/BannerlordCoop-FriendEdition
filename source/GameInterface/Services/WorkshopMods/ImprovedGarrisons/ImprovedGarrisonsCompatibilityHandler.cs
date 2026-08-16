@@ -914,6 +914,14 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
     private void HandleHostModConfigAccepted(MessagePayload<HostModConfigAccepted> payload)
     {
         if (payload?.What.Snapshot == null || !configAuthority.IsCurrent(payload.What.Snapshot)) return;
+        if (ModInformation.IsClient && !string.Equals(SnapshotSessionId, payload.What.Snapshot.SessionId, StringComparison.Ordinal))
+        {
+            stateReady = false;
+            SnapshotReadiness = WorkshopSnapshotReadiness.Unknown;
+            SnapshotRevision = -1;
+            revision = 0;
+            lastAppliedHash = null;
+        }
         StartSnapshotBootstrap();
     }
 
@@ -1015,7 +1023,7 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
 
     private void Handle_OperationResult(MessagePayload<NetworkImprovedGarrisonsOperationResult> payload)
     {
-        if (!compatible || !ModInformation.IsClient || payload.Who is not NetPeer serverPeer ||
+        if (!compatible || !ModInformation.IsClient || !configAuthority.TryGetCurrent(out _) || payload.Who is not NetPeer serverPeer ||
             !configAuthority.IsTrustedServer(serverPeer) ||
             !ImprovedGarrisonsOperationProtocol.IsResultShapeValid(payload.What) ||
             !configAuthority.TryGetCurrent(out var config) ||

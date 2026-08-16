@@ -466,6 +466,13 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
     private void HandleHostModConfigAccepted(MessagePayload<HostModConfigAccepted> payload)
     {
         if (payload?.What.Snapshot == null || !configAuthority.IsCurrent(payload.What.Snapshot)) return;
+        if (ModInformation.IsClient && !string.Equals(SnapshotSessionId, payload.What.Snapshot.SessionId, StringComparison.Ordinal))
+        {
+            snapshotReady = false;
+            SnapshotReadiness = WorkshopSnapshotReadiness.Unknown;
+            SnapshotRevision = -1;
+            revisionGate.Reset();
+        }
         StartSnapshotBootstrap();
     }
 
@@ -536,7 +543,7 @@ internal sealed class PlayerSettlementCompatibilityHandler : IHandler, IPlayerSe
 
     private void HandleState(MessagePayload<NetworkPlayerSettlementState> payload)
     {
-        if (!compatible || payload.Who is not NetPeer serverPeer ||
+        if (!compatible || !configAuthority.TryGetCurrent(out _) || payload.Who is not NetPeer serverPeer ||
             !PlayerSettlementSnapshotOriginGuard.IsTrustedServerTransport(
                 serverPeer,
                 ModInformation.IsClient))

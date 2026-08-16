@@ -6,6 +6,7 @@ using Common.Util;
 using GameInterface.Services.Alleys.Commands;
 using GameInterface.Services.Alleys.Interfaces;
 using GameInterface.Services.Alleys.Messages;
+using GameInterface.Services.GameDebug.Messages;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.TroopRosters.Data;
 using Serilog;
@@ -67,7 +68,6 @@ internal class AlleyHandler : IHandler
 
         messageBroker.Subscribe<AlleyDefenseResolvedRequested>(Handle_AlleyDefenseResolvedRequested);
         messageBroker.Subscribe<NetworkAlleyUnderAttack>(Handle_NetworkAlleyUnderAttack);
-        messageBroker.Subscribe<RequestAlleyDefenseResolved>(Handle_RequestAlleyDefenseResolved);
         messageBroker.Subscribe<ForceAlleyAttackRequested>(Handle_ForceAlleyAttack);
     }
 
@@ -82,7 +82,6 @@ internal class AlleyHandler : IHandler
 
         messageBroker.Unsubscribe<AlleyDefenseResolvedRequested>(Handle_AlleyDefenseResolvedRequested);
         messageBroker.Unsubscribe<NetworkAlleyUnderAttack>(Handle_NetworkAlleyUnderAttack);
-        messageBroker.Unsubscribe<RequestAlleyDefenseResolved>(Handle_RequestAlleyDefenseResolved);
         messageBroker.Unsubscribe<ForceAlleyAttackRequested>(Handle_ForceAlleyAttack);
     }
 
@@ -494,40 +493,11 @@ internal class AlleyHandler : IHandler
     {
         if (ModInformation.IsServer) return;
 
-        var alley = payload.What.Alley;
-        var won = payload.What.Won;
-        if (alley == null || !objectManager.TryGetIdWithLogging(alley, out var alleyId)) return;
-
-        // The fight is over: clear the local under-attack state and switch to the vanilla result menu the
-        // patched AlleyFightWon/Lost would have (their body is skipped so the outcome comes from the server).
-        behaviorInterface.ClearPlayerAlleyUnderAttackByAi(alley);
-        GameMenu.SwitchToMenu(won ? "alley_fight_won" : "alley_fight_lost");
-
-        // On a win, forward the post-fight garrison so the server records the defenders lost in the fight.
-        var garrison = payload.What.Garrison != null
-            ? AlleyGarrisonData.ToData(payload.What.Garrison, objectManager)
-            : Array.Empty<TroopRosterElementData>();
-        network.SendAll(new RequestAlleyDefenseResolved(alleyId, won, garrison));
-    }
-
-    private void Handle_RequestAlleyDefenseResolved(MessagePayload<RequestAlleyDefenseResolved> payload)
-    {
-        if (ModInformation.IsClient) return;
-
-        var data = payload.What;
-        GameThread.RunSafe(() =>
-        {
-            if (!objectManager.TryGetObjectWithLogging<Alley>(data.AlleyId, out var alley)) return;
-            if (!sessionInterface.TryGetManagementData(data.AlleyId, out var mgmt)) return;
-
-            // Ignore a stale/duplicate resolve: the attack may already have timed out and destroyed the alley.
-            if (mgmt.UnderAttackByAlleyId == null) return;
-
-            objectManager.TryGetObject<Alley>(mgmt.UnderAttackByAlleyId, out var attacker);
-
-            if (data.Won) ResolveDefenseWon(alley, data.AlleyId, attacker, mgmt.OverseerId, data.Garrison);
-            else DestroyPlayerAlley(alley, data.AlleyId, ResolveOverseer(mgmt), attacker);
-        });
+        // A client-reported win/loss and casualty roster is not an authority boundary. Until the
+        // attack-session protocol can have the server resolve this outcome, fail closed instead of
+        // letting a local mission mutate the campaign's alley ownership or garrison.
+        MessageBroker.Instance.Publish(this, new SendInformationMessage(
+            "Alley defense results are waiting for server-authoritative resolution."));
     }
 
     /// <summary>

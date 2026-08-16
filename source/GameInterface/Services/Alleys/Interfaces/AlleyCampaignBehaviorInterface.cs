@@ -22,6 +22,8 @@ public interface IAlleyCampaignBehaviorInterface : IGameAbstraction
 {
     void AddOrUpdatePlayerAlleyData(Alley alley, Hero overseer, TroopRoster garrison, CampaignTime lastRecruitTime);
     void RemovePlayerAlleyData(Alley alley);
+    /// <summary>Reads the local replicated management entry for an exact authority commit probe.</summary>
+    bool TryGetPlayerAlleyManagementData(Alley alley, out Hero overseer, out TroopRoster garrison, out long lastRecruitTimeTicks);
     bool TryGetCurrentSettlementAlley(out Alley alley);
 
     /// <summary>
@@ -137,6 +139,19 @@ public class AlleyCampaignBehaviorInterface : IAlleyCampaignBehaviorInterface
                 RemoveByAlley(list, alley);
             }
         });
+    }
+
+    public bool TryGetPlayerAlleyManagementData(Alley alley, out Hero overseer, out TroopRoster garrison, out long lastRecruitTimeTicks)
+    {
+        overseer = null;
+        garrison = null;
+        lastRecruitTimeTicks = 0;
+        var list = Behavior?._playerOwnedCommonAreaData;
+        if (alley == null || list == null || !TryGetByAlley(list, alley, out var data)) return false;
+        overseer = data.AssignedClanMember;
+        garrison = data.TroopRoster;
+        lastRecruitTimeTicks = data.LastRecruitTime.NumTicks;
+        return true;
     }
 
     public void SetPlayerAlleyUnderAttackByAi(Alley alley, Alley attacker, CampaignTime dueDate, bool showNotification)

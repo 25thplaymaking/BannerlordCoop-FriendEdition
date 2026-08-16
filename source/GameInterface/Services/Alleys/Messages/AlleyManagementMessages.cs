@@ -7,6 +7,12 @@ using TaleWorlds.CampaignSystem.Settlements;
 
 namespace GameInterface.Services.Alleys.Messages;
 
+/// <summary>Server-authoritative alley-management commands.</summary>
+public enum AlleyManagementOperation
+{
+    Acquire, Clear, Abandon, ChangeOverseer, SetGarrison, RecruitTroops,
+}
+
 // --- Local events: published on the requesting client from the menu/screen patches ---
 
 /// <summary>
@@ -91,6 +97,7 @@ public readonly struct AlleyClearedRequested : IEvent
 
 // --- Networked client -> server requests ---
 
+[AuthorityRoute("alley.acquire", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 public readonly struct RequestAcquireAlley : ICommand
 {
@@ -102,23 +109,31 @@ public readonly struct RequestAcquireAlley : ICommand
     public readonly string OverseerId;
     [ProtoMember(4)]
     public readonly TroopRosterElementData[] Garrison;
+    [ProtoMember(5)] public readonly AuthorityRequestHeader Header;
     public RequestAcquireAlley(string alleyId, string ownerId, string overseerId, TroopRosterElementData[] garrison)
     {
         AlleyId = alleyId;
         OwnerId = ownerId;
         OverseerId = overseerId;
         Garrison = garrison;
+        Header = default;
     }
+    public RequestAcquireAlley(string alleyId, string ownerId, string overseerId, TroopRosterElementData[] garrison, AuthorityRequestHeader header)
+        : this(alleyId, ownerId, overseerId, garrison) => Header = header;
 }
 
+[AuthorityRoute("alley.clear", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 public readonly struct RequestClearAlley : ICommand
 {
     [ProtoMember(1)]
     public readonly string AlleyId;
-    public RequestClearAlley(string alleyId) { AlleyId = alleyId; }
+    [ProtoMember(2)] public readonly AuthorityRequestHeader Header;
+    public RequestClearAlley(string alleyId) { AlleyId = alleyId; Header = default; }
+    public RequestClearAlley(string alleyId, AuthorityRequestHeader header) : this(alleyId) => Header = header;
 }
 
+[AuthorityRoute("alley.abandon", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 public readonly struct RequestAbandonAlley : ICommand
 {
@@ -126,13 +141,17 @@ public readonly struct RequestAbandonAlley : ICommand
     public readonly string AlleyId;
     [ProtoMember(2)]
     public readonly bool FromClanScreen;
+    [ProtoMember(3)] public readonly AuthorityRequestHeader Header;
     public RequestAbandonAlley(string alleyId, bool fromClanScreen)
     {
         AlleyId = alleyId;
         FromClanScreen = fromClanScreen;
+        Header = default;
     }
+    public RequestAbandonAlley(string alleyId, bool fromClanScreen, AuthorityRequestHeader header) : this(alleyId, fromClanScreen) => Header = header;
 }
 
+[AuthorityRoute("alley.overseer.change", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 public readonly struct RequestChangeAlleyOverseer : ICommand
 {
@@ -140,13 +159,17 @@ public readonly struct RequestChangeAlleyOverseer : ICommand
     public readonly string AlleyId;
     [ProtoMember(2)]
     public readonly string NewOverseerId;
+    [ProtoMember(3)] public readonly AuthorityRequestHeader Header;
     public RequestChangeAlleyOverseer(string alleyId, string newOverseerId)
     {
         AlleyId = alleyId;
         NewOverseerId = newOverseerId;
+        Header = default;
     }
+    public RequestChangeAlleyOverseer(string alleyId, string newOverseerId, AuthorityRequestHeader header) : this(alleyId, newOverseerId) => Header = header;
 }
 
+[AuthorityRoute("alley.garrison.transfer", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 public readonly struct RequestSetAlleyGarrison : ICommand
 {
@@ -154,13 +177,17 @@ public readonly struct RequestSetAlleyGarrison : ICommand
     public readonly string AlleyId;
     [ProtoMember(2)]
     public readonly TroopRosterElementData[] Garrison;
+    [ProtoMember(3)] public readonly AuthorityRequestHeader Header;
     public RequestSetAlleyGarrison(string alleyId, TroopRosterElementData[] garrison)
     {
         AlleyId = alleyId;
         Garrison = garrison;
+        Header = default;
     }
+    public RequestSetAlleyGarrison(string alleyId, TroopRosterElementData[] garrison, AuthorityRequestHeader header) : this(alleyId, garrison) => Header = header;
 }
 
+[AuthorityRoute("alley.recruit", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 public readonly struct RequestRecruitAlleyTroops : ICommand
 {
@@ -168,11 +195,27 @@ public readonly struct RequestRecruitAlleyTroops : ICommand
     public readonly string AlleyId;
     [ProtoMember(2)]
     public readonly TroopRosterElementData[] Troops;
+    [ProtoMember(3)] public readonly AuthorityRequestHeader Header;
     public RequestRecruitAlleyTroops(string alleyId, TroopRosterElementData[] troops)
     {
         AlleyId = alleyId;
         Troops = troops;
+        Header = default;
     }
+    public RequestRecruitAlleyTroops(string alleyId, TroopRosterElementData[] troops, AuthorityRequestHeader header) : this(alleyId, troops) => Header = header;
+}
+
+[ProtoContract(SkipConstructor = true)]
+public readonly struct NetworkAlleyManagementResult : ICommand
+{
+    [ProtoMember(1)] public readonly AuthorityResultHeader Header;
+    [ProtoMember(2)] public readonly AlleyManagementOperation Operation;
+    [ProtoMember(3)] public readonly string AlleyId;
+    [ProtoMember(4)] public readonly string OverseerId;
+    [ProtoMember(5)] public readonly bool FromClanScreen;
+    [ProtoMember(6)] public readonly string RosterKey;
+    public NetworkAlleyManagementResult(AuthorityResultHeader header, AlleyManagementOperation operation, string alleyId, string overseerId, bool fromClanScreen, string rosterKey)
+    { Header = header; Operation = operation; AlleyId = alleyId; OverseerId = overseerId; FromClanScreen = fromClanScreen; RosterKey = rosterKey; }
 }
 
 // --- Networked server -> clients broadcasts ---
@@ -188,6 +231,9 @@ public readonly struct NetworkAlleyManagementUpdated : ICommand
     public readonly TroopRosterElementData[] Garrison;
     [ProtoMember(4)]
     public readonly long LastRecruitTimeTicks;
+    [ProtoMember(5)] public readonly string SessionId;
+    [ProtoMember(6)] public readonly long AuthorityRequestId;
+    [ProtoMember(7)] public readonly long CommittedRevision;
     public NetworkAlleyManagementUpdated(
         string alleyId,
         string overseerId,
@@ -198,7 +244,13 @@ public readonly struct NetworkAlleyManagementUpdated : ICommand
         OverseerId = overseerId;
         Garrison = garrison;
         LastRecruitTimeTicks = lastRecruitTimeTicks;
+        SessionId = null;
+        AuthorityRequestId = 0;
+        CommittedRevision = 0;
     }
+    public NetworkAlleyManagementUpdated(string alleyId, string overseerId, TroopRosterElementData[] garrison, long lastRecruitTimeTicks, AuthorityRequestHeader header)
+        : this(alleyId, overseerId, garrison, lastRecruitTimeTicks)
+    { SessionId = header.SessionId; AuthorityRequestId = header.RequestId; CommittedRevision = header.ExpectedRevision; }
 }
 
 [ProtoContract(SkipConstructor = true)]
@@ -206,5 +258,10 @@ public readonly struct NetworkAlleyManagementRemoved : ICommand
 {
     [ProtoMember(1)]
     public readonly string AlleyId;
-    public NetworkAlleyManagementRemoved(string alleyId) { AlleyId = alleyId; }
+    [ProtoMember(2)] public readonly string SessionId;
+    [ProtoMember(3)] public readonly long AuthorityRequestId;
+    [ProtoMember(4)] public readonly long CommittedRevision;
+    public NetworkAlleyManagementRemoved(string alleyId) { AlleyId = alleyId; SessionId = null; AuthorityRequestId = 0; CommittedRevision = 0; }
+    public NetworkAlleyManagementRemoved(string alleyId, AuthorityRequestHeader header) : this(alleyId)
+    { SessionId = header.SessionId; AuthorityRequestId = header.RequestId; CommittedRevision = header.ExpectedRevision; }
 }

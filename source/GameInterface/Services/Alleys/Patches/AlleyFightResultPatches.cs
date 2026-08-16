@@ -8,11 +8,9 @@ using TaleWorlds.CampaignSystem;
 namespace GameInterface.Services.Alleys.Patches;
 
 /// <summary>
-/// The AI-attack defense fight is a local mission on the owning client (like the take-over fight), so its
-/// win/lose result is only made authoritative by sending it to the server. These prefixes replace the
-/// client-side vanilla apply - which sets the attacker's owner, grants XP and changes hero stats locally,
-/// diverging from the server and double-counting the XP the server already replicates - with a request the
-/// <see cref="Handlers.AlleyHandler"/> adjudicates. That handler also switches the result menu.
+/// The AI-attack defense fight is a local mission, but its win/loss and casualty roster are not trusted
+/// authority inputs. These prefixes suppress the client-side vanilla mutation; the handler fail-closes
+/// until a server-issued attack session can resolve the outcome.
 /// Never called on the host (no PlayerAlleyData there), so the vanilla body is left intact on the server.
 /// </summary>
 [HarmonyPatch(typeof(AlleyCampaignBehavior.PlayerAlleyData))]

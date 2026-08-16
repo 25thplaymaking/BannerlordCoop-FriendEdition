@@ -107,9 +107,15 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
     private bool compatible;
     private bool stateReady;
     private bool objectsRegistered;
+    internal bool IsCompatible => compatible;
     internal WorkshopSnapshotReadiness SnapshotReadiness { get; private set; }
     internal string SnapshotSessionId { get; private set; }
     internal long SnapshotRevision { get; private set; } = -1;
+
+    internal bool IsSnapshotReadyFor(string sessionId) =>
+        compatible && stateReady && SnapshotReadiness == WorkshopSnapshotReadiness.Ready &&
+        !string.IsNullOrWhiteSpace(sessionId) &&
+        string.Equals(SnapshotSessionId, sessionId, StringComparison.Ordinal);
 
     public ImprovedGarrisonsCompatibilityHandler(
         IMessageBroker messageBroker,
@@ -517,8 +523,7 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
                authorityRequestRouter.IsRegistered("workshop.improved-garrisons.setting", AuthorityRouteKind.Command) &&
                authorityRequestRouter.IsRegistered("workshop.improved-garrisons.management", AuthorityRouteKind.Command) &&
                authorityRequestRouter.IsRegistered("workshop.improved-garrisons.snapshot", AuthorityRouteKind.BootstrapQuery) &&
-               (!ModInformation.IsClient || (SnapshotReadiness == WorkshopSnapshotReadiness.Ready &&
-                   string.Equals(SnapshotSessionId, config.SessionId, StringComparison.Ordinal)));
+               IsSnapshotReadyFor(config.SessionId);
     }
 
     private bool TryFindTown(object manager, object[] arguments, out Town town)
@@ -866,7 +871,9 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
         objectsRegistered = true;
         stateReady = !ModInformation.IsClient;
         SnapshotReadiness = ModInformation.IsClient ? WorkshopSnapshotReadiness.Unknown : WorkshopSnapshotReadiness.Ready;
-        SnapshotSessionId = null;
+        SnapshotSessionId = !ModInformation.IsClient && configAuthority.TryGetCurrent(out var config)
+            ? config.SessionId
+            : null;
         SnapshotRevision = -1;
         if (ModInformation.IsClient)
             StartSnapshotBootstrap();
@@ -877,6 +884,13 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
     private void HandleHostModConfigAccepted(MessagePayload<HostModConfigAccepted> payload)
     {
         if (payload?.What.Snapshot == null || !configAuthority.IsCurrent(payload.What.Snapshot)) return;
+        if (!ModInformation.IsClient)
+        {
+            SnapshotSessionId = payload.What.Snapshot.SessionId;
+            SnapshotReadiness = stateReady
+                ? WorkshopSnapshotReadiness.Ready
+                : WorkshopSnapshotReadiness.Unknown;
+        }
         if (ModInformation.IsClient && !string.Equals(SnapshotSessionId, payload.What.Snapshot.SessionId, StringComparison.Ordinal))
         {
             stateReady = false;

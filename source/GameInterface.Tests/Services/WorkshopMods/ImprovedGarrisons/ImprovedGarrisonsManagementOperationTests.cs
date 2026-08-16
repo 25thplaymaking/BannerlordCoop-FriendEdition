@@ -276,15 +276,29 @@ public sealed class ImprovedGarrisonsManagementOperationTests
     }
 
     [Theory]
-    [InlineData(false, true, false)]
-    [InlineData(true, false, false)]
-    [InlineData(true, true, true)]
-    public void Capability_RequiresHostOptionAndCompatibleRoute(
+    [InlineData(false, true, true, true, true, true, false)]
+    [InlineData(true, false, true, true, true, true, false)]
+    [InlineData(true, true, false, true, true, true, false)]
+    [InlineData(true, true, true, false, true, true, false)]
+    [InlineData(true, true, true, true, false, true, false)]
+    [InlineData(true, true, true, true, true, false, false)]
+    [InlineData(true, true, true, true, true, true, true)]
+    public void Capability_RequiresConfiguredPinnedRoutesAndCurrentSnapshot(
         bool optionEnabled,
-        bool routeReady,
+        bool pinnedModuleReady,
+        bool settingRouteReady,
+        bool managementRouteReady,
+        bool snapshotRouteReady,
+        bool snapshotCurrent,
         bool expected)
     {
-        Assert.Equal(expected, ImprovedGarrisonsCapabilityPolicy.IsEnabled(optionEnabled, routeReady));
+        Assert.Equal(expected, ImprovedGarrisonsCapabilityPolicy.IsEnabled(
+            optionEnabled,
+            pinnedModuleReady,
+            settingRouteReady,
+            managementRouteReady,
+            snapshotRouteReady,
+            snapshotCurrent));
     }
 
     private static NetworkRequestImprovedGarrisonsOperation Request(

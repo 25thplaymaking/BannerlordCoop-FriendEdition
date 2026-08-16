@@ -1,5 +1,6 @@
 using Common.Messaging;
 using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.WorkshopMods.Core;
 using ProtoBuf;
 using System;
@@ -510,7 +511,15 @@ internal static class ImprovedGarrisonsCanonicalOperations
 
 internal static class ImprovedGarrisonsCapabilityPolicy
 {
-    public static bool IsEnabled(bool optionEnabled, bool routeReady) => optionEnabled && routeReady;
+    public static bool IsEnabled(
+        bool optionEnabled,
+        bool pinnedModuleReady,
+        bool settingRouteReady,
+        bool managementRouteReady,
+        bool snapshotRouteReady,
+        bool snapshotCurrent) =>
+        optionEnabled && pinnedModuleReady && settingRouteReady && managementRouteReady &&
+        snapshotRouteReady && snapshotCurrent;
 }
 
 internal sealed class ImprovedGarrisonsCapabilitySource : IWorkshopCapabilitySource
@@ -519,10 +528,20 @@ internal sealed class ImprovedGarrisonsCapabilitySource : IWorkshopCapabilitySou
     internal const string Operation = "Management";
 
     private readonly IModConfig modConfig;
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRequestRouter authorityRequestRouter;
+    private readonly ImprovedGarrisonsCompatibilityHandler compatibilityHandler;
 
-    public ImprovedGarrisonsCapabilitySource(IModConfig modConfig)
+    public ImprovedGarrisonsCapabilitySource(
+        IModConfig modConfig,
+        IModConfigAuthority configAuthority = null,
+        IAuthorityRequestRouter authorityRequestRouter = null,
+        ImprovedGarrisonsCompatibilityHandler compatibilityHandler = null)
     {
         this.modConfig = modConfig;
+        this.configAuthority = configAuthority;
+        this.authorityRequestRouter = authorityRequestRouter;
+        this.compatibilityHandler = compatibilityHandler;
     }
 
     public IEnumerable<WorkshopCapability> CaptureCapabilities()
@@ -531,9 +550,21 @@ internal sealed class ImprovedGarrisonsCapabilitySource : IWorkshopCapabilitySou
             ? ModConfigProvider.ModOptions
             : new ModOptions(modConfig.Data.ModOptions ?? new ModOptionsData());
         bool optionEnabled = options.IsWorkshopModuleEnabled(ModuleId);
-        // Snapshot readiness is deliberately separate from command ownership. The current
-        // operation messages remain legacy until the Task 6 authority migration.
-        bool enabled = false;
+        bool settingRouteReady = authorityRequestRouter?.IsRegistered(
+            "workshop.improved-garrisons.setting", AuthorityRouteKind.Command) == true;
+        bool managementRouteReady = authorityRequestRouter?.IsRegistered(
+            "workshop.improved-garrisons.management", AuthorityRouteKind.Command) == true;
+        bool snapshotRouteReady = authorityRequestRouter?.IsRegistered(
+            "workshop.improved-garrisons.snapshot", AuthorityRouteKind.BootstrapQuery) == true;
+        bool snapshotCurrent = configAuthority != null && configAuthority.TryGetCurrent(out var config) &&
+            compatibilityHandler?.IsSnapshotReadyFor(config.SessionId) == true;
+        bool enabled = ImprovedGarrisonsCapabilityPolicy.IsEnabled(
+            optionEnabled,
+            compatibilityHandler?.IsCompatible == true,
+            settingRouteReady,
+            managementRouteReady,
+            snapshotRouteReady,
+            snapshotCurrent);
         yield return new WorkshopCapability(
             ModuleId,
             Operation,

@@ -11,6 +11,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.CampaignBehaviors;
@@ -39,22 +40,55 @@ internal class SiegeAftermathPatches
         public readonly Clan PreviousOwnerClan;
         public readonly Dictionary<MobileParty, float> Contributions;
         public readonly CampaignTime ParkedAt;
+        public readonly string AftermathId;
         public Clan CaptureOwnerClan { get; private set; }
         public Clan CapturerClan { get; private set; }
+        private int state;
+        private int appliedAftermathType = -1;
 
         public PendingAftermath(MobileParty leaderParty, Clan previousOwnerClan, Dictionary<MobileParty, float> contributions)
-            : this(leaderParty, leaderParty?.LeaderHero, previousOwnerClan, contributions, CampaignTime.Now)
+            : this(leaderParty, leaderParty?.LeaderHero, previousOwnerClan, contributions, CampaignTime.Now,
+                Guid.NewGuid().ToString("N"))
         {
         }
 
         internal PendingAftermath(MobileParty leaderParty, Hero leaderHero, Clan previousOwnerClan,
-            Dictionary<MobileParty, float> contributions, CampaignTime parkedAt)
+            Dictionary<MobileParty, float> contributions, CampaignTime parkedAt, string aftermathId = null,
+            SiegeAftermathChoiceState restoredState = SiegeAftermathChoiceState.Pending, int restoredAftermathType = -1)
         {
             LeaderParty = leaderParty;
             LeaderHero = leaderHero;
             PreviousOwnerClan = previousOwnerClan;
             Contributions = contributions;
             ParkedAt = parkedAt;
+            AftermathId = string.IsNullOrWhiteSpace(aftermathId) ? Guid.NewGuid().ToString("N") : aftermathId;
+            state = (int)restoredState;
+            appliedAftermathType = restoredAftermathType;
+        }
+
+        internal SiegeAftermathChoiceState State => (SiegeAftermathChoiceState)Volatile.Read(ref state);
+        internal int AppliedAftermathType => Volatile.Read(ref appliedAftermathType);
+
+        internal bool TryBegin(string aftermathId) =>
+            string.Equals(AftermathId, aftermathId, StringComparison.Ordinal) &&
+            Interlocked.CompareExchange(ref state, (int)SiegeAftermathChoiceState.InProgress,
+                (int)SiegeAftermathChoiceState.Pending) == (int)SiegeAftermathChoiceState.Pending;
+
+        internal bool TryComplete(string aftermathId, int aftermathType)
+        {
+            if (!string.Equals(AftermathId, aftermathId, StringComparison.Ordinal) ||
+                State != SiegeAftermathChoiceState.InProgress)
+                return false;
+
+            Volatile.Write(ref appliedAftermathType, aftermathType);
+            Volatile.Write(ref state, (int)SiegeAftermathChoiceState.Applied);
+            return true;
+        }
+
+        internal void MarkAmbiguous(string aftermathId)
+        {
+            if (string.Equals(AftermathId, aftermathId, StringComparison.Ordinal))
+                Volatile.Write(ref state, (int)SiegeAftermathChoiceState.Ambiguous);
         }
 
         internal bool IsCaptureBound => CaptureOwnerClan != null && CapturerClan != null;
@@ -223,7 +257,11 @@ internal class SiegeAftermathPatches
         // it behind to fire later against the wrong owner.
         if (!PendingAftermaths.IsEmpty)
         {
-            ResolvePending(__instance, settlement, "a newer settlement capture began");
+            if (PendingAftermaths.TryGetValue(settlement, out var prior) &&
+                prior.State == SiegeAftermathChoiceState.Pending)
+                ResolvePending(__instance, settlement, "a newer settlement capture began");
+            else if (prior != null && prior.State == SiegeAftermathChoiceState.Applied)
+                PendingAftermaths.TryRemove(settlement, out _);
         }
 
         var contributions = new Dictionary<MobileParty, float>();
@@ -270,8 +308,8 @@ internal class SiegeAftermathPatches
 
         if (leaderParty?.LeaderHero != null && leaderParty.LeaderHero.IsPlayerHero())
         {
-            if (!PendingAftermaths.TryAdd(settlement,
-                    new PendingAftermath(leaderParty, settlement.OwnerClan, contributions)))
+            var pending = new PendingAftermath(leaderParty, settlement.OwnerClan, contributions);
+            if (!PendingAftermaths.TryAdd(settlement, pending))
             {
                 Logger.Error("Could not park siege aftermath for {Settlement}: another capture is still pending",
                     settlement.Name?.ToString());
@@ -280,7 +318,8 @@ internal class SiegeAftermathPatches
             // Make sure the leading player actually gets the choice menu: their local encounter flow
             // usually opens it, but if it doesn't (encounter torn down first), the server would wait
             // on this pending entry forever.
-            MessageBroker.Instance.Publish(null, new SiegeAftermathChoicePrompted(leaderParty, settlement));
+            MessageBroker.Instance.Publish(null, new SiegeAftermathChoicePrompted(leaderParty, settlement,
+                pending.AftermathId));
             return false;
         }
 
@@ -305,7 +344,8 @@ internal class SiegeAftermathPatches
                 continue;
             }
 
-            if (pair.Value.ParkedAt.ElapsedHoursUntilNow < CampaignTime.HoursInDay) continue;
+            if (pair.Value.State != SiegeAftermathChoiceState.Pending ||
+                pair.Value.ParkedAt.ElapsedHoursUntilNow < CampaignTime.HoursInDay) continue;
             ResolvePending(behavior, pair.Key, "the player choice timed out");
         }
     }
@@ -360,7 +400,7 @@ internal class SiegeAftermathPatches
     {
         if (ModInformation.IsClient) return;
 
-        MessageBroker.Instance.Publish(null, new SiegeAftermathApplied(settlement, (int)aftermathType));
+        MessageBroker.Instance.Publish(null, new SiegeAftermathApplied(attackerParty, settlement, (int)aftermathType));
     }
 
     // Vanilla's player relation effect is gated on MobileParty.MainParty, which is null on the
@@ -407,6 +447,14 @@ internal class SiegeAftermathPatches
 
         if (pending.MatchesCurrentCapture(settlement)) return;
 
+        if (pending.State == SiegeAftermathChoiceState.InProgress || pending.State == SiegeAftermathChoiceState.Ambiguous)
+        {
+            pending.MarkAmbiguous(pending.AftermathId);
+            Logger.Error("Retained ambiguous siege aftermath for {Settlement}: capture identity changed after native application began",
+                settlement.Name?.ToString());
+            return;
+        }
+
         PendingAftermaths.TryRemove(settlement, out _);
         Logger.Warning("Invalidated pending siege aftermath for {Settlement}: settlement ownership no longer matches the capture",
             settlement.Name?.ToString());
@@ -427,7 +475,10 @@ internal class SiegeAftermathPatches
                     pair.Value.Contributions,
                     pair.Value.ParkedAt,
                     pair.Value.CaptureOwnerClan,
-                    pair.Value.CapturerClan)).ToList();
+                    pair.Value.CapturerClan,
+                    pair.Value.AftermathId,
+                    (int)pair.Value.State,
+                    pair.Value.AppliedAftermathType)).ToList();
         }
 
         dataStore.SyncData(PendingAftermathSaveKey, ref saveData);
@@ -452,7 +503,12 @@ internal class SiegeAftermathPatches
                 entry.LeaderHero,
                 entry.PreviousOwnerClan,
                 new Dictionary<MobileParty, float>(entry.Contributions),
-                entry.ParkedAt);
+                entry.ParkedAt,
+                entry.AftermathId,
+                Enum.IsDefined(typeof(SiegeAftermathChoiceState), entry.State)
+                    ? (SiegeAftermathChoiceState)entry.State
+                    : SiegeAftermathChoiceState.Ambiguous,
+                entry.AppliedAftermathType);
             if (!pending.TryRestoreCaptureBinding(entry.CaptureOwnerClan, entry.CapturerClan)
                 || !pending.MatchesCurrentCapture(entry.Settlement))
             {
@@ -475,10 +531,13 @@ internal class SiegeAftermathPatches
             Dictionary<MobileParty, float>> applyAftermath = null)
     {
         if (behavior == null || settlement == null) return false;
-        if (!PendingAftermaths.TryRemove(settlement, out var pending)) return false;
+        if (!PendingAftermaths.TryGetValue(settlement, out var pending) ||
+            pending.State != SiegeAftermathChoiceState.Pending || !pending.TryBegin(pending.AftermathId))
+            return false;
 
         if (!pending.MatchesCurrentCapture(settlement))
         {
+            PendingAftermaths.TryRemove(settlement, out _);
             Logger.Warning("Discarded pending siege aftermath for {Settlement} ({Reason}): capture identity no longer matches",
                 settlement.Name?.ToString(), reason);
             return false;
@@ -490,7 +549,17 @@ internal class SiegeAftermathPatches
             SiegeAftermathAction.ApplyAftermath(leaderParty, capturedSettlement, aftermath, previousOwner, contributions);
 
         var aftermath = determineAftermath(behavior, pending.LeaderParty, settlement);
-        applyAftermath(pending.LeaderParty, settlement, aftermath, pending.PreviousOwnerClan, pending.Contributions);
+        try
+        {
+            applyAftermath(pending.LeaderParty, settlement, aftermath, pending.PreviousOwnerClan, pending.Contributions);
+            if (!pending.TryComplete(pending.AftermathId, (int)aftermath))
+                throw new InvalidOperationException("Could not retain an internally applied siege aftermath tombstone.");
+        }
+        catch
+        {
+            pending.MarkAmbiguous(pending.AftermathId);
+            throw;
+        }
         Logger.Information("Resolved pending siege aftermath for {Settlement} because {Reason}",
             settlement.Name?.ToString(), reason);
         return true;

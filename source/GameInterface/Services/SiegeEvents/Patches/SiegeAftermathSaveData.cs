@@ -37,6 +37,15 @@ internal sealed class PendingAftermathSaveData
     [SaveableField(8)]
     internal Clan CapturerClan;
 
+    [SaveableField(9)]
+    internal string AftermathId;
+
+    [SaveableField(10)]
+    internal int State;
+
+    [SaveableField(11)]
+    internal int AppliedAftermathType;
+
     // The save system constructs this type reflectively.
     private PendingAftermathSaveData()
     {
@@ -44,7 +53,8 @@ internal sealed class PendingAftermathSaveData
 
     internal PendingAftermathSaveData(Settlement settlement, MobileParty leaderParty, Hero leaderHero,
         Clan previousOwnerClan, Dictionary<MobileParty, float> contributions, CampaignTime parkedAt,
-        Clan captureOwnerClan, Clan capturerClan)
+        Clan captureOwnerClan, Clan capturerClan, string aftermathId, int state,
+        int appliedAftermathType)
     {
         Settlement = settlement;
         LeaderParty = leaderParty;
@@ -54,6 +64,9 @@ internal sealed class PendingAftermathSaveData
         ParkedAt = parkedAt;
         CaptureOwnerClan = captureOwnerClan;
         CapturerClan = capturerClan;
+        AftermathId = aftermathId;
+        State = state;
+        AppliedAftermathType = appliedAftermathType;
     }
 }
 

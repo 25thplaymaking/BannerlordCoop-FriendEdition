@@ -87,7 +87,9 @@ public sealed class SiegeAftermathPendingTests : IDisposable
 
         Assert.True(resolved);
         Assert.True(applied);
-        Assert.Empty(SiegeAftermathPatches.PendingAftermaths);
+        var applied = Assert.Single(SiegeAftermathPatches.PendingAftermaths);
+        Assert.Equal(SiegeAftermathChoiceState.Applied, applied.Value.State);
+        Assert.Equal((int)SiegeAftermathAction.SiegeAftermath.ShowMercy, applied.Value.AppliedAftermathType);
     }
 
     [Fact]
@@ -112,6 +114,8 @@ public sealed class SiegeAftermathPendingTests : IDisposable
         Assert.Equal(saved.Pending.ParkedAt, restored.Value.ParkedAt);
         Assert.Same(saved.Pending.CaptureOwnerClan, restored.Value.CaptureOwnerClan);
         Assert.Same(saved.Pending.CapturerClan, restored.Value.CapturerClan);
+        Assert.Equal(saved.Pending.AftermathId, restored.Value.AftermathId);
+        Assert.Equal(saved.Pending.State, restored.Value.State);
         Assert.Equal(37.5f, restored.Value.Contributions[contributor]);
         Assert.NotSame(saved.Pending.Contributions, restored.Value.Contributions);
     }
@@ -168,6 +172,20 @@ public sealed class SiegeAftermathPendingTests : IDisposable
         {
             Campaign.Current = previousCampaign;
         }
+    }
+
+    [Fact]
+    public void PendingToken_IsOneShotAndRetainsAppliedTombstone()
+    {
+        var pending = CreatePending(CreateHero(CreateUninitialized<Clan>()), CreateUninitialized<Clan>());
+
+        Assert.Equal(SiegeAftermathChoiceState.Pending, pending.State);
+        Assert.False(string.IsNullOrWhiteSpace(pending.AftermathId));
+        Assert.True(pending.TryBegin(pending.AftermathId));
+        Assert.False(pending.TryBegin(pending.AftermathId));
+        Assert.True(pending.TryComplete(pending.AftermathId, (int)SiegeAftermathAction.SiegeAftermath.Pillage));
+        Assert.Equal(SiegeAftermathChoiceState.Applied, pending.State);
+        Assert.Equal((int)SiegeAftermathAction.SiegeAftermath.Pillage, pending.AppliedAftermathType);
     }
 
     private static (Settlement Settlement, SiegeAftermathPatches.PendingAftermath Pending) AddBoundPending()

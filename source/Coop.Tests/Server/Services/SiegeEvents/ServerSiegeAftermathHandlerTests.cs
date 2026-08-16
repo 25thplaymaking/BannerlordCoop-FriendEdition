@@ -3,6 +3,9 @@ using Coop.Core.Server.Services.SiegeEvents.Handlers;
 using Coop.Core.Server.Services.SiegeEvents.Messages;
 using Coop.Tests.Mocks;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.AuthorityRequests;
+using GameInterface.Services.Players;
+using GameInterface.Configuration;
 using GameInterface.Services.SiegeEvents.Interfaces;
 using Moq;
 using System.Linq;
@@ -24,6 +27,8 @@ public sealed class ServerSiegeAftermathHandlerTests
         var settlement = CreateUninitialized<Settlement>();
         var leaderParty = CreateUninitialized<MobileParty>();
         var objectManager = new Mock<IObjectManager>();
+        var playerManager = new Mock<IPlayerManager>();
+        var configAuthority = new Mock<IModConfigAuthority>();
         var siegeEventInterface = new Mock<ISiegeEventInterface>();
         string settlementId = "settlement-1";
         string leaderPartyId = "leader-party-1";
@@ -31,8 +36,10 @@ public sealed class ServerSiegeAftermathHandlerTests
         objectManager.Setup(manager => manager.TryGetIdWithLogging(leaderParty, out leaderPartyId)).Returns(true);
         siegeEventInterface.Setup(service => service.GetPendingSiegeAftermathPrompts())
             .Returns(new[] { new PendingSiegeAftermathPrompt(leaderParty, settlement) });
+        using var router = new AuthorityRequestRouter(broker, network, playerManager.Object);
         using var handler = new ServerSiegeAftermathHandler(
-            broker, network, objectManager.Object, siegeEventInterface.Object);
+            broker, network, objectManager.Object, playerManager.Object, siegeEventInterface.Object,
+            configAuthority.Object, router);
 
         handler.SendPendingAftermathPrompts(peer);
 

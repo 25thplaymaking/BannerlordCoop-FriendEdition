@@ -12,10 +12,12 @@ public readonly struct SiegeAftermathChoicePrompted : IEvent
 {
     public readonly MobileParty LeaderParty;
     public readonly Settlement Settlement;
+    public readonly string AftermathId;
 
-    public SiegeAftermathChoicePrompted(MobileParty leaderParty, Settlement settlement)
+    public SiegeAftermathChoicePrompted(MobileParty leaderParty, Settlement settlement, string aftermathId)
     {
         LeaderParty = leaderParty;
         Settlement = settlement;
+        AftermathId = aftermathId;
     }
 }

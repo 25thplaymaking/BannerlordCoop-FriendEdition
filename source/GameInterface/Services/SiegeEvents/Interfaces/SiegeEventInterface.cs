@@ -24,12 +24,45 @@ public readonly struct PendingSiegeAftermathPrompt
 {
     public MobileParty LeaderParty { get; }
     public Settlement Settlement { get; }
+    public string AftermathId { get; }
+    public long Generation { get; }
 
-    public PendingSiegeAftermathPrompt(MobileParty leaderParty, Settlement settlement)
+    public PendingSiegeAftermathPrompt(MobileParty leaderParty, Settlement settlement,
+        string aftermathId = null, long generation = 1)
     {
         LeaderParty = leaderParty;
         Settlement = settlement;
+        AftermathId = aftermathId;
+        Generation = generation;
     }
+}
+
+public enum SiegeAftermathChoiceState
+{
+    Pending,
+    InProgress,
+    Applied,
+    Ambiguous,
+    Rejected,
+}
+
+public readonly struct SiegeAftermathChoice
+{
+    public SiegeAftermathChoice(SiegeAftermathChoiceState state, string aftermathId,
+        MobileParty leaderParty, int aftermathType = -1, long generation = 1)
+    {
+        State = state;
+        AftermathId = aftermathId;
+        LeaderParty = leaderParty;
+        AftermathType = aftermathType;
+        Generation = generation;
+    }
+
+    public SiegeAftermathChoiceState State { get; }
+    public string AftermathId { get; }
+    public MobileParty LeaderParty { get; }
+    public int AftermathType { get; }
+    public long Generation { get; }
 }
 
 public enum SiegeTerminationRole
@@ -110,7 +143,16 @@ public interface ISiegeEventInterface : IGameAbstraction
     /// <summary>
     /// Applies a player's parked siege aftermath choice. Server side.
     /// </summary>
-    void ApplySiegeAftermathChoice(MobileParty party, Settlement settlement, int aftermathType);
+    SiegeAftermathChoice GetSiegeAftermathChoice(MobileParty party, Settlement settlement, string aftermathId);
+
+    bool TryBeginSiegeAftermathChoice(MobileParty party, Settlement settlement, string aftermathId);
+
+    bool TryCompleteSiegeAftermathChoice(MobileParty party, Settlement settlement, string aftermathId, int aftermathType);
+
+    void MarkSiegeAftermathChoiceAmbiguous(MobileParty party, Settlement settlement, string aftermathId);
+
+    /// <summary>Runs the irreversible native action after the server has atomically claimed the choice.</summary>
+    void ApplySiegeAftermathChoice(MobileParty party, Settlement settlement, int aftermathType, string aftermathId);
 
     /// <summary>
     /// Returns a stable snapshot of valid server-owned aftermath prompts. Used to re-prompt a
@@ -363,30 +405,59 @@ internal class SiegeEventInterface : ISiegeEventInterface, IDisposable
             () => behavior.break_in_debrief_continue_on_consequence(null));
     }
 
-    public void ApplySiegeAftermathChoice(MobileParty party, Settlement settlement, int aftermathType)
+    public SiegeAftermathChoice GetSiegeAftermathChoice(MobileParty party, Settlement settlement, string aftermathId)
     {
         if (!Patches.SiegeAftermathPatches.PendingAftermaths.TryGetValue(settlement, out var pending))
         {
-            Logger.Error("No pending siege aftermath for {Settlement}", settlement.Name?.ToString());
-            return;
+            return new SiegeAftermathChoice(SiegeAftermathChoiceState.Rejected, aftermathId, party);
         }
 
-        // Validate before removing so a mismatched request cannot destroy the pending entry.
-        if (pending.LeaderParty != party)
+        if (pending.LeaderParty != party || !string.Equals(pending.AftermathId, aftermathId, StringComparison.Ordinal) ||
+            !pending.MatchesCurrentCapture(settlement))
         {
-            Logger.Error("Party {Party} is not the pending aftermath leader for {Settlement}", party.StringId, settlement.Name?.ToString());
-            return;
+            return new SiegeAftermathChoice(SiegeAftermathChoiceState.Rejected, aftermathId, party);
         }
 
-        if (!pending.MatchesCurrentCapture(settlement))
+        return new SiegeAftermathChoice(pending.State, pending.AftermathId, pending.LeaderParty,
+            pending.AppliedAftermathType);
+    }
+
+    public bool TryBeginSiegeAftermathChoice(MobileParty party, Settlement settlement, string aftermathId)
+    {
+        var choice = GetSiegeAftermathChoice(party, settlement, aftermathId);
+        return choice.State == SiegeAftermathChoiceState.Pending &&
+            Patches.SiegeAftermathPatches.PendingAftermaths.TryGetValue(settlement, out var pending) &&
+            pending.TryBegin(aftermathId);
+    }
+
+    public bool TryCompleteSiegeAftermathChoice(MobileParty party, Settlement settlement, string aftermathId, int aftermathType)
+    {
+        var choice = GetSiegeAftermathChoice(party, settlement, aftermathId);
+        return choice.State == SiegeAftermathChoiceState.InProgress &&
+            Patches.SiegeAftermathPatches.PendingAftermaths.TryGetValue(settlement, out var pending) &&
+            pending.TryComplete(aftermathId, aftermathType);
+    }
+
+    public void MarkSiegeAftermathChoiceAmbiguous(MobileParty party, Settlement settlement, string aftermathId)
+    {
+        if (Patches.SiegeAftermathPatches.PendingAftermaths.TryGetValue(settlement, out var pending) &&
+            pending.LeaderParty == party)
         {
-            Patches.SiegeAftermathPatches.PendingAftermaths.TryRemove(settlement, out _);
-            Logger.Warning("Rejected stale siege aftermath choice for {Settlement}: the capture owner or capturer changed",
-                settlement.Name?.ToString());
+            pending.MarkAmbiguous(aftermathId);
+        }
+    }
+
+    public void ApplySiegeAftermathChoice(MobileParty party, Settlement settlement, int aftermathType, string aftermathId)
+    {
+        var choice = GetSiegeAftermathChoice(party, settlement, aftermathId);
+        if (choice.State != SiegeAftermathChoiceState.InProgress)
+        {
+            Logger.Error("Siege aftermath choice was not claimed for {Settlement}", settlement.Name?.ToString());
             return;
         }
 
-        Patches.SiegeAftermathPatches.PendingAftermaths.TryRemove(settlement, out _);
+        if (!Patches.SiegeAftermathPatches.PendingAftermaths.TryGetValue(settlement, out var pending))
+            return;
 
         SiegeAftermathAction.ApplyAftermath(party, settlement, (SiegeAftermathAction.SiegeAftermath)aftermathType, pending.PreviousOwnerClan, pending.Contributions);
     }
@@ -394,8 +465,8 @@ internal class SiegeEventInterface : ISiegeEventInterface, IDisposable
     public PendingSiegeAftermathPrompt[] GetPendingSiegeAftermathPrompts()
     {
         return Patches.SiegeAftermathPatches.PendingAftermaths
-            .Where(pair => pair.Value.MatchesCurrentCapture(pair.Key))
-            .Select(pair => new PendingSiegeAftermathPrompt(pair.Value.LeaderParty, pair.Key))
+            .Where(pair => pair.Value.MatchesCurrentCapture(pair.Key) && pair.Value.State == SiegeAftermathChoiceState.Pending)
+            .Select(pair => new PendingSiegeAftermathPrompt(pair.Value.LeaderParty, pair.Key, pair.Value.AftermathId))
             .ToArray();
     }
 

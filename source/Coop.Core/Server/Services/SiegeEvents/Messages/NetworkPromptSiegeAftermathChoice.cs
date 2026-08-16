@@ -10,14 +10,19 @@ namespace Coop.Core.Server.Services.SiegeEvents.Messages;
 [ProtoContract(SkipConstructor = true)]
 public record NetworkPromptSiegeAftermathChoice : IEvent
 {
-    [ProtoMember(1)]
-    public string SettlementId { get; }
-    [ProtoMember(2)]
-    public string LeaderPartyId { get; }
+    [ProtoMember(1)] public string SettlementId { get; }
+    [ProtoMember(2)] public string LeaderPartyId { get; }
+    [ProtoMember(3)] public string AftermathId { get; }
+    [ProtoMember(4)] public long Generation { get; }
+    [ProtoMember(5)] public string SessionId { get; }
 
-    public NetworkPromptSiegeAftermathChoice(string settlementId, string leaderPartyId)
+    public NetworkPromptSiegeAftermathChoice(string settlementId, string leaderPartyId,
+        string aftermathId = null, long generation = 1, string sessionId = null)
     {
         SettlementId = settlementId;
         LeaderPartyId = leaderPartyId;
+        AftermathId = aftermathId;
+        Generation = generation;
+        SessionId = sessionId;
     }
 }

@@ -106,8 +106,6 @@ internal class PlayerCaptivityServerHandler : IHandler
         // ModInformation is evaluated per call (tests flip it per instance), so each handler
         // guards itself instead of gating the subscriptions here.
         messageBroker.Subscribe<PrisonerTaken>(Handle_PrisonerTaken);
-        messageBroker.Subscribe<NetworkEndPlayerCaptivityAttempted>(Handle_NetworkEndPlayerCaptivityAttempted);
-        messageBroker.Subscribe<NetworkEndCaptivityAttempted>(Handle_NetworkEndCaptivityAttempted);
         messageBroker.Subscribe<PlayerCaptivityEndedByServer>(Handle_PlayerCaptivityEndedByServer);
         messageBroker.Subscribe<CampaignTick>(Handle_CampaignTick);
     }
@@ -117,8 +115,6 @@ internal class PlayerCaptivityServerHandler : IHandler
         messageBroker.Unsubscribe<PrisonerTaken>(Handle_PrisonerTaken);
         surrenderRoute.Dispose();
         if (Instance == this) Instance = null;
-        messageBroker.Unsubscribe<NetworkEndPlayerCaptivityAttempted>(Handle_NetworkEndPlayerCaptivityAttempted);
-        messageBroker.Unsubscribe<NetworkEndCaptivityAttempted>(Handle_NetworkEndCaptivityAttempted);
         messageBroker.Unsubscribe<PlayerCaptivityEndedByServer>(Handle_PlayerCaptivityEndedByServer);
         messageBroker.Unsubscribe<CampaignTick>(Handle_CampaignTick);
     }

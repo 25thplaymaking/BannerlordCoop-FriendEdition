@@ -58,7 +58,6 @@ internal class CompanionRolesHandler : IHandler
         messageBroker.Subscribe<ClanNameSelectionDone>(Handle_ClanNameSelectionDone);
         messageBroker.Subscribe<DoClanNameSelection>(Handle_DoClanNameSelection);
         messageBroker.Subscribe<CompanionFired>(Handle_CompanionFired);
-        messageBroker.Subscribe<FireCompanion>(Handle_FireCompanion);
         messageBroker.Subscribe<FireCompanionCompleted>(Handle_FireCompanionCompleted);
         messageBroker.Subscribe<CompanionRejoinAfterEmprisonment>(Handle_CompanionRejoinAfterEmprisonment);
         messageBroker.Subscribe<DoCompanionRejoinAfterEmprisonment>(Handle_DoCompanionRejoinAfterEmprisonment);
@@ -75,7 +74,6 @@ internal class CompanionRolesHandler : IHandler
         messageBroker.Unsubscribe<ClanNameSelectionDone>(Handle_ClanNameSelectionDone);
         messageBroker.Unsubscribe<DoClanNameSelection>(Handle_DoClanNameSelection);
         messageBroker.Unsubscribe<CompanionFired>(Handle_CompanionFired);
-        messageBroker.Unsubscribe<FireCompanion>(Handle_FireCompanion);
         messageBroker.Unsubscribe<FireCompanionCompleted>(Handle_FireCompanionCompleted);
         messageBroker.Unsubscribe<CompanionRejoinAfterEmprisonment>(Handle_CompanionRejoinAfterEmprisonment);
         messageBroker.Unsubscribe<DoCompanionRejoinAfterEmprisonment>(Handle_DoCompanionRejoinAfterEmprisonment);
@@ -162,6 +160,12 @@ internal class CompanionRolesHandler : IHandler
 
     private void Handle_CompanionFired(MessagePayload<CompanionFired> obj)
     {
+        logger.Warning("Companion dismissal is disabled: no server-issued conversation lease verifies this request.");
+        try { TaleWorlds.Library.InformationManager.DisplayMessage(new TaleWorlds.Library.InformationMessage("Companion dismissal is unavailable until the server verifies the conversation.")); }
+        catch (Exception exception) { logger.Warning(exception, "Could not show companion dismissal rejection"); }
+        return;
+
+#pragma warning disable CS0162
         if (pendingFireCompanionRequestId != null)
         {
             logger.Warning("Ignored a second companion dismissal while request {RequestId} is pending",
@@ -201,6 +205,7 @@ internal class CompanionRolesHandler : IHandler
         {
             CompletePendingFireCompanion(requestId, pendingFireCompanionHeroId, false, exception.Message);
         }
+#pragma warning restore CS0162
     }
 
     private void Handle_FireCompanion(MessagePayload<FireCompanion> obj)

@@ -200,10 +200,7 @@ internal class PlayerCaptivityClientHandler : IHandler
         string facilitatorId = null;
         if (data.Facilitator != null && !objectManager.TryGetIdWithLogging(data.Facilitator, out facilitatorId)) return;
 
-        network.SendAll(new NetworkEndCaptivityAttempted(prisonerId, data.Detail, facilitatorId, data.ShowNotification));
-
-        PlayerEncounter.Current?._capturedAlreadyPrisonerHeroes?
-            .RemoveAll(element => element.Character?.HeroObject == data.Prisoner);
+        ShowAuthorityUnavailable("Captivity release is unavailable until the server can verify the conversation custody.");
     }
 
     /// <summary>
@@ -237,14 +234,9 @@ internal class PlayerCaptivityClientHandler : IHandler
                 if (data.Facilitator != null && !objectManager.TryGetIdWithLogging(data.Facilitator, out facilitatorId)) return;
                 int ransomAmount = Campaign.Current.PlayerCaptivity.CurrentRansomAmount;
 
-                var message = new NetworkEndPlayerCaptivityAttempted(heroId, partyId, playerParty.Position, data.Detail, facilitatorId, ransomAmount);
-                network.SendAll(message);
-
-                var playerCaptivity = Campaign.Current.PlayerCaptivity;
-
-                playerCaptivity._captorParty = null;
-                playerCaptivity.CountOfOffers = 0;
-                playerCaptivity.CurrentRansomAmount = 0;
+                // No client-selected hero, party, position, ransom, or facilitator may cross this
+                // boundary without a server-issued release offer. Keep the captivity UI/state intact.
+                ShowAuthorityUnavailable("Captivity release is unavailable until the server issues a verified offer.");
             }
             catch (Exception e)
             {
@@ -279,6 +271,12 @@ internal class PlayerCaptivityClientHandler : IHandler
                 GameMenu.ExitToLast();
             }
         });
+    }
+
+    private static void ShowAuthorityUnavailable(string message)
+    {
+        try { InformationManager.DisplayMessage(new InformationMessage(message)); }
+        catch (Exception exception) { Logger.Warning(exception, "Could not show authority rejection"); }
     }
 
     private void Handle_NetworkPlayerCaptivityReleasePositionSet(MessagePayload<NetworkPlayerCaptivityReleasePositionSet> payload)

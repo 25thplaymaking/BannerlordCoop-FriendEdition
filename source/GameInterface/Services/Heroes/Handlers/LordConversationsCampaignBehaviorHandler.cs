@@ -33,45 +33,39 @@ internal class LordConversationsCampaignBehaviorHandler : IHandler
         this.messageBroker = messageBroker;
 
         messageBroker.Subscribe<LiberateLordPrisoner>(Handle_LiberateLordPrisoner);
-        messageBroker.Subscribe<NetworkLiberateLordPrisoner>(Handle_NetworkLiberateLordPrisoner);
 
         messageBroker.Subscribe<TakeLordPrisoner>(Handle_TakeLordPrisoner);
-        messageBroker.Subscribe<NetworkTakeLordPrisoner>(Handle_NetworkTakeLordPrisoner);
 
         messageBroker.Subscribe<LordHelpedInBattle>(Handle_LordHelpedInBattle);
-        messageBroker.Subscribe<NetworkLordHelpedInBattle>(Handle_NetworkLordHelpedInBattle);
 
         messageBroker.Subscribe<LordDefeatToRelease>(Handle_LordDefeatToRelease);
-        messageBroker.Subscribe<NetworkLordDefeatToRelease>(Handle_NetworkLordDefeatToRelease);
 
         messageBroker.Subscribe<LordFreedToRelease>(Handle_LordFreedToRelease);
-        messageBroker.Subscribe<NetworkLordFreedToRelease>(Handle_NetworkLordFreedToRelease);
     }
 
     public void Dispose()
     {
         messageBroker.Unsubscribe<LiberateLordPrisoner>(Handle_LiberateLordPrisoner);
-        messageBroker.Unsubscribe<NetworkLiberateLordPrisoner>(Handle_NetworkLiberateLordPrisoner);
 
         messageBroker.Unsubscribe<TakeLordPrisoner>(Handle_TakeLordPrisoner);
-        messageBroker.Unsubscribe<NetworkTakeLordPrisoner>(Handle_NetworkTakeLordPrisoner);
 
         messageBroker.Unsubscribe<LordHelpedInBattle>(Handle_LordHelpedInBattle);
-        messageBroker.Unsubscribe<NetworkLordHelpedInBattle>(Handle_NetworkLordHelpedInBattle);
 
         messageBroker.Unsubscribe<LordDefeatToRelease>(Handle_LordDefeatToRelease);
-        messageBroker.Unsubscribe<NetworkLordDefeatToRelease>(Handle_NetworkLordDefeatToRelease);
 
         messageBroker.Unsubscribe<LordFreedToRelease>(Handle_LordFreedToRelease);
-        messageBroker.Unsubscribe<NetworkLordFreedToRelease>(Handle_NetworkLordFreedToRelease);
     }
 
     private void Handle_LiberateLordPrisoner(MessagePayload<LiberateLordPrisoner> obj)
     {
+        RejectLegacyConversationMutation("Prisoner liberation is unavailable until the server verifies the conversation.");
+        return;
+#pragma warning disable CS0162
         if (!objectManager.TryGetIdWithLogging(obj.What.MainHero, out var mainHeroId)) return;
         if (!objectManager.TryGetIdWithLogging(obj.What.ConversationHero, out var conversationHeroId)) return;
 
         network.SendAll(new NetworkLiberateLordPrisoner(mainHeroId, conversationHeroId));
+#pragma warning restore CS0162
     }
 
     private void Handle_NetworkLiberateLordPrisoner(MessagePayload<NetworkLiberateLordPrisoner> obj)
@@ -92,10 +86,14 @@ internal class LordConversationsCampaignBehaviorHandler : IHandler
 
     private void Handle_TakeLordPrisoner(MessagePayload<TakeLordPrisoner> obj)
     {
+        RejectLegacyConversationMutation("Taking a prisoner is unavailable until the server verifies the conversation.");
+        return;
+#pragma warning disable CS0162
         if (!objectManager.TryGetIdWithLogging(obj.What.MainParty, out var mainPartyId)) return;
         if (!objectManager.TryGetIdWithLogging(obj.What.ConversationHero, out var conversationHeroId)) return;
 
         network.SendAll(new NetworkTakeLordPrisoner(mainPartyId, conversationHeroId));
+#pragma warning restore CS0162
     }
 
     private void Handle_NetworkTakeLordPrisoner(MessagePayload<NetworkTakeLordPrisoner> obj)
@@ -114,10 +112,14 @@ internal class LordConversationsCampaignBehaviorHandler : IHandler
 
     private void Handle_LordHelpedInBattle(MessagePayload<LordHelpedInBattle> obj)
     {
+        RejectLegacyConversationMutation("Prisoner release is unavailable until the server verifies the battle state.");
+        return;
+#pragma warning disable CS0162
         if (!objectManager.TryGetIdWithLogging(obj.What.MainHero, out var mainHeroId)) return;
         if (!objectManager.TryGetIdWithLogging(obj.What.ConversationHero, out var conversationHeroId)) return;
 
         network.SendAll(new NetworkLordHelpedInBattle(mainHeroId, conversationHeroId));
+#pragma warning restore CS0162
     }
 
     private void Handle_NetworkLordHelpedInBattle(MessagePayload<NetworkLordHelpedInBattle> obj)
@@ -142,10 +144,14 @@ internal class LordConversationsCampaignBehaviorHandler : IHandler
 
     private void Handle_LordDefeatToRelease(MessagePayload<LordDefeatToRelease> obj)
     {
+        RejectLegacyConversationMutation("Prisoner release is unavailable until the server verifies the battle state.");
+        return;
+#pragma warning disable CS0162
         if (!objectManager.TryGetIdWithLogging(obj.What.MainHero, out var mainHeroId)) return;
         if (!objectManager.TryGetIdWithLogging(obj.What.ConversationHero, out var conversationHeroId)) return;
 
         network.SendAll(new NetworkLordDefeatToRelease(mainHeroId, conversationHeroId));
+#pragma warning restore CS0162
     }
 
     private void Handle_NetworkLordDefeatToRelease(MessagePayload<NetworkLordDefeatToRelease> obj)
@@ -173,10 +179,14 @@ internal class LordConversationsCampaignBehaviorHandler : IHandler
 
     private void Handle_LordFreedToRelease(MessagePayload<LordFreedToRelease> obj)
     {
+        RejectLegacyConversationMutation("Prisoner release is unavailable until the server verifies the conversation.");
+        return;
+#pragma warning disable CS0162
         if (!objectManager.TryGetIdWithLogging(obj.What.MainHero, out var mainHeroId)) return;
         if (!objectManager.TryGetIdWithLogging(obj.What.ConversationHero, out var conversationHeroId)) return;
 
         network.SendAll(new NetworkLordFreedToRelease(mainHeroId, conversationHeroId));
+#pragma warning restore CS0162
     }
 
     private void Handle_NetworkLordFreedToRelease(MessagePayload<NetworkLordFreedToRelease> obj)
@@ -196,5 +206,12 @@ internal class LordConversationsCampaignBehaviorHandler : IHandler
             //TraitLevelingHelper.OnLordFreed(conversationHero);
         },
         context: nameof(Handle_NetworkLordFreedToRelease));
+    }
+
+    private static void RejectLegacyConversationMutation(string reason)
+    {
+        Logger.Warning(reason);
+        try { TaleWorlds.Library.InformationManager.DisplayMessage(new TaleWorlds.Library.InformationMessage(reason)); }
+        catch (Exception exception) { Logger.Warning(exception, "Could not show conversation authority rejection"); }
     }
 }

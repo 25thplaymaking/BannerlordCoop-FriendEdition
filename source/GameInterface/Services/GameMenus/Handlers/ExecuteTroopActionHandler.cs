@@ -29,21 +29,26 @@ internal class ExecuteTroopActionHandler : IHandler
         this.network = network;
 
         messageBroker.Subscribe<MenuHeroTakenToParty>(Handle_MenuHeroTakenToParty);
-        messageBroker.Subscribe<MenuTakeHeroToParty>(Handle_MenuTakeHeroToParty);
     }
 
     public void Dispose()
     {
         messageBroker.Unsubscribe<MenuHeroTakenToParty>(Handle_MenuHeroTakenToParty);
-        messageBroker.Unsubscribe<MenuTakeHeroToParty>(Handle_MenuTakeHeroToParty);
     }
 
     private void Handle_MenuHeroTakenToParty(MessagePayload<MenuHeroTakenToParty> obj)
     {
+        Logger.Warning("Menu hero transfer is disabled: no server-issued party-screen lease verifies the target.");
+        try { TaleWorlds.Library.InformationManager.DisplayMessage(new TaleWorlds.Library.InformationMessage("Hero transfer is unavailable until the server verifies the party screen.")); }
+        catch (System.Exception exception) { Logger.Warning(exception, "Could not show hero transfer rejection"); }
+        return;
+
+#pragma warning disable CS0162
         if (!objectManager.TryGetIdWithLogging(obj.What.Hero, out var heroId)) return;
         if (!objectManager.TryGetIdWithLogging(obj.What.MainParty, out var mainPartyId)) return;
 
         network.SendAll(new MenuTakeHeroToParty(heroId, mainPartyId));
+#pragma warning restore CS0162
     }
 
     private void Handle_MenuTakeHeroToParty(MessagePayload<MenuTakeHeroToParty> obj)

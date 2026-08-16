@@ -103,4 +103,23 @@ public sealed class WorkshopCapabilityTests
                 0,
                 Array.Empty<WorkshopCapability>())));
     }
+
+    [Fact]
+    public void Readiness_DistinguishesLoadingReadyAndUnavailable()
+    {
+        var registry = new WorkshopCapabilityRegistry();
+        registry.MarkLoading(Session);
+
+        Assert.Equal(WorkshopCapabilityReadiness.Loading, registry.Readiness);
+        Assert.False(registry.IsReadyFor(Session));
+
+        Assert.Equal(WorkshopCapabilityApplyResult.Applied, registry.Apply(
+            new WorkshopCapabilitySnapshot(Session, 0, Array.Empty<WorkshopCapability>())));
+        Assert.Equal(WorkshopCapabilityReadiness.Ready, registry.Readiness);
+        Assert.True(registry.IsReadyFor(Session));
+
+        registry.MarkUnavailable();
+        Assert.Equal(WorkshopCapabilityReadiness.Unavailable, registry.Readiness);
+        Assert.False(registry.IsReadyFor(Session));
+    }
 }

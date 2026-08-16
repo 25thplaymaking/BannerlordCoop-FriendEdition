@@ -3,10 +3,11 @@ using Common.Logging;
 using Common.Messaging;
 using Common.Network;
 using GameInterface.Configuration;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.CampaignService.Messages;
 using GameInterface.Services.GameState.Messages;
 using GameInterface.Services.Heroes.Interaces;
-using GameInterface.Services.Players;
+using GameInterface.Services.PlayerCaptivityService.Messages;
 using LiteNetLib;
 using Serilog;
 using System;
@@ -24,8 +25,7 @@ internal class LoadModConfigHandler : IHandler
     private readonly IModConfig modConfig;
     private readonly IModConfigAuthority configAuthority;
     private readonly ITimeControlInterface timeControlInterface;
-    private readonly IPlayerManager playerManager;
-    private readonly ModConfigRequestGate<NetPeer> requestGate = new();
+    private readonly IAuthorityRouteHandle<ModConfigRefreshIntent, NetworkModConfigQueryResult> refreshRoute;
 
     public LoadModConfigHandler(
         IMessageBroker messageBroker,
@@ -33,24 +33,44 @@ internal class LoadModConfigHandler : IHandler
         IModConfig modConfig,
         IModConfigAuthority configAuthority,
         ITimeControlInterface timeControlInterface,
-        IPlayerManager playerManager)
+        IAuthorityRequestRouter authorityRequestRouter)
     {
         this.messageBroker = messageBroker;
         this.network = network;
         this.modConfig = modConfig;
         this.configAuthority = configAuthority;
         this.timeControlInterface = timeControlInterface;
-        this.playerManager = playerManager;
+
+        refreshRoute = authorityRequestRouter.Register(
+            AuthorityRoute<ModConfigRefreshIntent, NetworkRequestServerModConfig, NetworkModConfigQueryResult>.Define(
+                "bootstrap.mod-config", AuthorityRouteKind.BootstrapQuery,
+                CreateRefreshHeader,
+                (_, header) => new NetworkRequestServerModConfig(header),
+                request => request.Header,
+                result => result.Header,
+                request => request.TryValidateWireShape(out var failure) ? null : "invalid-config-query",
+                _ => "refresh",
+                ValidateRefreshHeader,
+                ExecuteRefresh,
+                CreateRefreshTerminal,
+                ProbeRefreshApplied,
+                _ => { },
+                PresentRefreshTerminal,
+                configAuthority.IsTrustedServer,
+                AuthorityTimeoutPolicy.BootstrapQuery));
         messageBroker.Subscribe<CampaignReady>(Handle_CampaignReady);
-        messageBroker.Subscribe<NetworkRequestServerModConfig>(Handle_NetworkRequestServerModConfig);
         messageBroker.Subscribe<NetworkLoadModConfig>(Handle_NetworkLoadModConfig);
+        messageBroker.Subscribe<NetworkModConfigQueryResult>(Handle_NetworkModConfigQueryResult);
+        messageBroker.Subscribe<CampaignTick>(HandleCampaignTick);
     }
 
     public void Dispose()
     {
         messageBroker.Unsubscribe<CampaignReady>(Handle_CampaignReady);
-        messageBroker.Unsubscribe<NetworkRequestServerModConfig>(Handle_NetworkRequestServerModConfig);
         messageBroker.Unsubscribe<NetworkLoadModConfig>(Handle_NetworkLoadModConfig);
+        messageBroker.Unsubscribe<NetworkModConfigQueryResult>(Handle_NetworkModConfigQueryResult);
+        messageBroker.Unsubscribe<CampaignTick>(HandleCampaignTick);
+        refreshRoute.Dispose();
     }
 
     internal void Handle_CampaignReady(MessagePayload<CampaignReady> obj)
@@ -67,7 +87,7 @@ internal class LoadModConfigHandler : IHandler
 
             ApplyConfigs();
             messageBroker.Publish(this, new HostModConfigAccepted(accepted));
-            network.SendAll(new NetworkRequestServerModConfig(accepted));
+            refreshRoute.Submit(default);
             return;
         }
 
@@ -95,44 +115,54 @@ internal class LoadModConfigHandler : IHandler
         network.SendAll(new NetworkLoadModConfig(snapshot));
     }
 
-    private void Handle_NetworkRequestServerModConfig(MessagePayload<NetworkRequestServerModConfig> obj)
+    private AuthorityRequestHeader CreateRefreshHeader(long requestId)
     {
-        if (!ModInformation.IsServer || obj?.Who is not NetPeer peer) return;
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot snapshot)) return default;
+        return new AuthorityRequestHeader(snapshot.ProtocolVersion, snapshot.SessionId, requestId, snapshot.Revision);
+    }
 
-        // Initial configuration is delivered by the module-validation response. Requests are only
-        // answered after the peer has an authenticated controller mapping and are bounded per peer.
-        // A joining peer legitimately requests while still unmapped: finishing character creation
-        // fires CampaignReady (and this request) before the server has unpacked that peer's hero
-        // transfer, so an unmapped requester is ignored — never disconnected — and is served by the
-        // request it sends after entering the transferred campaign.
-        if (playerManager == null || !playerManager.TryGetPlayer(peer, out _))
-        {
-            Logger.Warning("Ignoring mod-config request from peer {Peer} with no player mapping yet", peer.Id);
-            return;
-        }
-        if (!obj.What.TryValidateWireShape(out string requestFailure))
-        {
-            Logger.Warning("Disconnecting peer {Peer} after malformed mod-config request: {Failure}",
-                peer.Id, requestFailure);
-            peer.Disconnect();
-            return;
-        }
-        if (!requestGate.TryAccept(peer))
-        {
-            Logger.Warning("Rate-limited repeated mod-config request from peer {Peer}", peer.Id);
-            return;
-        }
+    private string ValidateRefreshHeader(AuthorityRequestHeader header)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot snapshot)) return "config-unavailable";
+        return header.ProtocolVersion == snapshot.ProtocolVersion &&
+            string.Equals(header.SessionId, snapshot.SessionId, StringComparison.Ordinal)
+            ? null
+            : "stale-config-session";
+    }
 
-        GameThread.RunSafe(() =>
-        {
-            if (!configAuthority.TryGetCurrent(out ModConfigSnapshot snapshot))
-            {
-                Logger.Fatal("Disconnecting peer {Peer}: authoritative host mod-config is unavailable", peer.Id);
-                peer.Disconnect();
-                return;
-            }
-            network.Send(peer, new NetworkLoadModConfig(snapshot));
-        }, true, nameof(Handle_NetworkRequestServerModConfig));
+    private AuthorityServerReply<NetworkModConfigQueryResult> ExecuteRefresh(
+        AuthorityServerContext context,
+        NetworkRequestServerModConfig _)
+    {
+        if (!configAuthority.TryGetCurrent(out ModConfigSnapshot snapshot))
+            return new AuthorityServerReply<NetworkModConfigQueryResult>(
+                new NetworkModConfigQueryResult(context.Header, AuthorityResultStatus.Unavailable, null, "config-unavailable"), false);
+
+        return new AuthorityServerReply<NetworkModConfigQueryResult>(
+            new NetworkModConfigQueryResult(context.Header, AuthorityResultStatus.Accepted, snapshot, null), true);
+    }
+
+    private static NetworkModConfigQueryResult CreateRefreshTerminal(
+        AuthorityRequestHeader header,
+        AuthorityResultStatus status,
+        string reasonCode) =>
+        new NetworkModConfigQueryResult(header, status, null, reasonCode);
+
+    private AuthorityCommitProbeResult ProbeRefreshApplied(NetworkModConfigQueryResult result) =>
+        result.Snapshot != null && configAuthority.IsCurrent(result.Snapshot)
+            ? AuthorityCommitProbeResult.Applied
+            : AuthorityCommitProbeResult.Pending;
+
+    private void PresentRefreshTerminal(AuthorityClientOutcome<NetworkModConfigQueryResult> outcome)
+    {
+        if (outcome.Completion != AuthorityClientCompletion.Applied)
+            Logger.Warning("Mod-config refresh ended without application. Completion={Completion} Reason={Reason}",
+                outcome.Completion, outcome.ReasonCode);
+    }
+
+    private void HandleCampaignTick(MessagePayload<CampaignTick> _)
+    {
+        if (ModInformation.IsClient) refreshRoute.Poll();
     }
 
     private void Handle_NetworkLoadModConfig(MessagePayload<NetworkLoadModConfig> obj)
@@ -166,31 +196,30 @@ internal class LoadModConfigHandler : IHandler
             return;
         }
 
+        AcceptSnapshot(serverPeer, obj.What.Snapshot, nameof(Handle_NetworkLoadModConfig));
+    }
+
+    private void Handle_NetworkModConfigQueryResult(MessagePayload<NetworkModConfigQueryResult> obj)
+    {
+        if (ModInformation.IsServer || obj?.Who is not NetPeer serverPeer ||
+            !configAuthority.IsTrustedServer(serverPeer)) return;
+        if (obj.What.Status == AuthorityResultStatus.Accepted)
+            AcceptSnapshot(serverPeer, obj.What.Snapshot, nameof(Handle_NetworkModConfigQueryResult));
+    }
+
+    private void AcceptSnapshot(NetPeer serverPeer, ModConfigSnapshot snapshot, string context)
+    {
         GameThread.RunSafe(() =>
         {
-            ModConfigAcceptanceResult result = configAuthority.AcceptClientSnapshot(obj.What.Snapshot);
+            ModConfigAcceptanceResult result = configAuthority.AcceptClientSnapshot(snapshot);
             if (!result.Succeeded)
             {
-                Logger.Fatal(
-                    "Rejected host mod-config snapshot ({Status}): {Reason}",
-                    result.Status,
-                    result.Reason);
+                Logger.Fatal("Rejected host mod-config snapshot ({Status}): {Reason}", result.Status, result.Reason);
                 serverPeer.Disconnect();
                 return;
             }
-
-            if (result.Status == ModConfigAcceptanceStatus.Accepted)
-            {
-                Logger.Information(
-                    "Accepted host mod-config resync: session={Session}, revision={Revision}, " +
-                    "sha256={Sha256}, difficulty.birthAndDeath={BirthAndDeath}",
-                    obj.What.Snapshot.SessionId,
-                    obj.What.Snapshot.Revision,
-                    obj.What.Snapshot.Sha256,
-                    obj.What.Snapshot.BirthAndDeathEnabled);
-            }
-            messageBroker.Publish(this, new HostModConfigAccepted(obj.What.Snapshot));
-        }, true, nameof(Handle_NetworkLoadModConfig));
+            messageBroker.Publish(this, new HostModConfigAccepted(snapshot));
+        }, true, context);
     }
 
     private void ApplyConfigs()
@@ -199,6 +228,10 @@ internal class LoadModConfigHandler : IHandler
         {
             timeControlInterface.AddFastForwardPolicy(() => false);
         }
+    }
+
+    private readonly struct ModConfigRefreshIntent
+    {
     }
 }
 

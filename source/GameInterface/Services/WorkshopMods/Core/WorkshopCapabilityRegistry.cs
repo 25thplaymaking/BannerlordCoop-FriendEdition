@@ -18,10 +18,22 @@ public enum WorkshopCapabilityApplyResult
     Conflict,
 }
 
+public enum WorkshopCapabilityReadiness
+{
+    Unknown,
+    Loading,
+    Ready,
+    Unavailable,
+}
+
 public interface IWorkshopCapabilityRegistry : IGameAbstraction
 {
     bool IsEnabled(string moduleId, string operation);
+    WorkshopCapabilityReadiness Readiness { get; }
+    bool IsReadyFor(string sessionId);
     WorkshopCapabilityApplyResult Apply(WorkshopCapabilitySnapshot snapshot);
+    void MarkLoading(string sessionId);
+    void MarkUnavailable();
     void Reset();
 }
 
@@ -30,11 +42,23 @@ internal sealed class WorkshopCapabilityRegistry : IWorkshopCapabilityRegistry
     private readonly object gate = new();
     private readonly Dictionary<string, bool> enabled = new(StringComparer.Ordinal);
     private WorkshopCapabilitySnapshot current;
+    private WorkshopCapabilityReadiness readiness;
+
+    public WorkshopCapabilityReadiness Readiness
+    {
+        get { lock (gate) return readiness; }
+    }
 
     public bool IsEnabled(string moduleId, string operation)
     {
         string key = Key(moduleId, operation);
         lock (gate) return key != null && enabled.TryGetValue(key, out bool value) && value;
+    }
+
+    public bool IsReadyFor(string sessionId)
+    {
+        lock (gate) return readiness == WorkshopCapabilityReadiness.Ready && current != null &&
+            string.Equals(current.SessionId, sessionId, StringComparison.Ordinal);
     }
 
     public WorkshopCapabilityApplyResult Apply(WorkshopCapabilitySnapshot snapshot)
@@ -66,7 +90,34 @@ internal sealed class WorkshopCapabilityRegistry : IWorkshopCapabilityRegistry
             foreach (KeyValuePair<string, bool> capability in candidate)
                 enabled.Add(capability.Key, capability.Value);
             current = snapshot;
+            readiness = WorkshopCapabilityReadiness.Ready;
             return WorkshopCapabilityApplyResult.Applied;
+        }
+    }
+
+    public void MarkLoading(string sessionId)
+    {
+        lock (gate)
+        {
+            if (current != null && string.Equals(current.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                readiness = WorkshopCapabilityReadiness.Ready;
+                return;
+            }
+
+            enabled.Clear();
+            current = null;
+            readiness = WorkshopCapabilityReadiness.Loading;
+        }
+    }
+
+    public void MarkUnavailable()
+    {
+        lock (gate)
+        {
+            enabled.Clear();
+            current = null;
+            readiness = WorkshopCapabilityReadiness.Unavailable;
         }
     }
 
@@ -76,6 +127,7 @@ internal sealed class WorkshopCapabilityRegistry : IWorkshopCapabilityRegistry
         {
             enabled.Clear();
             current = null;
+            readiness = WorkshopCapabilityReadiness.Unknown;
         }
     }
 

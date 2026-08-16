@@ -10,6 +10,41 @@
     "FrameworkLifecycle",
     "Retired"
   ],
+  "inactiveModuleHolds": [
+    {
+      "moduleId": "RebellionsAndDemographics",
+      "workshopId": "3644127631",
+      "steamManifestId": "5679238579592221906",
+      "moduleVersion": "v3.0.1",
+      "advertisedGameCompatibility": "v1.3.13",
+      "assemblyPath": "bin/Win64_Shipping_Client/RebellionsAndDemographics.dll",
+      "assemblyIdentity": "ClassLibrary22, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "assemblySha256": "115ca5f26eaa50f9ce6fa4ac88dc2b65b94be1eb4ff27a895ea29982983463a8",
+      "targetFramework": ".NETFramework,Version=v4.7.2",
+      "disposition": "Unsupported",
+      "reason": "source-required-for-authority-and-1.4.8-migration",
+      "auditEvidence": {
+        "campaignBehaviorsRegistered": 44,
+        "campaignModelsRegistered": 1,
+        "missionBehaviorsRegistered": 3,
+        "reachedNamespaceTypes": 263,
+        "mutableFamilies": [
+          "population and demographics", "rebellion and kingdom lifecycle", "plague and strikes",
+          "council, voting, and war cabinet", "field commands and conversations",
+          "incognito, corruption, and diplomacy", "missions, story orchestration, and hybrid reality"
+        ],
+        "clientActionEvidence": [
+          "WarCouncilInputBehavior", "FieldCommandInputBehavior", "FieldCommandConversationBehavior",
+          "HybridRealityInputBehavior", "InformationManager.ShowInquiry callbacks"
+        ]
+      },
+      "requiredBeforeActivation": [
+        "1.4.8 source/API migration and rebuilt binary", "server-only campaign tick and persistence ownership",
+        "typed authority routes for every client-triggered mutation", "canonical snapshots, late-join, and save/restart recovery",
+        "exact client/server route, replay, partial-publication, and convergence tests"
+      ]
+    }
+  ],
   "rules": [
     {
       "moduleId": "UnblockableThrust",

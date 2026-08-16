@@ -40,6 +40,12 @@ public static class GameLauncher
         LauncherConfig config,
         string enteredPassword)
     {
+        if (config is null) throw new ArgumentNullException(nameof(config));
+        string? blockedModule = config.GetBlockedModuleInToken();
+        if (blockedModule is not null)
+            throw new InvalidOperationException(
+                $"The launch token contains held module '{blockedModule}'. {config.CompatibilityHoldNotice}");
+
         var psi = new ProcessStartInfo
         {
             FileName = bannerlordExe,

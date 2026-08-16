@@ -33,4 +33,19 @@ public sealed class GameLauncherTests
             },
             startInfo.ArgumentList);
     }
+
+    [Fact]
+    public void CreateStartInfo_RejectsAnAuthorityHeldModule()
+    {
+        var config = new LauncherConfig
+        {
+            ModuleToken = "_MODULES_*Coop*RebellionsAndDemographics*_MODULES_",
+        };
+
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+            GameLauncher.CreateStartInfo(@"C:\Games\Bannerlord.exe", config, string.Empty));
+
+        Assert.Contains("RebellionsAndDemographics", exception.Message);
+        Assert.Contains("source must be migrated", exception.Message);
+    }
 }

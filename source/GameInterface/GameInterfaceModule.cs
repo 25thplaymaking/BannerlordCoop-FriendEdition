@@ -36,6 +36,7 @@ using GameInterface.Services.WorkshopMods.Diplomacy;
 using GameInterface.Services.WorkshopMods.Fourberie;
 using GameInterface.Services.WorkshopMods.ImprovedGarrisons;
 using GameInterface.Services.WorkshopMods.PlayerSettlement;
+using GameInterface.Services.WorkshopMods.RebellionsAndDemographics;
 using GameInterface.Services.Workshops;
 using GameInterface.Surrogates;
 using HarmonyLib;
@@ -137,6 +138,9 @@ public class GameInterfaceModule : Module
             .As<IWorkshopCapabilitySource>()
             .InstancePerLifetimeScope();
         builder.RegisterType<DiplomacyCapabilitySource>()
+            .As<IWorkshopCapabilitySource>()
+            .InstancePerLifetimeScope();
+        builder.RegisterType<RebellionsAndDemographicsCapabilitySource>()
             .As<IWorkshopCapabilitySource>()
             .InstancePerLifetimeScope();
         builder.RegisterType<MainPartyBattleRewardsCache>().As<IMainPartyBattleRewardsCache>().InstancePerLifetimeScope();

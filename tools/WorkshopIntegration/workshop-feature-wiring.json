@@ -3,6 +3,17 @@
   "targetGameVersion": "v1.4.8",
   "purpose": "Action-level release ledger for every module in the Friend Edition managed Workshop suite. A method-level authority disposition is necessary but is not sufficient to mark a player function wired.",
   "allowedReleaseStatuses": ["VerifiedFramework", "VerifiedPresentation", "VerifiedWired"],
+  "compatibilityHolds": [
+    {
+      "moduleId": "RebellionsAndDemographics",
+      "version": "v3.0.1",
+      "status": "HeldForSource",
+      "reason": "source-required-for-authority-and-1.4.8-migration",
+      "owner": "RebellionsAndDemographicsCapabilitySource",
+      "routes": ["staged package receipt", "capability snapshot: CampaignAuthority=false", "launcher and server launch guards"],
+      "tests": ["RebellionsAndDemographics_AdvertisesTheSourceMigrationHoldInsteadOfAReadyCapability", "CreateStartInfo_RejectsAnAuthorityHeldModule"]
+    }
+  ],
   "modules": [
     {
       "moduleId": "Bannerlord.Harmony",

@@ -44,6 +44,11 @@ internal class InventoryLogicPatches
             return false;
         }
 
+        // Only co-op clients suppress vanilla completion. A local/non-co-op campaign retains the
+        // native inventory transaction while unsupported co-op modes are closed by TradeHandler.
+        if (!ModInformation.IsClient)
+            return true;
+
         if (__instance.InventoryListener != null && __instance.IsTrading && __instance.OwnerCharacter.HeroObject.Gold - __instance.TotalAmount < 0)
         {
             MBInformationManager.AddQuickInformation(GameTexts.FindText("str_warning_you_dont_have_enough_money", null), 0, null, null, "");

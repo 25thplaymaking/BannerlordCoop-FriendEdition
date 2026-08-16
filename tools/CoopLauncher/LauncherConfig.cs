@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -30,8 +31,31 @@ public sealed class LauncherConfig
     /// </summary>
     public string ModuleToken { get; set; } =
         "_MODULES_*Bannerlord.Harmony*Bannerlord.ButterLib*Bannerlord.UIExtenderEx*Bannerlord.MBOptionScreen" +
-        "*Native*SandBoxCore*CustomBattle*Sandbox*StoryMode*PlayerSettlement*Coop*ImprovedGarrisons" +
+        "*Native*SandBoxCore*CustomBattle*Sandbox*StoryMode*OpenSourceSaddlery*OpenSourceWeaponry" +
+        "*OpenSourceArmory*PlayerSettlement*Coop*ImprovedGarrisons" +
         "*DismembermentPlus*Fourberie*Bannerlord.Diplomacy*UnblockableThrust*_MODULES_";
+
+    /// <summary>
+    /// Package members deliberately held out of the launch token. This is an explicit safety
+    /// boundary, not an optional cosmetic preference: a token containing one of these IDs is
+    /// rejected before the game process is started.
+    /// </summary>
+    public string[] BlockedModuleIds { get; set; } = ["RebellionsAndDemographics"];
+
+    /// <summary>Displayed whenever the otherwise-ready armory has a deliberately held package member.</summary>
+    public string CompatibilityHoldNotice { get; set; } =
+        "Rebellions & Demographics is packaged but held: its source must be migrated to 1.4.8 and wired to server authority before it can be launched.";
+
+    internal string? GetBlockedModuleInToken()
+    {
+        string[] tokenModules = (ModuleToken ?? string.Empty)
+            .Split('*', StringSplitOptions.RemoveEmptyEntries)
+            .Where(module => !string.Equals(module, "_MODULES_", StringComparison.Ordinal))
+            .ToArray();
+        return (BlockedModuleIds ?? [])
+            .FirstOrDefault(blocked => !string.IsNullOrWhiteSpace(blocked) &&
+                tokenModules.Contains(blocked, StringComparer.OrdinalIgnoreCase));
+    }
 
     /// <summary>
     /// Optional explicit Bannerlord install root (the folder containing <c>bin\Win64_Shipping_Client</c>).

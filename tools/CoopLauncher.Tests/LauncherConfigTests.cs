@@ -28,6 +28,8 @@ public sealed class LauncherConfigTests
             "https://github.com/25thplaymaking/BannerlordCoop-FriendEdition/releases/download/launcher-app/launcher.json",
             config.LauncherManifestUrl);
         Assert.Equal("1.4.8", config.RequiredGameVersion);
+        Assert.Equal(new[] { "RebellionsAndDemographics" }, config.BlockedModuleIds);
+        Assert.DoesNotContain("RebellionsAndDemographics", config.ModuleToken);
     }
 
     [Fact]
@@ -67,5 +69,16 @@ public sealed class LauncherConfigTests
         {
             File.Delete(tempPath);
         }
+    }
+
+    [Fact]
+    public void HeldModuleInLaunchToken_IsDetectedBeforeTheGameStarts()
+    {
+        var config = new LauncherConfig
+        {
+            ModuleToken = "_MODULES_*Coop*RebellionsAndDemographics*_MODULES_",
+        };
+
+        Assert.Equal("RebellionsAndDemographics", config.GetBlockedModuleInToken());
     }
 }

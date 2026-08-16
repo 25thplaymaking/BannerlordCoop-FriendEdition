@@ -93,7 +93,9 @@ public interface IWorkshopModuleCatalog
 /// </summary>
 public sealed class FriendEditionWorkshopModuleCatalog : IWorkshopModuleCatalog
 {
-    // The live Friend Edition loadout runs the exact same ten Workshop modules on both roles.
+    // The live Friend Edition loadout runs the exact same active content and gameplay modules on
+    // both roles. RebellionsAndDemographics is included in the sealed package but deliberately
+    // inactive until its 1.4.8 source migration and authority surface are reviewed.
     // RBM is intentionally absent: its combat-parameter initialization caused a native access
     // violation during co-op campaign startup and the project owner retired it from the loadout.
     // Retaining an RBM catalog entry would make the handshake and pack disagree with the launcher.
@@ -115,23 +117,40 @@ public sealed class FriendEditionWorkshopModuleCatalog : IWorkshopModuleCatalog
             WorkshopModuleRole.Framework, WorkshopCompatibilityProfile.AllPeersExact,
             featureActiveExpectedOnServer: true,
             featureActiveExpectedOnClient: true),
-        new("ImprovedGarrisons", "2859265386", "5143458534246082850", "v4.2.0.7", 110,
+        // These modules contain only XML and assets: all peers load the same exact item surface,
+        // but there is no executable campaign authority to adapt.
+        new("OpenSourceSaddlery", "3010990914", "5590992806248040986", "v2.0.0", 100,
+            WorkshopModuleRole.Presentation, WorkshopCompatibilityProfile.AllPeersExact,
+            featureActiveExpectedOnServer: true,
+            featureActiveExpectedOnClient: true,
+            loadsBeforeCoop: true),
+        new("OpenSourceWeaponry", "3010984416", "228880600705709326", "v2.0.1", 110,
+            WorkshopModuleRole.Presentation, WorkshopCompatibilityProfile.AllPeersExact,
+            featureActiveExpectedOnServer: true,
+            featureActiveExpectedOnClient: true,
+            loadsBeforeCoop: true),
+        new("OpenSourceArmory", "3011479883", "6047321499764171194", "v2.0.0", 120,
+            WorkshopModuleRole.Presentation, WorkshopCompatibilityProfile.AllPeersExact,
+            featureActiveExpectedOnServer: true,
+            featureActiveExpectedOnClient: true,
+            loadsBeforeCoop: true),
+        new("ImprovedGarrisons", "2859265386", "5143458534246082850", "v4.2.0.7", 210,
             WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign,
             featureActiveExpectedOnServer: true,
             featureActiveExpectedOnClient: true),
-        new("DismembermentPlus", "2875093027", "751945004455697202", "v2.0.8.8", 120,
+        new("DismembermentPlus", "2875093027", "751945004455697202", "v2.0.8.8", 220,
             WorkshopModuleRole.Presentation, WorkshopCompatibilityProfile.ClientPresentation,
             featureActiveExpectedOnServer: true,
             featureActiveExpectedOnClient: true),
-        new("Fourberie", "2875710877", "1598945672157391038", "v1.4.7.6", 130,
+        new("Fourberie", "2875710877", "1598945672157391038", "v1.4.7.6", 230,
             WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign,
             featureActiveExpectedOnServer: true,
             featureActiveExpectedOnClient: true),
-        new("Bannerlord.Diplomacy", "2881380744", "3938505074920035905", "v1.4.7", 140,
+        new("Bannerlord.Diplomacy", "2881380744", "3938505074920035905", "v1.4.7", 240,
             WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign,
             featureActiveExpectedOnServer: true,
             featureActiveExpectedOnClient: true),
-        new("UnblockableThrust", "3614435151", "3108412629025003964", "v1.1.3.1", 150,
+        new("UnblockableThrust", "3614435151", "3108412629025003964", "v1.1.3.1", 250,
             WorkshopModuleRole.Mission, WorkshopCompatibilityProfile.DeterministicMission,
             featureActiveExpectedOnServer: true,
             featureActiveExpectedOnClient: true),
@@ -143,6 +162,10 @@ public sealed class FriendEditionWorkshopModuleCatalog : IWorkshopModuleCatalog
             featureActiveExpectedOnServer: true,
             featureActiveExpectedOnClient: true,
             loadsBeforeCoop: true),
+        new("RebellionsAndDemographics", "3644127631", "5679238579592221906", "v3.0.1", 260,
+            WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign,
+            featureActiveExpectedOnServer: false,
+            featureActiveExpectedOnClient: false),
     };
 
     private readonly IReadOnlyDictionary<string, WorkshopModuleExpectation> modulesById =

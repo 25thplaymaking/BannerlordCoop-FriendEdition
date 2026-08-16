@@ -108,6 +108,8 @@ public sealed class LauncherSettings
             ServerPort = config.ServerPort,
             ServerPassword = config.ServerPassword,
             ModuleToken = config.ModuleToken,
+            BlockedModuleIds = config.BlockedModuleIds,
+            CompatibilityHoldNotice = config.CompatibilityHoldNotice,
             GamePath = string.IsNullOrWhiteSpace(GamePathOverride) ? config.GamePath : GamePathOverride,
             RequiredGameVersion = config.RequiredGameVersion,
             ProjectUrl = config.ProjectUrl,

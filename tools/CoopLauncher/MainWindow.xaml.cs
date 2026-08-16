@@ -408,6 +408,14 @@ public partial class MainWindow : Window
             UpdateText.Text = "All update scrolls verified.";
         }
 
+        if (snapshot.PrimaryAction == ArmoryPrimaryAction.Launch &&
+            !string.IsNullOrWhiteSpace(_config.CompatibilityHoldNotice))
+        {
+            ArmoryHeadline.Text = "THE ARMY IS READY — R&D HELD";
+            ArmoryDetail.Text = _config.CompatibilityHoldNotice;
+            UpdateText.Text = "A packaged compatibility hold is preventing Rebellions & Demographics from being advertised as ready.";
+        }
+
         JoinButton.Content = _preparationFailed
             ? "TRY PREPARING AGAIN"
             : PrimaryButtonText(snapshot.PrimaryAction);

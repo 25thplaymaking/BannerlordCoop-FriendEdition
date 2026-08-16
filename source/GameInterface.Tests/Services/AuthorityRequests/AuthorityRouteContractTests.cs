@@ -1,5 +1,7 @@
 using Common.Messaging;
 using GameInterface.Services.AuthorityRequests;
+using GameInterface.Services.Clans.Messages;
+using GameInterface.Services.Kingdoms.Messages;
 using GameInterface.Services.MapEvents.Messages.Start;
 using GameInterface.Services.Tournaments.Messages;
 using GameInterface.Services.Tournaments.Data;
@@ -12,6 +14,31 @@ namespace GameInterface.Tests.Services.AuthorityRequests;
 
 public sealed class AuthorityRouteContractTests
 {
+    [Fact]
+    public void MembershipServiceRequests_DeclareTypedRoutesAndRetainAuthorityCorrelation()
+    {
+        var header = new AuthorityRequestHeader(1, "0123456789abcdef0123456789abcdef", 41, 12);
+        var vassalJoin = new RequestVassalService("kingdom-a", false, header);
+        var vassalLeave = new RequestLeaveVassalService("clan-a", header);
+        var mercenaryJoin = new RequestMercenaryService("kingdom-a", 99, "clan-a", header);
+        var mercenaryLeave = new RequestMercenaryDismissalService("kingdom-a", "clan-a", header);
+        var rebellion = new NetworkStartRebellion("clan-a", header);
+
+        Assert.Equal("clan.vassal.join", GetRoute<RequestVassalService>());
+        Assert.Equal("clan.vassal.leave", GetRoute<RequestLeaveVassalService>());
+        Assert.Equal("clan.mercenary.join", GetRoute<RequestMercenaryService>());
+        Assert.Equal("clan.mercenary.leave", GetRoute<RequestMercenaryDismissalService>());
+        Assert.Equal("kingdom.rebel", GetRoute<NetworkStartRebellion>());
+        Assert.Equal(header.RequestId, vassalJoin.Header.RequestId);
+        Assert.Equal(header.SessionId, vassalLeave.Header.SessionId);
+        Assert.Equal(header.ExpectedRevision, mercenaryJoin.Header.ExpectedRevision);
+        Assert.Equal(header.RequestId, mercenaryLeave.Header.RequestId);
+        Assert.Equal(header.SessionId, rebellion.Header.SessionId);
+    }
+
+    private static string GetRoute<TRequest>() where TRequest : IMessage =>
+        ((AuthorityRouteAttribute)Attribute.GetCustomAttribute(typeof(TRequest), typeof(AuthorityRouteAttribute))).RouteId;
+
     [Fact]
     public void MapEventRequest_DeclaresTheRegisteredCommandRoute()
     {

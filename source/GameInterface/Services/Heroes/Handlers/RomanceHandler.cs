@@ -3,7 +3,10 @@ using Common.Logging;
 using Common.Messaging;
 using Common.Network;
 using Common.Util;
+using GameInterface.Configuration;
 using GameInterface.Registry.Messages;
+using GameInterface.Services.AuthorityRequests;
+using GameInterface.Services.CampaignService.Messages;
 using GameInterface.Services.Heroes.Extensions;
 using GameInterface.Services.Heroes.Messages.RomanceFlow;
 using GameInterface.Services.Heroes.RomanceFlow;
@@ -32,26 +35,82 @@ internal class RomanceHandler : IHandler
     private readonly IObjectManager objectManager;
     private readonly IPlayerManager playerManager;
     private readonly IRomanceAuthority romanceAuthority;
+    private readonly IModConfigAuthority configAuthority;
+    private readonly IAuthorityRouteHandle<NetworkRequestRomanceStateChange, NetworkRomanceStateChangeResult> transitionRoute;
+    private readonly IAuthorityRouteHandle<object, NetworkRomanceStateSyncResult> snapshotRoute;
 
     public RomanceHandler(
         IMessageBroker messageBroker,
         INetwork network,
         IObjectManager objectManager,
         IPlayerManager playerManager,
-        IRomanceAuthority romanceAuthority)
+        IRomanceAuthority romanceAuthority,
+        IModConfigAuthority configAuthority,
+        IAuthorityRequestRouter authorityRequestRouter)
     {
         this.messageBroker = messageBroker;
         this.network = network;
         this.objectManager = objectManager;
         this.playerManager = playerManager;
         this.romanceAuthority = romanceAuthority;
+        this.configAuthority = configAuthority;
+
+        transitionRoute = authorityRequestRouter.Register(
+            AuthorityRoute<NetworkRequestRomanceStateChange, NetworkRequestRomanceStateChange,
+                NetworkRomanceStateChangeResult>.Define(
+                "romance.transition", AuthorityRouteKind.Command, CreateHeader,
+                (intent, header) => new NetworkRequestRomanceStateChange(
+                    intent.TargetHeroId,
+                    (Romance.RomanceLevelEnum)intent.RequestedLevel,
+                    progressToNextLevel: 0,
+                    lastVisit: 0f,
+                    scoreFromPersuasion: 0f,
+                    intent.ClanMemberHeroId,
+                    header),
+                request => request.Header,
+                result => result.Header,
+                ValidateTransitionWire,
+                BuildTransitionKey,
+                ValidateHeader,
+                ExecuteTransition,
+                CreateTransitionTerminal,
+                ProbeTransition,
+                _ => StartSnapshotBootstrap(),
+                PresentTransitionTerminal,
+                configAuthority.IsTrustedServer,
+                AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true,
+                isExpectedClientResult: (request, result) =>
+                    result.Person2Id == request.TargetHeroId &&
+                    result.Level == request.RequestedLevel &&
+                    result.Person1Id == (request.ClanMemberHeroId ?? Hero.MainHero?.StringId)));
+        snapshotRoute = authorityRequestRouter.Register(
+            AuthorityRoute<object, NetworkRequestRomanceStateSync, NetworkRomanceStateSyncResult>.Define(
+                "romance.snapshot", AuthorityRouteKind.BootstrapQuery, CreateHeader,
+                (_, header) => new NetworkRequestRomanceStateSync(header),
+                request => request.Header,
+                result => result.Header,
+                request => request.Header.TryValidate(out _) ? null : "invalid-romance-snapshot-query",
+                request => "snapshot:" + request.Header.SessionId + ":" + request.Header.ExpectedRevision,
+                ValidateHeader,
+                ExecuteSnapshotQuery,
+                CreateSnapshotTerminal,
+                ProbeSnapshot,
+                _ => { },
+                PresentSnapshotTerminal,
+                configAuthority.IsTrustedServer,
+                AuthorityTimeoutPolicy.BootstrapQuery,
+                requireAuthenticatedPlayer: true,
+                failClosedOnApplyFailure: true));
 
         messageBroker.Subscribe<AllGameObjectsRegistered>(Handle_AllGameObjectsRegistered);
         messageBroker.Subscribe<RomanticStateChangeRequested>(Handle_RomanticStateChangeRequested);
         messageBroker.Subscribe<RomanceStatesChanged>(Handle_RomanceStatesChanged);
-        messageBroker.Subscribe<NetworkRequestRomanceStateChange>(Handle_NetworkRequestRomanceStateChange);
+        messageBroker.Subscribe<HostModConfigAccepted>(Handle_HostModConfigAccepted);
         messageBroker.Subscribe<NetworkRequestRomanceStateSync>(Handle_NetworkRequestRomanceStateSync);
         messageBroker.Subscribe<NetworkSyncRomanceStates>(Handle_NetworkSyncRomanceStates);
+        messageBroker.Subscribe<NetworkRomanceStateChangeResult>(Handle_NetworkRomanceStateChangeResult);
+        messageBroker.Subscribe<NetworkRomanceStateSyncResult>(Handle_NetworkRomanceStateSyncResult);
         messageBroker.Subscribe<NetworkRomanceRequestRejected>(Handle_NetworkRomanceRequestRejected);
     }
 
@@ -60,17 +119,21 @@ internal class RomanceHandler : IHandler
         messageBroker.Unsubscribe<AllGameObjectsRegistered>(Handle_AllGameObjectsRegistered);
         messageBroker.Unsubscribe<RomanticStateChangeRequested>(Handle_RomanticStateChangeRequested);
         messageBroker.Unsubscribe<RomanceStatesChanged>(Handle_RomanceStatesChanged);
-        messageBroker.Unsubscribe<NetworkRequestRomanceStateChange>(Handle_NetworkRequestRomanceStateChange);
+        messageBroker.Unsubscribe<HostModConfigAccepted>(Handle_HostModConfigAccepted);
         messageBroker.Unsubscribe<NetworkRequestRomanceStateSync>(Handle_NetworkRequestRomanceStateSync);
         messageBroker.Unsubscribe<NetworkSyncRomanceStates>(Handle_NetworkSyncRomanceStates);
+        messageBroker.Unsubscribe<NetworkRomanceStateChangeResult>(Handle_NetworkRomanceStateChangeResult);
+        messageBroker.Unsubscribe<NetworkRomanceStateSyncResult>(Handle_NetworkRomanceStateSyncResult);
         messageBroker.Unsubscribe<NetworkRomanceRequestRejected>(Handle_NetworkRomanceRequestRejected);
+        transitionRoute.Dispose();
+        snapshotRoute.Dispose();
     }
 
     private void Handle_AllGameObjectsRegistered(MessagePayload<AllGameObjectsRegistered> payload)
     {
         if (ModInformation.IsServer) return;
 
-        network.SendAll(new NetworkRequestRomanceStateSync());
+        StartSnapshotBootstrap();
     }
 
     private void Handle_RomanticStateChangeRequested(MessagePayload<RomanticStateChangeRequested> payload)
@@ -82,7 +145,7 @@ internal class RomanceHandler : IHandler
         {
             if (!objectManager.TryGetId(targetHero, out var targetHeroId)) return;
 
-            network.SendAll(new NetworkRequestRomanceStateChange(
+            transitionRoute.Submit(new NetworkRequestRomanceStateChange(
                 targetHeroId,
                 request.RequestedLevel,
                 request.ProgressToNextLevel,
@@ -101,7 +164,7 @@ internal class RomanceHandler : IHandler
         if (!objectManager.TryGetId(outsider, out var outsiderId)) return;
         if (!objectManager.TryGetId(clanMember, out var clanMemberId)) return;
 
-        network.SendAll(new NetworkRequestRomanceStateChange(
+        transitionRoute.Submit(new NetworkRequestRomanceStateChange(
             outsiderId,
             request.RequestedLevel,
             request.ProgressToNextLevel,
@@ -117,83 +180,49 @@ internal class RomanceHandler : IHandler
         network.SendAll(new NetworkSyncRomanceStates(BuildSnapshot()));
     }
 
-    private void Handle_NetworkRequestRomanceStateChange(MessagePayload<NetworkRequestRomanceStateChange> payload)
-    {
-        if (ModInformation.IsClient) return;
-
-        var sender = payload.Who;
-        var request = payload.What;
-        GameThread.RunSafe(() =>
-        {
-            if (!TryResolveRequester(sender, out var peer, out _, out var playerHero)) return;
-
-            if (!TryResolveHero(request.TargetHeroId, out var targetHero))
-            {
-                Reject(peer, "The selected hero no longer exists.");
-                return;
-            }
-
-            if (!global::System.Enum.IsDefined(typeof(Romance.RomanceLevelEnum), request.RequestedLevel))
-            {
-                Reject(peer, "The requested romance state is invalid.");
-                return;
-            }
-
-            var requestedLevel = (Romance.RomanceLevelEnum)request.RequestedLevel;
-
-            if (!string.IsNullOrEmpty(request.ClanMemberHeroId))
-            {
-                // Arranged match: the promise is between the requester's clan member and the
-                // target, not the requester themselves.
-                if (!TryResolveHero(request.ClanMemberHeroId, out var clanMember))
-                {
-                    Reject(peer, "The selected clan member no longer exists.");
-                    return;
-                }
-
-                if (!romanceAuthority.TryValidateArrangedStateChange(
-                        playerHero, clanMember, targetHero, requestedLevel, out var arrangedReason))
-                {
-                    Reject(peer, arrangedReason);
-                    return;
-                }
-
-                ChangeRomanticStateAction.Apply(clanMember, targetHero, requestedLevel);
-                return;
-            }
-
-            if (!romanceAuthority.TryValidateStateChange(playerHero, targetHero, requestedLevel, out var reason))
-            {
-                Reject(peer, reason);
-                return;
-            }
-
-            if (!TryApplyClientStateFields(playerHero, targetHero, request, out reason))
-            {
-                Reject(peer, reason);
-                return;
-            }
-
-            ChangeRomanticStateAction.Apply(playerHero, targetHero, requestedLevel);
-        }, context: nameof(Handle_NetworkRequestRomanceStateChange));
-    }
-
     private void Handle_NetworkRequestRomanceStateSync(MessagePayload<NetworkRequestRomanceStateSync> payload)
     {
         if (ModInformation.IsClient) return;
         if (payload.Who is not NetPeer peer) return;
 
+        // Marriage barter still has a legacy rejection recovery path while that command family is
+        // being migrated. Only headerless requests use this compatibility branch; authenticated
+        // snapshot requests are owned exclusively by the BootstrapQuery route above.
+        if (payload.What.Header.RequestId != 0) return;
         GameThread.RunSafe(() => SendSnapshot(peer), context: nameof(Handle_NetworkRequestRomanceStateSync));
     }
 
     private void Handle_NetworkSyncRomanceStates(MessagePayload<NetworkSyncRomanceStates> payload)
     {
-        if (ModInformation.IsServer) return;
+        if (ModInformation.IsServer || !configAuthority.IsTrustedServer(payload.Who)) return;
 
         var snapshot = payload.What;
         GameThread.RunSafe(
             () => ApplySnapshot(snapshot.States ?? Array.Empty<RomanceStateData>()),
             context: nameof(Handle_NetworkSyncRomanceStates));
+    }
+
+    private void Handle_HostModConfigAccepted(MessagePayload<HostModConfigAccepted> payload)
+    {
+        if (ModInformation.IsClient && payload.What.Snapshot != null && configAuthority.IsCurrent(payload.What.Snapshot))
+            StartSnapshotBootstrap();
+    }
+
+    private void Handle_NetworkRomanceStateChangeResult(MessagePayload<NetworkRomanceStateChangeResult> payload)
+    {
+        // The router owns correlation/replay. The canonical state is broadcast by the server
+        // before this terminal result, so there is intentionally no client-side mutation here.
+    }
+
+    private void Handle_NetworkRomanceStateSyncResult(MessagePayload<NetworkRomanceStateSyncResult> payload)
+    {
+        if (ModInformation.IsServer || !configAuthority.IsTrustedServer(payload.Who) ||
+            payload.What.Status != AuthorityResultStatus.Accepted)
+            return;
+
+        GameThread.RunSafe(
+            () => ApplySnapshot(payload.What.States ?? Array.Empty<RomanceStateData>()),
+            context: nameof(NetworkRomanceStateSyncResult));
     }
 
     private void Handle_NetworkRomanceRequestRejected(MessagePayload<NetworkRomanceRequestRejected> payload)
@@ -207,6 +236,185 @@ internal class RomanceHandler : IHandler
         GameThread.RunSafe(
             () => InformationManager.DisplayMessage(new InformationMessage(reason)),
             context: nameof(Handle_NetworkRomanceRequestRejected));
+    }
+
+    private void StartSnapshotBootstrap()
+    {
+        if (!ModInformation.IsClient || !configAuthority.TryGetCurrent(out _)) return;
+        snapshotRoute.Submit(default);
+    }
+
+    private AuthorityRequestHeader CreateHeader(long requestId)
+    {
+        if (!configAuthority.TryGetCurrent(out var config)) return default;
+        return new AuthorityRequestHeader(config.ProtocolVersion, config.SessionId, requestId, config.Revision);
+    }
+
+    private AuthorityHeaderValidation ValidateHeader(AuthorityRequestHeader header)
+    {
+        if (!configAuthority.TryGetCurrent(out var config))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "romance-config-unavailable");
+        if (header.ProtocolVersion != config.ProtocolVersion ||
+            !string.Equals(header.SessionId, config.SessionId, StringComparison.Ordinal))
+            return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-config-session");
+        return header.ExpectedRevision == config.Revision
+            ? AuthorityHeaderValidation.Valid
+            : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-config-revision");
+    }
+
+    private static string ValidateTransitionWire(NetworkRequestRomanceStateChange request)
+    {
+        if (string.IsNullOrWhiteSpace(request.TargetHeroId) ||
+            !Enum.IsDefined(typeof(Romance.RomanceLevelEnum), request.RequestedLevel))
+            return "invalid-romance-transition";
+
+        // The UI formerly copied client-local progress fields into the authoritative campaign
+        // state. The route carries only the target and requested transition; all progression is
+        // derived/preserved on the server.
+        return request.ProgressToNextLevel == 0 && request.LastVisit == 0f && request.ScoreFromPersuasion == 0f
+            ? null
+            : "client-romance-state-fields-not-allowed";
+    }
+
+    private static string BuildTransitionKey(NetworkRequestRomanceStateChange request) => string.Concat(
+        request.TargetHeroId, ":", request.ClanMemberHeroId ?? string.Empty, ":", request.RequestedLevel);
+
+    private AuthorityServerReply<NetworkRomanceStateChangeResult> ExecuteTransition(
+        AuthorityServerContext context, NetworkRequestRomanceStateChange request)
+    {
+        if (!TryResolveHero(context.Player.HeroId, out var playerHero) || playerHero == null)
+            return TransitionReply(context.Header, null, null, default, AuthorityResultStatus.Unauthorized,
+                "requester-hero-missing");
+        if (!TryResolveHero(request.TargetHeroId, out var targetHero) || targetHero == null)
+            return TransitionReply(context.Header, null, request.TargetHeroId, default, AuthorityResultStatus.Rejected,
+                "target-hero-missing");
+
+        Romance.RomanceLevelEnum level = (Romance.RomanceLevelEnum)request.RequestedLevel;
+        Hero subject = playerHero;
+        if (!string.IsNullOrEmpty(request.ClanMemberHeroId))
+        {
+            if (!TryResolveHero(request.ClanMemberHeroId, out subject) || subject == null)
+                return TransitionReply(context.Header, null, request.TargetHeroId, level, AuthorityResultStatus.Rejected,
+                    "arranged-clan-member-missing");
+            if (!romanceAuthority.TryValidateArrangedStateChange(playerHero, subject, targetHero, level, out var reason))
+                return TransitionReply(context.Header, subject, targetHero, level, AuthorityResultStatus.Rejected, reason);
+        }
+        else if (!romanceAuthority.TryValidateStateChange(playerHero, targetHero, level, out var reason))
+        {
+            return TransitionReply(context.Header, playerHero, targetHero, level, AuthorityResultStatus.Rejected, reason);
+        }
+
+        try
+        {
+            // No client progress, visit time, or persuasion score crosses this boundary. The
+            // native action owns the canonical transition and preserves its server state.
+            ChangeRomanticStateAction.Apply(subject, targetHero, level);
+            if (Romance.GetRomanticLevel(subject, targetHero) != level)
+                return TransitionReply(context.Header, subject, targetHero, level, AuthorityResultStatus.ExecutionFailed,
+                    "romance-postcondition-missing");
+            return TransitionReply(context.Header, subject, targetHero, level, AuthorityResultStatus.Accepted, null,
+                statePublished: true);
+        }
+        catch (Exception exception)
+        {
+            Logger.Error(exception, "Failed authoritative romance transition {RequestId}", context.Header.RequestId);
+            return TransitionReply(context.Header, subject, targetHero, level, AuthorityResultStatus.ExecutionFailed,
+                "romance-transition-failed");
+        }
+    }
+
+    private AuthorityServerReply<NetworkRomanceStateSyncResult> ExecuteSnapshotQuery(
+        AuthorityServerContext context, NetworkRequestRomanceStateSync _)
+    {
+        try
+        {
+            return new AuthorityServerReply<NetworkRomanceStateSyncResult>(
+                new NetworkRomanceStateSyncResult(context.Header, AuthorityResultStatus.Accepted, BuildSnapshot()), true);
+        }
+        catch (Exception exception)
+        {
+            Logger.Error(exception, "Failed to capture romance snapshot");
+            return new AuthorityServerReply<NetworkRomanceStateSyncResult>(
+                CreateSnapshotTerminal(context.Header, AuthorityResultStatus.ExecutionFailed, "romance-snapshot-failed"), false);
+        }
+    }
+
+    private AuthorityServerReply<NetworkRomanceStateChangeResult> TransitionReply(
+        AuthorityRequestHeader header,
+        Hero subject,
+        Hero target,
+        Romance.RomanceLevelEnum level,
+        AuthorityResultStatus status,
+        string reason,
+        bool statePublished = false)
+    {
+        objectManager.TryGetId(subject, out var subjectId);
+        objectManager.TryGetId(target, out var targetId);
+        return new AuthorityServerReply<NetworkRomanceStateChangeResult>(
+            new NetworkRomanceStateChangeResult(header, subjectId, targetId, level, status, reason), statePublished);
+    }
+
+    private static NetworkRomanceStateChangeResult CreateTransitionTerminal(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        new NetworkRomanceStateChangeResult(header, null, null, default, status, reason);
+
+    private static NetworkRomanceStateSyncResult CreateSnapshotTerminal(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reason) =>
+        new NetworkRomanceStateSyncResult(header, status, Array.Empty<RomanceStateData>(), reason);
+
+    private AuthorityCommitProbeResult ProbeTransition(NetworkRomanceStateChangeResult result)
+    {
+        if (result.Status != AuthorityResultStatus.Accepted ||
+            !configAuthority.TryGetCurrent(out var config) ||
+            !string.Equals(config.SessionId, result.SessionId, StringComparison.Ordinal) ||
+            config.Revision != result.CommittedRevision ||
+            !TryResolveHero(result.Person1Id, out var subject) ||
+            !TryResolveHero(result.Person2Id, out var target) ||
+            !Enum.IsDefined(typeof(Romance.RomanceLevelEnum), result.Level))
+            return AuthorityCommitProbeResult.Invalid;
+
+        return Romance.GetRomanticLevel(subject, target) == (Romance.RomanceLevelEnum)result.Level
+            ? AuthorityCommitProbeResult.Applied
+            : AuthorityCommitProbeResult.Pending;
+    }
+
+    private AuthorityCommitProbeResult ProbeSnapshot(NetworkRomanceStateSyncResult result)
+    {
+        if (result.Status != AuthorityResultStatus.Accepted ||
+            !configAuthority.TryGetCurrent(out var config) ||
+            !string.Equals(config.SessionId, result.SessionId, StringComparison.Ordinal) ||
+            config.Revision != result.CommittedRevision)
+            return AuthorityCommitProbeResult.Invalid;
+
+        RomanceStateData[] expected = result.States ?? Array.Empty<RomanceStateData>();
+        foreach (var state in expected)
+        {
+            if (!TryResolveHero(state.Person1Id, out var first) || !TryResolveHero(state.Person2Id, out var second) ||
+                !Enum.IsDefined(typeof(Romance.RomanceLevelEnum), state.Level))
+                return AuthorityCommitProbeResult.Invalid;
+            var local = Romance.GetRomanticState(first, second);
+            if (local == null || local.Level != (Romance.RomanceLevelEnum)state.Level ||
+                local.ProgressToNextLevel != state.ProgressToNextLevel || local.LastVisit != state.LastVisit ||
+                local.ScoreFromPersuasion != state.ScoreFromPersuasion)
+                return AuthorityCommitProbeResult.Pending;
+        }
+        return AuthorityCommitProbeResult.Applied;
+    }
+
+    private static void PresentTransitionTerminal(AuthorityClientOutcome<NetworkRomanceStateChangeResult> outcome)
+    {
+        if (outcome.Completion == AuthorityClientCompletion.Applied) return;
+        string reason = string.IsNullOrWhiteSpace(outcome.ReasonCode)
+            ? "The server could not apply the romance transition."
+            : outcome.ReasonCode;
+        InformationManager.DisplayMessage(new InformationMessage(reason));
+    }
+
+    private static void PresentSnapshotTerminal(AuthorityClientOutcome<NetworkRomanceStateSyncResult> outcome)
+    {
+        if (outcome.Completion != AuthorityClientCompletion.Applied)
+            Logger.Warning("Romance snapshot did not reach a canonical state. Completion={Completion} Reason={Reason}",
+                outcome.Completion, outcome.ReasonCode);
     }
 
     private bool TryResolveRequester(object sender, out NetPeer peer, out Player player, out Hero playerHero)

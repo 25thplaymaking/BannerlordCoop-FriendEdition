@@ -105,6 +105,20 @@ The mod/client `updateManifestUrl` contract is:
   the install; zip-slip guarded).
 - `sha256` — mandatory 64-digit SHA-256, verified before anything is written.
 
+For suites too large for one host asset, omit `clientZipUrl` and provide ordered `parts` instead:
+
+```json
+"parts": [
+  { "url": "https://…/part001", "bytes": 1992294400, "sha256": "<part SHA-256>" },
+  { "url": "https://…/part002", "bytes": 123456789, "sha256": "<part SHA-256>" }
+]
+```
+
+The forms are mutually exclusive. Each part must be HTTPS, positive and strictly below 2 GiB, and
+SHA-256-pinned. Parts are verified while being appended directly to one temporary ZIP; the complete
+ZIP is then checked against the manifest's top-level `sha256` and installed through the same rollback
+path. Existing single-URL GitHub and R2 feeds remain unchanged.
+
 The launcher extracts each verified zip into a private staging directory on the same volume, then
 exact-replaces the zip's top-level module directories. Stale files are removed by replacement, and
 transient access/sharing locks from filesystem scanners are retried for up to five seconds. Any

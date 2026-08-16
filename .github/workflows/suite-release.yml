@@ -1,8 +1,8 @@
 name: Launcher Suite Release
 
-# Workshop bytes are licensed/local build inputs and are not present in CI. A maintainer first
-# uploads the locally verified ZIP to its content-addressed public R2 key, then dispatches this
-# workflow. CI checks public reachability and byte length and publishes only the small feed JSON.
+# Licensed Workshop bytes are uploaded by an authorized maintainer to the immutable suite-payloads
+# release. CI downloads only a small descriptor, verifies every declared part against GitHub's
+# recorded release-asset size and SHA-256, then publishes only suite.json to the rolling feed.
 
 on:
   workflow_dispatch:
@@ -12,20 +12,8 @@ on:
         type: choice
         default: nightly
         options: [nightly, stable]
-      version:
-        description: Dotted-numeric version newer than the installed receipt
-        required: true
-        type: string
-      sha256:
-        description: SHA-256 of the already-uploaded Coop-suite.zip
-        required: true
-        type: string
-      bytes:
-        description: Exact byte length of Coop-suite.zip
-        required: true
-        type: string
-      notes:
-        description: One-line player-facing suite note
+      descriptor:
+        description: Immutable suite-<sha256>-v<version>.json asset on suite-payloads
         required: true
         type: string
 
@@ -52,36 +40,33 @@ jobs:
           python -m pip install PyYAML==6.0.3
           python .github/scripts/verify-release-safety.py
 
-      - name: Test suite feed builder
-        run: python .github/scripts/test_build_suite_feed.py
+      - name: Test suite feed builders
+        run: python -m unittest discover -s .github/scripts -p 'test_*suite*.py'
 
-      - name: Build suite manifest
+      - name: Download descriptor and GitHub asset metadata
         env:
-          SUITE_VERSION: ${{ inputs.version }}
-          SUITE_SHA256: ${{ inputs.sha256 }}
-          SUITE_BYTES: ${{ inputs.bytes }}
-          SUITE_NOTES: ${{ inputs.notes }}
-        run: |
-          python .github/scripts/build_suite_feed.py \
-            --version "$SUITE_VERSION" \
-            --sha256 "$SUITE_SHA256" \
-            --bytes "$SUITE_BYTES" \
-            --notes "$SUITE_NOTES" \
-            --output artifact/suite.json
-
-      - name: Verify staged R2 payload
-        env:
-          EXPECTED_BYTES: ${{ inputs.bytes }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DESCRIPTOR: ${{ inputs.descriptor }}
         run: |
           set -eu
-          object_url=$(jq -r .clientZipUrl artifact/suite.json)
-          remote_bytes=$(curl --fail --silent --show-error --head --retry 3 \
-            --retry-all-errors --output /dev/null --write-out '%header{content-length}' \
-            "$object_url" | tr -d '\r')
-          if [ "$remote_bytes" != "$EXPECTED_BYTES" ]; then
-            echo "R2 object length $remote_bytes does not match expected $EXPECTED_BYTES" >&2
+          if ! printf '%s\n' "$DESCRIPTOR" | grep -Eq '^suite-[0-9a-f]{64}-v[0-9]+(\.[0-9]+)*\.json$'; then
+            echo 'descriptor must use suite-<lowercase-sha256>-v<dotted-version>.json' >&2
             exit 1
           fi
+          mkdir -p staged
+          gh release download suite-payloads --pattern "$DESCRIPTOR" --dir staged
+          gh release view suite-payloads --json assets > staged/assets.json
+
+      - name: Verify staged GitHub payload
+        env:
+          DESCRIPTOR: ${{ inputs.descriptor }}
+        run: |
+          python .github/scripts/validate_suite_descriptor.py \
+            --descriptor "staged/$DESCRIPTOR" \
+            --assets staged/assets.json \
+            --repository "$GITHUB_REPOSITORY" \
+            --output artifact/suite.json
 
       - name: Publish suite feed
         env:
@@ -105,7 +90,7 @@ jobs:
           else
             gh release create "$tag" \
               --title "Calradia Co-op — $CHANNEL suite feed" \
-              --notes "Rolling $CHANNEL suite manifest. Payload bytes are immutable objects in public R2."
+              --notes "Rolling $CHANNEL suite manifest. Payload parts are immutable GitHub release assets."
           fi
           gh release upload "$tag" artifact/suite.json --clobber
           printf 'Feed: https://github.com/%s/releases/download/%s/suite.json\n' \

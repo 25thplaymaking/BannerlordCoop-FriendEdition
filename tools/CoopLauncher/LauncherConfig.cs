@@ -137,8 +137,17 @@ public sealed class UpdateManifest
     /// <summary>Monotonic build version, e.g. "2026.08.10.1". Newer-than-installed triggers a pull.</summary>
     [JsonPropertyName("version")] public string Version { get; set; } = "";
 
-    /// <summary>Direct URL to the client mod zip (the <c>Modules\Coop</c> payload).</summary>
+    /// <summary>
+    /// Direct URL to the update ZIP. Mutually exclusive with <see cref="Parts"/>; retained for
+    /// existing GitHub/R2 feeds and small client payloads.
+    /// </summary>
     [JsonPropertyName("clientZipUrl")] public string ClientZipUrl { get; set; } = "";
+
+    /// <summary>
+    /// Ordered sub-2-GiB pieces of one ZIP. The launcher concatenates and verifies them before
+    /// handing the reconstructed ZIP to the unchanged transactional installer.
+    /// </summary>
+    [JsonPropertyName("parts")] public UpdatePart[] Parts { get; set; } = [];
 
     /// <summary>SHA-256 of the zip, lowercase hex. Verified before anything is extracted.</summary>
     [JsonPropertyName("sha256")] public string Sha256 { get; set; } = "";
@@ -148,6 +157,13 @@ public sealed class UpdateManifest
 
     /// <summary>Exact Bannerlord version required by this client build.</summary>
     [JsonPropertyName("gameVersion")] public string GameVersion { get; set; } = "";
+}
+
+public sealed class UpdatePart
+{
+    [JsonPropertyName("url")] public string Url { get; set; } = "";
+    [JsonPropertyName("bytes")] public long Bytes { get; set; }
+    [JsonPropertyName("sha256")] public string Sha256 { get; set; } = "";
 }
 
 /// <summary>The remote feed used to update the portable launcher executable itself.</summary>

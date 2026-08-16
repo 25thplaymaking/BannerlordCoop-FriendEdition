@@ -19,8 +19,9 @@ public readonly record struct UpdateResult(UpdateOutcome Outcome, string Message
 /// byte-exact so the join handshake matches. Large (~1 GB) but changes rarely.</item>
 /// <item>the <b>co-op client</b> — Coop's own assemblies. Small, changes every build.</item>
 /// </list>
-/// Each tier is a manifest + signed zip whose root entries are module folders. Updates are staged and
-/// exact-replaced under <c>Modules\</c>; any install failure restores the previous module directories.
+/// Each tier is a manifest + SHA-256-pinned ZIP whose root entries are module folders. A manifest may
+/// provide one HTTPS ZIP or ordered, individually pinned parts that reconstruct it. Updates are staged
+/// and exact-replaced under <c>Modules\</c>; any install failure restores the previous module directories.
 /// Manifest checks never download payloads. Every required feed must be verified before launch or install.
 /// </summary>
 public sealed class ModUpdater : IModUpdateService
@@ -168,8 +169,8 @@ public sealed class ModUpdater : IModUpdateService
         string tempZip = Path.Combine(Path.GetTempPath(), $"coop-update-{Guid.NewGuid():N}.zip");
         try
         {
-            await DownloadAsync(
-                manifest.ClientZipUrl,
+            await DownloadPayloadAsync(
+                manifest,
                 tempZip,
                 label,
                 (fraction, message) => progress(component, fraction, message));
@@ -242,14 +243,88 @@ public sealed class ModUpdater : IModUpdateService
         }
     }
 
+    private async Task DownloadPayloadAsync(
+        UpdateManifest manifest,
+        string dest,
+        string label,
+        Action<double, string> progress)
+    {
+        UpdatePart[] parts = manifest.Parts ?? [];
+        if (parts.Length == 0)
+        {
+            await DownloadAsync(manifest.ClientZipUrl, dest, label, progress);
+            return;
+        }
+
+        long total = parts.Sum(part => part.Bytes);
+        long completed = 0;
+        await using var dst = File.Create(dest);
+        var buffer = new byte[131072];
+
+        for (int index = 0; index < parts.Length; index++)
+        {
+            UpdatePart part = parts[index];
+            using var resp = await _http.GetAsync(part.Url, HttpCompletionOption.ResponseHeadersRead);
+            resp.EnsureSuccessStatusCode();
+            if (resp.Content.Headers.ContentLength is long responseBytes && responseBytes != part.Bytes)
+                throw new InvalidDataException(
+                    $"{label} part {index + 1} length was {responseBytes}, expected {part.Bytes}");
+
+            await using Stream src = await resp.Content.ReadAsStreamAsync();
+            using IncrementalHash partHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            long partRead = 0;
+            int read;
+            while ((read = await src.ReadAsync(buffer)) > 0)
+            {
+                await dst.WriteAsync(buffer.AsMemory(0, read));
+                partHash.AppendData(buffer, 0, read);
+                partRead += read;
+                long received = completed + partRead;
+                progress(
+                    received / (double)total,
+                    $"Downloading {label}… part {index + 1} / {parts.Length}, " +
+                    $"{received / 1_048_576.0:0} / {total / 1_048_576.0:0} MB");
+            }
+
+            if (partRead != part.Bytes)
+                throw new InvalidDataException(
+                    $"{label} part {index + 1} length was {partRead}, expected {part.Bytes}");
+            string actualHash = Convert.ToHexString(partHash.GetHashAndReset()).ToLowerInvariant();
+            if (!actualHash.Equals(part.Sha256.Trim(), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"{label} part {index + 1} failed integrity check");
+            completed += partRead;
+        }
+    }
+
     internal static bool IsManifestValid(UpdateManifest? manifest)
     {
-        if (manifest is null || ParseParts(manifest.Version) is null ||
-            !TryGetHttpsUri(manifest.ClientZipUrl, out _))
+        if (manifest is null || ParseParts(manifest.Version) is null)
             return false;
 
         string sha256 = manifest.Sha256?.Trim() ?? string.Empty;
-        return sha256.Length == 64 && sha256.All(Uri.IsHexDigit);
+        if (sha256.Length != 64 || !sha256.All(Uri.IsHexDigit))
+            return false;
+
+        bool hasSingleUrl = !string.IsNullOrWhiteSpace(manifest.ClientZipUrl);
+        UpdatePart[] parts = manifest.Parts ?? [];
+        if (hasSingleUrl)
+            return parts.Length == 0 && TryGetHttpsUri(manifest.ClientZipUrl, out _);
+
+        if (parts.Length is 0 or > 1000)
+            return false;
+
+        const long githubAssetLimit = 2L * 1024 * 1024 * 1024;
+        var urls = new HashSet<string>(StringComparer.Ordinal);
+        foreach (UpdatePart? part in parts)
+        {
+            if (part is null || part.Bytes <= 0 || part.Bytes >= githubAssetLimit ||
+                !TryGetHttpsUri(part.Url, out _) || !urls.Add(part.Url))
+                return false;
+            string partSha256 = part.Sha256?.Trim() ?? string.Empty;
+            if (partSha256.Length != 64 || !partSha256.All(Uri.IsHexDigit))
+                return false;
+        }
+        return true;
     }
 
     private static TierUpdateCheck Unverified(

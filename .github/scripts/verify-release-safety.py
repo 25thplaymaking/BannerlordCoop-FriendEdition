@@ -175,18 +175,27 @@ def main() -> None:
         and suite_dispatch["channel"]["options"] == ["nightly", "stable"],
         "suite promotion must default to nightly and require an explicit stable choice",
     )
+    require(
+        set(suite_dispatch) == {"channel", "descriptor"},
+        "suite promotion may accept only a channel and content-addressed descriptor",
+    )
     suite_workflow_text = (ROOT / ".github" / "workflows" / "suite-release.yml").read_text(
         encoding="utf-8"
     )
     require(
         "secrets." not in suite_workflow_text,
-        "suite metadata promotion must not receive an R2 credential",
+        "suite metadata promotion must not receive an external-storage credential",
     )
     require(
         "Verify release safety policy" in step_names(suite, "publish")
-        and "Test suite feed builder" in step_names(suite, "publish")
-        and "Verify staged R2 payload" in step_names(suite, "publish"),
-        "suite promotion must enforce release safety, test its feed, and verify public payload length",
+        and "Test suite feed builders" in step_names(suite, "publish")
+        and "Verify staged GitHub payload" in step_names(suite, "publish"),
+        "suite promotion must enforce release safety, test its feed, and verify GitHub asset metadata",
+    )
+    require(
+        "suite-payloads" in suite_workflow_text
+        and "gh release view suite-payloads --json assets" in suite_workflow_text,
+        "suite promotion must validate immutable GitHub payload assets without downloading their bytes",
     )
     require(
         'gh release upload "$tag" artifact/suite.json --clobber' in suite_workflow_text,

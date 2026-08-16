@@ -157,6 +157,71 @@ public sealed class ModUpdaterTests
     }
 
     [Fact]
+    public async Task MultipartSuite_ReconstructsInOrderAndUsesExistingInstaller()
+    {
+        using var fixture = new UpdateFixture();
+        fixture.WriteInstalled("Coop", "installed-version.txt", "2.0");
+        byte[] suiteZip = CreateZipBytes(("Harmony/current.dll", "suite-from-parts"));
+        int split = suiteZip.Length / 2;
+        byte[] first = suiteZip[..split];
+        byte[] second = suiteZip[split..];
+        UpdateManifest suiteManifest = MultipartManifest("2.0", suiteZip, first, second);
+        var requestedParts = new List<string>();
+        using var http = new HttpClient(new StubHandler(request =>
+        {
+            string path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("suite.json")) return JsonResponse(suiteManifest);
+            if (path.EndsWith("client.json"))
+                return JsonResponse(Manifest("2.0", "client.zip", new string('a', 64)));
+            requestedParts.Add(path);
+            return BytesResponse(path.EndsWith("part001") ? first : second);
+        }));
+        ModUpdater updater = Updater(http);
+        ModUpdateCheck check = await updater.CheckAsync(fixture.Modules);
+
+        UpdateResult result = await updater.InstallAsync(fixture.Modules, check, (_, _, _) => { });
+
+        Assert.Equal(UpdateOutcome.Updated, result.Outcome);
+        Assert.Equal(new[] { "/part001", "/part002" }, requestedParts);
+        Assert.Equal("2.0", File.ReadAllText(Path.Combine(fixture.Modules, "coop-suite-version.txt")));
+        Assert.Equal(
+            "suite-from-parts",
+            File.ReadAllText(Path.Combine(fixture.Modules, "Harmony", "current.dll")));
+    }
+
+    [Fact]
+    public async Task MultipartSuite_PartHashFailureKeepsInstalledModules()
+    {
+        using var fixture = new UpdateFixture();
+        fixture.WriteInstalled("Harmony", "current.dll", "installed-kept");
+        fixture.WriteInstalled("Coop", "installed-version.txt", "2.0");
+        byte[] suiteZip = CreateZipBytes(("Harmony/current.dll", "suite-from-parts"));
+        byte[] declared = suiteZip[..(suiteZip.Length / 2)];
+        byte[] second = suiteZip[(suiteZip.Length / 2)..];
+        byte[] corrupt = (byte[])declared.Clone();
+        corrupt[0] ^= 0xff;
+        UpdateManifest suiteManifest = MultipartManifest("2.0", suiteZip, declared, second);
+        using var http = new HttpClient(new StubHandler(request =>
+        {
+            string path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("suite.json")) return JsonResponse(suiteManifest);
+            if (path.EndsWith("client.json"))
+                return JsonResponse(Manifest("2.0", "client.zip", new string('a', 64)));
+            return BytesResponse(path.EndsWith("part001") ? corrupt : second);
+        }));
+        ModUpdater updater = Updater(http);
+        ModUpdateCheck check = await updater.CheckAsync(fixture.Modules);
+
+        UpdateResult result = await updater.InstallAsync(fixture.Modules, check, (_, _, _) => { });
+
+        Assert.Equal(UpdateOutcome.Failed, result.Outcome);
+        Assert.Equal(
+            "installed-kept",
+            File.ReadAllText(Path.Combine(fixture.Modules, "Harmony", "current.dll")));
+        Assert.False(File.Exists(Path.Combine(fixture.Modules, "coop-suite-version.txt")));
+    }
+
+    [Fact]
     public async Task ReachedManifestHttpError_FailsClosed()
     {
         using var fixture = new UpdateFixture();
@@ -200,6 +265,39 @@ public sealed class ModUpdaterTests
         Assert.False(ModUpdater.IsManifestValid(malformed));
         Assert.True(ModUpdater.IsManifestValid(valid));
         Assert.False(ModUpdater.IsManifestValid(unsafeUrl));
+    }
+
+    [Fact]
+    public void MultipartManifestRequiresExclusiveSafeSubTwoGiBParts()
+    {
+        var valid = new UpdateManifest
+        {
+            Version = "1.0",
+            Sha256 = new string('a', 64),
+            Parts =
+            [
+                new UpdatePart
+                {
+                    Url = "https://github.com/example/repo/releases/download/suite-payloads/part001",
+                    Bytes = 1024,
+                    Sha256 = new string('b', 64),
+                },
+            ],
+        };
+
+        Assert.True(ModUpdater.IsManifestValid(valid));
+
+        valid.ClientZipUrl = "https://example.invalid/also-a-zip";
+        Assert.False(ModUpdater.IsManifestValid(valid));
+        valid.ClientZipUrl = "";
+        valid.Parts[0].Url = "http://example.invalid/part001";
+        Assert.False(ModUpdater.IsManifestValid(valid));
+        valid.Parts[0].Url = "https://example.invalid/part001";
+        valid.Parts[0].Bytes = 2L * 1024 * 1024 * 1024;
+        Assert.False(ModUpdater.IsManifestValid(valid));
+        valid.Parts[0].Bytes = 1024;
+        valid.Parts[0].Sha256 = "short";
+        Assert.False(ModUpdater.IsManifestValid(valid));
     }
 
     [Fact]
@@ -344,6 +442,19 @@ public sealed class ModUpdaterTests
         ClientZipUrl = $"https://updates.example/{asset}",
         Sha256 = sha,
         Notes = $"{asset} notes",
+    };
+
+    private static UpdateManifest MultipartManifest(string version, byte[] complete, params byte[][] parts) => new()
+    {
+        Version = version,
+        Sha256 = Convert.ToHexString(SHA256.HashData(complete)).ToLowerInvariant(),
+        Notes = "multipart suite notes",
+        Parts = parts.Select((part, index) => new UpdatePart
+        {
+            Url = $"https://updates.example/part{index + 1:000}",
+            Bytes = part.LongLength,
+            Sha256 = Convert.ToHexString(SHA256.HashData(part)).ToLowerInvariant(),
+        }).ToArray(),
     };
 
     private static HttpResponseMessage JsonResponse(UpdateManifest manifest) => new(HttpStatusCode.OK)

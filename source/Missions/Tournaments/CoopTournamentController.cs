@@ -576,7 +576,7 @@ public class CoopTournamentController : CoopMissionController
             affectorAgent.MountAgent != null &&
             blow.AttackType == AgentAttackType.Collision,
             collisionData.IsSneakAttack);
-        relayNetwork.SendAll(new NetworkSubmitTournamentHitProgression(progression));
+        TournamentSessionHandler.SubmitHitProgression(progression, snapshot.MissionInstanceId);
     }
 
     private bool TryResolveHitWeapon(
@@ -1155,7 +1155,7 @@ public class CoopTournamentController : CoopMissionController
         CaptureManifestAgents(manifest);
         submittedManifestMatchId = snapshot.CurrentMatchId;
         pendingManifest = manifest;
-        relayNetwork.SendAll(new NetworkSubmitTournamentSpawnManifest(manifest));
+        TournamentSessionHandler.SubmitSpawnManifest(manifest, snapshot.MissionInstanceId);
     }
 
     private void TrySubmitMatchResult(float dt)
@@ -1167,7 +1167,7 @@ public class CoopTournamentController : CoopMissionController
 
         submittedResultMatchId = snapshot.CurrentMatchId;
         pendingResult = result;
-        relayNetwork.SendAll(new NetworkSubmitTournamentMatchResult(result));
+        TournamentSessionHandler.SubmitMatchResult(result, snapshot.MissionInstanceId);
     }
 
     private bool IsMatchReadyForResult(float dt)

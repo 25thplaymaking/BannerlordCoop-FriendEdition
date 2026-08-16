@@ -16,25 +16,36 @@ internal enum TournamentCompletionStep
     SessionRemoval
 }
 
+internal enum TournamentCompletionState
+{
+    NotStarted,
+    InProgress,
+    Completed
+}
+
 internal sealed class TournamentCompletionTransaction
 {
-    private readonly HashSet<TournamentCompletionStep> completedSteps = new();
+    private readonly Dictionary<TournamentCompletionStep, TournamentCompletionState> steps = new();
 
-    public bool IsCompleted => completedSteps.Contains(TournamentCompletionStep.SessionRemoval);
+    public bool IsCompleted => StateOf(TournamentCompletionStep.SessionRemoval) == TournamentCompletionState.Completed;
     public bool IsReadyForRemoval =>
-        completedSteps.Contains(TournamentCompletionStep.Leaderboard) &&
-        completedSteps.Contains(TournamentCompletionStep.Influence) &&
-        completedSteps.Contains(TournamentCompletionStep.Prize) &&
-        completedSteps.Contains(TournamentCompletionStep.BetPayout) &&
-        completedSteps.Contains(TournamentCompletionStep.BetSettlement) &&
-        completedSteps.Contains(TournamentCompletionStep.SimulationProgression);
+        StateOf(TournamentCompletionStep.Leaderboard) == TournamentCompletionState.Completed &&
+        StateOf(TournamentCompletionStep.Influence) == TournamentCompletionState.Completed &&
+        StateOf(TournamentCompletionStep.Prize) == TournamentCompletionState.Completed &&
+        StateOf(TournamentCompletionStep.BetPayout) == TournamentCompletionState.Completed &&
+        StateOf(TournamentCompletionStep.BetSettlement) == TournamentCompletionState.Completed &&
+        StateOf(TournamentCompletionStep.SimulationProgression) == TournamentCompletionState.Completed;
+
+    public TournamentCompletionState StateOf(TournamentCompletionStep step) =>
+        steps.TryGetValue(step, out var state) ? state : TournamentCompletionState.NotStarted;
 
     public void Run(TournamentCompletionStep step, Action action)
     {
-        if (completedSteps.Contains(step))
+        if (StateOf(step) != TournamentCompletionState.NotStarted)
             return;
-
+        // Persist the consumption boundary before any native action. A throw cannot cause a duplicate award.
+        steps[step] = TournamentCompletionState.InProgress;
         action();
-        completedSteps.Add(step);
+        steps[step] = TournamentCompletionState.Completed;
     }
 }

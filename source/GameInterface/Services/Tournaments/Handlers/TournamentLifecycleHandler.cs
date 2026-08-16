@@ -16,10 +16,12 @@ internal sealed partial class TournamentSessionHandler
                 return false;
 
             RemoveSessionTracking(liveProgressionControllers, acceptedHitProgression, snapshot.SessionId);
+            RemoveAcceptedHitProgression(consumedHitProgression, snapshot.SessionId);
             return true;
         }
 
         RemoveSessionTracking(liveProgressionControllers, acceptedHitProgression, snapshot.SessionId);
+        RemoveAcceptedHitProgression(consumedHitProgression, snapshot.SessionId);
 
         var removal = new NetworkTournamentSessionRemoved(snapshot.SessionId, snapshot.TownId);
         network.SendAll(removal);

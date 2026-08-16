@@ -49,6 +49,9 @@ internal sealed partial class TournamentSessionHandler : IHandler
     private readonly IAuthorityRouteHandle<TournamentMissionEnteredIntent, NetworkTournamentMissionEnteredResult> missionEnteredRoute;
     private readonly IAuthorityRouteHandle<TournamentChoiceIntent, NetworkTournamentChoiceResult> choiceRoute;
     private readonly IAuthorityRouteHandle<TournamentBetIntent, NetworkTournamentBetResult> betRoute;
+    private readonly IAuthorityRouteHandle<TournamentSpawnManifestIntent, NetworkTournamentSpawnManifestResult> spawnManifestRoute;
+    private readonly IAuthorityRouteHandle<TournamentHitProgressionIntent, NetworkTournamentHitProgressionApplied> hitProgressionRoute;
+    private readonly IAuthorityRouteHandle<TournamentMatchResultIntent, NetworkTournamentMatchResultApplied> matchResultRoute;
     private readonly Dictionary<string, NetworkEnterTournamentMission> pendingMissionLaunches = new();
     private readonly HashSet<string> openedMissionLaunches = new();
     private readonly Dictionary<string, BetLedgerEntry> betLedger = new();
@@ -57,6 +60,8 @@ internal sealed partial class TournamentSessionHandler : IHandler
     private readonly HashSet<string> completionInProgress = new();
     private readonly HashSet<string> liveProgressionControllers = new();
     private readonly HashSet<string> acceptedHitProgression = new();
+    private readonly HashSet<string> consumedHitProgression = new();
+    private readonly Dictionary<string, TournamentSpawnManifestData> receivedSpawnManifests = new();
     private readonly System.Collections.Concurrent.ConcurrentDictionary<NetPeer, string> tournamentPeerControllers = new();
 
     public TournamentSessionHandler(
@@ -161,12 +166,43 @@ internal sealed partial class TournamentSessionHandler : IHandler
                 _ => TournamentStateSyncHandler.RequestCanonicalResync(), PresentBetTerminal,
                 configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
                 failClosedOnApplyFailure: true, isExpectedClientResult: IsExpectedBetResult));
+        spawnManifestRoute = authorityRequestRouter.Register(
+            AuthorityRoute<TournamentSpawnManifestIntent, NetworkSubmitTournamentSpawnManifest,
+                NetworkTournamentSpawnManifestResult>.Define(
+                "tournament.spawn-manifest", AuthorityRouteKind.Command, CreateAuthorityHeader,
+                (intent, header) => new NetworkSubmitTournamentSpawnManifest(header, intent.Manifest, intent.MissionInstanceId),
+                request => request.Header, result => result.Header, ValidateSpawnManifestWireShape,
+                BuildSpawnManifestCommandKey, ValidateAuthorityHeader, ExecuteSpawnManifest,
+                CreateSpawnManifestTerminal, ProbeSpawnManifestApplied,
+                _ => TournamentStateSyncHandler.RequestCanonicalResync(), PresentHostReportTerminal,
+                configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true, isExpectedClientResult: IsExpectedSpawnManifestResult));
+        hitProgressionRoute = authorityRequestRouter.Register(
+            AuthorityRoute<TournamentHitProgressionIntent, NetworkSubmitTournamentHitProgression,
+                NetworkTournamentHitProgressionApplied>.Define(
+                "tournament.hit-progression", AuthorityRouteKind.Command, CreateAuthorityHeader,
+                (intent, header) => new NetworkSubmitTournamentHitProgression(header, intent.Data, intent.MissionInstanceId),
+                request => request.Header, result => result.Header, ValidateHitProgressionWireShape,
+                BuildHitProgressionCommandKey, ValidateAuthorityHeader, ExecuteHitProgression,
+                CreateHitProgressionTerminal, ProbeHitProgressionApplied,
+                _ => TournamentStateSyncHandler.RequestCanonicalResync(), PresentHostReportTerminal,
+                configAuthority.IsTrustedServer, new AuthorityTimeoutPolicy(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5), 0),
+                failClosedOnApplyFailure: true, isExpectedClientResult: IsExpectedHitProgressionResult));
+        matchResultRoute = authorityRequestRouter.Register(
+            AuthorityRoute<TournamentMatchResultIntent, NetworkSubmitTournamentMatchResult,
+                NetworkTournamentMatchResultApplied>.Define(
+                "tournament.match-result", AuthorityRouteKind.Command, CreateAuthorityHeader,
+                (intent, header) => new NetworkSubmitTournamentMatchResult(header, intent.Result, intent.MissionInstanceId),
+                request => request.Header, result => result.Header, ValidateMatchResultWireShape,
+                BuildMatchResultCommandKey, ValidateAuthorityHeader, ExecuteMatchResult,
+                CreateMatchResultTerminal, ProbeMatchResultApplied,
+                _ => TournamentStateSyncHandler.RequestCanonicalResync(), PresentHostReportTerminal,
+                configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true, isExpectedClientResult: IsExpectedMatchResult));
 
         messageBroker.Subscribe<NetworkRequestLeaveActiveTournament>(Handle_LeaveActive);
         messageBroker.Subscribe<NetworkTournamentBetState>(Handle_BetState);
-        messageBroker.Subscribe<NetworkSubmitTournamentSpawnManifest>(Handle_SpawnManifest);
-        messageBroker.Subscribe<NetworkSubmitTournamentMatchResult>(Handle_MatchResult);
-        messageBroker.Subscribe<NetworkSubmitTournamentHitProgression>(Handle_HitProgression);
+        messageBroker.Subscribe<NetworkTournamentHitProgressionApplied>(Handle_HitProgressionApplied);
         messageBroker.Subscribe<NetworkTournamentSessionSnapshot>(Handle_Snapshot);
         messageBroker.Subscribe<NetworkTournamentSpawnManifest>(Handle_SpawnManifestSnapshot);
         messageBroker.Subscribe<NetworkEnterTournamentMission>(Handle_EnterMission);
@@ -183,11 +219,12 @@ internal sealed partial class TournamentSessionHandler : IHandler
         missionEnteredRoute.Dispose();
         choiceRoute.Dispose();
         betRoute.Dispose();
+        spawnManifestRoute.Dispose();
+        hitProgressionRoute.Dispose();
+        matchResultRoute.Dispose();
         messageBroker.Unsubscribe<NetworkRequestLeaveActiveTournament>(Handle_LeaveActive);
         messageBroker.Unsubscribe<NetworkTournamentBetState>(Handle_BetState);
-        messageBroker.Unsubscribe<NetworkSubmitTournamentSpawnManifest>(Handle_SpawnManifest);
-        messageBroker.Unsubscribe<NetworkSubmitTournamentMatchResult>(Handle_MatchResult);
-        messageBroker.Unsubscribe<NetworkSubmitTournamentHitProgression>(Handle_HitProgression);
+        messageBroker.Unsubscribe<NetworkTournamentHitProgressionApplied>(Handle_HitProgressionApplied);
         messageBroker.Unsubscribe<NetworkTournamentSessionSnapshot>(Handle_Snapshot);
         messageBroker.Unsubscribe<NetworkTournamentSpawnManifest>(Handle_SpawnManifestSnapshot);
         messageBroker.Unsubscribe<NetworkEnterTournamentMission>(Handle_EnterMission);
@@ -237,6 +274,21 @@ internal sealed partial class TournamentSessionHandler : IHandler
         Action<AuthorityClientOutcome<NetworkTournamentBetResult>> completion = null) =>
         Instance?.betRoute.Submit(new TournamentBetIntent(snapshot.SessionId, snapshot.Revision, snapshot.BracketRevision,
             snapshot.CurrentMatchId, amount, sequence, quote), completion);
+
+    internal static AuthorityRequestTicket<NetworkTournamentSpawnManifestResult> SubmitSpawnManifest(
+        TournamentSpawnManifestData manifest, string missionInstanceId,
+        Action<AuthorityClientOutcome<NetworkTournamentSpawnManifestResult>> completion = null) =>
+        Instance?.spawnManifestRoute.Submit(new TournamentSpawnManifestIntent(manifest, missionInstanceId), completion);
+
+    internal static AuthorityRequestTicket<NetworkTournamentHitProgressionApplied> SubmitHitProgression(
+        TournamentHitProgressionData data, string missionInstanceId,
+        Action<AuthorityClientOutcome<NetworkTournamentHitProgressionApplied>> completion = null) =>
+        Instance?.hitProgressionRoute.Submit(new TournamentHitProgressionIntent(data, missionInstanceId), completion);
+
+    internal static AuthorityRequestTicket<NetworkTournamentMatchResultApplied> SubmitMatchResult(
+        TournamentMatchResultData result, string missionInstanceId,
+        Action<AuthorityClientOutcome<NetworkTournamentMatchResultApplied>> completion = null) =>
+        Instance?.matchResultRoute.Submit(new TournamentMatchResultIntent(result, missionInstanceId), completion);
 
     private AuthorityRequestHeader CreateAuthorityHeader(long requestId)
     {
@@ -518,6 +570,30 @@ internal sealed partial class TournamentSessionHandler : IHandler
         public int Amount { get; }
         public long Sequence { get; }
         public TournamentBetQuote Quote { get; }
+    }
+
+    private readonly struct TournamentSpawnManifestIntent
+    {
+        public TournamentSpawnManifestIntent(TournamentSpawnManifestData manifest, string missionInstanceId) =>
+            (Manifest, MissionInstanceId) = (manifest, missionInstanceId);
+        public TournamentSpawnManifestData Manifest { get; }
+        public string MissionInstanceId { get; }
+    }
+
+    private readonly struct TournamentHitProgressionIntent
+    {
+        public TournamentHitProgressionIntent(TournamentHitProgressionData data, string missionInstanceId) =>
+            (Data, MissionInstanceId) = (data, missionInstanceId);
+        public TournamentHitProgressionData Data { get; }
+        public string MissionInstanceId { get; }
+    }
+
+    private readonly struct TournamentMatchResultIntent
+    {
+        public TournamentMatchResultIntent(TournamentMatchResultData result, string missionInstanceId) =>
+            (Result, MissionInstanceId) = (result, missionInstanceId);
+        public TournamentMatchResultData Result { get; }
+        public string MissionInstanceId { get; }
     }
 
     private bool HasEnrollmentInAnotherTown(string controllerId, string townId)
@@ -1058,7 +1134,13 @@ internal sealed partial class TournamentSessionHandler : IHandler
             return;
 
         GameThread.RunSafe(
-            () => messageBroker.Publish(this, new TournamentSpawnManifestUpdated(payload.What.Manifest)),
+            () =>
+            {
+                TournamentSpawnManifestData manifest = payload.What.Manifest;
+                if (manifest == null) return;
+                receivedSpawnManifests[manifest.SessionId] = manifest;
+                messageBroker.Publish(this, new TournamentSpawnManifestUpdated(manifest));
+            },
             context: nameof(Handle_SpawnManifestSnapshot));
     }
 
@@ -1508,7 +1590,9 @@ internal sealed partial class TournamentSessionHandler : IHandler
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "Failed to complete tournament session {SessionId}", snapshot.SessionId);
+            Logger.Fatal(ex, "Irreversible tournament completion failed for session {SessionId}; disconnecting tournament peers.", snapshot.SessionId);
+            DisconnectAllTournamentClients();
+            throw;
         }
         finally
         {
@@ -1630,7 +1714,9 @@ internal sealed partial class TournamentSessionHandler : IHandler
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "Failed to finalize tournament session {SessionId}", snapshot.SessionId);
+            Logger.Fatal(ex, "Irreversible tournament finalization failed for session {SessionId}; disconnecting tournament peers.", snapshot.SessionId);
+            DisconnectAllTournamentClients();
+            throw;
         }
         finally
         {

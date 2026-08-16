@@ -1,11 +1,13 @@
 using E2E.Tests.Environment.Instance;
 using E2E.Tests.Util;
+using Common.Messaging;
 using GameInterface.Services.PlayerCaptivityService.Messages;
 using GameInterface.Services.Players;
 using GameInterface.Services.Players.Data;
 using GameInterface.Services.Tournaments;
 using GameInterface.Services.Tournaments.Data;
 using GameInterface.Services.Tournaments.Messages;
+using GameInterface.Configuration;
 using System;
 using System.Linq;
 using TaleWorlds.CampaignSystem;
@@ -277,7 +279,7 @@ public class TournamentBettingFlowTests : SyncTestBase
         Server.NetworkSentMessages.Clear();
         Server.SimulateMessage(
             fixture.Bettor.NetPeer,
-            new NetworkSubmitTournamentSpawnManifest(manifest));
+            new NetworkSubmitTournamentSpawnManifest(CreateHostReportHeader(97), manifest, live.MissionInstanceId));
         Server.Call(() =>
         {
             Assert.True(Server.Resolve<ITournamentSessionRegistry>().TryGetSpawnManifest(SessionId, out var stored));
@@ -310,7 +312,14 @@ public class TournamentBettingFlowTests : SyncTestBase
 
         Server.SimulateMessage(
             fixture.Bettor.NetPeer,
-            new NetworkSubmitTournamentMatchResult(result));
+            new NetworkSubmitTournamentMatchResult(CreateHostReportHeader(98), result, live.MissionInstanceId));
+    }
+
+    private AuthorityRequestHeader CreateHostReportHeader(long requestId)
+    {
+        ModConfigSnapshot config = null;
+        Server.Call(() => Assert.True(Server.Resolve<IModConfigAuthority>().TryGetCurrent(out config)));
+        return new AuthorityRequestHeader(config.ProtocolVersion, config.SessionId, requestId, config.Revision);
     }
 
     private NetworkTournamentBetResult AssertSettlement(string reason)

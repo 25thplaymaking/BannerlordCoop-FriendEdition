@@ -350,28 +350,99 @@ public readonly struct NetworkRequestTournamentBet : ICommand
     public AuthorityRequestHeader Header => new(ProtocolVersion, ConfigSessionId, AuthorityRequestId, ConfigRevision);
 }
 
+[AuthorityRoute("tournament.spawn-manifest", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 public readonly struct NetworkSubmitTournamentSpawnManifest : ICommand
 {
-    [ProtoMember(1)]
-    public readonly TournamentSpawnManifestData Manifest;
+    [ProtoMember(1)] public readonly TournamentSpawnManifestData Manifest;
+    [ProtoMember(2)] public readonly int ProtocolVersion;
+    [ProtoMember(3)] public readonly string ConfigSessionId;
+    [ProtoMember(4)] public readonly long AuthorityRequestId;
+    [ProtoMember(5)] public readonly long ConfigRevision;
+    [ProtoMember(6)] public readonly string MissionInstanceId;
 
-    public NetworkSubmitTournamentSpawnManifest(TournamentSpawnManifestData manifest)
+    public NetworkSubmitTournamentSpawnManifest(AuthorityRequestHeader header, TournamentSpawnManifestData manifest, string missionInstanceId)
     {
         Manifest = manifest;
+        ProtocolVersion = header.ProtocolVersion;
+        ConfigSessionId = header.SessionId;
+        AuthorityRequestId = header.RequestId;
+        ConfigRevision = header.ExpectedRevision;
+        MissionInstanceId = missionInstanceId;
     }
+
+    public AuthorityRequestHeader Header => new(ProtocolVersion, ConfigSessionId, AuthorityRequestId, ConfigRevision);
 }
 
+[AuthorityRoute("tournament.match-result", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 public readonly struct NetworkSubmitTournamentMatchResult : ICommand
 {
-    [ProtoMember(1)]
-    public readonly TournamentMatchResultData Result;
+    [ProtoMember(1)] public readonly TournamentMatchResultData Result;
+    [ProtoMember(2)] public readonly int ProtocolVersion;
+    [ProtoMember(3)] public readonly string ConfigSessionId;
+    [ProtoMember(4)] public readonly long AuthorityRequestId;
+    [ProtoMember(5)] public readonly long ConfigRevision;
+    [ProtoMember(6)] public readonly string MissionInstanceId;
 
-    public NetworkSubmitTournamentMatchResult(TournamentMatchResultData result)
+    public NetworkSubmitTournamentMatchResult(AuthorityRequestHeader header, TournamentMatchResultData result, string missionInstanceId)
     {
         Result = result;
+        ProtocolVersion = header.ProtocolVersion;
+        ConfigSessionId = header.SessionId;
+        AuthorityRequestId = header.RequestId;
+        ConfigRevision = header.ExpectedRevision;
+        MissionInstanceId = missionInstanceId;
     }
+
+    public AuthorityRequestHeader Header => new(ProtocolVersion, ConfigSessionId, AuthorityRequestId, ConfigRevision);
+}
+
+[ProtoContract(SkipConstructor = true)]
+public readonly struct NetworkTournamentSpawnManifestResult : IEvent
+{
+    [ProtoMember(1)] public readonly TournamentSpawnManifestData Manifest;
+    [ProtoMember(2)] public readonly TournamentSessionSnapshot Snapshot;
+    [ProtoMember(3)] public readonly string SessionId;
+    [ProtoMember(4)] public readonly long AuthorityRequestId;
+    [ProtoMember(5)] public readonly AuthorityResultStatus Status;
+    [ProtoMember(6)] public readonly long CommittedRevision;
+    [ProtoMember(7)] public readonly string ReasonCode;
+    [ProtoMember(8)] public readonly long CommittedBracketRevision;
+
+    public NetworkTournamentSpawnManifestResult(AuthorityRequestHeader request, AuthorityResultStatus status,
+        TournamentSpawnManifestData manifest, TournamentSessionSnapshot snapshot, string reasonCode)
+    {
+        Manifest = manifest; Snapshot = snapshot; SessionId = request.SessionId; AuthorityRequestId = request.RequestId;
+        Status = status; CommittedRevision = snapshot?.Revision ?? manifest?.Revision ?? request.ExpectedRevision;
+        ReasonCode = reasonCode; CommittedBracketRevision = snapshot?.BracketRevision ?? manifest?.BracketRevision ?? 0;
+    }
+    public AuthorityResultHeader Header => new(SessionId, AuthorityRequestId, Status, CommittedRevision, ReasonCode);
+}
+
+[ProtoContract(SkipConstructor = true)]
+public readonly struct NetworkTournamentMatchResultApplied : IEvent
+{
+    [ProtoMember(1)] public readonly TournamentSessionSnapshot Snapshot;
+    [ProtoMember(2)] public readonly string SessionId;
+    [ProtoMember(3)] public readonly long AuthorityRequestId;
+    [ProtoMember(4)] public readonly AuthorityResultStatus Status;
+    [ProtoMember(5)] public readonly long CommittedRevision;
+    [ProtoMember(6)] public readonly string ReasonCode;
+    [ProtoMember(7)] public readonly long CommittedBracketRevision;
+    [ProtoMember(8)] public readonly string TournamentSessionId;
+    [ProtoMember(9)] public readonly string MatchId;
+    [ProtoMember(10)] public readonly long Sequence;
+
+    public NetworkTournamentMatchResultApplied(AuthorityRequestHeader request, AuthorityResultStatus status,
+        TournamentSessionSnapshot snapshot, TournamentMatchResultData result, string reasonCode)
+    {
+        Snapshot = snapshot; SessionId = request.SessionId; AuthorityRequestId = request.RequestId; Status = status;
+        CommittedRevision = snapshot?.Revision ?? result?.Revision ?? request.ExpectedRevision; ReasonCode = reasonCode;
+        CommittedBracketRevision = snapshot?.BracketRevision ?? result?.BracketRevision ?? 0;
+        TournamentSessionId = result?.SessionId; MatchId = result?.MatchId; Sequence = result?.Sequence ?? 0;
+    }
+    public AuthorityResultHeader Header => new(SessionId, AuthorityRequestId, Status, CommittedRevision, ReasonCode);
 }
 
 [ProtoContract(SkipConstructor = true)]

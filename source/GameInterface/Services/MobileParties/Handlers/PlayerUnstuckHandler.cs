@@ -63,14 +63,12 @@ internal class PlayerUnstuckHandler : IHandler
         this.siegeEventInterface = siegeEventInterface;
 
         messageBroker.Subscribe<PlayerUnstuckRequested>(Handle_PlayerUnstuckRequested);
-        messageBroker.Subscribe<NetworkRequestPlayerUnstuck>(Handle_NetworkRequestPlayerUnstuck);
         messageBroker.Subscribe<NetworkPlayerUnstuckResult>(Handle_NetworkPlayerUnstuckResult);
     }
 
     public void Dispose()
     {
         messageBroker.Unsubscribe<PlayerUnstuckRequested>(Handle_PlayerUnstuckRequested);
-        messageBroker.Unsubscribe<NetworkRequestPlayerUnstuck>(Handle_NetworkRequestPlayerUnstuck);
         messageBroker.Unsubscribe<NetworkPlayerUnstuckResult>(Handle_NetworkPlayerUnstuckResult);
     }
 
@@ -80,13 +78,18 @@ internal class PlayerUnstuckHandler : IHandler
     private void Handle_PlayerUnstuckRequested(MessagePayload<PlayerUnstuckRequested> payload)
     {
         if (ModInformation.IsServer) return;
-
-        if (!objectManager.TryGetIdWithLogging(payload.What.Party, out var partyId)) return;
-
-        // Optional: the hero speeds up server-side captivity resolution but is not required.
-        objectManager.TryGetId(Hero.MainHero, out var heroId);
-
-        network.SendAll(new NetworkRequestPlayerUnstuck(partyId, heroId));
+        const string reason = "server-stuck-proof-unavailable";
+        Logger.Warning("Rejected client unstuck request: {Reason}", reason);
+        try
+        {
+            InformationManager.DisplayMessage(new InformationMessage(
+                "Unstuck is unavailable until the server can verify a non-exploitable stuck state."));
+        }
+        catch (Exception exception)
+        {
+            Logger.Warning(exception, "Could not show unstuck authority rejection");
+        }
+        messageBroker.Publish(this, new PlayerUnstuckCompleted(null, new[] { reason }));
     }
 
     /// <summary>

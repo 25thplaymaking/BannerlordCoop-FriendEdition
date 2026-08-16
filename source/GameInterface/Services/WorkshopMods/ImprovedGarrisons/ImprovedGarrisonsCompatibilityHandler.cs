@@ -1284,6 +1284,8 @@ internal sealed class ImprovedGarrisonsCompatibilityHandler : IHandler, IImprove
             request.Operation == ImprovedGarrisonsOperation.CreateRecruiter ||
             request.Operation == ImprovedGarrisonsOperation.CreateMobileGarrison)
         {
+            if (request.Operation == ImprovedGarrisonsOperation.CreateTransferParty && !HasStableTransferProof())
+            { failure = "native-poststate-unavailable-CreateTransferParty"; return false; }
             if (string.IsNullOrEmpty(partyId) || !objectManager.TryGetObject(partyId, out MobileParty party) || party == null)
             { failure = "created party was not registered"; return false; }
             object partyManagement = GetStaticMember(assembly?.GetType("ImprovedGarrisons.Main", false), "PartyManagement");

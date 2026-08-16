@@ -27,14 +27,16 @@ public sealed class AuthorityRequestRouterTests
     }
 
     [Fact]
-    public void Submit_CorrelatesOnlyMatchingTrustedResult_AndWaitsForReplicaApply()
+    public void AcceptedResult_StaysPendingUntilTheClientRegistryProbeReportsReady()
     {
         using var broker = new MessageBroker();
         using var network = new TestNetwork();
         var server = network.CreatePeer();
         using var router = new AuthorityRequestRouter(broker, network, new Mock<IPlayerManager>().Object);
-        var applied = false;
-        using var route = router.Register(CreateRoute(() => applied ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending));
+        var registryReady = false;
+        using var route = router.Register(CreateRoute(() => registryReady
+            ? AuthorityCommitProbeResult.Applied
+            : AuthorityCommitProbeResult.Pending));
 
         var ticket = route.Submit("intent");
         var request = Assert.Single(network.GetPeerMessagesFromType<TestRequest>(server));
@@ -49,7 +51,7 @@ public sealed class AuthorityRequestRouterTests
         route.Poll();
         Assert.False(ticket.IsCompleted);
 
-        applied = true;
+        registryReady = true;
         route.Poll();
         Assert.True(ticket.IsCompleted);
         Assert.Equal(AuthorityClientCompletion.Applied, ticket.Outcome.Completion);

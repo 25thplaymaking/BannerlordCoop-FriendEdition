@@ -1,5 +1,6 @@
 ﻿using Common.Messaging;
 using ProtoBuf;
+using GameInterface.Services.AuthorityRequests;
 
 namespace GameInterface.Services.MapEvents.Messages.Conversation;
 
@@ -8,6 +9,7 @@ namespace GameInterface.Services.MapEvents.Messages.Conversation;
 /// validates it and, if allowed, replies with <see cref="NetworkAllowConversation"/>. Rejected requests receive no
 /// response.
 /// </summary>
+[AuthorityRoute("map-event.conversation.begin", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 internal readonly struct NetworkRequestConversation : ICommand
 {
@@ -23,6 +25,8 @@ internal readonly struct NetworkRequestConversation : ICommand
     public readonly bool ArmyTalkEncounter;
     [ProtoMember(6)]
     public readonly string RequestId;
+    [ProtoMember(7)]
+    public readonly AuthorityRequestHeader Header;
 
     public NetworkRequestConversation(
         string defenderId,
@@ -30,7 +34,8 @@ internal readonly struct NetworkRequestConversation : ICommand
         bool forcePlayerOutFromSettlement,
         ConversationRestartSource source,
         bool armyTalkEncounter,
-        string requestId = null)
+        string requestId = null,
+        AuthorityRequestHeader header = default)
     {
         DefenderId = defenderId;
         AttackerId = attackerId;
@@ -38,5 +43,6 @@ internal readonly struct NetworkRequestConversation : ICommand
         Source = source;
         ArmyTalkEncounter = armyTalkEncounter;
         RequestId = requestId;
+        Header = header;
     }
 }

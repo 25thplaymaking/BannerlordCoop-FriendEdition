@@ -2917,7 +2917,7 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
         });
         AssertWarDeclared(Server, playerClanId, requestedTargetClanId);
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkConversationEnded()));
+        client.Call(() => client.Resolve<ConversationRequestHandler>().SubmitCurrentConversationEnd());
     }
 
     [Fact]
@@ -3189,7 +3189,7 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
                 Campaign.Current.MapTimeTracker.Now + CampaignTime.Hours(32));
         });
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkConversationEnded()));
+        client.Call(() => client.Resolve<ConversationRequestHandler>().SubmitCurrentConversationEnd());
 
         try
         {
@@ -3432,7 +3432,7 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
                 out var disabledAttackTimes) && disabledAttackTimes.ContainsKey(playerParty));
         });
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkConversationEnded()));
+        client.Call(() => client.Resolve<ConversationRequestHandler>().SubmitCurrentConversationEnd());
     }
 
     [Fact]
@@ -3494,7 +3494,7 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
                 out var disabledAttackTimes) && disabledAttackTimes.ContainsKey(playerParty));
         });
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkConversationEnded()));
+        client.Call(() => client.Resolve<ConversationRequestHandler>().SubmitCurrentConversationEnd());
     }
 
     [Fact]
@@ -4197,7 +4197,7 @@ public class PlayerPartyInteractionFlowTests : MapEventTestBase
         IReadOnlyList<MethodBase>? disabledMethods = null)
     {
         client.Call(() =>
-            client.Resolve<INetwork>().SendAll(new NetworkRequestConversation(
+            client.Resolve<ConversationRequestHandler>().SubmitConversation(new NetworkRequestConversation(
                 responderPartyId,
                 initiatorPartyId,
                 forcePlayerOutFromSettlement: false,

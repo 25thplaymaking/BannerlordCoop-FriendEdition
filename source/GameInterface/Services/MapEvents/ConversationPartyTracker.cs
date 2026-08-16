@@ -2,6 +2,8 @@
 using Common.Messaging;
 using Common.Util;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.MapEvents.Messages.Conversation;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -27,6 +29,10 @@ internal sealed class ConversationPartyTracker : IHandler
     private readonly object stateLock = new object();
     private readonly Dictionary<object, Engagement> engagements =
         new Dictionary<object, Engagement>(ReferenceObjectComparer.Instance);
+    private readonly Dictionary<string, ConversationLease> leasesById = new Dictionary<string, ConversationLease>();
+    private readonly Dictionary<object, string> leaseByOwner = new Dictionary<object, string>(ReferenceObjectComparer.Instance);
+    private readonly Dictionary<string, ConversationLease> replicaLeases = new Dictionary<string, ConversationLease>();
+    private long leaseRevision;
 
     // Player-vs-player conversations: both player parties' ids -> the partner's id. Unlike an AI engagement no party
     // is held/AI-disabled; this just marks the two players unattackable by anyone but each other until the battle
@@ -127,6 +133,81 @@ internal sealed class ConversationPartyTracker : IHandler
             RequestId = requestId;
         }
     }
+
+    internal readonly struct ConversationLease
+    {
+        public ConversationLease(string leaseId, long revision, bool active, object owner, string ownerPartyId, string targetPartyId)
+        { LeaseId = leaseId; Revision = revision; Active = active; Owner = owner; OwnerPartyId = ownerPartyId; TargetPartyId = targetPartyId; }
+        public string LeaseId { get; }
+        public long Revision { get; }
+        public bool Active { get; }
+        public object Owner { get; }
+        public string OwnerPartyId { get; }
+        public string TargetPartyId { get; }
+    }
+
+    internal ConversationLease BeginLease(object owner, string ownerPartyId, string targetPartyId, string leaseId = null)
+    {
+        lock (stateLock)
+        {
+            leaseId ??= Guid.NewGuid().ToString("N");
+            var lease = new ConversationLease(leaseId, ++leaseRevision, true, owner, ownerPartyId, targetPartyId);
+            leasesById[leaseId] = lease;
+            leaseByOwner[owner] = leaseId;
+            return lease;
+        }
+    }
+
+    internal bool TryGetLease(string leaseId, out ConversationLease lease)
+    {
+        lock (stateLock) return leasesById.TryGetValue(leaseId, out lease);
+    }
+
+    internal bool TryGetActiveLeaseByOwner(object owner, out ConversationLease lease)
+    {
+        lock (stateLock)
+        {
+            lease = default;
+            return owner != null && leaseByOwner.TryGetValue(owner, out var leaseId) &&
+                leasesById.TryGetValue(leaseId, out lease) && lease.Active;
+        }
+    }
+
+    internal bool TryEndLease(object owner, string leaseId, out ConversationLease ended, out bool owned)
+    {
+        lock (stateLock)
+        {
+            owned = false;
+            if (!leasesById.TryGetValue(leaseId, out var lease) || !lease.Active) { ended = default; return false; }
+            owned = ReferenceEquals(lease.Owner, owner);
+            if (!owned) { ended = default; return false; }
+            ended = new ConversationLease(lease.LeaseId, ++leaseRevision, false, lease.Owner, lease.OwnerPartyId, lease.TargetPartyId);
+            leasesById[leaseId] = ended;
+            leaseByOwner.Remove(owner);
+            return true;
+        }
+    }
+
+    internal void ApplyLeaseState(NetworkConversationLeaseState state)
+    {
+        lock (stateLock)
+        {
+            if (replicaLeases.TryGetValue(state.LeaseId, out var current) && current.Revision > state.Revision) return;
+            replicaLeases[state.LeaseId] = new ConversationLease(state.LeaseId, state.Revision, state.IsActive, null,
+                state.OwnerPartyId, state.TargetPartyId);
+        }
+    }
+
+    internal bool IsReplicaLease(string leaseId, long revision, bool active, string ownerPartyId, string targetPartyId)
+    {
+        lock (stateLock)
+            return replicaLeases.TryGetValue(leaseId, out var lease) && lease.Revision == revision && lease.Active == active &&
+                (ownerPartyId == null || lease.OwnerPartyId == ownerPartyId) &&
+                (targetPartyId == null || lease.TargetPartyId == targetPartyId);
+    }
+
+    internal bool HasActiveReplicaLease(string leaseId, long revision) =>
+        IsReplicaLease(leaseId, revision, true, null, null);
 
     /// <summary>
     /// Begins or refreshes an engagement. A player cannot replace a live engagement with a different target, and a

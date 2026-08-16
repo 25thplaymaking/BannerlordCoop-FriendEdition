@@ -344,10 +344,10 @@ public class MapEventDebugCommands
             !objectManager.TryGetId(defender.Party, out var defenderPartyId))
             return "Unable to resolve the registered PartyBase ids.";
 
-        if (!ContainerProvider.TryResolve<INetwork>(out var network))
-            return "Unable to resolve the client network.";
+        if (!ContainerProvider.TryResolve<ConversationRequestHandler>(out var conversationHandler))
+            return "Unable to resolve the conversation authority handler.";
 
-        network.SendAll(new NetworkRequestConversation(
+        conversationHandler.SubmitConversation(new NetworkRequestConversation(
             defenderPartyId,
             attackerPartyId,
             forcePlayerOutFromSettlement: false,

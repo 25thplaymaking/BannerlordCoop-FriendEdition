@@ -3389,7 +3389,7 @@ public class VillageHostileActionTests : MapEventTestBase
 
     private void RequestConversation(EnvironmentInstance client, string attackerPartyId, string defenderPartyId)
     {
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkRequestConversation(
+        client.Call(() => client.Resolve<ConversationRequestHandler>().SubmitConversation(new NetworkRequestConversation(
             defenderPartyId,
             attackerPartyId,
             forcePlayerOutFromSettlement: false,

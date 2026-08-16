@@ -8,6 +8,22 @@ namespace GameInterface.Tests.Services.MapEvents;
 public class ConversationPartyTrackerTests
 {
     [Fact]
+    public void Lease_EndRequiresOwner_AndLeavesMonotonicTombstone()
+    {
+        using var tracker = new ConversationPartyTracker(new Mock<IObjectManager>().Object);
+        var owner = new object();
+        var other = new object();
+        var active = tracker.BeginLease(owner, "owner-party", "target-party", "lease-1");
+
+        Assert.False(tracker.TryEndLease(other, active.LeaseId, out _, out var owned));
+        Assert.False(owned);
+        Assert.True(tracker.TryEndLease(owner, active.LeaseId, out var ended, out owned));
+        Assert.True(owned);
+        Assert.False(ended.Active);
+        Assert.True(ended.Revision > active.Revision);
+    }
+
+    [Fact]
     public void RefreshingSameEngagement_RecordsServerDetectedDefender()
     {
         var tracker = new ConversationPartyTracker(new Mock<IObjectManager>().Object);

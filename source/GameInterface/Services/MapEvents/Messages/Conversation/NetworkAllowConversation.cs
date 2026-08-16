@@ -21,18 +21,26 @@ internal readonly struct NetworkAllowConversation : ICommand
     public readonly ConversationRestartSource Source;
     [ProtoMember(5)]
     public readonly string RequestId;
+    [ProtoMember(6)]
+    public readonly long LeaseRevision;
+    [ProtoMember(7)]
+    public readonly string LeaseId;
 
     public NetworkAllowConversation(
         string defenderId,
         string attackerId,
         bool forcePlayerOutFromSettlement,
         ConversationRestartSource source,
-        string requestId)
+        string requestId,
+        long leaseRevision = 0,
+        string leaseId = null)
     {
         DefenderId = defenderId;
         AttackerId = attackerId;
         ForcePlayerOutFromSettlement = forcePlayerOutFromSettlement;
         Source = source;
         RequestId = requestId;
+        LeaseRevision = leaseRevision;
+        LeaseId = leaseId;
     }
 }

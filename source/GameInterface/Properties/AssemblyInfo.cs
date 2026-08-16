@@ -32,6 +32,7 @@ using System.Runtime.InteropServices;
 [assembly: InternalsVisibleTo("Coop.Tests")]
 [assembly: InternalsVisibleTo("Coop.IntegrationTests")]
 [assembly: InternalsVisibleTo("GameInterface.Tests")]
+[assembly: InternalsVisibleTo("Missions")]
 
 // Moq/Castle generate proxies for internal interfaces (IDiplomacyRuntime and the other module
 // runtime seams) in a dynamic assembly. GameInterface is not strong-named, so the plain name works.

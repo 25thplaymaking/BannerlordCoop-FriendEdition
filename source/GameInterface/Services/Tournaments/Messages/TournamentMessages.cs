@@ -131,6 +131,7 @@ public readonly struct NetworkTournamentLeavePreparationResult : IEvent
         new AuthorityResultHeader(SessionId, AuthorityRequestId, Status, CommittedRevision, ReasonCode);
 }
 
+[AuthorityRoute("tournament.start", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 public readonly struct NetworkRequestStartTournament : ICommand
 {
@@ -138,14 +139,25 @@ public readonly struct NetworkRequestStartTournament : ICommand
     public readonly string SessionId;
     [ProtoMember(2)]
     public readonly long ExpectedRevision;
+    [ProtoMember(3)] public readonly int ProtocolVersion;
+    [ProtoMember(4)] public readonly string ConfigSessionId;
+    [ProtoMember(5)] public readonly long AuthorityRequestId;
+    [ProtoMember(6)] public readonly long ConfigRevision;
 
-    public NetworkRequestStartTournament(string sessionId, long expectedRevision)
+    public NetworkRequestStartTournament(AuthorityRequestHeader header, string sessionId, long expectedRevision)
     {
         SessionId = sessionId;
         ExpectedRevision = expectedRevision;
+        ProtocolVersion = header.ProtocolVersion;
+        ConfigSessionId = header.SessionId;
+        AuthorityRequestId = header.RequestId;
+        ConfigRevision = header.ExpectedRevision;
     }
+
+    public AuthorityRequestHeader Header => new(ProtocolVersion, ConfigSessionId, AuthorityRequestId, ConfigRevision);
 }
 
+[AuthorityRoute("tournament.spectate", AuthorityRouteKind.Command)]
 [ProtoContract(SkipConstructor = true)]
 public readonly struct NetworkRequestSpectateTournament : ICommand
 {
@@ -153,12 +165,54 @@ public readonly struct NetworkRequestSpectateTournament : ICommand
     public readonly string SessionId;
     [ProtoMember(2)]
     public readonly long ExpectedRevision;
+    [ProtoMember(3)] public readonly int ProtocolVersion;
+    [ProtoMember(4)] public readonly string ConfigSessionId;
+    [ProtoMember(5)] public readonly long AuthorityRequestId;
+    [ProtoMember(6)] public readonly long ConfigRevision;
 
-    public NetworkRequestSpectateTournament(string sessionId, long expectedRevision)
+    public NetworkRequestSpectateTournament(AuthorityRequestHeader header, string sessionId, long expectedRevision)
     {
         SessionId = sessionId;
         ExpectedRevision = expectedRevision;
+        ProtocolVersion = header.ProtocolVersion;
+        ConfigSessionId = header.SessionId;
+        AuthorityRequestId = header.RequestId;
+        ConfigRevision = header.ExpectedRevision;
     }
+
+    public AuthorityRequestHeader Header => new(ProtocolVersion, ConfigSessionId, AuthorityRequestId, ConfigRevision);
+}
+
+[ProtoContract(SkipConstructor = true)]
+public readonly struct NetworkTournamentLaunchResult : IEvent
+{
+    [ProtoMember(1)] public readonly TournamentSessionSnapshot Snapshot;
+    [ProtoMember(2)] public readonly string SessionId;
+    [ProtoMember(3)] public readonly long AuthorityRequestId;
+    [ProtoMember(4)] public readonly AuthorityResultStatus Status;
+    [ProtoMember(5)] public readonly long CommittedRevision;
+    [ProtoMember(6)] public readonly string ReasonCode;
+    [ProtoMember(7)] public readonly string TournamentSessionId;
+    [ProtoMember(8)] public readonly string MissionInstanceId;
+    [ProtoMember(9)] public readonly string RequesterControllerId;
+    [ProtoMember(10)] public readonly bool IsSpectator;
+
+    public NetworkTournamentLaunchResult(AuthorityRequestHeader request, AuthorityResultStatus status,
+        TournamentSessionSnapshot snapshot, string requesterControllerId, bool isSpectator, string reasonCode)
+    {
+        Snapshot = snapshot;
+        SessionId = request.SessionId;
+        AuthorityRequestId = request.RequestId;
+        Status = status;
+        CommittedRevision = snapshot?.Revision ?? request.ExpectedRevision;
+        ReasonCode = reasonCode;
+        TournamentSessionId = snapshot?.SessionId;
+        MissionInstanceId = snapshot?.MissionInstanceId;
+        RequesterControllerId = requesterControllerId;
+        IsSpectator = isSpectator;
+    }
+
+    public AuthorityResultHeader Header => new(SessionId, AuthorityRequestId, Status, CommittedRevision, ReasonCode);
 }
 
 [ProtoContract(SkipConstructor = true)]
@@ -334,12 +388,30 @@ public readonly struct NetworkEnterTournamentMission : ICommand
     public readonly TournamentSessionSnapshot Snapshot;
     [ProtoMember(2)]
     public readonly bool IsSpectator;
+    [ProtoMember(3)] public readonly string ConfigSessionId;
+    [ProtoMember(4)] public readonly long AuthorityRequestId;
+    [ProtoMember(5)] public readonly string TournamentSessionId;
+    [ProtoMember(6)] public readonly string MissionInstanceId;
+    [ProtoMember(7)] public readonly string RequesterControllerId;
 
-    public NetworkEnterTournamentMission(TournamentSessionSnapshot snapshot, bool isSpectator)
+    public NetworkEnterTournamentMission(AuthorityRequestHeader request, TournamentSessionSnapshot snapshot,
+        string requesterControllerId, bool isSpectator)
     {
         Snapshot = snapshot;
         IsSpectator = isSpectator;
+        ConfigSessionId = request.SessionId;
+        AuthorityRequestId = request.RequestId;
+        TournamentSessionId = snapshot?.SessionId;
+        MissionInstanceId = snapshot?.MissionInstanceId;
+        RequesterControllerId = requesterControllerId;
     }
+
+    public bool IsExactLaunch(AuthorityRequestHeader request, TournamentSessionSnapshot snapshot,
+        string requesterControllerId, bool isSpectator) =>
+        request.SessionId == ConfigSessionId && request.RequestId == AuthorityRequestId &&
+        snapshot != null && snapshot.SessionId == TournamentSessionId &&
+        snapshot.MissionInstanceId == MissionInstanceId && requesterControllerId == RequesterControllerId &&
+        isSpectator == IsSpectator;
 }
 
 public sealed class TournamentSessionUpdated : IEvent

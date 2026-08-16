@@ -44,6 +44,11 @@ internal sealed partial class TournamentSessionHandler : IHandler
     private readonly IModConfigAuthority configAuthority;
     private readonly IAuthorityRouteHandle<TournamentJoinIntent, NetworkTournamentJoinResult> joinRoute;
     private readonly IAuthorityRouteHandle<TournamentLeavePreparationIntent, NetworkTournamentLeavePreparationResult> leavePreparationRoute;
+    private readonly IAuthorityRouteHandle<TournamentLaunchIntent, NetworkTournamentLaunchResult> startRoute;
+    private readonly IAuthorityRouteHandle<TournamentLaunchIntent, NetworkTournamentLaunchResult> spectateRoute;
+    private readonly IAuthorityRouteHandle<TournamentMissionEnteredIntent, NetworkTournamentMissionEnteredResult> missionEnteredRoute;
+    private readonly Dictionary<string, NetworkEnterTournamentMission> pendingMissionLaunches = new();
+    private readonly HashSet<string> openedMissionLaunches = new();
     private readonly Dictionary<string, BetLedgerEntry> betLedger = new();
     private readonly Dictionary<string, TournamentCompletionTransaction> completionTransactions = new();
     private readonly HashSet<string> completionInProgress = new();
@@ -99,11 +104,42 @@ internal sealed partial class TournamentSessionHandler : IHandler
                 isExpectedClientResult: (request, result) => result.Status != AuthorityResultStatus.Accepted ||
                     result.Snapshot != null && result.Snapshot.SessionId == request.SessionId ||
                     result.RemovedSessionId == request.SessionId));
+        startRoute = authorityRequestRouter.Register(
+            AuthorityRoute<TournamentLaunchIntent, NetworkRequestStartTournament, NetworkTournamentLaunchResult>.Define(
+                "tournament.start", AuthorityRouteKind.Command, CreateAuthorityHeader,
+                (intent, header) => new NetworkRequestStartTournament(header, intent.SessionId, intent.ExpectedRevision),
+                request => request.Header, result => result.Header, ValidateStartWireShape, BuildStartCommandKey,
+                ValidateAuthorityHeader, ExecuteStart, CreateLaunchTerminal, ProbeStartApplied,
+                _ => TournamentStateSyncHandler.RequestCanonicalResync(), PresentStartTerminal,
+                configAuthority.IsTrustedServer, new AuthorityTimeoutPolicy(
+                    TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10), retryCount: 0),
+                failClosedOnApplyFailure: true,
+                isExpectedClientResult: IsExpectedLaunchResult));
+        spectateRoute = authorityRequestRouter.Register(
+            AuthorityRoute<TournamentLaunchIntent, NetworkRequestSpectateTournament, NetworkTournamentLaunchResult>.Define(
+                "tournament.spectate", AuthorityRouteKind.Command, CreateAuthorityHeader,
+                (intent, header) => new NetworkRequestSpectateTournament(header, intent.SessionId, intent.ExpectedRevision),
+                request => request.Header, result => result.Header, ValidateSpectateWireShape, BuildSpectateCommandKey,
+                ValidateAuthorityHeader, ExecuteSpectate, CreateLaunchTerminal, ProbeSpectateApplied,
+                _ => TournamentStateSyncHandler.RequestCanonicalResync(), PresentSpectateTerminal,
+                configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true,
+                isExpectedClientResult: IsExpectedLaunchResult));
+        missionEnteredRoute = authorityRequestRouter.Register(
+            AuthorityRoute<TournamentMissionEnteredIntent, NetworkTournamentMissionEntered,
+                NetworkTournamentMissionEnteredResult>.Define(
+                "tournament.mission-entered", AuthorityRouteKind.Command, CreateAuthorityHeader,
+                (intent, header) => new NetworkTournamentMissionEntered(header, intent.SessionId, intent.ExpectedRevision,
+                    intent.MissionInstanceId, intent.IsSpectator),
+                request => request.Header, result => result.Header, ValidateMissionEnteredWireShape,
+                BuildMissionEnteredCommandKey, ValidateAuthorityHeader, ExecuteMissionEntered,
+                CreateMissionEnteredTerminal, ProbeMissionEnteredApplied,
+                _ => TournamentStateSyncHandler.RequestCanonicalResync(), PresentMissionEnteredTerminal,
+                configAuthority.IsTrustedServer, AuthorityTimeoutPolicy.CampaignMutation,
+                failClosedOnApplyFailure: true,
+                isExpectedClientResult: IsExpectedMissionEnteredResult));
 
-        messageBroker.Subscribe<NetworkRequestStartTournament>(Handle_Start);
-        messageBroker.Subscribe<NetworkRequestSpectateTournament>(Handle_Spectate);
         messageBroker.Subscribe<NetworkRequestLeaveActiveTournament>(Handle_LeaveActive);
-        messageBroker.Subscribe<NetworkTournamentMissionEntered>(Handle_TournamentMissionEntered);
         messageBroker.Subscribe<NetworkRequestTournamentChoice>(Handle_Choice);
         messageBroker.Subscribe<NetworkRequestTournamentBet>(Handle_Bet);
         messageBroker.Subscribe<NetworkSubmitTournamentSpawnManifest>(Handle_SpawnManifest);
@@ -120,10 +156,10 @@ internal sealed partial class TournamentSessionHandler : IHandler
     {
         joinRoute.Dispose();
         leavePreparationRoute.Dispose();
-        messageBroker.Unsubscribe<NetworkRequestStartTournament>(Handle_Start);
-        messageBroker.Unsubscribe<NetworkRequestSpectateTournament>(Handle_Spectate);
+        startRoute.Dispose();
+        spectateRoute.Dispose();
+        missionEnteredRoute.Dispose();
         messageBroker.Unsubscribe<NetworkRequestLeaveActiveTournament>(Handle_LeaveActive);
-        messageBroker.Unsubscribe<NetworkTournamentMissionEntered>(Handle_TournamentMissionEntered);
         messageBroker.Unsubscribe<NetworkRequestTournamentChoice>(Handle_Choice);
         messageBroker.Unsubscribe<NetworkRequestTournamentBet>(Handle_Bet);
         messageBroker.Unsubscribe<NetworkSubmitTournamentSpawnManifest>(Handle_SpawnManifest);
@@ -150,6 +186,22 @@ internal sealed partial class TournamentSessionHandler : IHandler
         Action<AuthorityClientOutcome<NetworkTournamentLeavePreparationResult>> completion = null) =>
         Instance?.leavePreparationRoute.Submit(
             new TournamentLeavePreparationIntent(sessionId, expectedRevision), completion);
+
+    internal static AuthorityRequestTicket<NetworkTournamentLaunchResult> SubmitStart(
+        string sessionId, long expectedRevision,
+        Action<AuthorityClientOutcome<NetworkTournamentLaunchResult>> completion = null) =>
+        Instance?.startRoute.Submit(new TournamentLaunchIntent(sessionId, expectedRevision), completion);
+
+    internal static AuthorityRequestTicket<NetworkTournamentLaunchResult> SubmitSpectate(
+        string sessionId, long expectedRevision,
+        Action<AuthorityClientOutcome<NetworkTournamentLaunchResult>> completion = null) =>
+        Instance?.spectateRoute.Submit(new TournamentLaunchIntent(sessionId, expectedRevision), completion);
+
+    internal static AuthorityRequestTicket<NetworkTournamentMissionEnteredResult> SubmitMissionEntered(
+        string sessionId, long expectedRevision, string missionInstanceId, bool isSpectator,
+        Action<AuthorityClientOutcome<NetworkTournamentMissionEnteredResult>> completion = null) =>
+        Instance?.missionEnteredRoute.Submit(
+            new TournamentMissionEnteredIntent(sessionId, expectedRevision, missionInstanceId, isSpectator), completion);
 
     private AuthorityRequestHeader CreateAuthorityHeader(long requestId)
     {
@@ -211,7 +263,8 @@ internal sealed partial class TournamentSessionHandler : IHandler
             if (spectate == TournamentMutationStatus.Applied)
             {
                 BroadcastSnapshot(spectatorSnapshot);
-                network.Send(context.Peer, new NetworkEnterTournamentMission(spectatorSnapshot, true));
+                network.Send(context.Peer, new NetworkEnterTournamentMission(
+                    context.Header, spectatorSnapshot, player.ControllerId, true));
                 return JoinReply(context.Header, AuthorityResultStatus.Accepted, spectatorSnapshot, null, true);
             }
             SendCanonical(context.Peer, spectatorSnapshot ?? current);
@@ -384,6 +437,25 @@ internal sealed partial class TournamentSessionHandler : IHandler
         public long ExpectedRevision { get; }
     }
 
+    private readonly struct TournamentLaunchIntent
+    {
+        public TournamentLaunchIntent(string sessionId, long expectedRevision) =>
+            (SessionId, ExpectedRevision) = (sessionId, expectedRevision);
+        public string SessionId { get; }
+        public long ExpectedRevision { get; }
+    }
+
+    private readonly struct TournamentMissionEnteredIntent
+    {
+        public TournamentMissionEnteredIntent(string sessionId, long expectedRevision, string missionInstanceId,
+            bool isSpectator) => (SessionId, ExpectedRevision, MissionInstanceId, IsSpectator) =
+            (sessionId, expectedRevision, missionInstanceId, isSpectator);
+        public string SessionId { get; }
+        public long ExpectedRevision { get; }
+        public string MissionInstanceId { get; }
+        public bool IsSpectator { get; }
+    }
+
     private bool HasEnrollmentInAnotherTown(string controllerId, string townId)
     {
         return sessionRegistry.GetAll().Any(session =>
@@ -392,129 +464,259 @@ internal sealed partial class TournamentSessionHandler : IHandler
                 contestant.IsHuman && contestant.ControllerId == controllerId));
     }
 
-    private void Handle_Start(MessagePayload<NetworkRequestStartTournament> payload)
+    private static string ValidateStartWireShape(NetworkRequestStartTournament request) =>
+        IsBoundedTournamentId(request.SessionId) && request.ExpectedRevision >= 0 ? null : "invalid-tournament-start";
+
+    private static string BuildStartCommandKey(NetworkRequestStartTournament request) =>
+        string.Concat(FieldKey(request.SessionId), request.ExpectedRevision.ToString());
+
+    private static string ValidateSpectateWireShape(NetworkRequestSpectateTournament request) =>
+        IsBoundedTournamentId(request.SessionId) && request.ExpectedRevision >= 0 ? null : "invalid-tournament-spectate";
+
+    private static string BuildSpectateCommandKey(NetworkRequestSpectateTournament request) =>
+        string.Concat(FieldKey(request.SessionId), request.ExpectedRevision.ToString());
+
+    private AuthorityServerReply<NetworkTournamentLaunchResult> ExecuteStart(
+        AuthorityServerContext context, NetworkRequestStartTournament request)
     {
-        if (ModInformation.IsClient || !TryAuthenticate(payload.Who, out var peer, out var player))
-            return;
-
-        GameThread.RunSafe(() =>
+        if (!sessionRegistry.TryGet(request.SessionId, out TournamentSessionSnapshot current) ||
+            request.ExpectedRevision != current.Revision || current.Phase != TournamentSessionPhase.Preparation ||
+            !TryResolvePlayerAtTown(context.Player, current.TownId, out _, out _, out _) ||
+            !TryGetPlayerSlot(current, context.Player.ControllerId, out _) ||
+            Campaign.Current?.SaveHandler?.IsSaving == true)
         {
-            if (!sessionRegistry.TryGet(payload.What.SessionId, out var current) ||
-                current.Revision != payload.What.ExpectedRevision ||
-                current.Phase != TournamentSessionPhase.Preparation ||
-                !TryResolvePlayerAtTown(player, current.TownId, out _, out _, out _) ||
-                !current.Contestants.Any(contestant =>
-                    contestant.IsHuman && contestant.ControllerId == player.ControllerId))
-            {
-                SendCanonical(peer, current);
-                return;
-            }
+            SendCanonical(context.Peer, current);
+            return LaunchReply(context.Header, AuthorityResultStatus.StaleState, current,
+                context.Player.ControllerId, false, "stale-tournament-start", true);
+        }
 
-            if (Campaign.Current?.SaveHandler?.IsSaving == true)
-            {
-                SendRejection(peer, current.TownId, "Wait for the current campaign save to finish before starting the tournament.");
-                return;
-            }
+        if (!tournamentGameInterface.TryCreateBracket(current, out TournamentBracketUpdate bracket) ||
+            bracket?.Rounds == null || string.IsNullOrEmpty(bracket.CurrentMatchId))
+            return LaunchReply(context.Header, AuthorityResultStatus.Rejected, current,
+                context.Player.ControllerId, false, "invalid-tournament-bracket");
 
+        bool irreversible = false;
+        string stage = "locked-prize";
+        try
+        {
+            // From this point prize and roster state may no longer be safely rolled back.
+            irreversible = true;
             if (!tournamentGameInterface.TryApplyLockedPrize(current))
-            {
-                Logger.Error("Could not apply locked prize for tournament session {SessionId}", current.SessionId);
-                SendRejection(peer, current.TownId, "The locked tournament prize is no longer available.");
-                return;
-            }
+                throw new InvalidOperationException("Could not apply locked prize.");
+            stage = "registry-start";
+            TournamentMutationStatus status = sessionRegistry.TryStart(request.SessionId, request.ExpectedRevision,
+                context.Player.ControllerId, bracket.Rounds, bracket.CurrentMatchId, out TournamentSessionSnapshot snapshot);
+            if (status != TournamentMutationStatus.Applied || snapshot == null)
+                throw new InvalidOperationException("Tournament start did not commit: " + status);
+            stage = "native-state-publication";
             messageBroker.Publish(this, new TournamentNativeStateChanged());
-
-            if (!tournamentGameInterface.TryCreateBracket(current, out var bracket))
-                return;
-
-            var status = sessionRegistry.TryStart(
-                payload.What.SessionId,
-                payload.What.ExpectedRevision,
-                player.ControllerId,
-                bracket.Rounds,
-                bracket.CurrentMatchId,
-                out var snapshot);
-            PublishMutation(status, peer, snapshot);
-            if (status == TournamentMutationStatus.Applied)
-            {
-                Logger.Information(
-                    "[Tournament] Started session {SessionId} in town {TownId}: humans={HumanCount}, spectators={SpectatorCount}, voters={VoterCount}, match={MatchId}, revision={Revision}, startedBy={ControllerId}",
-                    snapshot.SessionId,
-                    snapshot.TownId,
-                    CountActiveHumans(snapshot),
-                    snapshot.SpectatorControllerIds.Length,
-                    snapshot.VoterCount,
-                    snapshot.CurrentMatchId,
-                    snapshot.Revision,
-                    player.ControllerId);
-                network.SendAll(new NetworkEnterTournamentMission(snapshot, false));
-            }
-        }, context: nameof(Handle_Start));
+            stage = "snapshot-publication";
+            BroadcastSnapshot(snapshot);
+            stage = "mission-launch";
+            network.SendAll(new NetworkEnterTournamentMission(context.Header, snapshot, context.Player.ControllerId, false));
+            return LaunchReply(context.Header, AuthorityResultStatus.Accepted, snapshot,
+                context.Player.ControllerId, false, null, true);
+        }
+        catch (Exception exception)
+        {
+            if (!irreversible) throw;
+            Logger.Fatal(exception, "[Tournament] irreversible start failed at {Stage}; session={SessionId}, request={RequestId}",
+                stage, current.SessionId, context.Header.RequestId);
+            DisconnectAllTournamentClients();
+            return LaunchReply(context.Header, AuthorityResultStatus.ExecutionFailed, null,
+                context.Player.ControllerId, false, "tournament-start-fatal", false, suppressReply: true);
+        }
     }
 
-    private void Handle_Spectate(MessagePayload<NetworkRequestSpectateTournament> payload)
+    private AuthorityServerReply<NetworkTournamentLaunchResult> ExecuteSpectate(
+        AuthorityServerContext context, NetworkRequestSpectateTournament request)
     {
-        if (ModInformation.IsClient || !TryAuthenticate(payload.Who, out var peer, out var player))
-            return;
+        if (!sessionRegistry.TryGet(request.SessionId, out TournamentSessionSnapshot current) ||
+            !TryResolvePlayerAtTown(context.Player, current.TownId, out _, out _, out _))
+            return LaunchReply(context.Header, AuthorityResultStatus.StaleState, current,
+                context.Player.ControllerId, true, "stale-tournament-session");
 
-        GameThread.RunSafe(() =>
+        TournamentMutationStatus status = sessionRegistry.TryRequestSpectate(request.SessionId, request.ExpectedRevision,
+            context.Player.ControllerId, out TournamentSessionSnapshot snapshot);
+        TournamentSessionSnapshot canonical = snapshot ?? current;
+        LogSpectatorRequest(context.Player.ControllerId, status, canonical);
+        if ((status != TournamentMutationStatus.Applied && status != TournamentMutationStatus.NoChange) ||
+            (status == TournamentMutationStatus.NoChange &&
+             !IsSpectatorRole(canonical, context.Player.ControllerId)))
         {
-            if (!sessionRegistry.TryGet(payload.What.SessionId, out var current) ||
-                !TryResolvePlayerAtTown(player, current.TownId, out _, out _, out _))
-            {
-                return;
-            }
+            SendCanonical(context.Peer, canonical);
+            return LaunchReply(context.Header,
+                status == TournamentMutationStatus.StaleRevision ? AuthorityResultStatus.StaleState : AuthorityResultStatus.Rejected,
+                canonical, context.Player.ControllerId, true, "spectate-not-available", true);
+        }
 
-            var status = sessionRegistry.TryRequestSpectate(
-                payload.What.SessionId,
-                payload.What.ExpectedRevision,
-                player.ControllerId,
-                out var snapshot);
-            LogSpectatorRequest(player.ControllerId, status, snapshot);
-            if (status == TournamentMutationStatus.Applied)
-            {
-                BroadcastSnapshot(snapshot);
-                network.Send(peer, new NetworkEnterTournamentMission(snapshot, true));
-            }
-            else
-                SendCanonical(peer, snapshot);
-        }, context: nameof(Handle_Spectate));
+        if (status == TournamentMutationStatus.Applied) BroadcastSnapshot(canonical);
+        else SendCanonical(context.Peer, canonical);
+        network.Send(context.Peer, new NetworkEnterTournamentMission(context.Header, canonical,
+            context.Player.ControllerId, true));
+        return LaunchReply(context.Header, AuthorityResultStatus.Accepted, canonical,
+            context.Player.ControllerId, true, null, true);
     }
 
-    private void Handle_TournamentMissionEntered(MessagePayload<NetworkTournamentMissionEntered> payload)
+    private static NetworkTournamentLaunchResult CreateLaunchTerminal(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reasonCode) =>
+        new(header, status, null, null, false, reasonCode);
+
+    private static AuthorityServerReply<NetworkTournamentLaunchResult> LaunchReply(
+        AuthorityRequestHeader header, AuthorityResultStatus status, TournamentSessionSnapshot snapshot,
+        string requesterControllerId, bool isSpectator, string reasonCode, bool statePublished = false,
+        bool suppressReply = false) => new(new NetworkTournamentLaunchResult(header, status, snapshot,
+            requesterControllerId, isSpectator, reasonCode), statePublished, suppressReply);
+
+    private AuthorityCommitProbeResult ProbeStartApplied(NetworkTournamentLaunchResult result) =>
+        ProbeLaunchApplied(result, expectSpectator: false);
+
+    private AuthorityCommitProbeResult ProbeSpectateApplied(NetworkTournamentLaunchResult result) =>
+        ProbeLaunchApplied(result, expectSpectator: true);
+
+    private AuthorityCommitProbeResult ProbeLaunchApplied(NetworkTournamentLaunchResult result, bool expectSpectator)
     {
-        if (ModInformation.IsClient || !TryAuthenticate(payload.Who, out var peer, out var player))
-            return;
+        if (result.Status != AuthorityResultStatus.Accepted || result.Snapshot == null ||
+            result.IsSpectator != expectSpectator || result.Snapshot.Phase == TournamentSessionPhase.Preparation ||
+            result.Snapshot.Revision != result.Header.CommittedRevision ||
+            result.RequesterControllerId != controllerIdProvider.ControllerId ||
+            !sessionRegistry.TryGet(result.TournamentSessionId, out TournamentSessionSnapshot applied))
+            return AuthorityCommitProbeResult.Invalid;
+        bool requesterHasRole = expectSpectator
+            ? IsSpectatorRole(result.Snapshot, result.RequesterControllerId)
+            : TryGetPlayerSlot(result.Snapshot, result.RequesterControllerId, out _);
+        if (!requesterHasRole)
+            return AuthorityCommitProbeResult.Invalid;
+        if (applied.Revision < result.Header.CommittedRevision)
+            return AuthorityCommitProbeResult.Pending;
+        if (applied.Revision != result.Header.CommittedRevision || applied.MissionInstanceId != result.MissionInstanceId)
+            return AuthorityCommitProbeResult.Invalid;
+        bool member = expectSpectator
+            ? applied.SpectatorControllerIds.Contains(controllerIdProvider.ControllerId)
+            : TryGetPlayerSlot(applied, controllerIdProvider.ControllerId, out _);
+        return member ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+    }
 
-        GameThread.RunSafe(() =>
+    private static bool IsExpectedLaunchResult(NetworkRequestStartTournament request, NetworkTournamentLaunchResult result) =>
+        IsExpectedLaunchResult(request.Header, request.SessionId, result, false);
+
+    private static bool IsExpectedLaunchResult(NetworkRequestSpectateTournament request, NetworkTournamentLaunchResult result) =>
+        IsExpectedLaunchResult(request.Header, request.SessionId, result, true);
+
+    private static bool IsExpectedLaunchResult(AuthorityRequestHeader header, string sessionId,
+        NetworkTournamentLaunchResult result, bool isSpectator) =>
+        result.Status != AuthorityResultStatus.Accepted ||
+        (result.SessionId == header.SessionId && result.AuthorityRequestId == header.RequestId &&
+         result.TournamentSessionId == sessionId && result.MissionInstanceId == result.Snapshot?.MissionInstanceId &&
+         result.IsSpectator == isSpectator);
+
+    private void PresentStartTerminal(AuthorityClientOutcome<NetworkTournamentLaunchResult> outcome) =>
+        PresentLaunchTerminal(outcome, false);
+
+    private void PresentSpectateTerminal(AuthorityClientOutcome<NetworkTournamentLaunchResult> outcome) =>
+        PresentLaunchTerminal(outcome, true);
+
+    private void PresentLaunchTerminal(AuthorityClientOutcome<NetworkTournamentLaunchResult> outcome, bool isSpectator)
+    {
+        if (outcome.Completion != AuthorityClientCompletion.Applied || outcome.Result.IsSpectator != isSpectator)
         {
-            if (!sessionRegistry.TryGet(payload.What.SessionId, out var current) ||
-                current.Phase == TournamentSessionPhase.Preparation ||
-                current.IsCompleted)
-                return;
+            Logger.Warning("Tournament launch ended without replica presentation. Completion={Completion}, Reason={Reason}",
+                outcome.Completion, outcome.ReasonCode);
+            TournamentStateSyncHandler.RequestCanonicalResync();
+            return;
+        }
+        TryOpenPendingMissionLaunch(outcome.Result.SessionId, outcome.Result.AuthorityRequestId);
+    }
 
-            var status = sessionRegistry.TryEnterMission(
-                current.SessionId,
-                payload.What.ExpectedRevision,
-                player.ControllerId,
-                out var snapshot);
-            TournamentSessionSnapshot canonical = snapshot ?? current;
-            Logger.Information(
-                "[Tournament] Mission entry session={SessionId}, controller={ControllerId}, role={Role}, status={Status}, entrants={EntrantCount}, humans={HumanCount}, spectators={SpectatorCount}, expectedRevision={ExpectedRevision}, revision={Revision}",
-                current.SessionId,
-                player.ControllerId,
-                GetPlayerRole(canonical, player.ControllerId),
-                status,
-                CountEntrants(canonical),
-                CountActiveHumans(canonical),
-                canonical.SpectatorControllerIds.Length,
-                payload.What.ExpectedRevision,
-                canonical.Revision);
-            PublishMutation(status, peer, snapshot);
-            if (status == TournamentMutationStatus.Applied &&
-                sessionRegistry.TryGetSpawnManifest(current.SessionId, out var manifest))
-                network.Send(peer, new NetworkTournamentSpawnManifest(manifest));
-        }, context: nameof(Handle_TournamentMissionEntered));
+    private static string ValidateMissionEnteredWireShape(NetworkTournamentMissionEntered request) =>
+        IsBoundedTournamentId(request.SessionId) && IsBoundedTournamentId(request.MissionInstanceId) &&
+        request.ExpectedRevision >= 0 ? null : "invalid-tournament-mission-entry";
+
+    private static string BuildMissionEnteredCommandKey(NetworkTournamentMissionEntered request) =>
+        string.Concat(FieldKey(request.SessionId), FieldKey(request.MissionInstanceId), request.ExpectedRevision.ToString(),
+            request.IsSpectator ? "1" : "0");
+
+    private AuthorityServerReply<NetworkTournamentMissionEnteredResult> ExecuteMissionEntered(
+        AuthorityServerContext context, NetworkTournamentMissionEntered request)
+    {
+        if (!sessionRegistry.TryGet(request.SessionId, out TournamentSessionSnapshot current))
+            return MissionEnteredReply(context.Header, AuthorityResultStatus.StaleState, null,
+                context.Player.ControllerId, request.IsSpectator, "tournament-not-found");
+        if (current.MissionInstanceId != request.MissionInstanceId)
+            return MissionEnteredReply(context.Header, AuthorityResultStatus.InvalidRequest, current,
+                context.Player.ControllerId, request.IsSpectator, "invalid-mission-correlation");
+
+        bool isCompetitor = TryGetPlayerSlot(current, context.Player.ControllerId, out _);
+        bool actualSpectator = IsSpectatorRole(current, context.Player.ControllerId);
+        if (!IsActiveSession(current) || (!isCompetitor && !actualSpectator) ||
+            actualSpectator != request.IsSpectator)
+            return MissionEnteredReply(context.Header, AuthorityResultStatus.InvalidRequest, current,
+                context.Player.ControllerId, request.IsSpectator, "invalid-mission-role");
+
+        TournamentMutationStatus status = sessionRegistry.TryEnterMission(request.SessionId, request.ExpectedRevision,
+            context.Player.ControllerId, out TournamentSessionSnapshot snapshot);
+        TournamentSessionSnapshot canonical = snapshot ?? current;
+        bool semanticStale = status == TournamentMutationStatus.StaleRevision && IsActiveSession(canonical) &&
+            canonical.MissionInstanceId == request.MissionInstanceId &&
+            IsConfirmedEntrant(canonical, context.Player.ControllerId) &&
+            IsSpectatorRole(canonical, context.Player.ControllerId) == request.IsSpectator;
+        if (status == TournamentMutationStatus.Applied || status == TournamentMutationStatus.NoChange || semanticStale)
+        {
+            if (status == TournamentMutationStatus.Applied) BroadcastSnapshot(canonical);
+            else SendCanonical(context.Peer, canonical);
+            if (sessionRegistry.TryGetSpawnManifest(canonical.SessionId, out TournamentSpawnManifestData manifest))
+                network.Send(context.Peer, new NetworkTournamentSpawnManifest(manifest));
+            return MissionEnteredReply(context.Header, AuthorityResultStatus.Accepted, canonical,
+                context.Player.ControllerId, request.IsSpectator, null, true);
+        }
+
+        SendCanonical(context.Peer, canonical);
+        return MissionEnteredReply(context.Header, AuthorityResultStatus.StaleState, canonical,
+            context.Player.ControllerId, request.IsSpectator, "stale-tournament-revision", true);
+    }
+
+    private static NetworkTournamentMissionEnteredResult CreateMissionEnteredTerminal(
+        AuthorityRequestHeader header, AuthorityResultStatus status, string reasonCode) =>
+        new(header, status, null, null, false, reasonCode);
+
+    private static AuthorityServerReply<NetworkTournamentMissionEnteredResult> MissionEnteredReply(
+        AuthorityRequestHeader header, AuthorityResultStatus status, TournamentSessionSnapshot snapshot,
+        string requesterControllerId, bool isSpectator, string reasonCode, bool statePublished = false) =>
+        new(new NetworkTournamentMissionEnteredResult(header, status, snapshot, requesterControllerId,
+            isSpectator, reasonCode), statePublished);
+
+    private AuthorityCommitProbeResult ProbeMissionEnteredApplied(NetworkTournamentMissionEnteredResult result)
+    {
+        if (result.Status != AuthorityResultStatus.Accepted || result.Snapshot == null ||
+            result.Snapshot.Revision != result.Header.CommittedRevision ||
+            result.RequesterControllerId != controllerIdProvider.ControllerId ||
+            !sessionRegistry.TryGet(result.TournamentSessionId, out TournamentSessionSnapshot applied))
+            return AuthorityCommitProbeResult.Invalid;
+        if (applied.Revision < result.Header.CommittedRevision)
+            return AuthorityCommitProbeResult.Pending;
+        if (applied.Revision != result.Header.CommittedRevision || !IsActiveSession(applied) ||
+            applied.MissionInstanceId != result.MissionInstanceId)
+            return AuthorityCommitProbeResult.Invalid;
+        bool exactEntrant = IsConfirmedEntrant(applied, controllerIdProvider.ControllerId);
+        bool actualSpectator = IsSpectatorRole(applied, controllerIdProvider.ControllerId);
+        return exactEntrant && actualSpectator == result.IsSpectator
+            ? AuthorityCommitProbeResult.Applied : AuthorityCommitProbeResult.Pending;
+    }
+
+    private static bool IsExpectedMissionEnteredResult(NetworkTournamentMissionEntered request,
+        NetworkTournamentMissionEnteredResult result) => result.Status != AuthorityResultStatus.Accepted ||
+        (result.SessionId == request.Header.SessionId && result.AuthorityRequestId == request.Header.RequestId &&
+         result.TournamentSessionId == request.SessionId && result.MissionInstanceId == request.MissionInstanceId &&
+         result.IsSpectator == request.IsSpectator);
+
+    private static void PresentMissionEnteredTerminal(AuthorityClientOutcome<NetworkTournamentMissionEnteredResult> outcome)
+    {
+        if (outcome.Completion != AuthorityClientCompletion.Applied)
+        {
+            Logger.Warning("Tournament mission entry ended without canonical entrant membership. Completion={Completion}, Reason={Reason}",
+                outcome.Completion, outcome.ReasonCode);
+            TournamentStateSyncHandler.RequestCanonicalResync();
+        }
     }
 
     private void Handle_Choice(MessagePayload<NetworkRequestTournamentChoice> payload)
@@ -747,7 +949,10 @@ internal sealed partial class TournamentSessionHandler : IHandler
         {
             TournamentSessionSnapshot snapshot = TournamentSessionSnapshotNormalizer.Normalize(payload.What.Snapshot);
             if (sessionRegistry.ApplySnapshot(snapshot))
+            {
                 messageBroker.Publish(this, new TournamentSessionUpdated(snapshot));
+                TryOpenPendingMissionLaunches(snapshot);
+            }
         }, context: nameof(Handle_Snapshot));
     }
 
@@ -771,23 +976,76 @@ internal sealed partial class TournamentSessionHandler : IHandler
         GameThread.RunSafe(() =>
         {
             TournamentSessionSnapshot snapshot = TournamentSessionSnapshotNormalizer.Normalize(payload.What.Snapshot);
-            if (snapshot == null)
+            if (snapshot == null || snapshot.SessionId != payload.What.TournamentSessionId ||
+                snapshot.MissionInstanceId != payload.What.MissionInstanceId ||
+                string.IsNullOrEmpty(payload.What.ConfigSessionId) || payload.What.AuthorityRequestId <= 0 ||
+                string.IsNullOrEmpty(payload.What.RequesterControllerId))
+            {
+                Logger.Warning("Ignoring invalid tournament mission launch correlation.");
                 return;
+            }
             if (!payload.What.IsSpectator && !snapshot.Contestants.Any(contestant =>
                     contestant.IsHuman && contestant.ControllerId == controllerIdProvider.ControllerId))
             {
                 return;
             }
-
-            if (!ContainerProvider.TryResolve(out ICoopTournamentLauncher launcher))
-            {
-                Logger.Error("Could not resolve {Launcher}", nameof(ICoopTournamentLauncher));
+            if (payload.What.IsSpectator && !snapshot.SpectatorControllerIds.Contains(controllerIdProvider.ControllerId))
                 return;
-            }
 
-            if (launcher.OpenCoopTournament(snapshot, payload.What.IsSpectator) == null)
-                return;
+            pendingMissionLaunches[MissionLaunchKey(payload.What)] = payload.What;
+            TryOpenPendingMissionLaunch(payload.What.ConfigSessionId, payload.What.AuthorityRequestId);
         }, context: nameof(Handle_EnterMission));
+    }
+
+    private void TryOpenPendingMissionLaunches(TournamentSessionSnapshot applied)
+    {
+        foreach (NetworkEnterTournamentMission launch in pendingMissionLaunches.Values
+                     .Where(candidate => candidate.TournamentSessionId == applied.SessionId &&
+                         candidate.MissionInstanceId == applied.MissionInstanceId).ToArray())
+            TryOpenPendingMissionLaunch(launch.ConfigSessionId, launch.AuthorityRequestId);
+    }
+
+    private void TryOpenPendingMissionLaunch(string configSessionId, long authorityRequestId)
+    {
+        NetworkEnterTournamentMission launch = pendingMissionLaunches.Values.FirstOrDefault(candidate =>
+            candidate.ConfigSessionId == configSessionId && candidate.AuthorityRequestId == authorityRequestId);
+        if (launch.Snapshot == null || !sessionRegistry.TryGet(launch.TournamentSessionId, out TournamentSessionSnapshot applied) ||
+            applied.Revision != launch.Snapshot.Revision || applied.MissionInstanceId != launch.MissionInstanceId)
+            return;
+
+        string key = MissionLaunchKey(launch);
+        if (openedMissionLaunches.Contains(key)) return;
+        if (!ContainerProvider.TryResolve(out ICoopTournamentLauncher launcher))
+        {
+            Logger.Error("Could not resolve {Launcher}", nameof(ICoopTournamentLauncher));
+            return;
+        }
+        if (launcher.OpenCoopTournament(applied, launch.IsSpectator) == null) return;
+        openedMissionLaunches.Add(key);
+        pendingMissionLaunches.Remove(key);
+    }
+
+    private static string MissionLaunchKey(NetworkEnterTournamentMission launch) =>
+        string.Concat(FieldKey(launch.ConfigSessionId), launch.AuthorityRequestId.ToString(),
+            FieldKey(launch.TournamentSessionId), FieldKey(launch.MissionInstanceId),
+            FieldKey(launch.RequesterControllerId), launch.IsSpectator ? "1" : "0");
+
+    private void DisconnectAllTournamentClients()
+    {
+        var peers = new HashSet<NetPeer>(tournamentPeerControllers.Keys);
+        foreach (Player connected in playerManager.Players)
+        {
+            if (playerManager.TryGetPeer(connected.ControllerId, out NetPeer peer))
+                peers.Add(peer);
+        }
+        foreach (NetPeer peer in peers)
+        {
+            try { peer.Disconnect(); }
+            catch (Exception exception)
+            {
+                Logger.Fatal(exception, "[Tournament] failed to disconnect client after irreversible launch failure.");
+            }
+        }
     }
 
     private void Handle_Disconnected(MessagePayload<PlayerDisconnected> payload)
@@ -1421,6 +1679,13 @@ internal sealed partial class TournamentSessionHandler : IHandler
             contestant.IsHuman && !contestant.IsReplaced && contestant.ControllerId == controllerId);
         return slot != null;
     }
+
+    private static bool IsSpectatorRole(TournamentSessionSnapshot snapshot, string controllerId) =>
+        snapshot?.SpectatorControllerIds?.Contains(controllerId) == true &&
+        !TryGetPlayerSlot(snapshot, controllerId, out _);
+
+    private static bool IsActiveSession(TournamentSessionSnapshot snapshot) =>
+        snapshot != null && snapshot.Phase != TournamentSessionPhase.Preparation && !snapshot.IsCompleted;
 
     private static bool IsConfirmedEntrant(TournamentSessionSnapshot snapshot, string controllerId)
     {

@@ -1,6 +1,8 @@
 using Common.Network.Messages;
+using Common.Messaging;
 using E2E.Tests.Environment.Instance;
 using E2E.Tests.Util;
+using GameInterface.Configuration;
 using GameInterface.Services.Players;
 using GameInterface.Services.Players.Data;
 using GameInterface.Services.Tournaments;
@@ -70,8 +72,14 @@ public class TournamentDisconnectFlowTests : SyncTestBase
             Assert.True(Server.Resolve<ITournamentSessionRegistry>().ApplySnapshot(CreateSnapshot(townId)));
         });
 
-        Server.SimulateMessage(host.NetPeer, new NetworkTournamentMissionEntered(SessionId, 1));
-        Server.SimulateMessage(successor.NetPeer, new NetworkTournamentMissionEntered(SessionId, 1));
+        ModConfigSnapshot config = null;
+        Server.Call(() => Assert.True(Server.Resolve<IModConfigAuthority>().TryGetCurrent(out config)));
+        var header = new AuthorityRequestHeader(config.ProtocolVersion, config.SessionId, 1, config.Revision);
+        Server.SimulateMessage(host.NetPeer, new NetworkTournamentMissionEntered(
+            header, SessionId, 1, "disconnect-mission", false));
+        Server.SimulateMessage(successor.NetPeer, new NetworkTournamentMissionEntered(
+            new AuthorityRequestHeader(config.ProtocolVersion, config.SessionId, 2, config.Revision),
+            SessionId, 1, "disconnect-mission", false));
 
         Server.Call(() =>
         {

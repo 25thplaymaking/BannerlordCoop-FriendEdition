@@ -6,6 +6,7 @@ using Common.Util;
 using GameInterface.Services.Entity;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Tournaments.Data;
+using GameInterface.Services.Tournaments.Handlers;
 using GameInterface.Services.Tournaments.Messages;
 using LiteNetLib;
 using Missions.Data;
@@ -173,7 +174,13 @@ public class CoopTournamentController : CoopMissionController
         network.ConnectToInstance(initialSnapshot.MissionInstanceId);
         coopMissionComponent.AgentRegistry.Clear();
         relayNetwork.SendAll(new NetworkMissionEntered(session.OwnControllerId, initialSnapshot.MissionInstanceId));
-        relayNetwork.SendAll(new NetworkTournamentMissionEntered(initialSnapshot.SessionId, initialSnapshot.Revision));
+        TournamentSessionHandler.SubmitMissionEntered(
+            initialSnapshot.SessionId,
+            initialSnapshot.Revision,
+            initialSnapshot.MissionInstanceId,
+            initialSnapshot.SpectatorControllerIds.Contains(session.OwnControllerId) &&
+            !initialSnapshot.Contestants.Any(contestant => contestant.IsHuman &&
+                contestant.ControllerId == session.OwnControllerId));
         DrainPendingTournamentPackets();
     }
 

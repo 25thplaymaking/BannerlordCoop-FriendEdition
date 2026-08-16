@@ -158,8 +158,7 @@ internal sealed class TournamentUIController : ITournamentUIController, IHandler
     public void RequestStart(string townId)
     {
         if (!TryGetTownSession(townId, out var snapshot)) return;
-
-        network.SendAll(new NetworkRequestStartTournament(snapshot.SessionId, snapshot.Revision));
+        TournamentSessionHandler.SubmitStart(snapshot.SessionId, snapshot.Revision);
     }
 
     public void RequestLeavePreparation(string townId)
@@ -173,8 +172,7 @@ internal sealed class TournamentUIController : ITournamentUIController, IHandler
     public void RequestSpectate(string townId)
     {
         if (!TryGetTownSession(townId, out var snapshot)) return;
-
-        network.SendAll(new NetworkRequestSpectateTournament(snapshot.SessionId, snapshot.Revision));
+        TournamentSessionHandler.SubmitSpectate(snapshot.SessionId, snapshot.Revision);
     }
 
     public void RequestLeaveActive(TournamentSessionSnapshot snapshot)

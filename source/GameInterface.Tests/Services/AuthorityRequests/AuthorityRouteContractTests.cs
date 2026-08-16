@@ -116,6 +116,39 @@ public sealed class AuthorityRouteContractTests
     }
 
     [Fact]
+    public void TournamentLaunchRequests_DeclareTypedRoutesAndRetainConfigCorrelation()
+    {
+        var header = new AuthorityRequestHeader(1, "0123456789abcdef0123456789abcdef", 31, 7);
+        var start = new NetworkRequestStartTournament(header, "tournament-a", 19);
+        var spectate = new NetworkRequestSpectateTournament(header, "tournament-a", 20);
+
+        Assert.Equal("tournament.start", ((AuthorityRouteAttribute)Attribute.GetCustomAttribute(
+            typeof(NetworkRequestStartTournament), typeof(AuthorityRouteAttribute))).RouteId);
+        Assert.Equal("tournament.spectate", ((AuthorityRouteAttribute)Attribute.GetCustomAttribute(
+            typeof(NetworkRequestSpectateTournament), typeof(AuthorityRouteAttribute))).RouteId);
+        Assert.Equal(header.RequestId, start.Header.RequestId);
+        Assert.Equal(header.ExpectedRevision, spectate.Header.ExpectedRevision);
+        Assert.Equal(19, start.ExpectedRevision);
+        Assert.Equal(20, spectate.ExpectedRevision);
+    }
+
+    [Fact]
+    public void TournamentMissionEnteredRequest_DeclaresRouteAndRetainsLaunchTuple()
+    {
+        var header = new AuthorityRequestHeader(1, "0123456789abcdef0123456789abcdef", 32, 8);
+        var request = new NetworkTournamentMissionEntered(header, "tournament-a", 21, "mission-a", true);
+        var attribute = (AuthorityRouteAttribute)Attribute.GetCustomAttribute(
+            typeof(NetworkTournamentMissionEntered), typeof(AuthorityRouteAttribute));
+
+        Assert.NotNull(attribute);
+        Assert.Equal("tournament.mission-entered", attribute.RouteId);
+        Assert.Equal(header.SessionId, request.Header.SessionId);
+        Assert.Equal(header.RequestId, request.Header.RequestId);
+        Assert.Equal("mission-a", request.MissionInstanceId);
+        Assert.True(request.IsSpectator);
+    }
+
+    [Fact]
     public void Router_RefusesARouteWhoseTypedMessageDoesNotDeclareTheSameIdentity()
     {
         using var broker = new MessageBroker();

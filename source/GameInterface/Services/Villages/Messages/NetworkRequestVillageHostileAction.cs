@@ -5,6 +5,7 @@ using ProtoBuf;
 namespace GameInterface.Services.Villages.Messages;
 
 [ProtoContract(SkipConstructor = true)]
+[AuthorityRoute("village.hostile-action", AuthorityRouteKind.Command)]
 public readonly struct NetworkRequestVillageHostileAction : ICommand
 {
     [ProtoMember(1)]
@@ -14,13 +15,32 @@ public readonly struct NetworkRequestVillageHostileAction : ICommand
     [ProtoMember(3)]
     public readonly string SettlementId;
     [ProtoMember(4)]
-    public readonly string ControllerId;
+    public readonly int ProtocolVersion;
+    [ProtoMember(5)]
+    public readonly string SessionId;
+    [ProtoMember(6)]
+    public readonly long AuthorityRequestId;
+    [ProtoMember(7)]
+    public readonly long ExpectedRevision;
 
-    public NetworkRequestVillageHostileAction(VillageHostileAction action, string mobilePartyId, string settlementId, string controllerId)
+    public NetworkRequestVillageHostileAction(
+        AuthorityRequestHeader header,
+        VillageHostileAction action,
+        string mobilePartyId,
+        string settlementId)
     {
         Action = action;
         MobilePartyId = mobilePartyId;
         SettlementId = settlementId;
-        ControllerId = controllerId;
+        ProtocolVersion = header.ProtocolVersion;
+        SessionId = header.SessionId;
+        AuthorityRequestId = header.RequestId;
+        ExpectedRevision = header.ExpectedRevision;
     }
+
+    public AuthorityRequestHeader Header => new AuthorityRequestHeader(
+        ProtocolVersion,
+        SessionId,
+        AuthorityRequestId,
+        ExpectedRevision);
 }

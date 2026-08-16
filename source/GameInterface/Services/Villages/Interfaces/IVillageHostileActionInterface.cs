@@ -15,6 +15,7 @@ public interface IVillageHostileActionInterface : IGameAbstraction
     void ApplyHostileAction(MobileParty mobileParty, Settlement settlement, VillageHostileAction action);
     void ApplyForceActionOutcome(MapEvent mapEvent, VillageHostileAction action);
     void ApproveMapEventStart(PartyBase attacker, Settlement settlement, VillageHostileAction action);
+    bool MarkApprovedMapEventStartPublished(PartyBase attacker, Settlement settlement, VillageHostileAction action);
     bool TryConsumeApprovedMapEventStart(PartyBase attacker, PartyBase defender, BattleCreationFlags flags, out VillageHostileActionDeniedReason reason);
     void CancelMapEventStartApprovals(PartyBase attacker);
     bool TryGetForceActionCooldown(Settlement settlement, out CampaignTime cooldownUntil);

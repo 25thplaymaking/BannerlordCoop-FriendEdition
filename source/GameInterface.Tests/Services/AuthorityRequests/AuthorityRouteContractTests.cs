@@ -1,6 +1,8 @@
 using Common.Messaging;
 using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.MapEvents.Messages.Start;
+using GameInterface.Services.Villages.Data;
+using GameInterface.Services.Villages.Messages;
 using System;
 using Xunit;
 
@@ -28,6 +30,22 @@ public sealed class AuthorityRouteContractTests
         Assert.NotNull(attribute);
         Assert.Equal("map-event.battle-start", attribute.RouteId);
         Assert.Equal(AuthorityRouteKind.Command, attribute.Kind);
+    }
+
+    [Fact]
+    public void VillageHostileActionRequest_DeclaresTheRegisteredCommandRouteAndRetainsItsHeader()
+    {
+        var attribute = (AuthorityRouteAttribute)Attribute.GetCustomAttribute(
+            typeof(NetworkRequestVillageHostileAction), typeof(AuthorityRouteAttribute));
+        var header = new AuthorityRequestHeader(1, "session", 9, 4);
+        var request = new NetworkRequestVillageHostileAction(header, VillageHostileAction.Raid, "party", "village");
+
+        Assert.NotNull(attribute);
+        Assert.Equal("village.hostile-action", attribute.RouteId);
+        Assert.Equal(AuthorityRouteKind.Command, attribute.Kind);
+        Assert.Equal(header.RequestId, request.Header.RequestId);
+        Assert.Equal(header.SessionId, request.Header.SessionId);
+        Assert.Equal(header.ExpectedRevision, request.Header.ExpectedRevision);
     }
 
     [Fact]

@@ -262,6 +262,16 @@ internal class VillageHostileActionInterface : IVillageHostileActionInterface
         pendingHostileActionSettlements[settlementId] = true;
     }
 
+    public bool MarkApprovedMapEventStartPublished(PartyBase attacker, Settlement settlement, VillageHostileAction action)
+    {
+        if (!TryGetApprovalKey(attacker, settlement, action, out var key) ||
+            !approvedMapEventStarts.TryGetValue(key, out var approval) || approval.IsExpired)
+            return false;
+
+        approval.IsPublished = true;
+        return true;
+    }
+
     public bool TryConsumeApprovedMapEventStart(
         PartyBase attacker,
         PartyBase defender,
@@ -300,16 +310,30 @@ internal class VillageHostileActionInterface : IVillageHostileActionInterface
             return false;
         }
 
-        if (approvedMapEventStarts.TryRemove(key, out var approval))
+        if (approvedMapEventStarts.TryGetValue(key, out var approval))
         {
-            ClearPendingHostileActionApprovalIfNoApprovals(approval.SettlementId);
             if (approval.IsExpired)
+            {
+                approvedMapEventStarts.TryRemove(key, out _);
+                ClearPendingHostileActionApprovalIfNoApprovals(approval.SettlementId);
+                reason = VillageHostileActionDeniedReason.NotApproved;
+                return false;
+            }
+
+            // The command may only be consumed after the route has queued its canonical
+            // approval publication. A premature map-event request must leave the approval
+            // available for the ordered route completion rather than burning it.
+            if (!approval.IsPublished)
             {
                 reason = VillageHostileActionDeniedReason.NotApproved;
                 return false;
             }
 
-            return true;
+            if (approvedMapEventStarts.TryRemove(key, out approval))
+            {
+                ClearPendingHostileActionApprovalIfNoApprovals(approval.SettlementId);
+                return true;
+            }
         }
 
         PruneExpiredApprovals(settlement);
@@ -537,6 +561,7 @@ internal class VillageHostileActionInterface : IVillageHostileActionInterface
 
         public string SettlementId { get; }
         public DateTime ExpiresAtUtc { get; }
+        public bool IsPublished { get; set; }
         public bool IsExpired => DateTime.UtcNow >= ExpiresAtUtc;
     }
 

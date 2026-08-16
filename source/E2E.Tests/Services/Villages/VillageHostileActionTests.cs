@@ -91,7 +91,8 @@ public class VillageHostileActionTests : MapEventTestBase
         Assert.Equal(VillageHostileAction.Raid, started.Action);
         Assert.Equal(mobilePartyId, started.MobilePartyId);
         Assert.Equal(target.SettlementId, started.SettlementId);
-        Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionDenied>());
+        Assert.Equal(AuthorityResultStatus.Accepted,
+            Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionResult>().Single().Header.Status);
 
         var result = ConsumeApprovedMapEventStart(mobilePartyId, target.SettlementPartyId, RaidFlags());
         Assert.True(result.Approved);
@@ -116,7 +117,8 @@ public class VillageHostileActionTests : MapEventTestBase
         Assert.Equal(action, started.Action);
         Assert.Equal(mobilePartyId, started.MobilePartyId);
         Assert.Equal(target.SettlementId, started.SettlementId);
-        Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionDenied>());
+        Assert.Equal(AuthorityResultStatus.Accepted,
+            Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionResult>().Single().Header.Status);
 
         var result = ConsumeApprovedMapEventStart(mobilePartyId, target.SettlementPartyId, HostileActionFlags(action));
         Assert.True(result.Approved);
@@ -248,8 +250,7 @@ public class VillageHostileActionTests : MapEventTestBase
 
         RequestHostileAction(client, VillageHostileAction.ForceVolunteers, mobilePartyId, target.SettlementId);
 
-        var denied = Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionDenied>().Single();
-        Assert.Equal(VillageHostileActionDeniedReason.HearthTooLow, denied.Reason);
+        AssertHostileActionRejected("hearth-too-low");
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionStarted>());
     }
 
@@ -268,8 +269,7 @@ public class VillageHostileActionTests : MapEventTestBase
 
         RequestHostileAction(client, action, mobilePartyId, target.SettlementId);
 
-        var denied = Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionDenied>().Single();
-        Assert.Equal(VillageHostileActionDeniedReason.Cooldown, denied.Reason);
+        AssertHostileActionRejected("cooldown");
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionStarted>());
     }
 
@@ -285,8 +285,7 @@ public class VillageHostileActionTests : MapEventTestBase
 
         RequestHostileAction(client, VillageHostileAction.Raid, mobilePartyId, settlementId);
 
-        var denied = Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionDenied>().Single();
-        Assert.Equal(VillageHostileActionDeniedReason.NonVillageSettlement, denied.Reason);
+        AssertHostileActionRejected("non-village-settlement");
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionStarted>());
     }
 
@@ -311,8 +310,7 @@ public class VillageHostileActionTests : MapEventTestBase
 
         RequestHostileAction(client, VillageHostileAction.Raid, mobilePartyId, target.SettlementId);
 
-        var denied = Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionDenied>().Single();
-        Assert.Equal(VillageHostileActionDeniedReason.InvalidVillageState, denied.Reason);
+        AssertHostileActionRejected("invalid-village-state");
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionStarted>());
     }
 
@@ -336,8 +334,7 @@ public class VillageHostileActionTests : MapEventTestBase
 
         RequestHostileAction(secondClient, VillageHostileAction.Raid, secondMobilePartyId, target.SettlementId);
 
-        var denied = Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionDenied>().Single();
-        Assert.Equal(VillageHostileActionDeniedReason.AlreadyInMapEvent, denied.Reason);
+        AssertHostileActionRejected("already-in-map-event");
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionStarted>());
     }
 
@@ -375,8 +372,7 @@ public class VillageHostileActionTests : MapEventTestBase
 
         RequestHostileAction(client, VillageHostileAction.Raid, mobilePartyId, target.SettlementId);
 
-        var denied = Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionDenied>().Single();
-        Assert.Equal(VillageHostileActionDeniedReason.OwnFaction, denied.Reason);
+        AssertHostileActionRejected("own-faction");
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionStarted>());
     }
 
@@ -561,8 +557,7 @@ public class VillageHostileActionTests : MapEventTestBase
 
         RequestHostileAction(client, VillageHostileAction.Raid, forgedMobilePartyId, target.SettlementId);
 
-        var denied = Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionDenied>().Single();
-        Assert.Equal(VillageHostileActionDeniedReason.InvalidRequester, denied.Reason);
+        AssertHostileActionRejected("invalid-requester");
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionStarted>());
     }
 
@@ -587,8 +582,7 @@ public class VillageHostileActionTests : MapEventTestBase
 
         RequestHostileAction(client, VillageHostileAction.Raid, mobilePartyId, target.SettlementId);
 
-        var denied = Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionDenied>().Single();
-        Assert.Equal(VillageHostileActionDeniedReason.InvalidRequester, denied.Reason);
+        AssertHostileActionRejected("invalid-requester");
         Assert.Empty(Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionStarted>());
     }
 
@@ -611,6 +605,37 @@ public class VillageHostileActionTests : MapEventTestBase
             null)));
 
         Assert.Null(Assert.Single(Server.NetworkSentMessages.GetMessages<NetworkMapEventCreated>()).MapEventId);
+    }
+
+    [Fact]
+    public void HostileMapEventCreation_DoesNotConsumeApprovalBeforeItsRoutePublication()
+    {
+        var (_, mobilePartyId) = CreatePlayerHeroParty("PlayerOne");
+        var target = CreateVillageTarget();
+        var first = false;
+        var second = false;
+
+        Server.Call(() =>
+        {
+            Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(mobilePartyId, out var mobileParty));
+            Assert.True(Server.ObjectManager.TryGetObject<Settlement>(target.SettlementId, out var settlement));
+            Assert.True(Server.ObjectManager.TryGetObject<PartyBase>(target.SettlementPartyId, out var defender));
+            var hostileActions = Server.Resolve<IVillageHostileActionInterface>();
+
+            hostileActions.ApproveMapEventStart(mobileParty.Party, settlement, VillageHostileAction.Raid);
+            first = hostileActions.TryConsumeApprovedMapEventStart(
+                mobileParty.Party, defender, RaidFlags(), out var firstReason);
+            Assert.Equal(VillageHostileActionDeniedReason.NotApproved, firstReason);
+
+            Assert.True(hostileActions.MarkApprovedMapEventStartPublished(
+                mobileParty.Party, settlement, VillageHostileAction.Raid));
+            second = hostileActions.TryConsumeApprovedMapEventStart(
+                mobileParty.Party, defender, RaidFlags(), out var secondReason);
+            Assert.Equal(VillageHostileActionDeniedReason.Invalid, secondReason);
+        });
+
+        Assert.False(first);
+        Assert.True(second);
     }
 
     [Fact]
@@ -3408,11 +3433,20 @@ public class VillageHostileActionTests : MapEventTestBase
             .Append(AccessTools.Method(typeof(GameMenu), nameof(GameMenu.SwitchToMenu)))
             .ToList();
 
-        client.Call(() => client.Resolve<INetwork>().SendAll(new NetworkRequestVillageHostileAction(
-            action,
-            mobilePartyId,
-            settlementId,
-            client.Resolve<IControllerIdProvider>().ControllerId)), disabledMethods);
+        client.Call(() =>
+        {
+            Assert.True(client.ObjectManager.TryGetObject<MobileParty>(mobilePartyId, out var mobileParty));
+            Assert.True(client.ObjectManager.TryGetObject<Settlement>(settlementId, out var settlement));
+            client.Resolve<IMessageBroker>().Publish(this,
+                new VillageHostileActionAttempted(action, mobileParty, settlement));
+        }, disabledMethods);
+    }
+
+    private void AssertHostileActionRejected(string reasonCode)
+    {
+        var result = Server.NetworkSentMessages.GetMessages<NetworkVillageHostileActionResult>().Single();
+        Assert.Equal(AuthorityResultStatus.Rejected, result.Header.Status);
+        Assert.Equal(reasonCode, result.Header.ReasonCode);
     }
 
     private static void SetMapEventCreationTimeout(EnvironmentInstance instance, TimeSpan timeout)
@@ -3471,6 +3505,8 @@ public class VillageHostileActionTests : MapEventTestBase
             Assert.True(Server.ObjectManager.TryGetObject<Settlement>(settlementId, out var settlement));
 
             Server.Resolve<IVillageHostileActionInterface>().ApproveMapEventStart(mobileParty.Party, settlement, action);
+            Assert.True(Server.Resolve<IVillageHostileActionInterface>().MarkApprovedMapEventStartPublished(
+                mobileParty.Party, settlement, action));
         });
     }
 

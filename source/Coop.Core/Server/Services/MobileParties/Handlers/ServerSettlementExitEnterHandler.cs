@@ -126,7 +126,6 @@ public class ServerSettlementExitEnterHandler : IHandler
                 Compact(partyId, typeof(MobileParty))));
             var result = AcceptedStart(context.Header, partyId, request.SettlementId,
                 SettlementEncounterStartMode.EnteredSettlement);
-            network.Send(context.Peer, result);
             return new AuthorityServerReply<NetworkStartSettlementEncounter>(result, statePublished: true);
         }
         catch (Exception exception)
@@ -143,21 +142,7 @@ public class ServerSettlementExitEnterHandler : IHandler
         SettlementEncounterStartMode mode)
     {
         var result = AcceptedStart(context.Header, partyId, settlementId, mode);
-        try
-        {
-            network.Send(context.Peer, result);
-            return new AuthorityServerReply<NetworkStartSettlementEncounter>(result, statePublished: true);
-        }
-        catch (Exception exception)
-        {
-            Logger.Error(exception,
-                "Could not publish idempotent settlement encounter start proof. Session={SessionId} Request={RequestId} Party={PartyId} Settlement={SettlementId}",
-                context.Header.SessionId, context.Header.RequestId, partyId, settlementId);
-            DisconnectPeer(context.Peer, "settlement start proof failure", context);
-            return new AuthorityServerReply<NetworkStartSettlementEncounter>(
-                CreateStartTerminalResult(context.Header, AuthorityResultStatus.ExecutionFailed,
-                    "settlement-start-isolated"), statePublished: false, suppressReply: true);
-        }
+        return new AuthorityServerReply<NetworkStartSettlementEncounter>(result, statePublished: true);
     }
 
     private AuthorityServerReply<NetworkSettlementEncounterLeaveResult> ExecuteEnd(
@@ -200,7 +185,6 @@ public class ServerSettlementExitEnterHandler : IHandler
                 new NetworkPartyLeaveSettlement(Compact(partyId, typeof(MobileParty))));
             var result = AcceptedEnd(context.Header, partyId, request.SettlementId,
                 SettlementEncounterLeaveOutcome.Applied);
-            network.Send(context.Peer, result);
             return new AuthorityServerReply<NetworkSettlementEncounterLeaveResult>(result, statePublished: true);
         }
         catch (Exception exception)
@@ -217,21 +201,7 @@ public class ServerSettlementExitEnterHandler : IHandler
         SettlementEncounterLeaveOutcome outcome)
     {
         var result = AcceptedEnd(context.Header, partyId, settlementId, outcome);
-        try
-        {
-            network.Send(context.Peer, result);
-            return new AuthorityServerReply<NetworkSettlementEncounterLeaveResult>(result, statePublished: true);
-        }
-        catch (Exception exception)
-        {
-            Logger.Error(exception,
-                "Could not publish idempotent settlement encounter leave proof. Session={SessionId} Request={RequestId} Party={PartyId} Settlement={SettlementId}",
-                context.Header.SessionId, context.Header.RequestId, partyId, settlementId);
-            DisconnectPeer(context.Peer, "settlement leave proof failure", context);
-            return new AuthorityServerReply<NetworkSettlementEncounterLeaveResult>(
-                CreateEndTerminalResult(context.Header, AuthorityResultStatus.ExecutionFailed,
-                    "settlement-leave-isolated"), statePublished: false, suppressReply: true);
-        }
+        return new AuthorityServerReply<NetworkSettlementEncounterLeaveResult>(result, statePublished: true);
     }
 
     private AuthorityServerReply<NetworkStartSettlementEncounter> IsolateStartAfterMutation(

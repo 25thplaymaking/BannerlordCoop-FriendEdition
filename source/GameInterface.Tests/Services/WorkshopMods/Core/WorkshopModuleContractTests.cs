@@ -99,6 +99,7 @@ public sealed class WorkshopModuleContractTests
             "Fourberie",
             "Bannerlord.Diplomacy",
             "PlayerSettlement",
+            "RebellionsAndDemographics",
         };
 
         Assert.Equal(expected, modules.Select(module => module.ModuleId));

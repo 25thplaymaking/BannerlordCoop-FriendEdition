@@ -10,6 +10,7 @@ using Coop.Core.Server.Services.Settlements;
 using Coop.IntegrationTests.Environment.Instance;
 using Coop.IntegrationTests.Environment.Mock;
 using GameInterface;
+using GameInterface.Configuration;
 using GameInterface.Policies;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Settlements.Interfaces;
@@ -113,7 +114,19 @@ public class TestEnvironment
             .As<ISettlementEncounterDistanceValidator>()
             .SingleInstance();
 
-        RegisterMock<ISettlementInterface>(builder);
+        var configSnapshot = new ModConfigSnapshot(
+            "0123456789abcdef0123456789abcdef",
+            revision: 1,
+            new ModOptions(new ModOptionsData()),
+            birthAndDeathEnabled: true);
+        var configAuthority = new Mock<IModConfigAuthority>();
+        configAuthority.Setup(value => value.TryGetCurrent(out configSnapshot)).Returns(true);
+        configAuthority.Setup(value => value.IsTrustedServer(It.IsAny<object>())).Returns(true);
+        builder.RegisterInstance(configAuthority.Object)
+            .As<IModConfigAuthority>()
+            .SingleInstance();
+
+        RegisterSettlementInterfaceMock(builder);
 
         return builder;
     }
@@ -123,6 +136,18 @@ public class TestEnvironment
         var mock = new Mock<T>();
         builder.RegisterInstance(mock).AsSelf().SingleInstance();
         builder.RegisterInstance(mock.Object).As<T>().SingleInstance();
+    }
+
+    private static void RegisterSettlementInterfaceMock(ContainerBuilder builder)
+    {
+        var mock = new Mock<ISettlementInterface>();
+        mock.Setup(service => service.PartyEnterSettlement(
+                It.IsAny<MobileParty>(), It.IsAny<Settlement>()))
+            .Callback<MobileParty, Settlement>((party, settlement) => party._currentSettlement = settlement);
+        mock.Setup(service => service.PartyLeaveSettlement(It.IsAny<MobileParty>()))
+            .Callback<MobileParty>(party => party._currentSettlement = null);
+        builder.RegisterInstance(mock).AsSelf().SingleInstance();
+        builder.RegisterInstance(mock.Object).As<ISettlementInterface>().SingleInstance();
     }
 
     /// <summary>

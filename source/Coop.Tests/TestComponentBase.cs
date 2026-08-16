@@ -100,6 +100,8 @@ internal abstract class TestComponentBase
         builder.RegisterType<RegistryCollection>().As<IRegistryCollection>().InstancePerLifetimeScope();
         builder.RegisterType<KingdomCreationSettlementTracker>().As<IKingdomCreationSettlementTracker>().InstancePerLifetimeScope();
         builder.RegisterType<KingdomDecisionDataConverter>().As<IKingdomDecisionDataConverter>().InstancePerLifetimeScope();
+        RegisterMock<IKingdomCreator>(builder);
+        RegisterMock<IKingdomDecisionVoteManager>(builder);
 
         RegisterMock<ILogger>(builder);
         RegisterMock<IGameInterface>(builder);

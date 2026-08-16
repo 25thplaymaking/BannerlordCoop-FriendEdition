@@ -1,16 +1,13 @@
-﻿using Common;
-using Common.Util;
-using Coop.Core.Client.Services.MobileParties.Messages;
+using Common.Messaging;
 using Coop.Core.Server.Services.Kingdoms.Messages;
 using Coop.IntegrationTests.Environment;
+using Coop.IntegrationTests.Environment.Instance;
+using GameInterface.Configuration;
 using GameInterface.Services.Entity;
 using GameInterface.Services.Kingdoms.Messages;
 using GameInterface.Services.Players;
 using GameInterface.Services.Players.Data;
-using System.Reflection;
-using TaleWorlds.CampaignSystem.Party;
-using TaleWorlds.CampaignSystem.Settlements;
-using TaleWorlds.Library;
+using TaleWorlds.CampaignSystem;
 
 namespace Coop.IntegrationTests.Kingdoms;
 
@@ -20,68 +17,68 @@ public class KingdomCreationRequestSyncTest
     internal TestEnvironment TestEnvironment { get; } = new TestEnvironment();
 
     [Fact]
-    public void ClientKingdomCreationRequested_Publishes_ServerCommand()
+    public void ClientKingdomCreationRequested_SendsCorrelatedAuthorityRequest()
     {
-        var client1 = TestEnvironment.Clients.First();
-        var server = TestEnvironment.Server;
-        client1.Resolve<IControllerIdProvider>().SetControllerId("player1");
+        var client = TestEnvironment.Clients.First();
+        client.Resolve<IControllerIdProvider>().SetControllerId("player1");
+        client.Resolve<TestNetworkRouter>().IsMessageRoutingEnabled = false;
 
         GameThreadTestRunner.Run(() =>
-            client1.SimulateMessage(this, new KingdomCreationRequested("Real Kingdom", "empire")));
+            client.SimulateMessage(this, new KingdomCreationRequested("Real Kingdom", "empire")));
 
-        Assert.Equal(1, client1.NetworkSentMessages.GetMessageCount<NetworkRequestCreateKingdom>());
-        Assert.Equal(1, server.InternalMessages.GetMessageCount<NetworkRequestCreateKingdom>());
-        Assert.Equal(1, server.InternalMessages.GetMessageCount<CreateKingdom>());
-
-        var networkRequest = Assert.Single(client1.NetworkSentMessages.GetMessages<NetworkRequestCreateKingdom>());
-        Assert.Equal("player1", networkRequest.ControllerId);
-        Assert.Equal("Real Kingdom", networkRequest.KingdomName);
-        Assert.Equal("empire", networkRequest.CultureId);
-        Assert.Null(networkRequest.PartyId);
-        Assert.Null(networkRequest.SettlementId);
-
-        var serverCommand = Assert.Single(server.InternalMessages.GetMessages<CreateKingdom>());
-        Assert.Equal("player1", serverCommand.ControllerId);
-        Assert.Equal("Real Kingdom", serverCommand.KingdomName);
-        Assert.Equal("empire", serverCommand.CultureId);
+        var request = Assert.Single(client.NetworkSentMessages.GetMessages<NetworkRequestCreateKingdom>());
+        Assert.Equal("player1", request.ControllerId);
+        Assert.Equal("Real Kingdom", request.KingdomName);
+        Assert.Equal("empire", request.CultureId);
+        Assert.Null(request.PartyId);
+        Assert.Null(request.SettlementId);
+        AssertCurrentHeader(client, request.Header);
+        Assert.Empty(TestEnvironment.Server.InternalMessages.GetMessages<CreateKingdom>());
     }
 
     [Fact]
-    public void ServerNetworkRequestCreateKingdom_Restores_CreatingPartySettlementContext()
+    public void ServerCreateKingdomAuthorityRequest_RejectsUnauthenticatedPeer()
     {
+        var client = TestEnvironment.Clients.First();
         var server = TestEnvironment.Server;
-        var playerManager = server.Resolve<IPlayerManager>();
+        var request = new NetworkRequestCreateKingdom(
+            "player1",
+            "Real Kingdom",
+            "empire",
+            "party1",
+            null,
+            CurrentHeader(server));
 
-        var party = server.CreateRegisteredObject<MobileParty>("party1");
-        var settlement = server.CreateRegisteredObject<Settlement>("settlement1");
-        settlement._partiesCache = new MBList<MobileParty>();
-        playerManager.AddPlayer(new Player("player1", "hero1", "party1", "clan1", "character1"));
+        GameThreadTestRunner.Run(() => server.SimulateMessage(client.NetPeer, request));
 
-        Assert.Null(party.CurrentSettlement);
-
-        GameThreadTestRunner.Run(() =>
-            server.SimulateMessage(
-                this,
-                new NetworkRequestCreateKingdom("player1", "Real Kingdom", "empire", "party1", "settlement1")));
-
-        Assert.Same(settlement, party.CurrentSettlement);
-        Assert.Single(
-            server.NetworkSentMessages.GetMessages<NetworkPartyEnterSettlement>(),
-            message => message.PartyId == "party1" && message.SettlementId == "settlement1");
+        var result = Assert.Single(server.NetworkSentMessages.GetMessages<NetworkCreateKingdomResult>());
+        Assert.Equal(AuthorityResultStatus.Unauthorized, result.Header.Status);
+        Assert.Equal("peer-not-player", result.Header.ReasonCode);
+        Assert.Equal(request.Header.RequestId, result.Header.RequestId);
+        Assert.Empty(server.InternalMessages.GetMessages<CreateKingdom>());
     }
 
     [Fact]
-    public void ServerNetworkRequestCreateKingdom_Publishes_CreateKingdomCommand()
+    public void ServerCreateKingdomAuthorityRequest_RejectsAuthenticatedPlayerWithoutClan()
     {
+        var client = TestEnvironment.Clients.First();
         var server = TestEnvironment.Server;
+        Authenticate(server, client, new Player("player1", "hero1", "party1", "clan1", "character1"));
+        var request = new NetworkRequestCreateKingdom(
+            "player1",
+            "Real Kingdom",
+            "empire",
+            "party1",
+            null,
+            CurrentHeader(server));
 
-        GameThreadTestRunner.Run(() =>
-            server.SimulateMessage(this, new NetworkRequestCreateKingdom("player1", "Real Kingdom", "empire")));
+        GameThreadTestRunner.Run(() => server.SimulateMessage(client.NetPeer, request));
 
-        var serverCommand = Assert.Single(server.InternalMessages.GetMessages<CreateKingdom>());
-        Assert.Equal("player1", serverCommand.ControllerId);
-        Assert.Equal("Real Kingdom", serverCommand.KingdomName);
-        Assert.Equal("empire", serverCommand.CultureId);
+        var result = Assert.Single(server.NetworkSentMessages.GetMessages<NetworkCreateKingdomResult>());
+        Assert.Equal(AuthorityResultStatus.Rejected, result.Header.Status);
+        Assert.Equal("clan-not-found", result.Header.ReasonCode);
+        Assert.Equal(request.Header.RequestId, result.Header.RequestId);
+        Assert.Empty(server.InternalMessages.GetMessages<CreateKingdom>());
     }
 
     [Fact]
@@ -113,37 +110,57 @@ public class KingdomCreationRequestSyncTest
     }
 
     [Fact]
-    public void ServerPlayerKingdomCreated_UsesPendingSettlementContextWhenCurrentSettlementWasCleared()
+    public void ServerCreateKingdomAuthorityRequest_RejectsStaleClanCulture()
     {
+        var client = TestEnvironment.Clients.First();
         var server = TestEnvironment.Server;
+        server.CreateRegisteredObject<Clan>("clan1");
+        Authenticate(server, client, new Player("player1", "hero1", "party1", "clan1", "character1"));
+        var request = new NetworkRequestCreateKingdom(
+            "player1",
+            "Real Kingdom",
+            "empire",
+            "party1",
+            null,
+            CurrentHeader(server));
+
+        GameThreadTestRunner.Run(() => server.SimulateMessage(client.NetPeer, request));
+
+        var result = Assert.Single(server.NetworkSentMessages.GetMessages<NetworkCreateKingdomResult>());
+        Assert.Equal(AuthorityResultStatus.Rejected, result.Header.Status);
+        Assert.Equal("stale-culture", result.Header.ReasonCode);
+        Assert.Equal(request.Header.RequestId, result.Header.RequestId);
+        Assert.Empty(server.InternalMessages.GetMessages<CreateKingdom>());
+    }
+
+    private static void Authenticate(
+        EnvironmentInstance server,
+        EnvironmentInstance client,
+        Player player)
+    {
         var playerManager = server.Resolve<IPlayerManager>();
+        Assert.True(playerManager.AddPlayer(player));
+        playerManager.SetPeer(player.ControllerId, client.NetPeer);
+    }
 
-        var party = server.CreateRegisteredObject<MobileParty>("party1");
-        var settlement = server.CreateRegisteredObject<Settlement>("settlement1");
-        settlement._partiesCache = new MBList<MobileParty>();
-        playerManager.AddPlayer(new Player("player1", "hero1", "party1", "clan1", "character1"));
+    private static AuthorityRequestHeader CurrentHeader(EnvironmentInstance instance)
+    {
+        Assert.True(instance.Resolve<IModConfigAuthority>().TryGetCurrent(out var snapshot));
+        return new AuthorityRequestHeader(
+            snapshot.ProtocolVersion,
+            snapshot.SessionId,
+            requestId: 17,
+            snapshot.Revision);
+    }
 
-        GameThreadTestRunner.Run(() =>
-            server.SimulateMessage(
-                this,
-                new NetworkRequestCreateKingdom("player1", "Real Kingdom", "empire", "party1", "settlement1")));
-
-        using (new AllowedThread())
-        {
-            typeof(MobileParty)
-                .GetField("_currentSettlement", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-                ?.SetValue(party, null);
-        }
-
-        GameThreadTestRunner.Run(() =>
-            server.SimulateMessage(
-                this,
-                new PlayerKingdomCreated("player1", "Kingdom_Created_1", "Real Kingdom", "clan1")));
-
-        var networkMessage = Assert.Single(server.NetworkSentMessages.GetMessages<NetworkPlayerKingdomCreated>());
-        Assert.Equal("party1", networkMessage.PartyId);
-        Assert.Equal("settlement1", networkMessage.SettlementId);
-        Assert.Same(settlement, party.CurrentSettlement);
+    private static void AssertCurrentHeader(EnvironmentInstance instance, AuthorityRequestHeader header)
+    {
+        Assert.True(instance.Resolve<IModConfigAuthority>().TryGetCurrent(out var snapshot));
+        Assert.True(header.TryValidate(out var failure), failure);
+        Assert.Equal(snapshot.ProtocolVersion, header.ProtocolVersion);
+        Assert.Equal(snapshot.SessionId, header.SessionId);
+        Assert.Equal(snapshot.Revision, header.ExpectedRevision);
+        Assert.True(header.RequestId > 0);
     }
 }
 

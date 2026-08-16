@@ -66,7 +66,7 @@ public sealed class SiegeAftermathPendingTests : IDisposable
         Assert.True(pending.TryBindCapture(newOwner, leaderHero));
         Assert.True(SiegeAftermathPatches.PendingAftermaths.TryAdd(settlement, pending));
 
-        bool applied = false;
+        bool aftermathApplied = false;
         bool resolved = SiegeAftermathPatches.ResolvePending(
             CreateUninitialized<SiegeAftermathCampaignBehavior>(), settlement, "settlement ownership changed",
             (_, party, capturedSettlement) =>
@@ -77,7 +77,7 @@ public sealed class SiegeAftermathPendingTests : IDisposable
             },
             (party, capturedSettlement, aftermath, oldOwner, contributions) =>
             {
-                applied = true;
+                aftermathApplied = true;
                 Assert.Same(pending.LeaderParty, party);
                 Assert.Same(settlement, capturedSettlement);
                 Assert.Equal(SiegeAftermathAction.SiegeAftermath.ShowMercy, aftermath);
@@ -86,7 +86,7 @@ public sealed class SiegeAftermathPendingTests : IDisposable
             });
 
         Assert.True(resolved);
-        Assert.True(applied);
+        Assert.True(aftermathApplied);
         var applied = Assert.Single(SiegeAftermathPatches.PendingAftermaths);
         Assert.Equal(SiegeAftermathChoiceState.Applied, applied.Value.State);
         Assert.Equal((int)SiegeAftermathAction.SiegeAftermath.ShowMercy, applied.Value.AppliedAftermathType);

@@ -1,4 +1,6 @@
 using Common;
+using Coop.Tests.Mocks;
+using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.WorkshopMods.ImprovedGarrisons;
 using HarmonyLib;
 using ProtoBuf;
@@ -576,33 +578,48 @@ public sealed class ImprovedGarrisonsCompatibilityTests : IDisposable
     [Fact]
     public void RequestLedger_SuppressesReplaysAndBoundsMemoryPerPeer()
     {
-        var ledger = new ImprovedGarrisonsRequestLedger<string>(2);
-        ledger.Record("peer-a", 10, "setting:a");
-        ledger.Record("peer-a", 11, "setting:b");
-        ledger.Record("peer-a", 12, "setting:c");
+        using var network = new TestNetwork();
+        var peerA = network.CreatePeer();
+        var peerB = network.CreatePeer();
+        var ledger = new AuthorityReplayLedger<string>(2);
 
-        Assert.False(ledger.HasSeen("peer-a", 10));
-        Assert.True(ledger.HasSeen("peer-a", 11));
-        Assert.True(ledger.HasSeen("peer-a", 12));
-        Assert.False(ledger.HasSeen("peer-b", 12));
+        Assert.Equal(AuthorityReplayDecision.New,
+            ledger.Inspect(peerA, "session", "workshop.improved-garrisons.setting", 10, "setting:a").Decision);
+        ledger.Complete(peerA, "session", "workshop.improved-garrisons.setting", 10, "accepted:a");
+        Assert.Equal(AuthorityReplayDecision.New,
+            ledger.Inspect(peerA, "session", "workshop.improved-garrisons.setting", 11, "setting:b").Decision);
+        ledger.Complete(peerA, "session", "workshop.improved-garrisons.setting", 11, "accepted:b");
+        Assert.Equal(AuthorityReplayDecision.New,
+            ledger.Inspect(peerA, "session", "workshop.improved-garrisons.setting", 12, "setting:c").Decision);
+
+        Assert.Equal(AuthorityReplayDecision.New,
+            ledger.Inspect(peerA, "session", "workshop.improved-garrisons.setting", 10, "setting:a").Decision);
+        Assert.Equal(AuthorityReplayDecision.New,
+            ledger.Inspect(peerB, "session", "workshop.improved-garrisons.setting", 12, "setting:c").Decision);
     }
 
     [Fact]
     public void RequestLedger_ReplaysOnlyTheExactCommand()
     {
-        var ledger = new ImprovedGarrisonsRequestLedger<string>(2);
-        ledger.Record("peer-a", 11, "operation:town-a", "accepted");
+        using var network = new TestNetwork();
+        var peer = network.CreatePeer();
+        var ledger = new AuthorityReplayLedger<string>(2);
 
-        Assert.Equal(
-            ImprovedGarrisonsReplayDecision.Replay,
-            ledger.Inspect("peer-a", 11, "operation:town-a", out string cached));
-        Assert.Equal("accepted", cached);
-        Assert.Equal(
-            ImprovedGarrisonsReplayDecision.Conflict,
-            ledger.Inspect<string>("peer-a", 11, "operation:town-b", out _));
-        Assert.Equal(
-            ImprovedGarrisonsReplayDecision.New,
-            ledger.Inspect<string>("peer-a", 12, "operation:town-a", out _));
+        Assert.Equal(AuthorityReplayDecision.New,
+            ledger.Inspect(peer, "session", "workshop.improved-garrisons.management", 11,
+                "operation:town-a").Decision);
+        ledger.Complete(peer, "session", "workshop.improved-garrisons.management", 11, "accepted");
+
+        var replay = ledger.Inspect(peer, "session", "workshop.improved-garrisons.management", 11,
+            "operation:town-a");
+        Assert.Equal(AuthorityReplayDecision.Completed, replay.Decision);
+        Assert.Equal("accepted", replay.Result);
+        Assert.Equal(AuthorityReplayDecision.Conflict,
+            ledger.Inspect(peer, "session", "workshop.improved-garrisons.management", 11,
+                "operation:town-b").Decision);
+        Assert.Equal(AuthorityReplayDecision.New,
+            ledger.Inspect(peer, "session", "workshop.improved-garrisons.management", 12,
+                "operation:town-a").Decision);
     }
 
     [Fact]

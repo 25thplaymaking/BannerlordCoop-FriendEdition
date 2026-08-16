@@ -3,6 +3,7 @@ using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.Clans.Messages;
 using GameInterface.Services.Kingdoms.Messages;
 using GameInterface.Services.MapEvents.Messages.Start;
+using GameInterface.Services.Tournaments;
 using GameInterface.Services.Tournaments.Messages;
 using GameInterface.Services.Tournaments.Data;
 using GameInterface.Services.Villages.Data;

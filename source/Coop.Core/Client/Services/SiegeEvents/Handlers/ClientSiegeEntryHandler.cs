@@ -11,13 +11,14 @@ using GameInterface.Services.ObjectManager;
 using GameInterface.Services.PlayerCaptivityService.Messages;
 using GameInterface.Services.SiegeEvents.Interfaces;
 using GameInterface.Services.SiegeEvents.Messages;
+using GameInterface.Services.UI.Interfaces;
 using System;
 using System.Linq;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Encounters;
+using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
-using TaleWorlds.Engine;
 
 namespace Coop.Core.Client.Services.SiegeEvents.Handlers;
 
@@ -33,6 +34,7 @@ internal class ClientSiegeEntryHandler : IHandler
     private readonly INetwork network;
     private readonly IObjectManager objectManager;
     private readonly ISiegeEventInterface siegeEventInterface;
+    private readonly ILoadingInterface loadingInterface;
     private readonly IModConfigAuthority configAuthority;
     private readonly IAuthorityRouteHandle<SiegeEntryIntent, NetworkBesiegeSettlementApproved> besiegeRoute;
     private readonly IAuthorityRouteHandle<SiegeEntryIntent, NetworkJoinSiegeCampApproved> joinRoute;
@@ -66,7 +68,7 @@ internal class ClientSiegeEntryHandler : IHandler
         INetworkConfig configuration,
         IObjectManager objectManager,
         ISiegeEventInterface siegeEventInterface)
-        : this(messageBroker, network, configuration, objectManager, siegeEventInterface, null, null)
+        : this(messageBroker, network, configuration, objectManager, siegeEventInterface, null, null, null)
     {
     }
 
@@ -77,12 +79,14 @@ internal class ClientSiegeEntryHandler : IHandler
         IObjectManager objectManager,
         ISiegeEventInterface siegeEventInterface,
         IModConfigAuthority configAuthority,
-        IAuthorityRequestRouter authorityRequestRouter)
+        IAuthorityRequestRouter authorityRequestRouter,
+        ILoadingInterface loadingInterface)
     {
         this.messageBroker = messageBroker;
         this.network = network;
         this.objectManager = objectManager;
         this.siegeEventInterface = siegeEventInterface;
+        this.loadingInterface = loadingInterface;
         this.configAuthority = configAuthority;
         BreakInContinuationTimeout = configuration.ObjectCreationTimeout;
         if (authorityRequestRouter != null && configAuthority != null)
@@ -511,11 +515,11 @@ internal class ClientSiegeEntryHandler : IHandler
         UnwindSiegeEntry(outcome.ReasonCode ?? "canonical-siege-state-missing");
     }
 
-    private static void UnwindSiegeEntry(string reason)
+    private void UnwindSiegeEntry(string reason)
     {
         // Entry attempts do not make a local siege write. Clear the menu/loading residue exactly once
         // when their authority lifecycle reaches any non-applied terminal outcome.
-        LoadingWindow.DisableGlobalLoadingWindow();
+        loadingInterface?.HideLoadingScreen();
         PlayerEncounter.LeaveEncounter = true;
         GameMenu.ExitToLast();
         Logger.Information("Siege entry did not apply: {Reason}", reason);

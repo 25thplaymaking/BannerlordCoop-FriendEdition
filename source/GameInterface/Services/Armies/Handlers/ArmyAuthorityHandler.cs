@@ -28,6 +28,7 @@ internal sealed class ArmyAuthorityHandler : IHandler
     private readonly IObjectManager objectManager;
     private readonly INetwork network;
     private readonly IModConfigAuthority configAuthority;
+    private readonly IPlayerManager playerManager;
     private readonly IAuthorityRouteHandle<CreateIntent, ArmyAuthorityResult> createRoute;
     private readonly IAuthorityRouteHandle<InviteIntent, ArmyAuthorityResult> inviteRoute;
     private readonly IAuthorityRouteHandle<InviteResponseIntent, ArmyAuthorityResult> inviteResponseRoute;
@@ -38,12 +39,13 @@ internal sealed class ArmyAuthorityHandler : IHandler
     private readonly Dictionary<string, InviteLease> invitationLeases = new Dictionary<string, InviteLease>();
 
     public ArmyAuthorityHandler(IMessageBroker messageBroker, IObjectManager objectManager, INetwork network,
-        IModConfigAuthority configAuthority, IAuthorityRequestRouter authorityRequestRouter)
+        IModConfigAuthority configAuthority, IPlayerManager playerManager, IAuthorityRequestRouter authorityRequestRouter)
     {
         this.messageBroker = messageBroker;
         this.objectManager = objectManager;
         this.network = network;
         this.configAuthority = configAuthority;
+        this.playerManager = playerManager;
         createRoute = authorityRequestRouter.Register(AuthorityRoute<CreateIntent, RequestCreateArmy, ArmyAuthorityResult>.Define(
             "army.create", AuthorityRouteKind.Command, Header, (x,h) => new RequestCreateArmy(x.KingdomId, x.TargetSettlementId, x.ArmyTypeId, x.PartyIds, h), x => x.Header, x => x.Header,
             x => string.IsNullOrWhiteSpace(x.KingdomId) || string.IsNullOrWhiteSpace(x.ArmyTypeId) ? "army-create-malformed" : null,
@@ -127,7 +129,7 @@ internal sealed class ArmyAuthorityHandler : IHandler
     {
         if (!Actor(c, out var actor, out var reason) || !Army(r.ArmyId, out var army) || !ReferenceEquals(army.LeaderParty, actor) || !Party(r.PartyId, out var party) || party.Army != null)
             return Reply(c.Header, r.ArmyId, r.PartyId, AuthorityResultStatus.Rejected, reason ?? "army-invite-ineligible");
-        if (party.IsPlayerParty()) { invitationLeases[LeaseKey(r.ArmyId, r.PartyId)] = new InviteLease(actor.StringId, DateTime.UtcNow.AddMinutes(1)); return Reply(c.Header, r.ArmyId, r.PartyId, AuthorityResultStatus.Accepted); }
+        if (playerManager.Contains(party)) { invitationLeases[LeaseKey(r.ArmyId, r.PartyId)] = new InviteLease(actor.StringId, DateTime.UtcNow.AddMinutes(1)); return Reply(c.Header, r.ArmyId, r.PartyId, AuthorityResultStatus.Accepted); }
         if (!SameFaction(actor, party)) return Reply(c.Header, r.ArmyId, r.PartyId, AuthorityResultStatus.Rejected, "army-invite-faction-mismatch");
         Add(army, party, false); return Reply(c.Header, r.ArmyId, r.PartyId, AuthorityResultStatus.Accepted);
     }
@@ -185,7 +187,7 @@ internal sealed class ArmyAuthorityHandler : IHandler
     private bool Army(string id, out Army army) => objectManager.TryGetObject(id, out army);
     private bool Party(string id, out MobileParty party) => objectManager.TryGetObject(id, out party);
     private static bool SameFaction(MobileParty one, MobileParty two) => one?.MapFaction != null && ReferenceEquals(one.MapFaction, two?.MapFaction);
-    private IEnumerable<MobileParty> AuthoritativeEligibleParties(MobileParty actor, IEnumerable<string> ids) => (ids ?? Enumerable.Empty<string>()).Distinct().Select(id => { objectManager.TryGetObject(id, out MobileParty p); return p; }).Where(p => p != null && p.Army == null && !p.IsPlayerParty() && SameFaction(actor, p));
+    private IEnumerable<MobileParty> AuthoritativeEligibleParties(MobileParty actor, IEnumerable<string> ids) => (ids ?? Enumerable.Empty<string>()).Distinct().Select(id => { objectManager.TryGetObject(id, out MobileParty p); return p; }).Where(p => p != null && p.Army == null && !playerManager.Contains(p) && SameFaction(actor, p));
     private static List<string> Ids(IEnumerable<MobileParty> parties) => parties.Select(p => p.StringId).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
     private AuthorityRequestHeader Header(long requestId) => configAuthority.TryGetCurrent(out var s) ? new AuthorityRequestHeader(s.ProtocolVersion, s.SessionId, requestId, s.Revision) : default;
     private AuthorityHeaderValidation Validate(AuthorityRequestHeader h) { if (!configAuthority.TryGetCurrent(out var s)) return AuthorityHeaderValidation.Reject(AuthorityResultStatus.Unavailable, "config-unavailable"); if (h.ProtocolVersion != s.ProtocolVersion) return AuthorityHeaderValidation.Reject(AuthorityResultStatus.InvalidRequest, "unsupported-protocol"); if (h.SessionId != s.SessionId) return AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleSession, "stale-session"); return h.ExpectedRevision == s.Revision ? AuthorityHeaderValidation.Valid : AuthorityHeaderValidation.Reject(AuthorityResultStatus.StaleState, "stale-state"); }

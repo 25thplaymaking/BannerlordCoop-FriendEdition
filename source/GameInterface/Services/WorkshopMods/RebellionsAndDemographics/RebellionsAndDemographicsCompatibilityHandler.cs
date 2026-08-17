@@ -252,6 +252,7 @@ internal sealed class RebellionsAndDemographicsCompatibilityHandler : IHandler
         MethodInfo onGameStart = FindLifecycleMethod(subModule, "OnGameStart", 2);
         MethodInfo onMissionInitialize = FindLifecycleMethod(subModule, "OnMissionBehaviorInitialize", 1);
         RebellionsAndDemographicsHarmonyIsolation.Purge(assembly, harmony);
+        RebellionsAndDemographicsHarmonyIsolation.InstallSaveDefinitionCompatibility(harmony);
         harmony.Patch(onSubModuleLoad, postfix: new HarmonyMethod(AccessTools.Method(
             typeof(RebellionsAndDemographicsRuntime), nameof(RebellionsAndDemographicsRuntime.PurgeUpstreamAfterSubModuleLoad))));
         harmony.Patch(onGameStart, prefix: new HarmonyMethod(AccessTools.Method(

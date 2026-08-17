@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using TaleWorlds.SaveSystem;
 
 namespace GameInterface.Services.WorkshopMods.RebellionsAndDemographics;
 
@@ -10,6 +11,75 @@ internal static class RebellionsAndDemographicsHarmonyIsolation
 {
     internal const string UpstreamOwner = "com.rebellions.and.demographics";
     internal const string AdapterOwner = "Bannerlord.Coop.RebellionsAndDemographics.1.4.8";
+
+    private static readonly FieldInfo DefinitionContextField = typeof(SaveableTypeDefiner).GetField(
+        "_definitionContext", BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly MethodInfo ConstructContainerDefinition = typeof(SaveableTypeDefiner).GetMethod(
+        "ConstructContainerDefinition", BindingFlags.Instance | BindingFlags.NonPublic,
+        binder: null, types: new[] { typeof(Type) }, modifiers: null);
+    private static readonly MethodInfo AddClassDefinition = typeof(SaveableTypeDefiner)
+        .GetMethods(BindingFlags.Instance | BindingFlags.NonPublic)
+        .SingleOrDefault(method => method.Name == "AddClassDefinition" &&
+            method.GetParameters().Length == 3 && method.GetParameters()[0].ParameterType == typeof(Type));
+
+    internal static void InstallSaveDefinitionCompatibility(Harmony adapter)
+    {
+        if (adapter == null) throw new ArgumentNullException(nameof(adapter));
+        if (DefinitionContextField == null || ConstructContainerDefinition == null || AddClassDefinition == null)
+            throw new MissingMemberException("The v1.4.8 SaveableTypeDefiner contract is unavailable.");
+
+        MethodInfo containerPrefix = AccessTools.Method(
+            typeof(RebellionsAndDemographicsHarmonyIsolation), nameof(SkipDuplicateContainerDefinitionPrefix));
+        MethodInfo classPrefix = AccessTools.Method(
+            typeof(RebellionsAndDemographicsHarmonyIsolation), nameof(SkipDuplicateClassDefinitionPrefix));
+        PatchOnce(adapter, ConstructContainerDefinition, containerPrefix);
+        PatchOnce(adapter, AddClassDefinition, classPrefix);
+    }
+
+    private static void PatchOnce(Harmony adapter, MethodInfo original, MethodInfo prefix)
+    {
+        var patches = Harmony.GetPatchInfo(original)?.Prefixes;
+        if (patches != null && patches.Any(patch => patch.owner == adapter.Id && patch.PatchMethod == prefix)) return;
+        adapter.Patch(original, prefix: new HarmonyMethod(prefix));
+    }
+
+    // R&D v3.0.1 defines several native containers more than once and defines
+    // PendingAllianceData from two definers. v1.4.8 turns the former into a fatal assert and the
+    // latter into a duplicate dictionary insertion. Keep the first canonical definition exactly
+    // as older versions did and make only subsequent registration attempts idempotent.
+    private static bool SkipDuplicateContainerDefinitionPrefix(object __instance, Type __0) =>
+        ShouldRunDefinitionOriginal(__instance, __0);
+
+    private static bool SkipDuplicateClassDefinitionPrefix(object __instance, Type __0)
+    {
+        // The package duplicates its own PendingAllianceData class. Do not weaken collision
+        // detection for any class owned by the game or a different module.
+        if (!string.Equals(__0?.Assembly.GetName().Name,
+                RebellionsAndDemographicsModule.AssemblyName, StringComparison.Ordinal)) return true;
+        return ShouldRunDefinitionOriginal(__instance, __0);
+    }
+
+    private static bool ShouldRunDefinitionOriginal(object instance, Type type)
+    {
+        if (instance == null || type == null) return true;
+        try
+        {
+            object context = DefinitionContextField.GetValue(instance);
+            if (context == null) return true;
+            MethodInfo hasDefinition = context.GetType().GetMethod(
+                "HasDefinition", BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null, types: new[] { typeof(Type) }, modifiers: null);
+            if (hasDefinition == null) return true;
+            return ShouldRunSaveDefinitionOriginal((bool)hasDefinition.Invoke(context, new object[] { type }));
+        }
+        catch
+        {
+            // Preserve the engine's fail-closed behavior if the pinned reflection contract changes.
+            return true;
+        }
+    }
+
+    internal static bool ShouldRunSaveDefinitionOriginal(bool alreadyDefined) => !alreadyDefined;
 
     internal static void Purge(Assembly assembly, Harmony adapter)
     {

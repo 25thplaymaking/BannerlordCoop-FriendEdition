@@ -2,6 +2,9 @@
 
 ## 2026-08-16 — v1.4.8 module loading and trade-close hotfix
 
+- Make the pinned Rebellions and Demographics v3.0.1 save-definition registration idempotent on
+  Bannerlord v1.4.8, preserving the first canonical definition instead of aborting the dedicated
+  host on its duplicate native containers and `PendingAllianceData` class.
 - Migrate the exact pre-gear/R&D launcher module token in place, preserving private endpoints,
   passwords, and genuinely customized module lists. Existing launchers now include Open Source
   Saddlery, Weaponry, Armory, and Rebellions and Demographics after self-update.

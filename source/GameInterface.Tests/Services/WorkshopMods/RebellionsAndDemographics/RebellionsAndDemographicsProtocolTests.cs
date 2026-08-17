@@ -17,6 +17,13 @@ public sealed class RebellionsAndDemographicsProtocolTests
     private static readonly AuthorityRequestHeader Header = new(7, "session-a", 41, 9);
 
     [Fact]
+    public void SaveDefinitionCompatibility_PreservesFirstDefinition_AndSuppressesOnlyDuplicates()
+    {
+        Assert.True(RebellionsAndDemographicsHarmonyIsolation.ShouldRunSaveDefinitionOriginal(false));
+        Assert.False(RebellionsAndDemographicsHarmonyIsolation.ShouldRunSaveDefinitionOriginal(true));
+    }
+
+    [Fact]
     public void ChoiceCommand_IsAnAuthenticatedTypedRoute_AndRejectsMalformedLease()
     {
         var valid = new NetworkRequestRebellionsAndDemographicsChoice(Header, "lease-a", RdPromptKind.Ultimatum, true, 12);
@@ -79,6 +86,11 @@ public sealed class RebellionsAndDemographicsProtocolTests
             AssertPrefix(tryStart, adapter.Id);
             AssertPrefix(processDefeat, adapter.Id);
             AssertPrefix(triggerUltimatum, adapter.Id);
+            AssertPrefix(typeof(TaleWorlds.SaveSystem.SaveableTypeDefiner).GetMethod(
+                "ConstructContainerDefinition", BindingFlags.Instance | BindingFlags.NonPublic), adapter.Id);
+            AssertPrefix(typeof(TaleWorlds.SaveSystem.SaveableTypeDefiner).GetMethods(
+                    BindingFlags.Instance | BindingFlags.NonPublic)
+                .Single(method => method.Name == "AddClassDefinition" && method.GetParameters().Length == 3), adapter.Id);
 
             // This executes the upstream PatchAll. The adapter's previously installed postfix must
             // remove every upstream-owned patch before control returns.

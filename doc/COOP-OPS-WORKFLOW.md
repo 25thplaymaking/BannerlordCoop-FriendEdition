@@ -133,6 +133,29 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
     `ToString()` reaches `GetYear` and terminates the native host with divide-by-zero exit 84. Use
     invariant `NumTicks` for early canonical snapshots and require the host to reach `SERVING`.
 
+16. **A per-collection `DisableParallelization` does NOT isolate a test from the rest of the
+    assembly — only from its own collection's members.** GameInterface.Tests had accumulated five
+    such collections (ModConfig, ModInformation role, Campaign.Current, GameThread cancellation,
+    Fourberie) each trying to guard a different process-wide global, and tests kept failing anyway:
+    `AuthorityRequestRouterTests` sits in `ModInformationRoleCollection` and still lost races to
+    classes outside it that assign `ModInformation.IsServer`. Because the production code these
+    suites drive reads process-wide state (`ModInformation`, `Campaign.Current`,
+    `MBObjectManager.Instance`, the global Harmony set, `MessageBroker.Instance`), and the coupling
+    is transitive through production code rather than visible in the test file, the only reliable
+    fix is `[assembly: CollectionBehavior(DisableTestParallelization = true)]` — which
+    `Coop.IntegrationTests` and `E2E.Tests` already use. It is now on `GameInterface.Tests` and
+    `Coop.Tests` too. Symptom to recognise: a release build fails on a test that passes locally, and
+    a *different* unrelated test fails each time. *(Earned: a nightly client release failed on
+    Tournament and Registry tests that had nothing to do with the change being built.)*
+
+17. **Never hard-code a "different" digest against `ManifestFactory.StableHash`.** It used to derive
+    its fill char from `StringComparer.Ordinal.GetHashCode`, which .NET seeds randomly per process,
+    so the value it produced changed between runs and a literal chosen to differ from it collided
+    about one run in five. The fold is deterministic now, but the rule stands: pick the literal from
+    outside the `fill..fill+4` band, and keep it a hex digit — the manifest wire shape requires 64
+    hex characters, so a non-hex filler is rejected as a malformed manifest instead of as the
+    mismatch the test intends.
+
 ---
 
 ## Checklist: making a handshake-affecting change

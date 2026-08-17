@@ -24,7 +24,6 @@ using GameInterface.Services.UI.CoopOptions;
 using GameInterface.Services.UI.Messages;
 using GameInterface.Services.UI.CrashReporting;
 using GameInterface.Services.WorkshopMods.Diplomacy;
-using GameInterface.Services.WorkshopMods.Core;
 using GameInterface.Services.WorkshopMods.Frameworks;
 using GameInterface.Utils;
 using HarmonyLib;
@@ -97,11 +96,6 @@ namespace Coop
                     Environment.GetEnvironmentVariable("COOP_DIAG_FIRSTCHANCE"), "1", StringComparison.Ordinal) ||
                 File.Exists(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "coop-diag.on")))
                 AppDomain.CurrentDomain.FirstChanceException += OnFirstChanceException;
-
-            // Bannerlord 1.4.8 filters DedicatedServerType=none before invoking any submodule lifecycle.
-            // Install the exact audited override while LoadSubModules is still constructing entries; Coop
-            // precedes every affected Workshop module in the required production activation order.
-            DedicatedServerWorkshopSubModuleLoadGuard.PrepareBeforeWorkshopSubModuleLoad();
 
             // Constructors for every active submodule run before the OnSubModuleLoad pass. Validate
             // the canonical Harmony provider now and, if an operator deliberately activated the

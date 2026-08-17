@@ -110,6 +110,13 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
     active and the Bannerlord `dotnet.exe` process is gone, take and byte-verify the save/module
     rollback snapshot, install the paired payload, then `systemctl --user reset-failed` before start.
 
+13. **A Coop submodule constructor is too late to change dedicated-server eligibility.** Bannerlord
+    v1.4.8 reads `DedicatedServerType` and filters the submodule set before constructing the active
+    entries. A server-only exception must be installed by `coophook.dll` from
+    `DOTNET_STARTUP_HOOKS`, when `TaleWorlds.MountAndBlade` loads, and it must remain an exact audited
+    class-name allowlist. Descriptor discovery is not proof: require the RGL log to show each
+    affected managed assembly loading before declaring the server modules active.
+
 ---
 
 ## Checklist: making a handshake-affecting change

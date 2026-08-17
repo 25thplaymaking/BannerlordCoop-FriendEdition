@@ -6,8 +6,9 @@
   passwords, and genuinely customized module lists. Existing launchers now include Open Source
   Saddlery, Weaponry, Armory, and Rebellions and Demographics after self-update.
 - Enable the five audited Workshop gameplay submodules that Bannerlord v1.4.8 now filters from a
-  dedicated host. The constructor-time guard is server-only and class-name allowlisted, so the
-  stock Workshop descriptors remain byte-identical for the client/server content handshake.
+  dedicated host. The startup-hook guard is server-only and class-name allowlisted, so it runs
+  before eligibility filtering while the stock Workshop descriptors remain byte-identical for the
+  client/server content handshake.
 - Prevent the rendered client from locally simulating a server-owned battle while leaving an
   encounter after the server has already unregistered it. This closes the post-trade
   `EncounterLeaveConsequence` index crash without changing auto-resolve or server simulation.

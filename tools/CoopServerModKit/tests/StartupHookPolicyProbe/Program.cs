@@ -9,6 +9,10 @@ MethodInfo policy = hookType.GetMethod(
     "ShouldProbeModuleBins",
     BindingFlags.NonPublic | BindingFlags.Static)
     ?? throw new MissingMethodException(hookType.FullName, "ShouldProbeModuleBins");
+MethodInfo modulePolicy = hookType.GetMethod(
+    "ShouldForceDedicatedWorkshopSubModule",
+    BindingFlags.NonPublic | BindingFlags.Static)
+    ?? throw new MissingMethodException(hookType.FullName, "ShouldForceDedicatedWorkshopSubModule");
 
 string[] requiredClientOnlyAssemblies =
 [
@@ -56,4 +60,23 @@ foreach (string assemblyName in engineOwnedAssemblies)
         throw new InvalidOperationException($"Canonical engine/Coop assembly is redirectable: {assemblyName}");
 }
 
-Console.WriteLine("PASS: startup hook probes the exact client-only support closure and preserves canonical engine ownership");
+string[] dedicatedWorkshopSubModules =
+[
+    "ImprovedGarrisons.Main",
+    "DismembermentPlus.Main",
+    "Fourberie.Main",
+    "UnblockableThrust.UnblockableThrustSubmodule",
+    "RebellionsAndDemographics.SubModule",
+];
+foreach (string classType in dedicatedWorkshopSubModules)
+{
+    if (!(bool)modulePolicy.Invoke(null, [classType])!)
+        throw new InvalidOperationException($"Audited dedicated Workshop submodule is blocked: {classType}");
+}
+foreach (string? classType in new string?[] { "Unrelated.Mod.Entry", "SandBox.View.SandBoxViewSubModule", null })
+{
+    if ((bool)modulePolicy.Invoke(null, [classType])!)
+        throw new InvalidOperationException($"Unaudited dedicated Workshop submodule is enabled: {classType ?? "<null>"}");
+}
+
+Console.WriteLine("PASS: startup hook preserves assembly ownership and enables only the five audited dedicated Workshop submodules");

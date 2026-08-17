@@ -1,7 +1,9 @@
+using HarmonyLib;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Threading;
 
 // Injected via DOTNET_STARTUP_HOOKS. Two jobs:
 //  1. A BLSE-style assembly resolver: when the .NET runtime can't resolve a by-name assembly from
@@ -13,6 +15,8 @@ using System.Reflection;
 internal sealed class StartupHook
 {
     private const string LogPath = "/tmp/coop-fce.log";
+    private const string MountAndBladeAssemblyName = "TaleWorlds.MountAndBlade";
+    private const string DedicatedModuleFilterHarmonyId = "BannerlordCoop.ServerKit.DedicatedModuleFilter";
     private static readonly object Sync = new object();
     private static readonly Dictionary<string, Assembly> Cache = new Dictionary<string, Assembly>(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> LoggedResolutionEvents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -36,26 +40,16 @@ internal sealed class StartupHook
         "TaleWorlds.TwoDimension",
     };
     private static string[] _binDirs;
+    private static int _dedicatedModuleFilterInstalled;
 
     public static void Initialize()
     {
         try { File.WriteAllText(LogPath, "[hook] initialized " + DateTime.Now.ToString("O") + "\n"); } catch { }
 
         AppDomain.CurrentDomain.AssemblyResolve += ResolveFromModuleBins;
-        AppDomain.CurrentDomain.AssemblyLoad += (s, e) =>
-        {
-            try
-            {
-                var loaded = e.LoadedAssembly;
-                var name = loaded?.GetName().Name;
-                if (string.IsNullOrEmpty(name) ||
-                    !name.StartsWith("Bannerlord.Diplomacy", StringComparison.Ordinal)) return;
-                LogResolutionOnce(
-                    "assembly-load:" + loaded.FullName + ":" + SafeLocation(loaded),
-                    "[assembly-load] " + loaded.FullName + " from " + SafeLocation(loaded));
-            }
-            catch { }
-        };
+        AppDomain.CurrentDomain.AssemblyLoad += OnAssemblyLoaded;
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            OnAssemblyLoaded(null, new AssemblyLoadEventArgs(assembly));
 
         if (string.Equals(
             Environment.GetEnvironmentVariable("COOP_SERVER_KIT_DIAGNOSTICS"),
@@ -92,6 +86,89 @@ internal sealed class StartupHook
         {
             try { File.AppendAllText(LogPath, "\n=== UNHANDLED ===\n" + (e.ExceptionObject?.ToString() ?? "?") + "\n"); } catch { }
         };
+    }
+
+    private static void OnAssemblyLoaded(object sender, AssemblyLoadEventArgs args)
+    {
+        var loaded = args.LoadedAssembly;
+        var name = loaded?.GetName().Name;
+        if (string.IsNullOrEmpty(name)) return;
+
+        if (string.Equals(name, MountAndBladeAssemblyName, StringComparison.Ordinal))
+            InstallDedicatedModuleFilter(loaded);
+
+        if (!name.StartsWith("Bannerlord.Diplomacy", StringComparison.Ordinal)) return;
+        LogResolutionOnce(
+            "assembly-load:" + loaded.FullName + ":" + SafeLocation(loaded),
+            "[assembly-load] " + loaded.FullName + " from " + SafeLocation(loaded));
+    }
+
+    private static void InstallDedicatedModuleFilter(Assembly mountAndBladeAssembly)
+    {
+        if (Interlocked.CompareExchange(ref _dedicatedModuleFilterInstalled, 1, 0) != 0) return;
+
+        try
+        {
+            Type moduleType = mountAndBladeAssembly.GetType(
+                "TaleWorlds.MountAndBlade.Module",
+                throwOnError: true);
+            MethodInfo target = AccessTools.Method(moduleType, "CheckIfSubmoduleCanBeLoadable")
+                ?? throw new MissingMethodException(moduleType.FullName, "CheckIfSubmoduleCanBeLoadable");
+            MethodInfo prefix = AccessTools.Method(
+                typeof(StartupHook),
+                nameof(CheckIfSubmoduleCanBeLoadablePrefix))
+                ?? throw new MissingMethodException(typeof(StartupHook).FullName, nameof(CheckIfSubmoduleCanBeLoadablePrefix));
+
+            new Harmony(DedicatedModuleFilterHarmonyId).Patch(
+                target,
+                prefix: new HarmonyMethod(prefix));
+            LogResolutionOnce(
+                "dedicated-module-filter-installed",
+                "[module-filter] installed exact dedicated Workshop submodule allowlist");
+        }
+        catch (Exception exception)
+        {
+            Volatile.Write(ref _dedicatedModuleFilterInstalled, 0);
+            LogResolutionOnce(
+                "dedicated-module-filter-error",
+                "[module-filter] ERROR: " + exception.GetType().FullName + ": " + exception.Message);
+            throw;
+        }
+    }
+
+    private static bool CheckIfSubmoduleCanBeLoadablePrefix(object __0, ref bool __result)
+    {
+        string classType = null;
+        try
+        {
+            classType = __0?.GetType()
+                .GetProperty("SubModuleClassTypeName", BindingFlags.Instance | BindingFlags.Public)
+                ?.GetValue(__0) as string;
+        }
+        catch { }
+
+        if (!ShouldForceDedicatedWorkshopSubModule(classType)) return true;
+
+        __result = true;
+        LogResolutionOnce(
+            "dedicated-module-force:" + classType,
+            "[module-filter] enabling audited dedicated Workshop submodule " + classType);
+        return false;
+    }
+
+    private static bool ShouldForceDedicatedWorkshopSubModule(string classType)
+    {
+        switch (classType)
+        {
+            case "ImprovedGarrisons.Main":
+            case "DismembermentPlus.Main":
+            case "Fourberie.Main":
+            case "UnblockableThrust.UnblockableThrustSubmodule":
+            case "RebellionsAndDemographics.SubModule":
+                return true;
+            default:
+                return false;
+        }
     }
 
     private static string[] BinDirs()

@@ -1,7 +1,15 @@
 using Common.Messaging;
+using Common.Network;
+using Coop.Tests.Mocks;
+using GameInterface.Configuration;
 using GameInterface.Services.AuthorityRequests;
+using GameInterface.Services.CampaignService.Messages;
+using GameInterface.Services.ObjectManager;
+using GameInterface.Services.Players;
+using GameInterface.Services.WorkshopMods.Core;
 using GameInterface.Services.WorkshopMods.RebellionsAndDemographics;
 using HarmonyLib;
+using Moq;
 using System;
 using System.IO;
 using System.Linq;
@@ -13,6 +21,7 @@ using Xunit;
 
 namespace GameInterface.Tests.Services.WorkshopMods.RebellionsAndDemographics;
 
+[Collection(ModInformationRoleCollection.Name)]
 public sealed class RebellionsAndDemographicsProtocolTests
 {
     private static readonly AuthorityRequestHeader Header = new(7, "session-a", 41, 9);
@@ -215,5 +224,92 @@ public sealed class RebellionsAndDemographicsProtocolTests
             new RdPlagueState(string.Empty, 0, string.Empty), Array.Empty<RdPromptLease>(), Array.Empty<RdPromptTombstone>(), new[] { second, first });
 
         Assert.Equal(new long[] { 41, 42 }, state.InterventionWatermarks.Select(value => value.AuthorityRequestId));
+    }
+
+    [Fact]
+    public void RepublishedHostModConfig_ForTheSameSession_KeepsAnAppliedSnapshotReady()
+    {
+        var accepted = new ModConfigSnapshot(new string('a', ModConfigSnapshot.SessionIdLength), revision: 1,
+            ModConfigProvider.ModOptions, birthAndDeathEnabled: true);
+        var authority = new TestConfigAuthority(accepted);
+        using var broker = new MessageBroker();
+        using var network = new TestNetwork();
+        var server = network.CreatePeer();
+        Assert.True(authority.TryBindTrustedServer(server, out _));
+        using var router = new AuthorityRequestRouter(broker, network, new Mock<IPlayerManager>().Object);
+        using var handler = new RebellionsAndDemographicsCompatibilityHandler(broker, network, authority,
+            new Mock<IObjectManager>().Object, new Mock<IPlayerManager>().Object,
+            new Mock<IWorkshopCapabilityRegistry>().Object, router);
+
+        var state = new RebellionsAndDemographicsState(accepted.SessionId, 4, new[] { "PopulationBehavior" },
+            new[] { new RdSettlementPopulationState("town_A", 4200, 1200, 0, 24,
+                new[] { new RdCulturePopulationState("empire", 4200) }) },
+            new RdPlagueState(string.Empty, 0, string.Empty), Array.Empty<RdPromptLease>(),
+            Array.Empty<RdPromptTombstone>(), Array.Empty<RdInterventionWatermark>());
+        broker.Publish(server, new NetworkRebellionsAndDemographicsStateQueryResult(
+            new AuthorityRequestHeader(accepted.ProtocolVersion, accepted.SessionId, 3, accepted.Revision),
+            AuthorityResultStatus.Accepted, state, null));
+
+        Assert.Equal(WorkshopSnapshotReadiness.Ready, handler.SnapshotReadiness);
+        Assert.Equal(4, handler.SnapshotRevision);
+
+        // One join republishes the same accepted snapshot several times: the module validation
+        // barrier, CampaignReady, and the mod-config refresh acceptance. None of them invalidates
+        // an applied snapshot, so the router's commit probe still observes Ready. Resetting here
+        // failed the bootstrap query closed with apply-timeout and disconnected the client.
+        broker.Publish(this, new HostModConfigAccepted(accepted));
+
+        Assert.Equal(WorkshopSnapshotReadiness.Ready, handler.SnapshotReadiness);
+        Assert.Equal(4, handler.SnapshotRevision);
+        Assert.Equal(accepted.SessionId, handler.SnapshotSessionId);
+
+        var rejoined = new ModConfigSnapshot(new string('b', ModConfigSnapshot.SessionIdLength), revision: 1,
+            ModConfigProvider.ModOptions, birthAndDeathEnabled: true);
+        authority.Current = rejoined;
+        broker.Publish(this, new HostModConfigAccepted(rejoined));
+
+        Assert.Equal(WorkshopSnapshotReadiness.Loading, handler.SnapshotReadiness);
+        Assert.Equal(-1, handler.SnapshotRevision);
+        Assert.Null(handler.CurrentState);
+    }
+
+    private sealed class TestConfigAuthority : IModConfigAuthority
+    {
+        private object trustedServer;
+
+        internal TestConfigAuthority(ModConfigSnapshot current) => Current = current;
+
+        internal ModConfigSnapshot Current { get; set; }
+
+        public bool TryGetCurrent(out ModConfigSnapshot snapshot)
+        {
+            snapshot = Current;
+            return snapshot != null;
+        }
+
+        public ModConfigSnapshot InitializeHost(ModConfigData data) => Current;
+
+        public ModConfigAcceptanceResult AcceptClientSnapshot(ModConfigSnapshot snapshot)
+        {
+            Current = snapshot;
+            return new ModConfigAcceptanceResult(ModConfigAcceptanceStatus.Accepted);
+        }
+
+        public bool IsCurrent(ModConfigSnapshot snapshot) =>
+            snapshot != null && Current != null &&
+            snapshot.ProtocolVersion == Current.ProtocolVersion &&
+            snapshot.Revision == Current.Revision &&
+            string.Equals(snapshot.SessionId, Current.SessionId, StringComparison.Ordinal) &&
+            string.Equals(snapshot.Sha256, Current.Sha256, StringComparison.Ordinal);
+
+        public bool TryBindTrustedServer(object transportPeer, out string failure)
+        {
+            trustedServer = transportPeer;
+            failure = null;
+            return transportPeer != null;
+        }
+
+        public bool IsTrustedServer(object transportPeer) =>
+            transportPeer != null && ReferenceEquals(trustedServer, transportPeer);
     }
 }

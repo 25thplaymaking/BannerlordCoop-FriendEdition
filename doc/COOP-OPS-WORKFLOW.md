@@ -114,8 +114,10 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
     v1.4.8 reads `DedicatedServerType` and filters the submodule set before constructing the active
     entries. A server-only exception must be installed by `coophook.dll` from
     `DOTNET_STARTUP_HOOKS`, when `TaleWorlds.MountAndBlade` loads, and it must remain an exact audited
-    class-name allowlist. Descriptor discovery is not proof: require the RGL log to show each
-    affected managed assembly loading before declaring the server modules active.
+    class-name allowlist. Do not enable client-presentation entries such as DismembermentPlus merely
+    because their descriptor is active: its bootstrap loads WinForms and correctly remains filtered
+    on the headless host. Descriptor discovery is not proof: require the RGL log to show each required
+    server-gameplay assembly loading before declaring those server modules active.
 
 ---
 

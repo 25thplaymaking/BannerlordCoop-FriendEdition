@@ -63,7 +63,6 @@ foreach (string assemblyName in engineOwnedAssemblies)
 string[] dedicatedWorkshopSubModules =
 [
     "ImprovedGarrisons.Main",
-    "DismembermentPlus.Main",
     "Fourberie.Main",
     "UnblockableThrust.UnblockableThrustSubmodule",
     "RebellionsAndDemographics.SubModule",
@@ -73,10 +72,16 @@ foreach (string classType in dedicatedWorkshopSubModules)
     if (!(bool)modulePolicy.Invoke(null, [classType])!)
         throw new InvalidOperationException($"Audited dedicated Workshop submodule is blocked: {classType}");
 }
-foreach (string? classType in new string?[] { "Unrelated.Mod.Entry", "SandBox.View.SandBoxViewSubModule", null })
+foreach (string? classType in new string?[]
+         {
+             "DismembermentPlus.Main",
+             "Unrelated.Mod.Entry",
+             "SandBox.View.SandBoxViewSubModule",
+             null,
+         })
 {
     if ((bool)modulePolicy.Invoke(null, [classType])!)
         throw new InvalidOperationException($"Unaudited dedicated Workshop submodule is enabled: {classType ?? "<null>"}");
 }
 
-Console.WriteLine("PASS: startup hook preserves assembly ownership and enables only the five audited dedicated Workshop submodules");
+Console.WriteLine("PASS: startup hook preserves assembly ownership and enables only the four audited dedicated gameplay submodules");

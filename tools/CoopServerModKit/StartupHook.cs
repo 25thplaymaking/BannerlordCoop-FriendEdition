@@ -161,7 +161,6 @@ internal sealed class StartupHook
         switch (classType)
         {
             case "ImprovedGarrisons.Main":
-            case "DismembermentPlus.Main":
             case "Fourberie.Main":
             case "UnblockableThrust.UnblockableThrustSubmodule":
             case "RebellionsAndDemographics.SubModule":

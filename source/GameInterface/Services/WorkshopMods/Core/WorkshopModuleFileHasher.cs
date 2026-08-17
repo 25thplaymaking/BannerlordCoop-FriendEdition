@@ -42,6 +42,15 @@ public sealed class WorkshopModuleFileHasher
         "mod-config.json",
         "coop-options.json",
         "server-config.json",
+        // Improved Garrisons appends to this file inside its OWN ModuleData folder whenever one of
+        // its methods throws — and it throws on every campaign tick of the headless host, where
+        // IGSaveFilePath.get_SaveFilesPath() has no player profile to resolve. The package bytes
+        // therefore drift the moment the server runs, even though nothing was ever installed or
+        // edited. It is a log that happens to carry an .xml extension, so the ".log" rule below
+        // never caught it and the .xml rule filed it under CONFIGURATION: the host advertised
+        // itself as an unmanaged copy and refused every join with a configuration mismatch that
+        // no player could act on. No shipped package contains a file with this name.
+        "errorlog.xml",
     };
 
     private static readonly HashSet<string> IgnoredExtensions = new(StringComparer.OrdinalIgnoreCase)

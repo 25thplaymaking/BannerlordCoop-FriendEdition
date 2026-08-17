@@ -34,6 +34,54 @@ public class WorkshopManifestValidatorTests
             diagnostic.Contains("unmanaged copy", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Reproduces the live join refusal: the host's Improved Garrisons drifted (its runtime error
+    /// log was hashed), so the server advertised live hashes instead of its receipt pins. The
+    /// player then saw two stacked reasons — "reinstall from the private suite" and "use the
+    /// server package defaults" — neither of which they could act on, and which contradict each
+    /// other. The unmanaged host must be named once, as the host's fault.
+    /// </summary>
+    [Fact]
+    public void UnmanagedServer_ReportsTheHostOnce_WithoutCascadingHashRemedies()
+    {
+        WorkshopCompatibilityManifest server = ManifestFactory.Create(
+            WorkshopPeerRole.Server,
+            module => Copy(module,
+                configurationHash: module.ModuleId == "ImprovedGarrisons" ? new string('c', 64) : null,
+                managedDistributionComponent: module.ModuleId != "ImprovedGarrisons"));
+        WorkshopCompatibilityManifest client = ManifestFactory.Create(WorkshopPeerRole.Client);
+
+        WorkshopManifestValidationResult result = validator.Validate(server, client);
+
+        Assert.False(result.Matches);
+        Assert.Equal(1, result.Diagnostics.Count(diagnostic => diagnostic.Contains("ImprovedGarrisons")));
+
+        string diagnostic = result.Diagnostics.Single(value => value.Contains("ImprovedGarrisons"));
+        Assert.Contains("unmanaged copy", diagnostic, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("host must", diagnostic, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Configuration mismatch", result.ToNetworkReason(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The suppression above is scoped to an unmanaged peer. Two receipt-backed peers that
+    /// genuinely disagree on package bytes must still be refused with the hash diagnostic.
+    /// </summary>
+    [Fact]
+    public void ManagedPeers_StillReportConfigurationMismatch()
+    {
+        WorkshopCompatibilityManifest server = ManifestFactory.Create(WorkshopPeerRole.Server);
+        WorkshopCompatibilityManifest client = ManifestFactory.Create(
+            WorkshopPeerRole.Client,
+            module => Copy(module, forClient: true,
+                configurationHash: module.ModuleId == "ImprovedGarrisons" ? new string('c', 64) : null));
+
+        WorkshopManifestValidationResult result = validator.Validate(server, client);
+
+        Assert.False(result.Matches);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Contains("Configuration mismatch for 'ImprovedGarrisons'", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void ClientPresentation_CodeIsVerified_ButCosmeticConfigMayDiffer()
     {

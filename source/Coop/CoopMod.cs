@@ -472,8 +472,12 @@ namespace Coop
             Coop = new CoopartiveMultiplayerExperience(isServer, CrashDiagnostics.SetPhase);
 
             Updateables.Add(GameThread.Instance);
-            if (ContainerProvider.TryResolve<IAuthorityRequestRouter>(out var authorityRequestRouter))
-                Updateables.Add(authorityRequestRouter);
+
+            // Resolve the router per frame, not once here: joining rebuilds the container, so the
+            // instance available now is not the one the session's handlers register routes on. See
+            // AuthorityRouterPump — capturing it here left every fire-and-forget authority command
+            // unapplied for the whole session.
+            Updateables.Add(new AuthorityRouterPump());
 
 #if DEBUG
             if (isAutoConnect)

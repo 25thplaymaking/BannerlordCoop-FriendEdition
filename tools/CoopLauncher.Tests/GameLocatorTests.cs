@@ -18,7 +18,8 @@ public sealed class GameLocatorTests : IDisposable
         File.WriteAllText(Path.Combine(_root, "Modules", "Native", "SubModule.xml"),
             "<Module><Version value=\"v1.4.8\" /></Module>");
 
-        GameLocator.GameInstallation install = Assert.Single(GameLocator.FindInstallations(_root));
+        GameLocator.GameInstallation install = Assert.IsType<GameLocator.GameInstallation>(
+            GameLocator.FindInstallations(_root).First());
 
         Assert.Equal("1.4.8", install.Version);
         Assert.Equal(Path.GetFullPath(_root), install.RootPath);

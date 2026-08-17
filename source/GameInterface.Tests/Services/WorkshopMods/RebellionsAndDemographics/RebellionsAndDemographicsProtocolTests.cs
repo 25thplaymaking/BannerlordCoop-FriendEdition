@@ -102,8 +102,7 @@ public sealed class RebellionsAndDemographicsProtocolTests
         const string binaryPath = @"P:\SteamLibrary\steamapps\workshop\content\261550\3644127631\bin\Win64_Shipping_Client\RebellionsAndDemographics.dll";
         if (!File.Exists(binaryPath)) return;
 
-        string inventoryPath = Path.Combine(Directory.GetCurrentDirectory(), "doc", "generated", "workshop-function-inventory.json");
-        Assert.True(File.Exists(inventoryPath), "The generated pinned-binary inventory is required for the local dependency-closure audit.");
+        string inventoryPath = FindRepositoryFile("doc", "generated", "workshop-function-inventory.json");
 
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(inventoryPath));
         JsonElement assembly = document.RootElement.GetProperty("assemblies").EnumerateArray()
@@ -126,6 +125,23 @@ public sealed class RebellionsAndDemographicsProtocolTests
         member.StartsWith("RebellionsAndDemographics." + type, StringComparison.Ordinal) &&
         (member.Length == "RebellionsAndDemographics.".Length + type.Length ||
          member["RebellionsAndDemographics.".Length + type.Length] is '.' or '+');
+
+    private static string FindRepositoryFile(params string[] pathParts)
+    {
+        foreach (string start in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+        {
+            var directory = new DirectoryInfo(start);
+            while (directory != null)
+            {
+                string path = Path.Combine(directory.FullName, Path.Combine(pathParts));
+                if (File.Exists(path)) return path;
+                directory = directory.Parent;
+            }
+        }
+
+        throw new FileNotFoundException(
+            $"Unable to find {Path.Combine(pathParts)} from {Directory.GetCurrentDirectory()} or {AppContext.BaseDirectory}");
+    }
 
     private static System.Collections.Generic.IEnumerable<Patch> Enumerate(Patches patches)
     {

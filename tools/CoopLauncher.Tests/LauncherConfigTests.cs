@@ -72,6 +72,52 @@ public sealed class LauncherConfigTests
     }
 
     [Fact]
+    public void KnownLegacyProductionToken_MigratesWithoutLosingPrivateSettings()
+    {
+        string tempPath = Path.Combine(Path.GetTempPath(), $"launcher-config-{Guid.NewGuid():N}.json");
+        try
+        {
+            File.WriteAllText(tempPath, JsonSerializer.Serialize(new
+            {
+                serverPassword = "private-local-token",
+                moduleToken = LauncherConfig.LegacyModuleTokenBeforeGearAndDemographics,
+            }));
+
+            LauncherConfig config = LauncherConfig.Load(tempPath);
+
+            Assert.Equal("private-local-token", config.ServerPassword);
+            Assert.Equal(LauncherConfig.CurrentModuleToken, config.ModuleToken);
+            Assert.Contains("OpenSourceSaddlery", config.ModuleToken);
+            Assert.Contains("OpenSourceWeaponry", config.ModuleToken);
+            Assert.Contains("OpenSourceArmory", config.ModuleToken);
+            Assert.Contains("RebellionsAndDemographics", config.ModuleToken);
+        }
+        finally
+        {
+            File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
+    public void CustomModuleToken_IsNotRewritten()
+    {
+        string tempPath = Path.Combine(Path.GetTempPath(), $"launcher-config-{Guid.NewGuid():N}.json");
+        const string customToken = "_MODULES_*Native*Sandbox*Coop*MyPrivateModule*_MODULES_";
+        try
+        {
+            File.WriteAllText(tempPath, JsonSerializer.Serialize(new { moduleToken = customToken }));
+
+            LauncherConfig config = LauncherConfig.Load(tempPath);
+
+            Assert.Equal(customToken, config.ModuleToken);
+        }
+        finally
+        {
+            File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
     public void EmptyProductionBlocklist_DoesNotRejectTheApprovedRAndDToken()
     {
         var config = new LauncherConfig

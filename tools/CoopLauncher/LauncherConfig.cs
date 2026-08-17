@@ -12,6 +12,20 @@ namespace CoopLauncher;
 /// </summary>
 public sealed class LauncherConfig
 {
+    internal const string CurrentModuleToken =
+        "_MODULES_*Bannerlord.Harmony*Bannerlord.ButterLib*Bannerlord.UIExtenderEx*Bannerlord.MBOptionScreen" +
+        "*Native*SandBoxCore*CustomBattle*Sandbox*StoryMode*OpenSourceSaddlery*OpenSourceWeaponry" +
+        "*OpenSourceArmory*PlayerSettlement*Coop*ImprovedGarrisons" +
+        "*DismembermentPlus*Fourberie*Bannerlord.Diplomacy*UnblockableThrust*RebellionsAndDemographics*_MODULES_";
+
+    // The production token shipped before the gear modules and R&D were activated. Launcher self-
+    // updates deliberately preserve the adjacent private config, so migrate only this exact known
+    // default and leave genuinely customized module lists untouched.
+    internal const string LegacyModuleTokenBeforeGearAndDemographics =
+        "_MODULES_*Bannerlord.Harmony*Bannerlord.ButterLib*Bannerlord.UIExtenderEx*Bannerlord.MBOptionScreen" +
+        "*Native*SandBoxCore*CustomBattle*Sandbox*StoryMode*PlayerSettlement*Coop*ImprovedGarrisons" +
+        "*DismembermentPlus*Fourberie*Bannerlord.Diplomacy*UnblockableThrust*_MODULES_";
+
     /// <summary>Shown as the launcher's display title.</summary>
     public string GroupName { get; set; } = "Calradia Co-op";
 
@@ -29,11 +43,7 @@ public sealed class LauncherConfig
     /// The launch order token passed to <c>Bannerlord.exe /singleplayer</c>. The full mod set,
     /// minus RBM. Kept here so a mod-list change is a config edit, not a launcher rebuild.
     /// </summary>
-    public string ModuleToken { get; set; } =
-        "_MODULES_*Bannerlord.Harmony*Bannerlord.ButterLib*Bannerlord.UIExtenderEx*Bannerlord.MBOptionScreen" +
-        "*Native*SandBoxCore*CustomBattle*Sandbox*StoryMode*OpenSourceSaddlery*OpenSourceWeaponry" +
-        "*OpenSourceArmory*PlayerSettlement*Coop*ImprovedGarrisons" +
-        "*DismembermentPlus*Fourberie*Bannerlord.Diplomacy*UnblockableThrust*RebellionsAndDemographics*_MODULES_";
+    public string ModuleToken { get; set; } = CurrentModuleToken;
 
     /// <summary>
     /// Explicit launch exclusions, normally empty for the production compatibility suite.
@@ -117,8 +127,16 @@ public sealed class LauncherConfig
         try
         {
             if (File.Exists(path))
-                return JsonSerializer.Deserialize<LauncherConfig>(File.ReadAllText(path), Options)
-                       ?? new LauncherConfig();
+            {
+                LauncherConfig config = JsonSerializer.Deserialize<LauncherConfig>(File.ReadAllText(path), Options)
+                                        ?? new LauncherConfig();
+                if (string.Equals(
+                        config.ModuleToken,
+                        LegacyModuleTokenBeforeGearAndDemographics,
+                        StringComparison.Ordinal))
+                    config.ModuleToken = CurrentModuleToken;
+                return config;
+            }
         }
         catch
         {

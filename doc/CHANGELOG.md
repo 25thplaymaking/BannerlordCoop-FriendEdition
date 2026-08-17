@@ -1,5 +1,17 @@
 # Friend Edition Changelog
 
+## 2026-08-16 — v1.4.8 module loading and trade-close hotfix
+
+- Migrate the exact pre-gear/R&D launcher module token in place, preserving private endpoints,
+  passwords, and genuinely customized module lists. Existing launchers now include Open Source
+  Saddlery, Weaponry, Armory, and Rebellions and Demographics after self-update.
+- Enable the five audited Workshop gameplay submodules that Bannerlord v1.4.8 now filters from a
+  dedicated host. The constructor-time guard is server-only and class-name allowlisted, so the
+  stock Workshop descriptors remain byte-identical for the client/server content handshake.
+- Prevent the rendered client from locally simulating a server-owned battle while leaving an
+  encounter after the server has already unregistered it. This closes the post-trade
+  `EncounterLeaveConsequence` index crash without changing auto-resolve or server simulation.
+
 ## 2026-08-15 — Portal production-host fallback
 
 - Schedule campaign stats through the shared game-thread queue used by both the desktop game loop and

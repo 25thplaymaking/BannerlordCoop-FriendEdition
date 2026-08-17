@@ -1,7 +1,6 @@
 using Common;
 using Common.Logging;
 using GameInterface.Policies;
-using GameInterface.Services.ObjectManager;
 using Helpers;
 using HarmonyLib;
 using Serilog;
@@ -39,9 +38,10 @@ namespace GameInterface.Services.MapEvents.Patches;
 /// battle screen and the event is left showing the enemy at zero troops while the player still holds all of
 /// theirs - which is precisely what an earlier, broader version of this guard caused.
 ///
-/// Also requires a client, outside an authoritative replay, and a map event the object manager knows - a
-/// purely local event still simulates normally. The server's own path is untouched, and it passes null for
-/// the roster, which is the branch that never indexes.
+/// The encounter-leave scope itself is the ownership proof. A server teardown can unregister the event
+/// before the rendered client processes the leave-menu click, so consulting the object registry here
+/// creates a false negative in precisely the crash window this guard exists to cover. The server's own path
+/// is untouched, and it passes null for the roster, which is the branch that never indexes.
 /// </remarks>
 [HarmonyPatch]
 internal class ClientBattleSimulationGuardPatch
@@ -75,17 +75,25 @@ internal class ClientBattleSimulationGuardPatch
     {
         // The one path that must not simulate. Everything else - auto-resolve, "send troops", any battle the
         // player watches resolve without a mission - needs these to run.
-        if (!inEncounterLeave) return false;
-        if (CallOriginalPolicy.IsOriginalAllowed()) return false;
-        if (ModInformation.IsServer) return false;
-        if (mapEvent == null) return false;
+        if (!ShouldSuppressLocalSimulation(
+                inEncounterLeave,
+                CallOriginalPolicy.IsOriginalAllowed(),
+                ModInformation.IsServer,
+                mapEvent != null))
+            return false;
 
-        if (!ContainerProvider.TryResolve<IObjectManager>(out var objectManager)) return false;
-        if (!objectManager.TryGetId(mapEvent, out var mapEventId)) return false;
+        string mapEventId = mapEvent.StringId ?? "<unregistered>";
 
         Logger.Warning(
             "[BattleSync] Skipping local {Step} for server-owned battle {MapEventId}; the server resolves it",
             step, mapEventId);
         return true;
     }
+
+    internal static bool ShouldSuppressLocalSimulation(
+        bool isInEncounterLeave,
+        bool isOriginalAllowed,
+        bool isServer,
+        bool hasMapEvent) =>
+        isInEncounterLeave && !isOriginalAllowed && !isServer && hasMapEvent;
 }

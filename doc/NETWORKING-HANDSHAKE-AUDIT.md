@@ -28,7 +28,7 @@ for the native behaviour the patches depend on; verify package hashes on both pe
 | F12 | Low | Dead disabled-branch for caravan hostile actions | Fixed |
 | F13 | Low | Launcher token migration not persisted | Fixed |
 | F14 | **Critical** | Eight client actions shipped disabled *and* never subscribed server-side | Fixed |
-| F15 | High | Player self-release from captivity needs per-client state the server does not model | **Open — needs a decision** |
+| F15 | High | Player self-release from captivity needs per-client state the server does not model | Fixed — server-issued release offer |
 | F16 | Low | Dead disabled-branch for villager hostile actions | Fixed |
 
 ---
@@ -263,44 +263,56 @@ it rather than passing vacuously.
 
 ---
 
-## F15 - Player self-release from captivity (High, open - needs a decision)
-
-Everything above is fixed. This one is not, and I do not think it should be fixed quietly.
+## F15 - Player self-release from captivity (High, fixed)
 
 When *your own* hero is captive, the menu options that end it - pay ransom, escape, captor lets you go -
-publish `EndPlayerCaptivityAttempted`. That was stubbed like the rest, and
-`NetworkEndPlayerCaptivityAttempted` was never subscribed server-side. The difference is that this
-handler, unlike the other seven, **cannot be made safe by adding a check**, because a value it needs is
-supplied by the client and cannot be recomputed server-side:
+publish `EndPlayerCaptivityAttempted`. That was stubbed like the seven in F14, and
+`NetworkEndPlayerCaptivityAttempted` was never subscribed server-side either. Unlike those seven it could
+not be fixed by adding a check, because the two values that decide the outcome were supplied by the
+client and the server had nothing to compare them against:
 
-- **The ransom amount.** The client sends `Campaign.Current.PlayerCaptivity.CurrentRansomAmount`. The
-  server cannot recompute it. `PlayerCaptivity` is a per-campaign singleton that on a headless host
-  describes the host's own captivity, not the client's, and `RansomPlayerValuePatch` deliberately forces
-  `PrisonerRansomValue` to **0** for player heroes so the AI does not ransom them. There is no
-  server-side number to compare against, so a client could name its own price - including zero.
-- **The release position.** The client sends where its party reappears. This half *is* fixable: the
-  server already has `GetReleasePosition` and can derive it from the captor. The ransom is the blocker.
+- **The ransom.** The client sent `Campaign.Current.PlayerCaptivity.CurrentRansomAmount`. Native's
+  `PlayerCaptivity.GetPlayerRansomValue` reads `Hero.MainHero` at *every* step - gold, captor, and the
+  Man of Means perk - so on a headless host it prices the host's hero, not the captive client's. And
+  `RansomPlayerValuePatch` deliberately forces `PrisonerRansomValue` to 0 for player heroes so the AI
+  never ransoms them. There was no server-side number, so a client could name its own price, including
+  zero.
+- **The release position.** The client sent where its party reappears - a teleport, for free.
 
-`PlayerCaptivityServerHandler` keeps no per-captive state - no record of who is held, by whom, at what
-price - so there is nothing to validate against today. Server-driven releases still work: if the captor
-is defeated, or the AI ransoms or frees you, `PlayerCaptivityEndedByServer` runs and you get out. What
-does not work is *choosing* to buy your way out.
+I laid this out with three options and the decision was **the server-issued release offer**, which is
+what is now implemented.
 
-Three ways forward, in the order I would pick them:
+**How it works.** When the server records a capture in `Handle_PrisonerTaken` - the one moment it knows
+both the captive and the captor - it prices the captivity itself, stores the terms under a fresh offer
+id, and sends the id and the figure to that captive's client. The client's request quotes the id and the
+kind of release, and nothing else: the hero, the captor, the price and the reappearance position are all
+read back from the server's own record. `NetworkPlayerCaptivityReleaseRequest` has exactly two fields,
+and a test asserts that, because any field added back is somewhere for the exploit to return.
 
-1. **Server-issued release offer (recommended).** When the server records a player as captive it
-   computes and stores the ransom itself, and sends an offer id. The client's request quotes the id, not
-   a number; the server prices it, checks the hero's gold, and applies. This is the same shape as the
-   marriage-barter lease that already works, so it fits the architecture rather than bending it. It is
-   also the largest change: new per-captive server state plus a small protocol.
-2. **Server-priced, client-triggered.** Keep the current message, but have the server ignore
-   `RansomAmount` and `PlayerPartyPosition` entirely - derive the position from the captor via
-   `GetReleasePosition`, and price the ransom server-side at apply time. Much smaller, and it closes the
-   exploit, but the number shown in the player's menu can disagree with what they are charged.
-3. **Leave it as it is.** Captivity still ends - captor defeated, AI ransom, peace - just not by your
-   choice. No exploit, no work, a worse game.
+The offer is consumed under a lock before the release runs, so a replayed request finds nothing rather
+than a second free release, and a captor change between offer and redemption is rejected - the price was
+quoted against a specific captor. Offers are discarded when captivity ends by any other route.
 
-I did not pick one, because the first is a real feature decision and the third is a real answer.
+**Pricing.** `PlayerCaptivityRansom` is a port of native's arithmetic taken from the shipped IL, with the
+hero passed in instead of `Hero.MainHero`:
+
+```
+(int)((rand * 0.5 + 0.5)
+      * (gold * 0.05 + 300)
+      * (settlement ? (kingdom ? 4 : 2) : 1)
+      * (mobile ? (lordParty ? 2 : 1) : 1)
+      * (manOfMeans ? 1 + secondaryBonus : 1))
+```
+
+The roll is taken once and stored on the offer, exactly as native takes it once in `SetRansomAmount`, so
+the quote cannot drift from the charge. The multipliers are pinned by tests: they cannot be compared
+against the original at runtime, since native prices the wrong hero on a headless host, which is the
+whole reason this port exists.
+
+**What the player sees.** The offer carries the figure so the captivity menu quotes what will actually be
+charged. `PlayerCaptivity.SetRansomAmount` is suppressed on clients - `CheckCaptivityChange` calls it on
+tick, so a client left alone re-rolls its own price and would advertise a number it will not be charged.
+The server still runs the original; its own `MainHero` is never a co-op captive.
 
 ---
 
@@ -313,8 +325,8 @@ party-size modelling, and the launcher's module wiring.
 Also covered on the second pass: every client action disabled behind a stub or an unreachable branch,
 found by sweeping for the pattern itself rather than by reading - `CS0162` suppressions, "is disabled"
 and "unavailable until" strings, and `IHandler` types that subscribe nothing. That sweep is now clean
-apart from F15 and two deliberate gates: the unstuck command and the Diplomacy messenger, both correctly
-refused until their authority is available.
+apart from two deliberate gates: the unstuck command and the Diplomacy messenger, both correctly refused
+until their authority is available.
 
 Not yet covered: per-route behavioural verification of all 90 routes against their game-side effects
 (only reachability and termination were proved), the mission/battle layer, and a systematic diff

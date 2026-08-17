@@ -68,6 +68,10 @@ internal class PlayerCaptivityServerHandler : IHandler
     private readonly IModConfigAuthority configAuthority;
     private readonly IAuthorityRouteHandle<SurrenderIntent, NetworkPlayerSurrenderResult> surrenderRoute;
 
+    // Server-issued release terms, keyed by offer id. Guarded because offers are issued and consumed
+    // from the game thread but discarded from the disconnect path too.
+    private readonly Dictionary<string, ReleaseOffer> releaseOffers = new Dictionary<string, ReleaseOffer>();
+
     private readonly struct SurrenderIntent
     {
         public SurrenderIntent(string mapEventId) => MapEventId = mapEventId;
@@ -106,6 +110,7 @@ internal class PlayerCaptivityServerHandler : IHandler
         // guards itself instead of gating the subscriptions here.
         messageBroker.Subscribe<PrisonerTaken>(Handle_PrisonerTaken);
         messageBroker.Subscribe<NetworkEndCaptivityAttempted>(Handle_NetworkEndCaptivityAttempted);
+        messageBroker.Subscribe<NetworkPlayerCaptivityReleaseRequest>(Handle_NetworkPlayerCaptivityReleaseRequest);
         messageBroker.Subscribe<PlayerCaptivityEndedByServer>(Handle_PlayerCaptivityEndedByServer);
         messageBroker.Subscribe<CampaignTick>(Handle_CampaignTick);
     }
@@ -114,6 +119,7 @@ internal class PlayerCaptivityServerHandler : IHandler
     {
         messageBroker.Unsubscribe<PrisonerTaken>(Handle_PrisonerTaken);
         messageBroker.Unsubscribe<NetworkEndCaptivityAttempted>(Handle_NetworkEndCaptivityAttempted);
+        messageBroker.Unsubscribe<NetworkPlayerCaptivityReleaseRequest>(Handle_NetworkPlayerCaptivityReleaseRequest);
         surrenderRoute.Dispose();
         if (Instance == this) Instance = null;
         messageBroker.Unsubscribe<PlayerCaptivityEndedByServer>(Handle_PlayerCaptivityEndedByServer);
@@ -343,6 +349,10 @@ internal class PlayerCaptivityServerHandler : IHandler
         RemoveVisual(playerParty);
         if (playerParty.LeaderHero != null)
             playerParty.ChangePartyLeader(null);
+
+        // Price this captivity now, while the captor is known, and tell the captive's client the terms.
+        // Without an offer the player can only wait to be freed by someone else (audit F15).
+        IssueReleaseOffer(hero, playerParty, payload.What.CapturerParty);
     }
 
     /// <summary>
@@ -641,70 +651,182 @@ internal class PlayerCaptivityServerHandler : IHandler
     }
 
     /// <summary>
-    /// A client requests release from captivity (ransom paid, escape, captor let them go).
-    /// Re-implements native <see cref="PlayerCaptivity"/>.EndCaptivityInternal for a remote player
-    /// hero, then confirms to the requesting client so it can leave the captivity menus.
+    /// A captive player chose to end their own captivity, quoting a server-issued offer.
+    /// Re-implements native <see cref="PlayerCaptivity"/>.EndCaptivityInternal for a remote player hero,
+    /// then confirms to the requesting client so it can leave the captivity menus.
     /// </summary>
-    private void Handle_NetworkEndPlayerCaptivityAttempted(MessagePayload<NetworkEndPlayerCaptivityAttempted> payload)
+    /// <remarks>
+    /// The request carries an offer id and nothing else of consequence. Everything that decides the
+    /// outcome — which hero, which captor, the price, where the party reappears — is read from the
+    /// server's own record of that offer, so the exploit the previous message allowed (name your own
+    /// ransom, name your own reappearance position) has nothing to attach to.
+    ///
+    /// The offer is consumed before the release runs, so a duplicate or replayed request finds nothing.
+    /// </remarks>
+    private void Handle_NetworkPlayerCaptivityReleaseRequest(MessagePayload<NetworkPlayerCaptivityReleaseRequest> payload)
     {
         if (ModInformation.IsClient) return;
 
-        var heroId = payload.What.PlayerHeroId;
-        var partyId = payload.What.PlayerPartyId;
-        var facilitatorId = payload.What.FacilitatorId;
+        var offerId = payload.What.OfferId;
         var detail = payload.What.Detail;
-        var ransomAmount = payload.What.RansomAmount;
-        var releasePosition = payload.What.PlayerPartyPosition;
-        var peer = payload.Who as NetPeer;
 
-        // The release touches party/roster game state the main-thread tick also touches, so defer the
-        // apply to the game loop; resolve the object ids inside the lambda so a deferred create that lands
-        // first is visible, and send the reply inside the lambda after the release runs so the client only
-        // leaves the captivity menus once the server has actually applied it.
+        if (payload.Who is not NetPeer peer)
+        {
+            Logger.Error("Rejected {Message} without a requesting peer", nameof(NetworkPlayerCaptivityReleaseRequest));
+            return;
+        }
+
+        if (!playerManager.TryGetPlayer(peer, out var player))
+        {
+            Logger.Warning("Rejected captivity release from peer {PeerId}: no registered player", peer.Id);
+            return;
+        }
+
         GameThread.Run(() =>
         {
             try
             {
-                if (!objectManager.TryGetObjectWithLogging<Hero>(heroId, out var playerHero))
-                    return;
-                if (!objectManager.TryGetObjectWithLogging<MobileParty>(partyId, out var playerParty))
-                    return;
-
-                Hero facilitator = null;
-                if (facilitatorId != null && !objectManager.TryGetObjectWithLogging(facilitatorId, out facilitator))
-                    return;
-
-                PlayerCaptivityLogger.Debug("Handle_NetworkEndPlayerCaptivityAttempted (server): hero={HeroId} party={PartyId} detail={Detail} facilitator={FacilitatorId}",
-                    playerHero.StringId, playerParty.StringId, detail, facilitator?.StringId);
-
-                var isPaidRansom = detail == EndCaptivityDetail.Ransom;
-                if (isPaidRansom && (ransomAmount <= 0 || playerHero.Gold < ransomAmount))
+                ReleaseOffer offer;
+                lock (releaseOffers)
                 {
-                    Logger.Warning(
-                        "Refused invalid ransom release for {HeroId}: amount={Amount}, available={Gold}",
-                        playerHero.StringId,
-                        ransomAmount,
-                        playerHero.Gold);
+                    if (offerId == null || !releaseOffers.TryGetValue(offerId, out offer))
+                    {
+                        Logger.Warning("Rejected captivity release from peer {PeerId}: unknown offer", peer.Id);
+                        return;
+                    }
+
+                    // The offer belongs to one hero, and only that hero's owner may spend it.
+                    if (offer.HeroId != player.HeroId)
+                    {
+                        Logger.Warning("Rejected captivity release from peer {PeerId}: offer belongs to another player",
+                            peer.Id);
+                        return;
+                    }
+
+                    // Consume first: a replay finds nothing rather than a second free release.
+                    releaseOffers.Remove(offerId);
+                }
+
+                if (!objectManager.TryGetObjectWithLogging<Hero>(offer.HeroId, out var playerHero)) return;
+                if (!objectManager.TryGetObjectWithLogging<MobileParty>(player.MobilePartyId, out var playerParty)) return;
+
+                // The world may have moved on since the offer was made — freed already, or handed to a
+                // different captor, which would make this price wrong.
+                PartyBase captor = playerHero.PartyBelongedToAsPrisoner;
+                if (captor == null)
+                {
+                    PlayerCaptivityLogger.Debug("Captivity release skipped: {HeroId} is no longer captive", playerHero.StringId);
                     return;
                 }
 
-                var capturerFaction = playerHero.PartyBelongedToAsPrisoner?.MapFaction;
+                if (!objectManager.TryGetId(captor, out var currentCaptorId) || currentCaptorId != offer.CaptorPartyId)
+                {
+                    Logger.Warning("Rejected captivity release for {HeroId}: the captor changed since the offer",
+                        playerHero.StringId);
+                    return;
+                }
+
+                var isPaidRansom = detail == EndCaptivityDetail.Ransom;
+                if (isPaidRansom && (offer.RansomAmount <= 0 || playerHero.Gold < offer.RansomAmount))
+                {
+                    Logger.Warning(
+                        "Refused ransom release for {HeroId}: price={Amount}, available={Gold}",
+                        playerHero.StringId, offer.RansomAmount, playerHero.Gold);
+                    return;
+                }
+
+                // Derived, never taken from the client: native drops the freed party at the captor.
+                CampaignVec2 releasePosition = GetReleasePosition(captor, playerParty.Position);
+
+                Hero facilitator = captor.LeaderHero;
+                var capturerFaction = captor.MapFaction;
+
                 if (!ReleasePlayerFromCaptivity(playerHero, playerParty, detail, facilitator, releasePosition))
                     return;
 
                 if (isPaidRansom)
                 {
-                    GiveGoldAction.ApplyBetweenCharacters(playerHero, null, ransomAmount, false);
+                    GiveGoldAction.ApplyBetweenCharacters(playerHero, null, offer.RansomAmount, false);
                     GrantRansomSafeConduct(playerParty, capturerFaction);
                 }
+
+                PlayerCaptivityLogger.Debug("Released {HeroId} on offer {OfferId} ({Detail}, {Amount} denars)",
+                    playerHero.StringId, offerId, detail, isPaidRansom ? offer.RansomAmount : 0);
 
                 network.Send(peer, new NetworkPlayerCaptivityEnded());
             }
             catch (Exception e)
             {
-                Logger.Error(e, "Failed to apply {Message}", nameof(NetworkEndPlayerCaptivityAttempted));
+                Logger.Error(e, "Failed to apply {Message}", nameof(NetworkPlayerCaptivityReleaseRequest));
             }
         }, blocking: true);
+    }
+
+    /// <summary>
+    /// Prices this capture and offers the captive's own client the terms, once.
+    /// </summary>
+    /// <remarks>
+    /// Native prices a captivity once, in <c>PlayerCaptivity.SetRansomAmount</c>, and keeps the number for
+    /// its duration. This does the same, on the only machine whose word counts. The client is told the
+    /// figure purely so its menu quotes what it will actually be charged.
+    /// </remarks>
+    private void IssueReleaseOffer(Hero captive, MobileParty capturedParty, PartyBase captor)
+    {
+        if (captive == null || captor == null) return;
+        if (!objectManager.TryGetId(captive, out var heroId)) return;
+        if (!objectManager.TryGetId(captor, out var captorPartyId)) return;
+
+        int ransom = PlayerCaptivityRansom.ForCaptive(captive, captor);
+        var offerId = Guid.NewGuid().ToString("N");
+
+        lock (releaseOffers)
+        {
+            // One live offer per hero: a re-capture replaces the stale terms rather than adding to them.
+            foreach (var existing in releaseOffers.Where(entry => entry.Value.HeroId == heroId).ToList())
+                releaseOffers.Remove(existing.Key);
+
+            releaseOffers[offerId] = new ReleaseOffer(offerId, heroId, captorPartyId, ransom);
+        }
+
+        if (!PlayerManager.TryGetControlledObjectInfo(capturedParty, out var controlInfo) ||
+            !playerManager.TryGetPeer(controlInfo.ObjectControllerId, out var peer))
+        {
+            PlayerCaptivityLogger.Debug("Priced captivity of {HeroId} at {Amount} but its owner is not connected",
+                heroId, ransom);
+            return;
+        }
+
+        PlayerCaptivityLogger.Debug("Offering release of {HeroId} at {Amount} denars (offer {OfferId})",
+            heroId, ransom, offerId);
+        network.Send(peer, new NetworkPlayerCaptivityReleaseOffer(offerId, ransom));
+    }
+
+    /// <summary>Drops any live offer for a hero whose captivity ended by some other route.</summary>
+    private void DiscardReleaseOffers(string heroId)
+    {
+        if (heroId == null) return;
+        lock (releaseOffers)
+        {
+            foreach (var existing in releaseOffers.Where(entry => entry.Value.HeroId == heroId).ToList())
+                releaseOffers.Remove(existing.Key);
+        }
+    }
+
+    /// <summary>Terms the server issued for one captivity. Priced once, spent once.</summary>
+    private readonly struct ReleaseOffer
+    {
+        public ReleaseOffer(string offerId, string heroId, string captorPartyId, int ransomAmount)
+        {
+            OfferId = offerId;
+            HeroId = heroId;
+            CaptorPartyId = captorPartyId;
+            RansomAmount = ransomAmount;
+        }
+
+        public string OfferId { get; }
+        public string HeroId { get; }
+        public string CaptorPartyId { get; }
+        public int RansomAmount { get; }
     }
 
     /// <summary>
@@ -730,6 +852,9 @@ internal class PlayerCaptivityServerHandler : IHandler
 
         PlayerCaptivityLogger.Debug("Handle_PlayerCaptivityEndedByServer: hero={HeroId} party={PartyId} detail={Detail}",
             playerHero.StringId, playerParty.StringId, payload.What.Detail);
+
+        // Freed by some other route (captor defeated, AI ransom, peace): any live offer is now stale.
+        if (objectManager.TryGetId(playerHero, out var releasedHeroId)) DiscardReleaseOffers(releasedHeroId);
 
         var captorParty = playerHero.PartyBelongedToAsPrisoner;
         var releasePosition = payload.What.HasReleasePosition

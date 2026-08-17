@@ -7,6 +7,7 @@ using GameInterface.Services.MobileParties.Extensions;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.PlayerCaptivityService.Messages;
 using Serilog;
+using System.Threading;
 using System;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Encounters;
@@ -42,6 +43,9 @@ internal class PlayerCaptivityClientHandler : IHandler
     private static readonly ILogger Logger = LogManager.GetLogger<PlayerCaptivityClientHandler>();
     private readonly IObjectManager objectManager;
     private readonly INetwork network;
+
+    // The live server-issued offer for this client's own captivity, or null when none stands.
+    private string releaseOfferId;
     private readonly IMessageBroker messageBroker;
 
     public PlayerCaptivityClientHandler(
@@ -60,6 +64,7 @@ internal class PlayerCaptivityClientHandler : IHandler
         messageBroker.Subscribe<EndPlayerCaptivityAttempted>(Handle_EndPlayerCaptivityAttempted);
         messageBroker.Subscribe<EndCaptivityAttempted>(Handle_EndCaptivityAttempted);
         messageBroker.Subscribe<NetworkPlayerCaptivityEnded>(Handle_NetworkPlayerCaptivityEnded);
+        messageBroker.Subscribe<NetworkPlayerCaptivityReleaseOffer>(Handle_NetworkPlayerCaptivityReleaseOffer);
         messageBroker.Subscribe<NetworkPlayerCaptivityReleasePositionSet>(Handle_NetworkPlayerCaptivityReleasePositionSet);
     }
 
@@ -70,6 +75,7 @@ internal class PlayerCaptivityClientHandler : IHandler
         messageBroker.Unsubscribe<EndPlayerCaptivityAttempted>(Handle_EndPlayerCaptivityAttempted);
         messageBroker.Unsubscribe<EndCaptivityAttempted>(Handle_EndCaptivityAttempted);
         messageBroker.Unsubscribe<NetworkPlayerCaptivityEnded>(Handle_NetworkPlayerCaptivityEnded);
+        messageBroker.Unsubscribe<NetworkPlayerCaptivityReleaseOffer>(Handle_NetworkPlayerCaptivityReleaseOffer);
         messageBroker.Unsubscribe<NetworkPlayerCaptivityReleasePositionSet>(Handle_NetworkPlayerCaptivityReleasePositionSet);
     }
 
@@ -219,33 +225,40 @@ internal class PlayerCaptivityClientHandler : IHandler
         PlayerCaptivityLogger.Debug("Handle_EndPlayerCaptivityAttempted (client): hero={HeroId} detail={Detail} facilitator={FacilitatorId}",
             data.PlayerHero?.StringId, data.Detail, data.Facilitator?.StringId);
 
-        // Reading the captivity state and the main party, then forwarding the request and clearing the
-        // local captivity state, all touch game state the main-thread tick also touches, so defer the
-        // apply to the game loop. Ids are resolved inside the lambda so a deferred create that lands
-        // first is visible, and the forward to the server goes out from the main thread after the read.
-        GameThread.Run(() =>
+        // Quote the server's offer and nothing else. The hero, the captor, the price and the release
+        // position are all the server's to decide; this used to send a client-chosen ransom and a
+        // client-chosen reappearance position, which is why it was never wired up (audit F15).
+        string offerId = Volatile.Read(ref releaseOfferId);
+        if (offerId == null)
         {
-            try
-            {
-                if (!objectManager.TryGetIdWithLogging(data.PlayerHero, out string heroId)) return;
+            ShowAuthorityUnavailable("The server has not issued release terms for this captivity yet.");
+            return;
+        }
 
-                var playerParty = MobileParty.MainParty;
-                if (!objectManager.TryGetIdWithLogging(playerParty, out string partyId)) return;
-
-                string facilitatorId = null;
-                if (data.Facilitator != null && !objectManager.TryGetIdWithLogging(data.Facilitator, out facilitatorId)) return;
-                int ransomAmount = Campaign.Current.PlayerCaptivity.CurrentRansomAmount;
-
-                // No client-selected hero, party, position, ransom, or facilitator may cross this
-                // boundary without a server-issued release offer. Keep the captivity UI/state intact.
-                ShowAuthorityUnavailable("Captivity release is unavailable until the server issues a verified offer.");
-            }
-            catch (Exception e)
-            {
-                Logger.Error(e, "Failed to apply {Message}", nameof(EndPlayerCaptivityAttempted));
-            }
-        });
+        network.SendAll(new NetworkPlayerCaptivityReleaseRequest(offerId, data.Detail));
     }
+
+    /// <summary>
+    /// The server priced this captivity. Keep the id to quote back, and put the server's figure in front
+    /// of the player so the menu cannot advertise a number different from what they will be charged.
+    /// </summary>
+    private void Handle_NetworkPlayerCaptivityReleaseOffer(MessagePayload<NetworkPlayerCaptivityReleaseOffer> payload)
+    {
+        if (ModInformation.IsServer) return;
+
+        Volatile.Write(ref releaseOfferId, payload.What.OfferId);
+        int amount = payload.What.RansomAmount;
+
+        GameThread.RunSafe(() =>
+        {
+            var captivity = Campaign.Current?.PlayerCaptivity;
+            if (captivity == null) return;
+
+            captivity.CurrentRansomAmount = amount;
+            PlayerCaptivityLogger.Debug("Server release terms accepted: {Amount} denars", amount);
+        }, context: nameof(NetworkPlayerCaptivityReleaseOffer));
+    }
+
 
     /// <summary>
     /// The server released this client's hero; leave the captivity menus and any settlement the

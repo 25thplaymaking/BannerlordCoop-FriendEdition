@@ -7,7 +7,7 @@ never affect the join handshake. Full rationale: [`../../doc/COOP-MOD-INTEGRATIO
 
 | Piece | Build | Output | Deploy to |
 |---|---|---|---|
-| `StartupHook.cs` (+ `coophook.csproj`) | `dotnet build -c Release` (net6.0) | `coophook.dll` | `~/bannerlord-coop/server/coophook.dll`, referenced via `DOTNET_STARTUP_HOOKS='Z:\…\coophook.dll'`; installs the exact four-class v1.4.8 dedicated gameplay allowlist before module filtering and makes duplicate save-container registration preserve-first; DismembermentPlus remains client-only because its presentation bootstrap requires WinForms |
+| `StartupHook.cs` (+ `coophook.csproj`) | `dotnet build -c Release` (net6.0) | `coophook.dll` | `~/bannerlord-coop/server/coophook.dll`, referenced via `DOTNET_STARTUP_HOOKS='Z:\…\coophook.dll'`; installs exact four-class v1.4.8 gameplay and presentation policies before module filtering and makes duplicate save-container registration preserve-first; DismembermentPlus remains client-only because its presentation bootstrap requires WinForms |
 | `Sync-ServerModuleBins.ps1` + `server-module-roles.json` | PowerShell 7 | exact gameplay/mission server overlays | each role-declared Workshop module's `Win64_Shipping_Server` bin |
 | `Verify-ServerModuleBins.py` | Python 3 | fail-closed startup preflight | invoked by the production service before Wine |
 | `dspatch/` | `dotnet run -- <in.dll> <out.dll>` (net8, Mono.Cecil) | loader-patched `DedicatedServer.Core.dll` | input to the release-pairing patcher |

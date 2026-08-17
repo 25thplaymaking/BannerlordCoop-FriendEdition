@@ -223,6 +223,14 @@ internal sealed class StartupHook
         }
         catch { }
 
+        if (ShouldBlockDedicatedPresentationSubModule(classType))
+        {
+            __result = false;
+            LogResolutionOnce(
+                "dedicated-module-block:" + classType,
+                "[module-filter] blocking audited client-presentation submodule " + classType);
+            return false;
+        }
         if (!ShouldForceDedicatedWorkshopSubModule(classType)) return true;
 
         __result = true;
@@ -240,6 +248,20 @@ internal sealed class StartupHook
             case "Fourberie.Main":
             case "UnblockableThrust.UnblockableThrustSubmodule":
             case "RebellionsAndDemographics.SubModule":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static bool ShouldBlockDedicatedPresentationSubModule(string classType)
+    {
+        switch (classType)
+        {
+            case "Bannerlord.UIExtenderEx.SubModule":
+            case "MCM.MCMSubModule":
+            case "MCM.Internal.MCMImplementationSubModule":
+            case "Bannerlord.ModuleLoader.Bannerlord_MBOptionScreen":
                 return true;
             default:
                 return false;

@@ -17,6 +17,10 @@ MethodInfo saveDefinitionPolicy = hookType.GetMethod(
     "ShouldRunContainerDefinitionOriginal",
     BindingFlags.NonPublic | BindingFlags.Static)
     ?? throw new MissingMethodException(hookType.FullName, "ShouldRunContainerDefinitionOriginal");
+MethodInfo presentationPolicy = hookType.GetMethod(
+    "ShouldBlockDedicatedPresentationSubModule",
+    BindingFlags.NonPublic | BindingFlags.Static)
+    ?? throw new MissingMethodException(hookType.FullName, "ShouldBlockDedicatedPresentationSubModule");
 
 string[] requiredClientOnlyAssemblies =
 [
@@ -88,9 +92,27 @@ foreach (string? classType in new string?[]
         throw new InvalidOperationException($"Unaudited dedicated Workshop submodule is enabled: {classType ?? "<null>"}");
 }
 
+string[] dedicatedPresentationSubModules =
+[
+    "Bannerlord.UIExtenderEx.SubModule",
+    "MCM.MCMSubModule",
+    "MCM.Internal.MCMImplementationSubModule",
+    "Bannerlord.ModuleLoader.Bannerlord_MBOptionScreen",
+];
+foreach (string classType in dedicatedPresentationSubModules)
+{
+    if (!(bool)presentationPolicy.Invoke(null, [classType])!)
+        throw new InvalidOperationException($"Audited client-presentation submodule is not blocked: {classType}");
+}
+foreach (string? classType in new string?[] { "ImprovedGarrisons.Main", "Unrelated.Mod.Entry", null })
+{
+    if ((bool)presentationPolicy.Invoke(null, [classType])!)
+        throw new InvalidOperationException($"Gameplay or unknown submodule is presentation-blocked: {classType ?? "<null>"}");
+}
+
 if (!(bool)saveDefinitionPolicy.Invoke(null, [false])!)
     throw new InvalidOperationException("The first save-container definition would be suppressed.");
 if ((bool)saveDefinitionPolicy.Invoke(null, [true])!)
     throw new InvalidOperationException("A duplicate save-container definition would reach the v1.4.8 fatal assert.");
 
-Console.WriteLine("PASS: startup hook preserves assembly ownership, enables four audited gameplay submodules, and suppresses only duplicate save-container registrations");
+Console.WriteLine("PASS: startup hook preserves assembly ownership, enables four gameplay submodules, blocks four presentation submodules, and suppresses only duplicate save-container registrations");

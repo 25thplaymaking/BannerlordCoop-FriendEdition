@@ -47,7 +47,7 @@ public class WorkshopManifestValidatorTests
         WorkshopCompatibilityManifest server = ManifestFactory.Create(
             WorkshopPeerRole.Server,
             module => Copy(module,
-                configurationHash: module.ModuleId == "ImprovedGarrisons" ? new string('c', 64) : null,
+                configurationHash: module.ModuleId == "ImprovedGarrisons" ? new string('0', 64) : null,
                 managedDistributionComponent: module.ModuleId != "ImprovedGarrisons"));
         WorkshopCompatibilityManifest client = ManifestFactory.Create(WorkshopPeerRole.Client);
 
@@ -73,7 +73,7 @@ public class WorkshopManifestValidatorTests
         WorkshopCompatibilityManifest client = ManifestFactory.Create(
             WorkshopPeerRole.Client,
             module => Copy(module, forClient: true,
-                configurationHash: module.ModuleId == "ImprovedGarrisons" ? new string('c', 64) : null));
+                configurationHash: module.ModuleId == "ImprovedGarrisons" ? new string('0', 64) : null));
 
         WorkshopManifestValidationResult result = validator.Validate(server, client);
 

@@ -145,10 +145,19 @@ internal static class ManifestFactory
                expectation.FeatureActiveExpectedOnServer;
     }
 
+    /// <summary>
+    /// Derives a per-module placeholder digest. The identity fold is computed here rather than with
+    /// <c>StringComparer.Ordinal.GetHashCode</c>, which is randomly seeded per process: the fill char
+    /// it produced changed between runs, so any test that hard-coded a "different" literal collided
+    /// with it in roughly one process out of five and silently lost the difference it was asserting.
+    /// Values stay inside <c>fill..fill+4</c>; use a char outside that band when a test needs a digest
+    /// guaranteed to differ.
+    /// </summary>
     public static string StableHash(string identity, char fill)
     {
-        int offset = Math.Abs(StringComparer.Ordinal.GetHashCode(identity)) % 16;
-        char value = (char)(fill + offset % 5);
+        int fold = 0;
+        foreach (char character in identity ?? string.Empty) fold = unchecked(fold * 31 + character);
+        char value = (char)(fill + Math.Abs(fold % 16) % 5);
         return new string(value, 64);
     }
 }

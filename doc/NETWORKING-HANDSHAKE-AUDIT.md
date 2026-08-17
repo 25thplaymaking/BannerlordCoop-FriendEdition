@@ -23,9 +23,13 @@ for the native behaviour the patches depend on; verify package hashes on both pe
 | F7 | Medium | Unit suites raced on process-wide game state; CI green by luck | Fixed `b87c538a3` |
 | F8 | Medium | Launcher lost the crash bundle when any report folder was incomplete | Fixed `e98ca7cfa` |
 | F9 | Medium | `ItemRoster` lifetime logging storm — 1,929 ERR lines in 3 min | Fixed |
-| F10 | Medium | Client manifest build 41.5 s against a 30 s validation deadline | **Open** |
+| F10 | — | Client manifest build 41.5 s against a 30 s validation deadline | Withdrawn — not a defect |
 | F11 | Low | Handshake message types with a throwing member and a null-returning property | Fixed |
 | F12 | Low | Dead disabled-branch for caravan hostile actions | Fixed |
+| F13 | Low | Launcher token migration not persisted | Fixed |
+| F14 | **Critical** | Eight client actions shipped disabled *and* never subscribed server-side | Fixed |
+| F15 | High | Player self-release from captivity needs per-client state the server does not model | **Open — needs a decision** |
+| F16 | Low | Dead disabled-branch for villager hostile actions | Fixed |
 
 ---
 
@@ -159,12 +163,19 @@ first three reports per `(action, subject)`, says so once when a subject starts 
 quiet — at Warning, not Error. Nothing here is a failure, and reserving Error for real faults is what
 makes the log searchable.
 
-### F10 — Manifest build vs validation deadline (Medium)
-The client took **41,560 ms** to build its Workshop manifest this session (cold cache; a warm run was
-1,357 ms). `ValidateModuleState.ValidationTimeout` is **30 s**. The build did not trip it, but the
-margin is inverted on a cold cache and a slower disk could produce a spurious "Timed out waiting for
-the server to validate the connection". Needs either a deadline that accounts for hashing, or a
-warm-up that hashes before the join begins.
+### F10 — Manifest build vs validation deadline — WITHDRAWN
+I recorded this as an open risk on the strength of two numbers: the client took **41,560 ms** to build
+its Workshop manifest (cold cache; warm was 1,357 ms) and `ValidateModuleState.ValidationTimeout` is
+**30 s**. Those numbers are real but they are not on the same clock, and I paired them wrongly.
+
+`ValidationTimeout` is armed inside `SendValidationRequest`, which runs *after* hashing finishes; it
+bounds the server round-trip only. The build itself is covered by `ManifestPreparationTimeout`, a
+separate 2-minute deadline armed at construction and present since the Workshop baseline
+(`af127af18`) — long before this audit. `SteamJoinWatchdog` is the only other deadline in the join and
+it is disarmed on `NetworkConnected`, before validation starts. The 41.5 s build therefore ran against
+120 s, a ~3x margin, and the session it was measured in joined successfully.
+
+No change was needed and none was made.
 
 ### F11 — Handshake message types (Low) — FIXED
 `ValidateModules.TransactionID` is `=> throw new NotImplementedException()`, and
@@ -179,7 +190,8 @@ return null.
 against caravans are temporarily disabled" branch is unreachable. Remove the flag or document why it
 is retained.
 
-*Fixed.* Flag and unreachable branch removed.
+*Fixed.* Flag and unreachable branch removed. **F16** is the same defect in
+`VillagerConversationsPatches.villagerHostileActionsEnabled`, found by the F14 sweep and removed with it.
 
 ### F13 — Launcher token migration is not persisted (Low) — FIXED
 The migration rewrites the legacy token in memory only, and matches with `StringComparison.Ordinal`.
@@ -191,11 +203,118 @@ locked config can never block a launch.
 
 ---
 
+## F14 - Eight client actions shipped disabled, and unwired on both sides (Critical, fixed)
+
+F2 found trade disabled by an early `return` with a `#pragma warning disable CS0162` hiding the
+unreachable remainder. That turned out to be a pattern, not an incident. Searching for the pattern
+itself - `CS0162` in shipped source - found seven more, and every one of them was broken *twice*: the
+client stub was only half of it, because in each case the server-side apply handler existed, was
+correct, and **was never subscribed**. Undoing the stub alone would still have produced silence.
+
+| Action | Client | Server |
+|---|---|---|
+| Settlement "take to party" | stubbed | `Handle_MenuTakeHeroToParty` never subscribed |
+| Companion dismissal | stubbed | `Handle_FireCompanion` never subscribed |
+| Liberate lord prisoner | stubbed | `Handle_NetworkLiberateLordPrisoner` never subscribed |
+| Take lord prisoner | stubbed | `Handle_NetworkTakeLordPrisoner` never subscribed |
+| Released after helping in battle | stubbed | `Handle_NetworkLordHelpedInBattle` never subscribed |
+| Let a defeated lord go | stubbed | `Handle_NetworkLordDefeatToRelease` never subscribed |
+| Free a lord | stubbed | `Handle_NetworkLordFreedToRelease` never subscribed |
+| Release a prisoner you hold | stopped at the client | no network message existed at all |
+
+Taking prisoners after a battle is not a fringe feature; neither is dismissing a companion.
+
+**The reason they were disabled was sound.** Each stub's comment said some variant of "no server-issued
+lease verifies this request", and that was true: the requests name their own actor and target, so a
+client could forge "dismiss any companion", "add any hero to any party", or "free every prisoner in the
+campaign". The pre-existing server checks confirmed the *world* still matched what the client expected
+- clan unchanged, party unchanged - which is optimistic concurrency, not authorization. Nothing asked
+who was calling.
+
+So the fix is not to un-stub them. Each is restored behind a gate that reads server state only:
+
+- **Identity, always.** The peer resolves to a registered `Player`, and the actor named in the request is
+  that player's own hero or party. This alone kills acting-as-somebody-else.
+- **Custody or a lease, whichever is actually checkable.**
+  - Hero transfer: the target party must be the requester's own, and the hero must be unattached or
+    already in their clan - otherwise it is pulling a hero out of someone else's party.
+  - Companion dismissal: the companion's owning clan must be the requester's clan.
+  - Prisoner release: the party holding the prisoner must be the requester's own. Custody *is* the
+    permission - releasing a prisoner you are holding needs nothing further.
+  - The five lord-conversation outcomes: an active `ConversationPartyTracker` lease, **or** custody of
+    the prisoner. The lease exists now (it did not when these were disabled) and covers both the
+    client-initiated and the server-detected post-battle conversation, since `HoldAndApprove` issues one
+    on the `serverDetected` path too. Custody is the fallback for a party-screen conversation, which
+    never opens a map conversation and so has no lease to hold. Taking a *new* prisoner has no custody
+    to appeal to and therefore still requires the lease - which is exactly the case that must not be
+    forgeable.
+
+The conversation partner is deliberately not matched against the lease target: a prisoner has no party,
+so there is nothing on the lease to compare it against.
+
+Native behaviour was taken from the game's own IL rather than guessed - the TakeToParty branch of
+`GameMenuOverlay.ExecuteTroopAction` is exactly `LeaveSettlementAction.ApplyForCharacterOnly` followed
+by `AddHeroToPartyAction.Apply(hero, MainParty, true)`, which is what the server applies.
+
+**Why nothing caught it.** No test asserted that a handler is subscribed, or that its body reaches the
+send. Twelve tests now assert both at the IL level, which is the only level where "returns early before
+sending" is visible. They were checked against a deliberately re-stubbed build to confirm they fail on
+it rather than passing vacuously.
+
+---
+
+## F15 - Player self-release from captivity (High, open - needs a decision)
+
+Everything above is fixed. This one is not, and I do not think it should be fixed quietly.
+
+When *your own* hero is captive, the menu options that end it - pay ransom, escape, captor lets you go -
+publish `EndPlayerCaptivityAttempted`. That was stubbed like the rest, and
+`NetworkEndPlayerCaptivityAttempted` was never subscribed server-side. The difference is that this
+handler, unlike the other seven, **cannot be made safe by adding a check**, because a value it needs is
+supplied by the client and cannot be recomputed server-side:
+
+- **The ransom amount.** The client sends `Campaign.Current.PlayerCaptivity.CurrentRansomAmount`. The
+  server cannot recompute it. `PlayerCaptivity` is a per-campaign singleton that on a headless host
+  describes the host's own captivity, not the client's, and `RansomPlayerValuePatch` deliberately forces
+  `PrisonerRansomValue` to **0** for player heroes so the AI does not ransom them. There is no
+  server-side number to compare against, so a client could name its own price - including zero.
+- **The release position.** The client sends where its party reappears. This half *is* fixable: the
+  server already has `GetReleasePosition` and can derive it from the captor. The ransom is the blocker.
+
+`PlayerCaptivityServerHandler` keeps no per-captive state - no record of who is held, by whom, at what
+price - so there is nothing to validate against today. Server-driven releases still work: if the captor
+is defeated, or the AI ransoms or frees you, `PlayerCaptivityEndedByServer` runs and you get out. What
+does not work is *choosing* to buy your way out.
+
+Three ways forward, in the order I would pick them:
+
+1. **Server-issued release offer (recommended).** When the server records a player as captive it
+   computes and stores the ransom itself, and sends an offer id. The client's request quotes the id, not
+   a number; the server prices it, checks the hero's gold, and applies. This is the same shape as the
+   marriage-barter lease that already works, so it fits the architecture rather than bending it. It is
+   also the largest change: new per-captive server state plus a small protocol.
+2. **Server-priced, client-triggered.** Keep the current message, but have the server ignore
+   `RansomAmount` and `PlayerPartyPosition` entirely - derive the position from the captor via
+   `GetReleasePosition`, and price the ransom server-side at apply time. Much smaller, and it closes the
+   exploit, but the number shown in the player's menu can disagree with what they are charged.
+3. **Leave it as it is.** Captivity still ends - captor defeated, AI ransom, peace - just not by your
+   choice. No exploit, no work, a worse game.
+
+I did not pick one, because the first is a real feature decision and the third is a real answer.
+
+---
+
 ## Scope
 
 Covered: the authority-route layer end to end (registration, lifetime, completion, timeouts,
 re-entrancy), the Workshop manifest handshake on both peers, the trade and inventory path, caravan
 party-size modelling, and the launcher's module wiring.
+
+Also covered on the second pass: every client action disabled behind a stub or an unreachable branch,
+found by sweeping for the pattern itself rather than by reading - `CS0162` suppressions, "is disabled"
+and "unavailable until" strings, and `IHandler` types that subscribe nothing. That sweep is now clean
+apart from F15 and two deliberate gates: the unstuck command and the Diplomacy messenger, both correctly
+refused until their authority is available.
 
 Not yet covered: per-route behavioural verification of all 90 routes against their game-side effects
 (only reachability and termination were proved), the mission/battle layer, and a systematic diff

@@ -1,4 +1,4 @@
-﻿using Common;
+using Common;
 using Common.Logging;
 using Common.Messaging;
 using Common.Network;
@@ -13,6 +13,7 @@ using GameInterface.Services.MapEvents.Messages;
 using GameInterface.Services.MapEvents.Messages.Leave;
 using GameInterface.Services.MobilePartyAIs.Patches;
 using GameInterface.Services.MobileParties.Extensions;
+using GameInterface.Services.Heroes.Extensions;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.PartyBases.Extensions;
 using GameInterface.Services.PartyVisuals.Extensions;
@@ -104,6 +105,7 @@ internal class PlayerCaptivityServerHandler : IHandler
         // ModInformation is evaluated per call (tests flip it per instance), so each handler
         // guards itself instead of gating the subscriptions here.
         messageBroker.Subscribe<PrisonerTaken>(Handle_PrisonerTaken);
+        messageBroker.Subscribe<NetworkEndCaptivityAttempted>(Handle_NetworkEndCaptivityAttempted);
         messageBroker.Subscribe<PlayerCaptivityEndedByServer>(Handle_PlayerCaptivityEndedByServer);
         messageBroker.Subscribe<CampaignTick>(Handle_CampaignTick);
     }
@@ -111,6 +113,7 @@ internal class PlayerCaptivityServerHandler : IHandler
     public void Dispose()
     {
         messageBroker.Unsubscribe<PrisonerTaken>(Handle_PrisonerTaken);
+        messageBroker.Unsubscribe<NetworkEndCaptivityAttempted>(Handle_NetworkEndCaptivityAttempted);
         surrenderRoute.Dispose();
         if (Instance == this) Instance = null;
         messageBroker.Unsubscribe<PlayerCaptivityEndedByServer>(Handle_PlayerCaptivityEndedByServer);
@@ -1027,5 +1030,89 @@ internal class PlayerCaptivityServerHandler : IHandler
                 yield return (hero, mobileParty);
             }
         }
+    }
+
+    /// <summary>
+    /// A client asks to release a prisoner its own party is holding — the party screen's release action
+    /// and the other native flows that reach <c>EndCaptivityAction.ApplyInternal</c> for a non-local hero.
+    /// </summary>
+    /// <remarks>
+    /// Custody is the whole authorization, and the server reads it rather than accepting it: the hero
+    /// must actually be a prisoner, and the party holding them must be the requesting player's own. A
+    /// client naming somebody else's prisoner is refused, so this cannot be used to empty another
+    /// player's or an AI lord's dungeon.
+    ///
+    /// Releasing a player hero is deliberately excluded. That path restores a deactivated co-op party
+    /// and has its own server-driven flow (<see cref="Handle_PlayerCaptivityEndedByServer"/>); routing it
+    /// through here would half-free them.
+    /// </remarks>
+    private void Handle_NetworkEndCaptivityAttempted(MessagePayload<NetworkEndCaptivityAttempted> payload)
+    {
+        if (ModInformation.IsClient) return;
+
+        var prisonerId = payload.What.PrisonerId;
+        var facilitatorId = payload.What.FacilitatorId;
+        var detail = payload.What.Detail;
+
+        if (payload.Who is not NetPeer requester)
+        {
+            Logger.Error("Rejected {Message} without a requesting peer", nameof(NetworkEndCaptivityAttempted));
+            return;
+        }
+
+        if (!playerManager.TryGetPlayer(requester, out var player))
+        {
+            Logger.Warning("Rejected captivity release from peer {PeerId}: no registered player", requester.Id);
+            return;
+        }
+
+        GameThread.Run(() =>
+        {
+            try
+            {
+                if (!objectManager.TryGetObjectWithLogging<Hero>(prisonerId, out var prisoner)) return;
+
+                Hero facilitator = null;
+                if (facilitatorId != null && !objectManager.TryGetObjectWithLogging(facilitatorId, out facilitator))
+                    return;
+
+                if (prisoner.IsPlayerHero())
+                {
+                    Logger.Warning(
+                        "Rejected captivity release from peer {PeerId}: {HeroId} is a player hero and uses the co-op release",
+                        requester.Id, prisoner.StringId);
+                    return;
+                }
+
+                if (!prisoner.IsPrisoner)
+                {
+                    PlayerCaptivityLogger.Debug("Captivity release skipped: {HeroId} is not a prisoner", prisoner.StringId);
+                    return;
+                }
+
+                PartyBase captor = prisoner.PartyBelongedToAsPrisoner;
+                if (captor?.MobileParty == null ||
+                    !objectManager.TryGetId(captor.MobileParty, out var captorPartyId) ||
+                    captorPartyId != player.MobilePartyId)
+                {
+                    Logger.Warning(
+                        "Rejected captivity release from peer {PeerId}: {HeroId} is not held by their party",
+                        requester.Id, prisoner.StringId);
+                    return;
+                }
+
+                using (new AllowedThread())
+                {
+                    EndCaptivityAction.ApplyByReleasedByChoice(prisoner, facilitator);
+                }
+
+                PlayerCaptivityLogger.Debug("Released {HeroId} at the request of peer {PeerId} ({Detail})",
+                    prisoner.StringId, requester.Id, detail);
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, "Failed to apply {Message}", nameof(NetworkEndCaptivityAttempted));
+            }
+        });
     }
 }

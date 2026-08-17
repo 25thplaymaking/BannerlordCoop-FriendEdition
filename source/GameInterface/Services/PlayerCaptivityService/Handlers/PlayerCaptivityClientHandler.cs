@@ -1,4 +1,4 @@
-﻿using Common;
+using Common;
 using Common.Logging;
 using Common.Messaging;
 using Common.Network;
@@ -200,7 +200,9 @@ internal class PlayerCaptivityClientHandler : IHandler
         string facilitatorId = null;
         if (data.Facilitator != null && !objectManager.TryGetIdWithLogging(data.Facilitator, out facilitatorId)) return;
 
-        ShowAuthorityUnavailable("Captivity release is unavailable until the server can verify the conversation custody.");
+        // The captor is deliberately not sent: the server reads it from the prisoner and requires it to
+        // be this player's own party, so there is nothing here for a client to choose.
+        network.SendAll(new NetworkEndCaptivityAttempted(prisonerId, data.Detail, facilitatorId));
     }
 
     /// <summary>

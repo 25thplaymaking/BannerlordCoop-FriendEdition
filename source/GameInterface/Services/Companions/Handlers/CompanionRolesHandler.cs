@@ -1,4 +1,4 @@
-﻿using Common;
+using Common;
 using Common.Logging;
 using Common.Messaging;
 using Common.Network;
@@ -8,6 +8,7 @@ using GameInterface.Services.Companions.Interfaces;
 using GameInterface.Services.Companions.Messages;
 using GameInterface.Services.Heroes.Patches;
 using GameInterface.Services.ObjectManager;
+using GameInterface.Services.Players;
 using GameInterface.Services.TroopRosters.Interfaces;
 using GameInterface.Services.TroopRosters.Messages;
 using LiteNetLib;
@@ -37,6 +38,7 @@ internal class CompanionRolesHandler : IHandler
     private readonly ICompanionRolesCampaignBehaviorInterface companionRolesCampaignBehaviorInterface;
     private readonly ITroopRosterInterface troopRosterInterface;
     private readonly ISendCoalescer sendCoalescer;
+    private readonly IPlayerManager playerManager;
     private string pendingFireCompanionRequestId;
     private string pendingFireCompanionHeroId;
 
@@ -46,6 +48,7 @@ internal class CompanionRolesHandler : IHandler
         INetwork network,
         ICompanionRolesCampaignBehaviorInterface companionRolesCampaignBehaviorInterface,
         ITroopRosterInterface troopRosterInterface,
+        IPlayerManager playerManager,
         ISendCoalescer sendCoalescer = null)
     {
         this.messageBroker = messageBroker;
@@ -54,10 +57,12 @@ internal class CompanionRolesHandler : IHandler
         this.companionRolesCampaignBehaviorInterface = companionRolesCampaignBehaviorInterface;
         this.troopRosterInterface = troopRosterInterface;
         this.sendCoalescer = sendCoalescer;
+        this.playerManager = playerManager;
 
         messageBroker.Subscribe<ClanNameSelectionDone>(Handle_ClanNameSelectionDone);
         messageBroker.Subscribe<DoClanNameSelection>(Handle_DoClanNameSelection);
         messageBroker.Subscribe<CompanionFired>(Handle_CompanionFired);
+        messageBroker.Subscribe<FireCompanion>(Handle_FireCompanion);
         messageBroker.Subscribe<FireCompanionCompleted>(Handle_FireCompanionCompleted);
         messageBroker.Subscribe<CompanionRejoinAfterEmprisonment>(Handle_CompanionRejoinAfterEmprisonment);
         messageBroker.Subscribe<DoCompanionRejoinAfterEmprisonment>(Handle_DoCompanionRejoinAfterEmprisonment);
@@ -74,6 +79,7 @@ internal class CompanionRolesHandler : IHandler
         messageBroker.Unsubscribe<ClanNameSelectionDone>(Handle_ClanNameSelectionDone);
         messageBroker.Unsubscribe<DoClanNameSelection>(Handle_DoClanNameSelection);
         messageBroker.Unsubscribe<CompanionFired>(Handle_CompanionFired);
+        messageBroker.Unsubscribe<FireCompanion>(Handle_FireCompanion);
         messageBroker.Unsubscribe<FireCompanionCompleted>(Handle_FireCompanionCompleted);
         messageBroker.Unsubscribe<CompanionRejoinAfterEmprisonment>(Handle_CompanionRejoinAfterEmprisonment);
         messageBroker.Unsubscribe<DoCompanionRejoinAfterEmprisonment>(Handle_DoCompanionRejoinAfterEmprisonment);
@@ -160,12 +166,8 @@ internal class CompanionRolesHandler : IHandler
 
     private void Handle_CompanionFired(MessagePayload<CompanionFired> obj)
     {
-        logger.Warning("Companion dismissal is disabled: no server-issued conversation lease verifies this request.");
-        try { TaleWorlds.Library.InformationManager.DisplayMessage(new TaleWorlds.Library.InformationMessage("Companion dismissal is unavailable until the server verifies the conversation.")); }
-        catch (Exception exception) { logger.Warning(exception, "Could not show companion dismissal rejection"); }
-        return;
+        if (ModInformation.IsServer) return;
 
-#pragma warning disable CS0162
         if (pendingFireCompanionRequestId != null)
         {
             logger.Warning("Ignored a second companion dismissal while request {RequestId} is pending",
@@ -205,11 +207,13 @@ internal class CompanionRolesHandler : IHandler
         {
             CompletePendingFireCompanion(requestId, pendingFireCompanionHeroId, false, exception.Message);
         }
-#pragma warning restore CS0162
     }
 
     private void Handle_FireCompanion(MessagePayload<FireCompanion> obj)
     {
+        // Client -> server only; a client has nothing to apply and no peer to answer.
+        if (!ModInformation.IsServer) return;
+
         var data = obj.What;
         var requester = obj.Who as NetPeer;
 
@@ -227,6 +231,8 @@ internal class CompanionRolesHandler : IHandler
             {
                 if (string.IsNullOrWhiteSpace(data.RequestId))
                     throw new InvalidOperationException("The dismissal request has no correlation id.");
+                if (!playerManager.TryGetPlayer(requester, out var requestingPlayer))
+                    throw new InvalidOperationException("The requesting peer has no registered player.");
                 if (!objectManager.TryGetObjectWithLogging<Hero>(data.OneToOneConversationHeroId,
                     out var oneToOneConversationHero))
                     throw new InvalidOperationException("The requested companion could not be resolved.");
@@ -234,6 +240,13 @@ internal class CompanionRolesHandler : IHandler
                     !objectManager.TryGetIdWithLogging(oneToOneConversationHero.CompanionOf, out var currentClanId) ||
                     currentClanId != data.ExpectedClanId)
                     throw new InvalidOperationException("The companion's owning clan changed before dismissal.");
+
+                // The checks above only confirm the world still looks as the client expected; they say
+                // nothing about who is asking. Without this a peer could dismiss any companion in the
+                // campaign, including another player's. A player may only dismiss their own clan's.
+                if (currentClanId != requestingPlayer.ClanId)
+                    throw new InvalidOperationException(
+                        "The companion does not belong to the requesting player's clan.");
 
                 string currentPartyId = null;
                 if (oneToOneConversationHero.PartyBelongedTo != null &&

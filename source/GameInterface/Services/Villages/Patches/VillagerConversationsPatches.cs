@@ -1,4 +1,4 @@
-﻿using Common.Messaging;
+using Common.Messaging;
 using Common.Util;
 using GameInterface.Services.ItemRosters.Interfaces;
 using GameInterface.Services.ObjectManager;
@@ -19,19 +19,10 @@ namespace GameInterface.Services.Villages.Patches;
 [HarmonyPatch(typeof(VillagerCampaignBehavior))]
 internal class VillagerConversationsPatches
 {
-    private static readonly bool villagerHostileActionsEnabled = true;
-
     [HarmonyPatch(nameof(VillagerCampaignBehavior.village_farmer_loot_on_clickable_condition))]
     [HarmonyPrefix]
     public static bool VillageFarmerLootOnClickableConditionPrefix(ref VillagerCampaignBehavior __instance, ref bool __result, out TextObject explanation)
     {
-        if (!villagerHostileActionsEnabled)
-        {
-            __result = false;
-            explanation = new TextObject("{=!} Hostile actions against villagers are temporarily disabled.");
-            return false;
-        }
-
         // Replacement message for vanilla's "You just looted these people." message to be ambiguous for more than one player
         explanation = new TextObject("");
         if (__instance._lootedVillagers.ContainsKey(MobileParty.ConversationParty))

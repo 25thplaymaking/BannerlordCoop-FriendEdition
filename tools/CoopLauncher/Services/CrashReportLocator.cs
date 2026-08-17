@@ -16,13 +16,20 @@ public static class CrashReportLocator
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
         "Mount and Blade II Bannerlord", "Coop Crash Reports");
 
-    public static CrashReportCandidate? FindLatest()
+    public static CrashReportCandidate? FindLatest() => FindLatestIn(Root);
+
+    internal static CrashReportCandidate? FindLatestIn(string root)
     {
         try
         {
-            if (!Directory.Exists(Root)) return null;
-            return Directory.EnumerateDirectories(Root)
+            if (!Directory.Exists(root)) return null;
+            // CreateCandidate returns null for a report folder that has no shareable.zip, and the
+            // catch below turns any throw into "no crash report". Discard those before sorting, as
+            // FindPending does: without the filter a single incomplete folder dereferenced null in
+            // the key selector and silently disabled crash-report attachment altogether.
+            return Directory.EnumerateDirectories(root)
                 .Select(CreateCandidate)
+                .Where(candidate => candidate is not null)
                 .OrderByDescending(candidate => File.GetLastWriteTimeUtc(candidate!.ZipPath))
                 .FirstOrDefault();
         }
@@ -32,12 +39,15 @@ public static class CrashReportLocator
         }
     }
 
-    public static CrashReportCandidate? FindPending(string lastSubmittedId, long newerThanUtcTicks)
+    public static CrashReportCandidate? FindPending(string lastSubmittedId, long newerThanUtcTicks) =>
+        FindPendingIn(Root, lastSubmittedId, newerThanUtcTicks);
+
+    internal static CrashReportCandidate? FindPendingIn(string root, string lastSubmittedId, long newerThanUtcTicks)
     {
         try
         {
-            if (!Directory.Exists(Root)) return null;
-            return Directory.EnumerateDirectories(Root)
+            if (!Directory.Exists(root)) return null;
+            return Directory.EnumerateDirectories(root)
                 .Select(CreateCandidate)
                 .Where(candidate => candidate is not null &&
                     candidate.CreatedUtc.Ticks > newerThanUtcTicks &&

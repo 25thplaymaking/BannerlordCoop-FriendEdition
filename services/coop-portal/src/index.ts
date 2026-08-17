@@ -83,7 +83,7 @@ async function createReport(request: Request, env: Env): Promise<Response> {
   const report = normalizeReport(value);
   if (report === null) return json({ message: "Title, description, or report metadata is invalid." }, 400);
 
-  const limited = await env.REPORT_RATE_LIMITER.limit({ key: report.clientId });
+  const limited = await env.REPORT_RATE_LIMITER.limit({ key: rateLimitKey(request) });
   if (!limited.success)
     return json({ message: "Too many reports were submitted. Wait a minute and try again." }, 429);
 
@@ -161,6 +161,22 @@ async function readJson(request: Request, maximumBytes = MAX_BODY_BYTES): Promis
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
   try { return JSON.parse(new TextDecoder().decode(bytes)); }
   catch { return null; }
+}
+
+/**
+ * `/reports` is unauthenticated and opens a GitHub issue with the portal's own token, so its
+ * throttle has to key on something the caller cannot choose. It previously keyed on the
+ * body's `clientId`, which a caller varies per request to get an unlimited bucket. Use the
+ * connecting address instead: Cloudflare overwrites `cf-connecting-ip` at the edge, and the
+ * Node host — bound to loopback behind the tunnel — stamps `x-portal-client-ip` from the
+ * socket after stripping any supplied copy. With neither present, fall back to one shared
+ * bucket rather than a per-caller one, so an unattributable origin throttles instead of
+ * bypassing.
+ */
+function rateLimitKey(request: Request): string {
+  const candidate = request.headers.get("cf-connecting-ip") ?? request.headers.get("x-portal-client-ip") ?? "";
+  const address = candidate.split(",")[0]?.trim() ?? "";
+  return address.length === 0 ? "origin:unattributed" : `origin:${address}`;
 }
 
 function normalizeReport(value: unknown): ReportInput | null {
@@ -258,4 +274,4 @@ function json(value: unknown, status = 200): Response {
 
 class PayloadTooLargeError extends Error {}
 
-export const testing = { normalizeReport, isStats, buildIssueBody, redact };
+export const testing = { normalizeReport, isStats, buildIssueBody, redact, rateLimitKey };

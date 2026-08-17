@@ -5,6 +5,7 @@ using Xunit;
 
 namespace GameInterface.Tests.Services.WorkshopMods.Fourberie;
 
+[Collection(FourberieRuntimeCollection.Name)]
 public sealed class FourberieConfigurationFingerprintTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "fourberie-config-" + Guid.NewGuid().ToString("N"));

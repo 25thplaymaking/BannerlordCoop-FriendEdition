@@ -54,6 +54,7 @@ export class SlidingRateLimiter {
 
   async limit(input: { key: string }): Promise<{ success: boolean }> {
     const now = Date.now();
+    this.evictExpired(now);
     const recent = (this.requests.get(input.key) ?? []).filter(time => time > now - 60_000);
     if (recent.length >= 3) {
       this.requests.set(input.key, recent);
@@ -62,6 +63,17 @@ export class SlidingRateLimiter {
     recent.push(now);
     this.requests.set(input.key, recent);
     return { success: true };
+  }
+
+  /**
+   * Keys are attacker-influenced, and this process is long-lived on the same host as the game
+   * server, so a map that only ever grows is a slow memory leak. Drop buckets whose whole window
+   * has aged out; a bucket still inside its window is re-filtered by `limit` itself.
+   */
+  private evictExpired(now: number): void {
+    for (const [key, times] of this.requests) {
+      if (times.every(time => time <= now - 60_000)) this.requests.delete(key);
+    }
   }
 }
 
@@ -76,6 +88,22 @@ async function readBody(request: IncomingMessage, maximumBytes: number): Promise
     chunks.push(bytes);
   }
   return Buffer.concat(chunks);
+}
+
+/**
+ * Rebuilds the inbound headers with an authoritative `x-portal-client-ip`. Any copy supplied by
+ * the caller is dropped first — the rate limiter keys on this value, so it must describe the
+ * socket, not whatever the request claimed.
+ */
+export function clientAddressHeaders(request: IncomingMessage): HeadersInit {
+  const headers: Record<string, string> = {};
+  for (const [name, value] of Object.entries(request.headers)) {
+    if (value === undefined || name.toLowerCase() === "x-portal-client-ip") continue;
+    headers[name] = Array.isArray(value) ? value.join(", ") : value;
+  }
+  const address = request.socket.remoteAddress ?? "";
+  if (address.length > 0) headers["x-portal-client-ip"] = address;
+  return headers;
 }
 
 function sendJson(response: import("node:http").ServerResponse, status: number, value: unknown): void {
@@ -185,7 +213,7 @@ export function startServer(): void {
       const body = await readBody(incoming, maximumBytes);
       const request = new Request(`${protocol}://${authority}${incoming.url ?? "/"}`, {
         method: incoming.method,
-        headers: incoming.headers as HeadersInit,
+        headers: clientAddressHeaders(incoming),
         body: body as BodyInit | undefined,
       });
       const response = await portal.fetch(request, env);

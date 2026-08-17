@@ -64,7 +64,7 @@ namespace GameInterface.Services.Heroes.Patches
             }
             if (ModInformation.IsClient)
             {
-                Logger.Error("Client updated managed {var}", nameof(Hero.LastTimeStampForActivity));
+                ClientMutationLog.Report(Logger, "updated", nameof(Hero.LastTimeStampForActivity));
                 instance.LastTimeStampForActivity = newTimestamp;
                 return;
             }
@@ -101,7 +101,7 @@ namespace GameInterface.Services.Heroes.Patches
             }
             if (ModInformation.IsClient)
             {
-                Logger.Error("Client updated managed {var}", nameof(Hero._characterObject));
+                ClientMutationLog.Report(Logger, "updated", nameof(Hero._characterObject));
                 instance._characterObject = newCharacterObject;
                 return;
             }
@@ -138,7 +138,7 @@ namespace GameInterface.Services.Heroes.Patches
             }
             if (ModInformation.IsClient)
             {
-                Logger.Error("Client updated managed {var}", nameof(Hero._firstName));
+                ClientMutationLog.Report(Logger, "updated", nameof(Hero._firstName));
                 instance._firstName = newName;
                 return;
             }
@@ -175,7 +175,7 @@ namespace GameInterface.Services.Heroes.Patches
             }
             if (ModInformation.IsClient)
             {
-                Logger.Error("Client updated managed {var}", nameof(Hero._name));
+                ClientMutationLog.Report(Logger, "updated", nameof(Hero._name));
                 instance._name = newName;
                 return;
             }
@@ -214,7 +214,7 @@ namespace GameInterface.Services.Heroes.Patches
             }
             if (ModInformation.IsClient)
             {
-                Logger.Error("Client updated managed {var}", nameof(Hero._heroState));
+                ClientMutationLog.Report(Logger, "updated", nameof(Hero._heroState));
                 instance._heroState = newState;
                 return;
             }
@@ -253,7 +253,7 @@ namespace GameInterface.Services.Heroes.Patches
             }
             if (ModInformation.IsClient)
             {
-                Logger.Error("Client updated managed {var}", nameof(Hero._defaultAge));
+                ClientMutationLog.Report(Logger, "updated", nameof(Hero._defaultAge));
                 instance._defaultAge = age;
                 return;
             }
@@ -290,7 +290,7 @@ namespace GameInterface.Services.Heroes.Patches
             }
             if (ModInformation.IsClient)
             {
-                Logger.Error("Client updated managed {var}", nameof(Hero._birthDay));
+                ClientMutationLog.Report(Logger, "updated", nameof(Hero._birthDay));
                 instance._birthDay = birthDay;
                 return;
             }
@@ -327,7 +327,7 @@ namespace GameInterface.Services.Heroes.Patches
             }
             if (ModInformation.IsClient)
             {
-                Logger.Error("Client updated managed {var}", nameof(Hero._power));
+                ClientMutationLog.Report(Logger, "updated", nameof(Hero._power));
                 instance._power = power;
                 return;
             }
@@ -365,7 +365,7 @@ namespace GameInterface.Services.Heroes.Patches
 
             if (ModInformation.IsClient)
             {
-                Logger.Error("Client updated managed {var}", nameof(Hero.HomeSettlement));
+                ClientMutationLog.Report(Logger, "updated", nameof(Hero.HomeSettlement));
                 instance._homeSettlement = settlement;
                 return;
             }
@@ -402,7 +402,7 @@ namespace GameInterface.Services.Heroes.Patches
             }
             if (ModInformation.IsClient)
             {
-                Logger.Error("Client updated managed {var}", nameof(Hero.IsPregnant));
+                ClientMutationLog.Report(Logger, "updated", nameof(Hero.IsPregnant));
                 instance.IsPregnant = isPregnant;
                 return;
             }

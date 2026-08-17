@@ -24,7 +24,7 @@ class MobilePartyAiLifetimePatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(MobilePartyAi));
+            ClientMutationLog.Report(Logger, "created", typeof(MobilePartyAi));
             return;
         }
 

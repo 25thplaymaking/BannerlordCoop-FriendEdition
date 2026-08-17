@@ -35,7 +35,7 @@ internal class ClanLifetimePatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(Clan));
+            ClientMutationLog.Report(Logger, "created", typeof(Clan));
             return false;
         }
 

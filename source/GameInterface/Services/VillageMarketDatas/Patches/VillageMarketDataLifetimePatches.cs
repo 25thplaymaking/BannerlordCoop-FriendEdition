@@ -28,7 +28,7 @@ internal class VillageMarketDataLifetimePatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(VillageMarketData));
+            ClientMutationLog.Report(Logger, "created", typeof(VillageMarketData));
             return true;
         }
 

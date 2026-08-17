@@ -31,7 +31,7 @@ internal class MilitiaPartyComponentLifetimePatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(MilitiaPartyComponent));
+            ClientMutationLog.Report(Logger, "created", typeof(MilitiaPartyComponent));
             return false;
         }
 

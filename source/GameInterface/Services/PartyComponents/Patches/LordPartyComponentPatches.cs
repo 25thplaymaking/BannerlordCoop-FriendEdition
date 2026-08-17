@@ -76,7 +76,7 @@ public class LordPartyComponentTranspilers
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client updated managed {type}", "LordPartyComponent.Owner");
+            ClientMutationLog.Report(Logger, "updated", "LordPartyComponent.Owner");
             instance.Owner = owner;
             return;
         }
@@ -96,7 +96,7 @@ public class LordPartyComponentTranspilers
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client updated managed {type}", nameof(instance._initializationArgs));
+            ClientMutationLog.Report(Logger, "updated", nameof(instance._initializationArgs));
             instance._initializationArgs = initArgs;
             return;
         }

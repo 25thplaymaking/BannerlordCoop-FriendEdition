@@ -22,7 +22,6 @@ namespace GameInterface.Services.Caravans.Patches;
 [HarmonyPatch(typeof(CaravansCampaignBehavior))]
 internal class CaravansConversationsPatches
 {
-    private static readonly bool caravanHostileActionsEnabled = true;
 
     [HarmonyPatch(nameof(CaravansCampaignBehavior.caravan_companion_ask_change_home_settlement_4_on_consequence))]
     [HarmonyPrefix]
@@ -103,13 +102,6 @@ internal class CaravansConversationsPatches
     [HarmonyPrefix]
     public static bool CaravanLootOnClickableConditionPrefix(ref CaravansCampaignBehavior __instance, ref bool __result, out TextObject explanation)
     {
-        if (!caravanHostileActionsEnabled)
-        {
-            __result = false;
-            explanation = new TextObject("{=!} Hostile actions against caravans are temporarily disabled.");
-            return false;
-        }
-
         // Replacement message for vanilla's "You just looted this party." message to be ambiguous for more than one player
         explanation = new TextObject("");
         var conversationParty = MobileParty.ConversationParty;

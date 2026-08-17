@@ -31,7 +31,7 @@ internal class WorkshopLifetimePatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(Workshop));
+            ClientMutationLog.Report(Logger, "created", typeof(Workshop));
 
 
             return true;

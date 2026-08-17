@@ -53,7 +53,7 @@ public class VillagerPartyComponentTranspilers
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client updated managed {type}", "VillagerPartyComponent.Village");
+            ClientMutationLog.Report(Logger, "updated", "VillagerPartyComponent.Village");
             instance.Village = village;
             return;
         }

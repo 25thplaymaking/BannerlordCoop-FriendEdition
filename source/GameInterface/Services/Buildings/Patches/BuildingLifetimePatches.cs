@@ -27,7 +27,7 @@ namespace GameInterface.Services.Buildings.Patches
 
             if (ModInformation.IsClient)
             {
-                Logger.Error("Client created managed {name}", typeof(Building));
+                ClientMutationLog.Report(Logger, "created", typeof(Building));
                 return true;
             }
 

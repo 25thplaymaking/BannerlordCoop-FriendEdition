@@ -33,7 +33,7 @@ internal class EquipmentLifetimePatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(Hero));
+            ClientMutationLog.Report(Logger, "created", typeof(Hero));
             return;
         }
 
@@ -49,7 +49,7 @@ internal class EquipmentLifetimePatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(Hero));
+            ClientMutationLog.Report(Logger, "created", typeof(Hero));
             return;
         }
 

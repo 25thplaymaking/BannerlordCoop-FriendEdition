@@ -106,7 +106,7 @@ public class BanditPartyComponentTranspilers
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client updated managed {type}", nameof(instance._initializationArgs));
+            ClientMutationLog.Report(Logger, "updated", nameof(instance._initializationArgs));
             return;
         }
 

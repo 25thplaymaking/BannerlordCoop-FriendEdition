@@ -134,7 +134,17 @@ public sealed class LauncherConfig
                         config.ModuleToken,
                         LegacyModuleTokenBeforeGearAndDemographics,
                         StringComparison.Ordinal))
+                {
                     config.ModuleToken = CurrentModuleToken;
+
+                    // Persist it. The match above is ordinal and exact, so any hand-edit to this file
+                    // — even whitespace — stops the migration firing and the launch silently drops to
+                    // the pre-gear 16-module order, which then fails the join handshake. Writing it
+                    // back makes the upgrade survive that. Best-effort: a read-only or locked config
+                    // must never block a launch, and the in-memory value is already correct.
+                    try { File.WriteAllText(path, JsonSerializer.Serialize(config, Options)); }
+                    catch { }
+                }
                 return config;
             }
         }

@@ -26,7 +26,7 @@ namespace GameInterface.Services.EquipmentRoster.Patches
 
             if (ModInformation.IsClient)
             {
-                Logger.Error("Client created managed {name}", typeof(MBEquipmentRoster));
+                ClientMutationLog.Report(Logger, "created", typeof(MBEquipmentRoster));
                 return false;
             }
 

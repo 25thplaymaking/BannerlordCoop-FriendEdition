@@ -29,7 +29,7 @@ internal class CaravanPartyComponentLifetimePatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(CaravanPartyComponent));
+            ClientMutationLog.Report(Logger, "created", typeof(CaravanPartyComponent));
             return false;
         }
 

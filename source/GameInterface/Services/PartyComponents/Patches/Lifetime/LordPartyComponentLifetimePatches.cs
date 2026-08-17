@@ -30,7 +30,7 @@ internal class LordPartyComponentLifetimePatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(LordPartyComponent));
+            ClientMutationLog.Report(Logger, "created", typeof(LordPartyComponent));
             return false;
         }
 

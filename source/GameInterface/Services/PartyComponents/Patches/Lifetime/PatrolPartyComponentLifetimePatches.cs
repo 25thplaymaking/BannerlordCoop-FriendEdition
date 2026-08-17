@@ -36,7 +36,7 @@ internal class PatrolPartyComponentLifetimePatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(PatrolPartyComponent));
+            ClientMutationLog.Report(Logger, "created", typeof(PatrolPartyComponent));
             return true;
         }
 

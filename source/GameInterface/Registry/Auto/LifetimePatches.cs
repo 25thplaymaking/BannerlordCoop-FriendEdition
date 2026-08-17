@@ -16,7 +16,7 @@ internal class LifetimePatches<T>
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", __instance.GetType());
+            ClientMutationLog.Report(Logger, "created", __instance.GetType());
             return;
         }
 

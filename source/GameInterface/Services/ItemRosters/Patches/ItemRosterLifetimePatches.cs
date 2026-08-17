@@ -37,7 +37,7 @@ internal class ItemRosterLifetimePatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(ItemRoster));
+            ClientMutationLog.Report(Logger, "created", typeof(ItemRoster));
             return true;
         }
 

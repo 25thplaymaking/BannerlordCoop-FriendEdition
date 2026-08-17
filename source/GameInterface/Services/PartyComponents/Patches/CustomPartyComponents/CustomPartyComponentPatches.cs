@@ -57,7 +57,7 @@ public class CustomPartyComponentPatches
         }
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client updated managed {type}", nameof(instance._name));
+            ClientMutationLog.Report(Logger, "updated", nameof(instance._name));
             return;
         }
 
@@ -98,7 +98,7 @@ public class CustomPartyComponentPatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client updated managed {type}", nameof(instance._homeSettlement));
+            ClientMutationLog.Report(Logger, "updated", nameof(instance._homeSettlement));
             return;
         }
 
@@ -139,7 +139,7 @@ public class CustomPartyComponentPatches
         }
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client updated managed {type}", nameof(instance._owner));
+            ClientMutationLog.Report(Logger, "updated", nameof(instance._owner));
             return;
         }
 
@@ -180,7 +180,7 @@ public class CustomPartyComponentPatches
         }
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client updated managed {type}", nameof(instance._customPartyBaseSpeed));
+            ClientMutationLog.Report(Logger, "updated", nameof(instance._customPartyBaseSpeed));
             return;
         }
 
@@ -218,7 +218,7 @@ public class CustomPartyComponentPatches
         }
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client updated managed {type}", nameof(instance._partyMountStringId));
+            ClientMutationLog.Report(Logger, "updated", nameof(instance._partyMountStringId));
             return;
         }
 
@@ -256,7 +256,7 @@ public class CustomPartyComponentPatches
         }
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client updated managed {type}", nameof(instance._partyHarnessStringId));
+            ClientMutationLog.Report(Logger, "updated", nameof(instance._partyHarnessStringId));
             return;
         }
 
@@ -294,7 +294,7 @@ public class CustomPartyComponentPatches
         }
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client updated managed {type}", nameof(instance._avoidHostileActions));
+            ClientMutationLog.Report(Logger, "updated", nameof(instance._avoidHostileActions));
             return;
         }
 

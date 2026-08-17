@@ -29,7 +29,7 @@ internal class VillagerPartyComponentLifetimePatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(VillagerPartyComponent));
+            ClientMutationLog.Report(Logger, "created", typeof(VillagerPartyComponent));
             return false;
         }
 

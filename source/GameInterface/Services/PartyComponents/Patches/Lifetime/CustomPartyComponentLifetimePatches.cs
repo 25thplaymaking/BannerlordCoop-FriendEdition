@@ -29,7 +29,7 @@ internal class CustomPartyComponentLifetimePatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(CustomPartyComponent));
+            ClientMutationLog.Report(Logger, "created", typeof(CustomPartyComponent));
             return false;
         }
 

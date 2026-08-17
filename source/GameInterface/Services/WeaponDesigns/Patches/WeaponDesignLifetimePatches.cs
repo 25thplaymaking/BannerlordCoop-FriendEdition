@@ -27,7 +27,7 @@ namespace GameInterface.Services.WeaponDesigns.Patches
 
             if (ModInformation.IsClient)
             {
-                Logger.Error("Client created managed {name}", typeof(WeaponDesign));
+                ClientMutationLog.Report(Logger, "created", typeof(WeaponDesign));
                 return true;
             }
 

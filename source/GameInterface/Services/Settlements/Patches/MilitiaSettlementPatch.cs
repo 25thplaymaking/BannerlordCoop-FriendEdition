@@ -26,7 +26,7 @@ public class MilitiaSettlementPatch
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(Settlement));
+            ClientMutationLog.Report(Logger, "created", typeof(Settlement));
             return true;
         }
 

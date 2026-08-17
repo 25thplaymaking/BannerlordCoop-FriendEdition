@@ -28,7 +28,7 @@ internal class HorseComponentLifetimePatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(HorseComponent));
+            ClientMutationLog.Report(Logger, "created", typeof(HorseComponent));
             return true;
         }
 

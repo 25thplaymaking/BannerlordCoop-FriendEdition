@@ -25,7 +25,7 @@ internal class HideoutLifetimePatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(Hideout));
+            ClientMutationLog.Report(Logger, "created", typeof(Hideout));
             return true;
         }
 

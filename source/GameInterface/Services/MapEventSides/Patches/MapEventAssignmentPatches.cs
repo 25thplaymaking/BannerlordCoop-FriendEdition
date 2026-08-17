@@ -59,7 +59,7 @@ internal class MapEventAssignmentPatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed MapEventSide");
+            ClientMutationLog.Report(Logger, "created", "MapEventSide");
             return new MapEventSide(mapEvent, side, party);
         }
 

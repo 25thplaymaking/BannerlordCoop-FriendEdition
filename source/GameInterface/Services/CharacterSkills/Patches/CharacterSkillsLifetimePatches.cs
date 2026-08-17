@@ -26,7 +26,7 @@ namespace GameInterface.Services.CharacterSkills.Patches
 
             if (ModInformation.IsClient)
             {
-                Logger.Error("Client created managed {name}", typeof(MBCharacterSkills));
+                ClientMutationLog.Report(Logger, "created", typeof(MBCharacterSkills));
                 return false;
             }
 

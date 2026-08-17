@@ -27,7 +27,7 @@ namespace GameInterface.Services.Monsters.Patches
 
             if (ModInformation.IsClient)
             {
-                Logger.Error("Client created managed {name}", typeof(Monster));
+                ClientMutationLog.Report(Logger, "created", typeof(Monster));
                 return false;
             }
 

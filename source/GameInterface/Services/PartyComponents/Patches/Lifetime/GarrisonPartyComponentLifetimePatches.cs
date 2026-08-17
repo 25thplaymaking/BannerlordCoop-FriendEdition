@@ -37,7 +37,7 @@ internal class GarrisonPartyComponentLifetimePatches
 
         if (ModInformation.IsClient)
         {
-            Logger.Error("Client created managed {name}", typeof(GarrisonPartyComponent));
+            ClientMutationLog.Report(Logger, "created", typeof(GarrisonPartyComponent));
             return false;
         }
 

@@ -443,7 +443,20 @@ internal sealed class RebellionsAndDemographicsCompatibilityHandler : IHandler
     private void HandleHostModConfigAccepted(MessagePayload<HostModConfigAccepted> payload)
     {
         if (!ModInformation.IsClient || !configAuthority.IsCurrent(payload?.What.Snapshot)) return;
-        SnapshotReadiness = WorkshopSnapshotReadiness.Loading;
+
+        // The same accepted snapshot is republished several times during one join: the module
+        // validation barrier, CampaignReady, and the mod-config refresh acceptance each publish it.
+        // Only a genuine session change invalidates an applied snapshot. Resetting readiness on
+        // every republish knocked an already-applied bootstrap replica back to Loading, so the
+        // router commit probe never observed Ready, failed the query closed with apply-timeout,
+        // and disconnected the client back to the main menu.
+        if (!string.Equals(SnapshotSessionId, payload.What.Snapshot.SessionId, StringComparison.Ordinal))
+        {
+            SnapshotReadiness = WorkshopSnapshotReadiness.Loading;
+            SnapshotRevision = -1;
+            SnapshotFingerprint = string.Empty;
+            CurrentState = null;
+        }
         snapshotRoute.Submit(default);
     }
 

@@ -2,6 +2,7 @@ using Common.Messaging;
 using GameInterface.Services.Players.Data;
 using LiteNetLib;
 using System;
+using System.Threading;
 
 namespace GameInterface.Services.AuthorityRequests;
 
@@ -106,9 +107,20 @@ public sealed class AuthorityRequestTicket<TResult> where TResult : IMessage
         RequestId = requestId;
     }
 
+    private int completionClaimed;
+
     public long RequestId { get; }
     public bool IsCompleted { get; internal set; }
     public AuthorityClientOutcome<TResult> Outcome { get; internal set; }
+
+    /// <summary>
+    /// Claims this ticket's single completion for the calling terminal path; false if another one
+    /// already claimed it. A plain <see cref="IsCompleted"/> check-then-act is not enough: the
+    /// network poller (a reply) and the game thread (a blocking deadline, an apply timeout, a
+    /// cancel) race for the same ticket, and both could pass the check and then run the
+    /// presentation and completion callbacks with conflicting outcomes.
+    /// </summary>
+    internal bool TryClaimCompletion() => Interlocked.Exchange(ref completionClaimed, 1) == 0;
 }
 
 /// <summary>Typed feature adapter. It contains no remote method metadata or untyped payload.</summary>

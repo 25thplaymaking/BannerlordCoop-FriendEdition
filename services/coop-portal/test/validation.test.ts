@@ -73,6 +73,25 @@ describe("portal validation", () => {
     expect(headers["content-type"]).toBe("application/json");
   });
 
+  it("keeps cf-connecting-ip only when the local tunnel is the peer", () => {
+    // Behind cloudflared the edge has already overwritten it, and it is the only real client
+    // address available — dropping it would collapse every user into one bucket.
+    const tunnelled = clientAddressHeaders({
+      headers: { "cf-connecting-ip": "203.0.113.9", authorization: "Bearer x" },
+      socket: { remoteAddress: "127.0.0.1" },
+    } as never) as Record<string, string>;
+    expect(tunnelled["cf-connecting-ip"]).toBe("203.0.113.9");
+    expect(tunnelled["authorization"]).toBe("Bearer x");
+
+    // Reached directly it is just caller input, and honouring it would restore the bypass.
+    const direct = clientAddressHeaders({
+      headers: { "cf-connecting-ip": "203.0.113.9" },
+      socket: { remoteAddress: "198.51.100.4" },
+    } as never) as Record<string, string>;
+    expect(direct["cf-connecting-ip"]).toBeUndefined();
+    expect(direct["x-portal-client-ip"]).toBe("198.51.100.4");
+  });
+
   it("throttles a single origin regardless of how many client ids it claims", async () => {
     const limiter = new SlidingRateLimiter();
     const results: boolean[] = [];

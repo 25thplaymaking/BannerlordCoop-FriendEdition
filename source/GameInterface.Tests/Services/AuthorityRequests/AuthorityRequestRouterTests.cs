@@ -292,8 +292,11 @@ public sealed class AuthorityRequestRouterTests
                 // first of the two cancellations needs to observe the lock.
                 if (Interlocked.Exchange(ref callbacksSeen, 1) != 0) return;
                 callbackEntered.Set();
+                // Generous, because this only bounds how long a FAILING run takes: with the lock
+                // released, Poll returns immediately. A short wait would false-fail on a starved
+                // CI box that could not schedule the probe thread in time.
                 Volatile.Write(ref pollFinishedWhileCancelling,
-                    pollCompleted.Wait(TimeSpan.FromSeconds(2)) ? 1 : 0);
+                    pollCompleted.Wait(TimeSpan.FromSeconds(10)) ? 1 : 0);
             }));
 
         route.Submit("first");
@@ -313,7 +316,7 @@ public sealed class AuthorityRequestRouterTests
         // Returns only after both cancellations have run their marshalled callbacks.
         broker.Publish(server, new TestResult(new AuthorityResultHeader("replacement", 1,
             AuthorityResultStatus.Rejected, 0, "session-replaced")));
-        poller.Join(TimeSpan.FromSeconds(10));
+        poller.Join(TimeSpan.FromSeconds(20));
 
         Assert.Equal(1, Volatile.Read(ref pollFinishedWhileCancelling));
     }

@@ -90,18 +90,33 @@ async function readBody(request: IncomingMessage, maximumBytes: number): Promise
   return Buffer.concat(chunks);
 }
 
+/** cloudflared terminates the tunnel on this host, so only a loopback peer may assert a client IP. */
+function isTrustedProxy(address: string): boolean {
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
 /**
- * Rebuilds the inbound headers with an authoritative `x-portal-client-ip`. Any copy supplied by
- * the caller is dropped first — the rate limiter keys on this value, so it must describe the
- * socket, not whatever the request claimed.
+ * Rebuilds the inbound headers so the value the rate limiter keys on describes the caller rather
+ * than what the caller claimed.
+ *
+ * `x-portal-client-ip` is always dropped and re-stamped from the socket. `cf-connecting-ip` is
+ * kept only when the peer is the local tunnel: Cloudflare overwrites that header at its edge, so
+ * behind cloudflared it is the real client address and dropping it would collapse every user into
+ * one shared bucket. Reached any other way — a non-loopback `PORTAL_HOST` bind, a different proxy,
+ * a same-host client — it is just caller input, and keeping it would hand back the very bypass
+ * this rebuild exists to close.
  */
 export function clientAddressHeaders(request: IncomingMessage): HeadersInit {
+  const address = request.socket.remoteAddress ?? "";
+  const trusted = isTrustedProxy(address);
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(request.headers)) {
-    if (value === undefined || name.toLowerCase() === "x-portal-client-ip") continue;
+    if (value === undefined) continue;
+    const key = name.toLowerCase();
+    if (key === "x-portal-client-ip") continue;
+    if (key === "cf-connecting-ip" && !trusted) continue;
     headers[name] = Array.isArray(value) ? value.join(", ") : value;
   }
-  const address = request.socket.remoteAddress ?? "";
   if (address.length > 0) headers["x-portal-client-ip"] = address;
   return headers;
 }

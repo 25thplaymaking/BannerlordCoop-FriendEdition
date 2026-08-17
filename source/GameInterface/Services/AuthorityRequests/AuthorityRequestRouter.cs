@@ -593,7 +593,10 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             Action<AuthorityClientOutcome<TResult>> completion,
             AuthorityClientOutcome<TResult> outcome)
         {
-            if (ticket.IsCompleted) return ticket.Outcome;
+            // Claim before running any callback. Terminal paths race across the poller thread (a
+            // reply) and the game thread (a blocking deadline, an apply timeout, a cancel); a plain
+            // IsCompleted check let both pass and present two conflicting outcomes to the player.
+            if (!ticket.TryClaimCompletion()) return ticket.Outcome;
 
             bool accepted = outcome.Completion == AuthorityClientCompletion.Applied;
             if (!TryRunClientCallback(() => route.PresentTerminalOutcome(outcome), "presentation", ticket.RequestId) && accepted)

@@ -4,6 +4,45 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
+> **2026-08-17 review-findings fixes — SHIPPED from source `cb2252c08`, server paired and live.**
+> A review of the 2026-08-15/16 update (188 commits) found four defects, all fixed and locked by
+> tests that fail without them. The authority router cancelled every pending ticket while holding its
+> route lock; completing a ticket marshals its presentation callback onto the game thread and waits,
+> while the game thread's own `Poll` takes that same lock first, so a reply carrying a replaced
+> `SessionId` parked the network poller and the game loop against each other for the full 30s
+> `GameThread.BlockingTimeout`, once per pending request. `AuthorityRequestTicket` now also claims its
+> completion with `Interlocked` rather than a check-then-act on `IsCompleted`. The campaign portal's
+> unauthenticated `/reports` endpoint — which opens a GitHub issue with the portal's own token — keyed
+> its throttle on the caller-supplied `clientId`, so varying that field bought an unlimited bucket; it
+> now keys on the connecting address, keeping `cf-connecting-ip` only when the local tunnel is the
+> peer and stamping `x-portal-client-ip` from the socket otherwise. `CrashReportLocator.FindLatest`
+> sorted on `candidate!.ZipPath` without discarding the nulls an incomplete report folder produces, so
+> one such folder silently disabled crash-report attachment entirely (8 of 109 folders qualified on the
+> maintainer's machine). The ~25 Fourberie test classes drive one static runtime double with no shared
+> collection and clobbered each other under xUnit's per-class parallelism; a filtered run failed one or
+> two different tests every time while the full-suite run passed on scheduling luck. They now share a
+> non-parallel collection and five consecutive filtered runs are clean. Suites: GameInterface 1857,
+> Coop 630, integration 141, Common 121, launcher 101, portal 9 — zero failures.
+> Stable client `2026.08.17.0522` and stable launcher `2026.8.17.46` published from this source; the
+> campaign portal redeployed at 05:18:47Z.
+>
+> The same release carries the Improved Garrisons handshake fix. That mod appends to
+> `ModuleData/ErrorLog.xml` inside its own module root whenever it throws, which it does on every
+> campaign tick of the headless host, and the Workshop hasher classified that runtime log as
+> configuration and folded it into the package digest — so the host drifted from its receipt within
+> seconds of loading a save and refused every client with "Server loads an unmanaged copy of
+> 'ImprovedGarrisons'". The hasher now excludes it by name in both the runtime and the receipt
+> packager; no shipped package contains that name, so every existing pin stays valid. The interim
+> read-only `ModuleData` workaround is reverted as part of this deployment. Paired core SHA-256
+> `793f76daf5c95b13748c76d8edc25092e1c4a20e2177ea499cc9e4588ff16101`, receipt SHA-256
+> `766aee5eb136ea773680cdcb9c1b8ff87b7c0b4e739de75387ff8a050c428d84`. The host reloaded
+> `friendallmods1`, verified against release pins, reached `SERVING` on UDP 4200 as Winter 1, 1107,
+> emitted repeated pulses and stayed at `NRestarts=0`. Proof the fix holds: with `ErrorLog.xml`
+> present again on disk, the pre-fix hashing rules fail the Improved Garrisons configuration digest
+> and the post-fix rules pass, and all 14 modules match the receipt on both the host and the installed
+> client. Byte-verified rollback snapshot:
+> `/home/bishop/bannerlord-coop/server/_mod_backups/pre-cb2252c08-20260817T132306Z`.
+
 > **2026-08-15 castle “leave it to the others” siege-menu correction — LIVE.**
 > Client logs showed Bannerlord repeatedly throwing `NullReferenceException` in
 > `DefaultEncounterModel.GetLeaderOfSiegeEvent` while the siege-strategies menu refreshed its lead

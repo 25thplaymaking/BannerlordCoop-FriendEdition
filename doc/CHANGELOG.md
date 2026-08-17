@@ -123,6 +123,26 @@ non-empty construction path, full server overlay/isolated-save boot,
 rendered two-client matrix, and live promotion remain incomplete. No production
 server or save was changed.
 
+## 2026-08-17 — review-findings fixes (stable + server live)
+
+A review of the 2026-08-15/16 update found four defects, now fixed and covered:
+
+- the authority route no longer holds its lock while marshalling a cancellation onto the game
+  thread, which stalled the network poller and the game loop against each other for 30 seconds per
+  pending request whenever the host replaced its session mid-request;
+- authority ticket completion is claimed atomically, so a reply and a deadline can no longer both
+  present a terminal outcome for the same request;
+- the portal's unauthenticated report endpoint throttles on the connecting address instead of a
+  caller-supplied identifier, and trusts `cf-connecting-ip` only from the local tunnel;
+- the launcher finds the newest crash bundle again when an incomplete report folder is present;
+- the Fourberie suites share a non-parallel collection instead of racing on one static double.
+
+The Workshop package hash also stops covering mod-written runtime logs. Improved Garrisons appends
+to `ModuleData/ErrorLog.xml` in its own module root on every headless-host exception, which drifted
+the server away from its receipt and refused every join as an unmanaged copy. The runtime hasher and
+the receipt packager both exclude it; existing pins are unaffected because no shipped package
+contains that name. The interim read-only `ModuleData` workaround on the host is reverted.
+
 ## 2026-08-11 — Separatism authority closure (development; stable held)
 
 Separatism now has exact authority closure for all 57 required candidates. The recovered

@@ -166,6 +166,27 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
     shipped — and check `githubstatus.com` before promoting during flaky API behaviour.
     *(Earned: `launcher-app` 2026.8.17.48 shipped a truncated exe; 2026.8.17.50 repaired it.)*
 
+19. **A server cross-build in a worktree with an `mb2` junction silently overwrites the LIVE client
+    module.** `Deploy.targets` runs on every build and copies the output into
+    `$(RepoRoot)mb2\Modules\$(ModName)`, and every `ServerWork/*` worktree's `mb2` resolves to the
+    real Steam install. So building `source/Coop/Coop.csproj -c Release` while the Serilog 2.x server
+    flip is applied drops **server-flavour** assemblies onto the player's client — precisely the
+    `MissingMethodException` failure rule 3 describes — and it stays broken until the launcher next
+    reinstalls the client payload over it. Build server payloads with **`-p:ModName=`**, which is used
+    only by `Deploy.targets` (`Condition="'$(ModName)' != '' and Exists('$(ModsRoot)')"`) so the
+    references still resolve and the deploy is skipped. Afterwards verify with
+    `Modules/Coop/bin/Win64_Shipping_Client/Common.dll` referencing **Serilog 4.2.0.0**, not 2.0.0.0.
+    *(Earned: three server pairings in one session each deployed 2.x assemblies over the live install;
+    the launcher happened to reinstall before the next launch, so it went unnoticed.)*
+
+20. **A startup crash with no `rgl_log`, no `Coop_client.log` and no new `NoHarmony.txt` entry is not
+    a mod crash — prove it from the WER report before touching the build.**
+    `C:\ProgramData\Microsoft\Windows\WER\ReportArchive\AppCrash_Bannerlord.exe_*\Report.wer`
+    lists every loaded module at fault time. If none of them are under `Modules\`, the engine died
+    before the module layer and no client build can be responsible. *(Earned: a native
+    `0xc0000005` in `TaleWorlds.Native.dll` was assumed to be a just-shipped client build; the WER
+    report showed 125 loaded modules and not one mod assembly.)*
+
 ---
 
 ## Checklist: making a handshake-affecting change

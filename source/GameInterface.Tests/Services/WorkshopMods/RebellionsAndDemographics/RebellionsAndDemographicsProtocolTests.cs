@@ -8,6 +8,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using TaleWorlds.CampaignSystem;
 using Xunit;
 
 namespace GameInterface.Tests.Services.WorkshopMods.RebellionsAndDemographics;
@@ -15,6 +16,13 @@ namespace GameInterface.Tests.Services.WorkshopMods.RebellionsAndDemographics;
 public sealed class RebellionsAndDemographicsProtocolTests
 {
     private static readonly AuthorityRequestHeader Header = new(7, "session-a", 41, 9);
+
+    [Fact]
+    public void PlagueTimeFingerprint_UsesRawTicksBeforeCalendarInitialization()
+    {
+        Assert.Equal("12345", RebellionsAndDemographicsCompatibilityHandler.CanonicalCampaignTime(new CampaignTime(12345)));
+        Assert.Equal(string.Empty, RebellionsAndDemographicsCompatibilityHandler.CanonicalCampaignTime(null!));
+    }
 
     [Fact]
     public void SaveDefinitionCompatibility_PreservesFirstDefinition_AndSuppressesOnlyDuplicates()

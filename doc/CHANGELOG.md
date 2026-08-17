@@ -2,6 +2,9 @@
 
 ## 2026-08-16 — v1.4.8 module loading and trade-close hotfix
 
+- Encode R&D's plague schedule from raw campaign ticks during the first authoritative snapshot.
+  Bannerlord's calendar conversion is not initialized yet inside the dedicated host's `OnGameStart`
+  callback; formatting the value there caused the server's native divide-by-zero exit 84.
 - Make the pinned Rebellions and Demographics v3.0.1 save-definition registration idempotent on
   Bannerlord v1.4.8, preserving the first canonical definition instead of aborting the dedicated
   host on its duplicate native containers and `PendingAllianceData` class.

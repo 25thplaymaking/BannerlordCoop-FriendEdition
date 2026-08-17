@@ -75,6 +75,7 @@ internal sealed class StartupHook
                     // shapes. Preserve the finite log for faults capable of terminating the host
                     // or crossing one of Friend Edition's runtime boundaries.
                     if (!(ex is InvalidOperationException) &&
+                        !(ex is DivideByZeroException) &&
                         ex.HResult != unchecked((int)0x80004005) &&
                         st.IndexOf("BannerlordPlayerSettlement.", StringComparison.Ordinal) < 0 &&
                         st.IndexOf("PlayerSettlementFixes.", StringComparison.Ordinal) < 0 &&
@@ -82,9 +83,12 @@ internal sealed class StartupHook
                         st.IndexOf("Coop.", StringComparison.Ordinal) < 0)
                         return;
                     if (new FileInfo(LogPath).Length >= 400000) return;
+                    string diagnosticStack = ex is DivideByZeroException
+                        ? "\nFirst-chance observer stack:\n" + Environment.StackTrace
+                        : "";
                     File.AppendAllText(LogPath,
                         "\n=== FIRST-CHANCE " + DateTime.Now.ToString("HH:mm:ss.fff") + " ===\n" +
-                        ex.GetType().FullName + ": " + ex.Message + "\n" + st + "\n");
+                        ex.GetType().FullName + ": " + ex.Message + "\n" + st + diagnosticStack + "\n");
                 }
                 catch { }
             };

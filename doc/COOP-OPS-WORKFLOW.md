@@ -128,6 +128,11 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
     campaign-handler patch is too late. Require a fresh RGL error log with zero duplicate-definition
     asserts before accepting an R&D-enabled dedicated boot.
 
+15. **Do not format `CampaignTime` during the first dedicated `OnGameStart` callback.** The raw
+    tick value is available, but Bannerlord has not initialized the calendar divisor yet, so
+    `ToString()` reaches `GetYear` and terminates the native host with divide-by-zero exit 84. Use
+    invariant `NumTicks` for early canonical snapshots and require the host to reach `SERVING`.
+
 ---
 
 ## Checklist: making a handshake-affecting change

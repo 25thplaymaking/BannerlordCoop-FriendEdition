@@ -14,6 +14,7 @@ using ProtoBuf;
 using System;
 using System.Collections.Generic;
 using System.Collections;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -817,8 +818,12 @@ internal sealed class RebellionsAndDemographicsCompatibilityHandler : IHandler
         var city = type.GetField("_activePlagueCity", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(behavior) as Settlement;
         var days = (int)(type.GetField("_activePlagueDaysLeft", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(behavior) ?? 0);
         object next = type.GetField("_nextPlagueDate", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(behavior);
-        return new RdPlagueState(city?.StringId ?? string.Empty, days, next?.ToString() ?? string.Empty);
+        return new RdPlagueState(city?.StringId ?? string.Empty, days, CanonicalCampaignTime(next));
     }
+
+    internal static string CanonicalCampaignTime(object value) => value is CampaignTime campaignTime
+        ? campaignTime.NumTicks.ToString(CultureInfo.InvariantCulture)
+        : string.Empty;
 
     private void DisconnectAllCampaignPeers(string reason)
     {

@@ -116,6 +116,9 @@ Friend Edition is live on Bannerlord `v1.4.8` using the existing
 - The existing campaign loaded 493 settlements, 2,058 heroes, and 1,545 mobile
   parties, registered the settlement-distance cache, reached `SERVING`, bound
   UDP 4200, and sustained repeated pulses with zero service restarts.
+- Fourberie's optional bandit stash remains null until first use. The authoritative
+  snapshot now canonicalizes that valid state as an empty item roster, so network
+  startup does not abort before the first client can join.
 - The existing save autosaved successfully on v1.4.8. Its observed live
   SHA-256 at 19:25 UTC was
   `2bbae2ac0e3e0b66a4e94bcc4c484192c51f9a49f5f8d56b45e16e965ee32875`

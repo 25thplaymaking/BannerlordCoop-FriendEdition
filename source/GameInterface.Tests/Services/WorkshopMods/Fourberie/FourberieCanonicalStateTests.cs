@@ -93,4 +93,35 @@ public sealed class FourberieCanonicalStateTests
         Assert.True(transaction.TryRollback(out var rollbackFailure), rollbackFailure);
         Assert.Equal(5, global::Fourberie.FourberieBehavior._crimeValue[1]);
     }
+
+    [Fact]
+    public void NeverOpenedBanditStash_CapturesAsCanonicalEmptyRoster()
+    {
+        global::Fourberie.FourberieBehavior.Reset();
+        global::Fourberie.FourberieBehavior._stash = null;
+        var objectManager = new Mock<IObjectManager>(MockBehavior.Strict).Object;
+
+        Assert.True(FourberieCanonicalState.TryCapture(
+            typeof(global::Fourberie.FourberieBehavior).Assembly,
+            objectManager,
+            out var entries,
+            out var fingerprint,
+            out var captureFailure), captureFailure);
+
+        Assert.True(FourberieCanonicalState.TryApply(
+            typeof(global::Fourberie.FourberieBehavior).Assembly,
+            objectManager,
+            entries,
+            out var applyFailure), applyFailure);
+        Assert.NotNull(global::Fourberie.FourberieBehavior._stash);
+        Assert.Empty(global::Fourberie.FourberieBehavior._stash);
+
+        Assert.True(FourberieCanonicalState.TryCapture(
+            typeof(global::Fourberie.FourberieBehavior).Assembly,
+            objectManager,
+            out _,
+            out var restoredFingerprint,
+            out var secondFailure), secondFailure);
+        Assert.Equal(fingerprint, restoredFingerprint);
+    }
 }

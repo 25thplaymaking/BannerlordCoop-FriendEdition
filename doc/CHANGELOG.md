@@ -2,6 +2,9 @@
 
 ## 2026-08-16 — v1.4.8 module loading and trade-close hotfix
 
+- Canonicalize Fourberie's never-opened null bandit stash as an empty item roster during the first
+  authoritative snapshot. A fresh or migrated campaign can now finish compatibility bootstrap and
+  admit clients before any player has opened the stash.
 - Encode R&D's plague schedule from raw campaign ticks during the first authoritative snapshot.
   Bannerlord's calendar conversion is not initialized yet inside the dedicated host's `OnGameStart`
   callback; formatting the value there caused the server's native divide-by-zero exit 84.

@@ -362,13 +362,12 @@ internal static class FourberieCanonicalState
         out string failure)
     {
         failure = null;
-        if (list == null)
-        {
-            failure = $"Fourberie field {spec.FieldName} is null";
-            return false;
-        }
-
+        // Fourberie leaves its optional bandit stash null until it is opened for the first time.
+        // Persisting and restoring that state as an empty ItemRoster keeps the snapshot complete
+        // without rejecting a campaign that has never used the stash.
         entries.Add(new FourberieStateEntry(spec.FieldName, spec.Kind, string.Empty, string.Empty));
+        if (list == null) return true;
+
         var ordinal = 1;
         foreach (var item in list)
         {

@@ -12,11 +12,15 @@ using System.Threading;
 //     which would collide with Coop's own dependency versions.
 //  2. Capture any unhandled exception to /tmp/coop-fce.log before the TaleWorlds watchdog kills it.
 //     High-volume first-chance diagnostics are opt-in via COOP_SERVER_KIT_DIAGNOSTICS=1 and capped.
+//  3. Make v1.4.8 save-container registration idempotent before the dedicated engine scans the
+//     pinned R&D definitions. The graphical engine tolerated those duplicates; headless exits 84.
 internal sealed class StartupHook
 {
     private const string LogPath = "/tmp/coop-fce.log";
     private const string MountAndBladeAssemblyName = "TaleWorlds.MountAndBlade";
+    private const string SaveSystemAssemblyName = "TaleWorlds.SaveSystem";
     private const string DedicatedModuleFilterHarmonyId = "BannerlordCoop.ServerKit.DedicatedModuleFilter";
+    private const string SaveDefinitionCompatibilityHarmonyId = "BannerlordCoop.ServerKit.SaveDefinitionCompatibility";
     private static readonly object Sync = new object();
     private static readonly Dictionary<string, Assembly> Cache = new Dictionary<string, Assembly>(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> LoggedResolutionEvents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -41,6 +45,9 @@ internal sealed class StartupHook
     };
     private static string[] _binDirs;
     private static int _dedicatedModuleFilterInstalled;
+    private static int _saveDefinitionCompatibilityInstalled;
+    private static FieldInfo _saveDefinitionContextField;
+    private static MethodInfo _definitionContextHasDefinition;
 
     public static void Initialize()
     {
@@ -96,12 +103,81 @@ internal sealed class StartupHook
 
         if (string.Equals(name, MountAndBladeAssemblyName, StringComparison.Ordinal))
             InstallDedicatedModuleFilter(loaded);
+        if (string.Equals(name, SaveSystemAssemblyName, StringComparison.Ordinal))
+            InstallSaveDefinitionCompatibility(loaded);
 
         if (!name.StartsWith("Bannerlord.Diplomacy", StringComparison.Ordinal)) return;
         LogResolutionOnce(
             "assembly-load:" + loaded.FullName + ":" + SafeLocation(loaded),
             "[assembly-load] " + loaded.FullName + " from " + SafeLocation(loaded));
     }
+
+    private static void InstallSaveDefinitionCompatibility(Assembly saveSystemAssembly)
+    {
+        if (Interlocked.CompareExchange(ref _saveDefinitionCompatibilityInstalled, 1, 0) != 0) return;
+
+        try
+        {
+            Type definerType = saveSystemAssembly.GetType(
+                "TaleWorlds.SaveSystem.SaveableTypeDefiner",
+                throwOnError: true);
+            _saveDefinitionContextField = definerType.GetField(
+                "_definitionContext", BindingFlags.Instance | BindingFlags.NonPublic)
+                ?? throw new MissingFieldException(definerType.FullName, "_definitionContext");
+            _definitionContextHasDefinition = _saveDefinitionContextField.FieldType.GetMethod(
+                "HasDefinition", BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null, types: new[] { typeof(Type) }, modifiers: null)
+                ?? throw new MissingMethodException(_saveDefinitionContextField.FieldType.FullName, "HasDefinition");
+            MethodInfo target = definerType.GetMethod(
+                "ConstructContainerDefinition", BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null, types: new[] { typeof(Type) }, modifiers: null)
+                ?? throw new MissingMethodException(definerType.FullName, "ConstructContainerDefinition");
+            MethodInfo prefix = AccessTools.Method(
+                typeof(StartupHook),
+                nameof(ConstructContainerDefinitionPrefix))
+                ?? throw new MissingMethodException(typeof(StartupHook).FullName, nameof(ConstructContainerDefinitionPrefix));
+
+            new Harmony(SaveDefinitionCompatibilityHarmonyId).Patch(
+                target,
+                prefix: new HarmonyMethod(prefix));
+            LogResolutionOnce(
+                "save-definition-compatibility-installed",
+                "[save-compat] installed preserve-first container registration guard");
+        }
+        catch (Exception exception)
+        {
+            Volatile.Write(ref _saveDefinitionCompatibilityInstalled, 0);
+            LogResolutionOnce(
+                "save-definition-compatibility-error",
+                "[save-compat] ERROR: " + exception.GetType().FullName + ": " + exception.Message);
+            throw;
+        }
+    }
+
+    private static bool ConstructContainerDefinitionPrefix(object __instance, Type __0)
+    {
+        try
+        {
+            object context = _saveDefinitionContextField?.GetValue(__instance);
+            if (context == null || __0 == null) return true;
+            bool alreadyDefined = (bool)_definitionContextHasDefinition.Invoke(context, new object[] { __0 });
+            if (ShouldRunContainerDefinitionOriginal(alreadyDefined)) return true;
+
+            LogResolutionOnce(
+                "duplicate-save-container:" + __0.AssemblyQualifiedName,
+                "[save-compat] preserving existing container definition " + __0.FullName);
+            return false;
+        }
+        catch (Exception exception)
+        {
+            LogResolutionOnce(
+                "save-definition-prefix-error:" + (__0?.AssemblyQualifiedName ?? "<null>"),
+                "[save-compat] PREFIX ERROR: " + exception.GetType().FullName + ": " + exception.Message);
+            return true;
+        }
+    }
+
+    private static bool ShouldRunContainerDefinitionOriginal(bool alreadyDefined) => !alreadyDefined;
 
     private static void InstallDedicatedModuleFilter(Assembly mountAndBladeAssembly)
     {

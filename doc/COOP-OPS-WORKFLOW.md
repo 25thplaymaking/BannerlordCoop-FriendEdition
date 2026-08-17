@@ -119,6 +119,13 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
     on the headless host. Descriptor discovery is not proof: require the RGL log to show each required
     server-gameplay assembly loading before declaring those server modules active.
 
+14. **The v1.4.8 save-definition scan also runs before Coop constructs compatibility handlers.**
+    The pinned R&D package registers several native containers repeatedly; the rendered engine
+    tolerated that, while the headless engine records fatal asserts and exits 84. Install the
+    preserve-first container guard from `coophook.dll` when `TaleWorlds.SaveSystem` loads. A
+    campaign-handler patch is too late. Require a fresh RGL error log with zero duplicate-definition
+    asserts before accepting an R&D-enabled dedicated boot.
+
 ---
 
 ## Checklist: making a handshake-affecting change

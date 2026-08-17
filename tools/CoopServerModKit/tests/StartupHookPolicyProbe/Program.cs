@@ -13,6 +13,10 @@ MethodInfo modulePolicy = hookType.GetMethod(
     "ShouldForceDedicatedWorkshopSubModule",
     BindingFlags.NonPublic | BindingFlags.Static)
     ?? throw new MissingMethodException(hookType.FullName, "ShouldForceDedicatedWorkshopSubModule");
+MethodInfo saveDefinitionPolicy = hookType.GetMethod(
+    "ShouldRunContainerDefinitionOriginal",
+    BindingFlags.NonPublic | BindingFlags.Static)
+    ?? throw new MissingMethodException(hookType.FullName, "ShouldRunContainerDefinitionOriginal");
 
 string[] requiredClientOnlyAssemblies =
 [
@@ -84,4 +88,9 @@ foreach (string? classType in new string?[]
         throw new InvalidOperationException($"Unaudited dedicated Workshop submodule is enabled: {classType ?? "<null>"}");
 }
 
-Console.WriteLine("PASS: startup hook preserves assembly ownership and enables only the four audited dedicated gameplay submodules");
+if (!(bool)saveDefinitionPolicy.Invoke(null, [false])!)
+    throw new InvalidOperationException("The first save-container definition would be suppressed.");
+if ((bool)saveDefinitionPolicy.Invoke(null, [true])!)
+    throw new InvalidOperationException("A duplicate save-container definition would reach the v1.4.8 fatal assert.");
+
+Console.WriteLine("PASS: startup hook preserves assembly ownership, enables four audited gameplay submodules, and suppresses only duplicate save-container registrations");

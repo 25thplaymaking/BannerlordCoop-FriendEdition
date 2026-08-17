@@ -264,6 +264,63 @@ public sealed class AuthorityRequestRouterTests
         Assert.Equal(AuthorityClientCompletion.Cancelled, second.Outcome.Completion);
     }
 
+    /// <summary>
+    /// Completing a ticket marshals its presentation callback onto the game thread and waits for
+    /// it, while the game thread's own Poll takes the route lock as its first act. Cancelling from
+    /// inside that lock parked the network poller and the game loop against each other for the full
+    /// 30s blocking timeout, once per pending request — a hard hang whenever the host replaced its
+    /// session while a request was in flight. The route must not hold its lock across a completion.
+    /// </summary>
+    [Fact]
+    public void SessionMismatch_DoesNotHoldTheRouteLockWhileMarshallingToTheGameThread()
+    {
+        using var broker = new MessageBroker();
+        using var network = new TestNetwork();
+        var server = network.CreatePeer();
+        using var router = new AuthorityRequestRouter(broker, network, new Mock<IPlayerManager>().Object);
+
+        var callbackEntered = new ManualResetEventSlim(false);
+        var pollCompleted = new ManualResetEventSlim(false);
+        int callbacksSeen = 0;
+        int pollFinishedWhileCancelling = 0;
+
+        using var route = router.Register(CreateRoute(
+            () => AuthorityCommitProbeResult.Pending,
+            presented: _ =>
+            {
+                // Runs on the game-loop pump while the publishing thread waits for it. Only the
+                // first of the two cancellations needs to observe the lock.
+                if (Interlocked.Exchange(ref callbacksSeen, 1) != 0) return;
+                callbackEntered.Set();
+                // Generous, because this only bounds how long a FAILING run takes: with the lock
+                // released, Poll returns immediately. A short wait would false-fail on a starved
+                // CI box that could not schedule the probe thread in time.
+                Volatile.Write(ref pollFinishedWhileCancelling,
+                    pollCompleted.Wait(TimeSpan.FromSeconds(10)) ? 1 : 0);
+            }));
+
+        route.Submit("first");
+        route.Submit("second");
+
+        // Poll contends for exactly the lock HandleResult takes, so it can only finish here if the
+        // publishing thread released that lock before marshalling the cancellation.
+        var poller = new Thread(() =>
+        {
+            callbackEntered.Wait(TimeSpan.FromSeconds(5));
+            route.Poll();
+            pollCompleted.Set();
+        })
+        { IsBackground = true, Name = "authority-route-poll-probe" };
+        poller.Start();
+
+        // Returns only after both cancellations have run their marshalled callbacks.
+        broker.Publish(server, new TestResult(new AuthorityResultHeader("replacement", 1,
+            AuthorityResultStatus.Rejected, 0, "session-replaced")));
+        poller.Join(TimeSpan.FromSeconds(20));
+
+        Assert.Equal(1, Volatile.Read(ref pollFinishedWhileCancelling));
+    }
+
     [Fact]
     public void PresentationCallback_RunsOnTheInitializedGameThread()
     {

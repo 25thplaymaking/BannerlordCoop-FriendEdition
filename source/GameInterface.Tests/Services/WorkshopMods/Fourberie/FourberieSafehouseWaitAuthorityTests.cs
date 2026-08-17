@@ -5,6 +5,7 @@ using Xunit;
 
 namespace GameInterface.Tests.Services.WorkshopMods.Fourberie;
 
+[Collection(FourberieRuntimeCollection.Name)]
 public sealed class FourberieSafehouseWaitAuthorityTests
 {
     [Theory]

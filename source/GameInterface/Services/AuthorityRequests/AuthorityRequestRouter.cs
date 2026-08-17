@@ -235,13 +235,15 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
 
             if (!completed && !ticket.IsCompleted)
             {
-                lock (sync)
+                // Read under the lock, complete outside it: see the note in HandleResult. This
+                // caller is on the game thread, where the marshal runs inline, but keeping the
+                // rule uniform stops the next caller from reintroducing the stall.
+                PendingRequest request;
+                lock (sync) pending.TryGetValue(ticket.RequestId, out request);
+                if (request != null)
                 {
-                    if (pending.TryGetValue(ticket.RequestId, out var request))
-                    {
-                        lifecycle.ClientTimedOut(ticket.RequestId.ToString(), "blocking-deadline");
-                        CompletePending(request, AuthorityClientCompletion.TimedOut, default, "blocking-deadline");
-                    }
+                    lifecycle.ClientTimedOut(ticket.RequestId.ToString(), "blocking-deadline");
+                    CompletePending(request, AuthorityClientCompletion.TimedOut, default, "blocking-deadline");
                 }
             }
 
@@ -389,6 +391,7 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             }
 
             PendingRequest request;
+            bool sessionReplaced;
             lock (sync)
             {
                 if (!pending.TryGetValue(resultHeader.RequestId, out request))
@@ -398,17 +401,28 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
                     return;
                 }
 
-                if (!string.Equals(request.Header.SessionId, resultHeader.SessionId, StringComparison.Ordinal))
+                sessionReplaced = !string.Equals(
+                    request.Header.SessionId, resultHeader.SessionId, StringComparison.Ordinal);
+                if (!sessionReplaced)
                 {
-                    Logger.Warning("Authoritative session changed while request was pending. Route={Route} RequestId={RequestId}",
-                        route.RouteId, resultHeader.RequestId);
-                    CancelAll("session-replaced");
-                    return;
+                    request.Result = payload.What;
+                    request.ResultHeader = resultHeader;
+                    request.ServerPeer = (NetPeer)payload.Who;
                 }
+            }
 
-                request.Result = payload.What;
-                request.ResultHeader = resultHeader;
-                request.ServerPeer = (NetPeer)payload.Who;
+            // Completing a ticket marshals its presentation and completion callbacks onto the game
+            // thread and waits for them, while the game thread's own Poll takes this lock as its
+            // first act. Cancelling from inside the lock therefore parks the poller thread and the
+            // game loop against each other for the full blocking timeout, once per pending request.
+            // Monitor is reentrant, so the nested CancelAll's own lock does not protect against it —
+            // the lock must actually be released first.
+            if (sessionReplaced)
+            {
+                Logger.Warning("Authoritative session changed while request was pending. Route={Route} RequestId={RequestId}",
+                    route.RouteId, resultHeader.RequestId);
+                CancelAll("session-replaced");
+                return;
             }
 
             lifecycle.ClientReplyReceived(resultHeader.RequestId.ToString(), resultHeader.Status.ToString());
@@ -579,7 +593,10 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             Action<AuthorityClientOutcome<TResult>> completion,
             AuthorityClientOutcome<TResult> outcome)
         {
-            if (ticket.IsCompleted) return ticket.Outcome;
+            // Claim before running any callback. Terminal paths race across the poller thread (a
+            // reply) and the game thread (a blocking deadline, an apply timeout, a cancel); a plain
+            // IsCompleted check let both pass and present two conflicting outcomes to the player.
+            if (!ticket.TryClaimCompletion()) return ticket.Outcome;
 
             bool accepted = outcome.Completion == AuthorityClientCompletion.Applied;
             if (!TryRunClientCallback(() => route.PresentTerminalOutcome(outcome), "presentation", ticket.RequestId) && accepted)

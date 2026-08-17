@@ -48,30 +48,91 @@ internal class TradeHandler : IHandler
         this.troopRosterInterface = troopRosterInterface;
 
         messageBroker.Subscribe<TradeAttempted>(Handle_TradeAttempted);
+        messageBroker.Subscribe<CompleteTrade>(Handle_CompleteTrade);
         messageBroker.Subscribe<UpdateEquipmentClients>(Handle_UpdateEquipmentClients);
     }
 
     public void Dispose()
     {
         messageBroker.Unsubscribe<TradeAttempted>(Handle_TradeAttempted);
+        messageBroker.Unsubscribe<CompleteTrade>(Handle_CompleteTrade);
         messageBroker.Unsubscribe<UpdateEquipmentClients>(Handle_UpdateEquipmentClients);
     }
 
+    /// <summary>
+    /// [Client] The player completed an inventory transaction. Package the resulting rosters,
+    /// equipment, gold and troop state and let the server apply it.
+    /// </summary>
+    /// <remarks>
+    /// This ran inside <c>InventoryLogic.DoneLogic</c> via a synchronous broker dispatch. A previous
+    /// revision answered here by closing the inventory screen, and TaleWorlds' CloseScreen calls
+    /// DoneLogic again, so accepting a trade recursed until the stack overflowed and killed the
+    /// client outright. Nothing on this path may drive the inventory screen; see
+    /// <see cref="BlockedTradeTeardown"/>, which the prefix holds across this dispatch.
+    /// </remarks>
     private void Handle_TradeAttempted(MessagePayload<TradeAttempted> payload)
     {
-        // A CompleteTrade packet used to accept client-authored roster, equipment, gold, warehouse and
-        // troop snapshots. There is no deterministic server-side reconstruction for every inventory
-        // mode yet, so fail closed rather than let a client mutate campaign state. Supported modes must
-        // be reintroduced through the typed trade.open/trade.commit authority flow.
-        logger.Warning("Blocked legacy client-authored trade completion; the inventory mode is not authority-wired.");
-        if (ModInformation.IsClient)
+        var what = payload.What;
+
+        var isManagingWarehouse = what.InventoryMode == InventoryScreenHelper.InventoryMode.Warehouse;
+
+        // Don't update warehouse rosters directly if managing a warehouse, server uses CoopSession.WorkshopPlayerData
+        // Not all left rosters need to be managed by server so no need to check result of resolving it
+        // e.g. Discarding items in default inventory screen only needs to save the right roster
+        // Don't need to log the check here, from roster can not resolve legimately
+        string fromRosterId = null;
+        if (!isManagingWarehouse) objectManager.TryGetId(what.FromRoster, out fromRosterId);
+
+        if (!objectManager.TryGetIdWithLogging(what.ToRoster, out var toRosterId)) return;
+        if (!objectManager.TryGetIdWithLogging(what.Hero, out var heroId)) return;
+        if (!objectManager.TryGetIdWithLogging(what.OwnerParty, out var ownerPartyId)) return;
+        if (!objectManager.TryGetIdWithLogging(what.TroopRoster, out var troopRosterId)) return;
+        if (!objectManager.TryGetIdWithLogging(what.InitialCharacterEquipment.HeroObject, out var initialHeroId)) return;
+
+        // CurrentMobileParty can be already destroyed when this logic runs. Attempt to get an id without logging
+        objectManager.TryGetId(what.CurrentMobileParty, out var currentMobilePartyId);
+
+        string currentSettlementComponentId = null;
+        if (what.CurrentSettlementComponent is not null && 
+            !objectManager.TryGetIdWithLogging(what.CurrentSettlementComponent, out currentSettlementComponentId)) return;
+
+        var boughtItems = ResolveTradeItemIds(what.BoughtItems);
+        var soldItems = ResolveTradeItemIds(what.SoldItems);
+
+        if (what.CanGainXpFromDiscarding)
         {
-            GameThread.RunSafe(() =>
-            {
-                MBInformationManager.AddQuickInformation(new TaleWorlds.Localization.TextObject("{=coop_trade_session_unavailable}server-trade-session-unavailable"));
-                InventoryScreenHelper.CloseScreen(true);
-            }, context: nameof(TradeHandler));
+            soldItems = ResolveLeftLootIds(what.FromRoster._data);
         }
+
+        var characterIdEquipmentsData = ResolveCharacterIdEquipmentsData(what.OwnerParty, what.InitialCharacterEquipment);
+
+        var troopRosterData = troopRosterInterface.PackTroopRosterData(what.TroopRoster);
+
+        var message = new CompleteTrade(
+            fromRosterId,
+            fromRosterId is null,
+            toRosterId,
+            what.FromRoster._data,
+            what.ToRoster._data,
+            characterIdEquipmentsData,
+            what.IsTrading,
+            what.CanGainXpFromDiscarding,
+            isManagingWarehouse,
+            heroId,
+            initialHeroId,
+            what.TotalAmount,
+            what.MerchantGold,
+            ownerPartyId,
+            currentMobilePartyId,
+            currentSettlementComponentId is null,
+            currentSettlementComponentId,
+            boughtItems,
+            soldItems,
+            troopRosterId,
+            troopRosterData
+        );
+
+        network.SendAll(message);
     }
 
     private void Handle_CompleteTrade(MessagePayload<CompleteTrade> payload)

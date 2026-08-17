@@ -26,6 +26,16 @@ internal class InventoryLogicPatches
     [HarmonyPrefix]
     static bool DoneLogicPrefix(InventoryLogic __instance, ref bool __result)
     {
+        // TradeHandler answers a blocked completion by closing the screen, and CloseScreen ->
+        // CloseInventoryPresentation -> DoneLogic lands straight back here. Answer that nested call
+        // instead of publishing a second TradeAttempted, which recursed until the stack overflowed
+        // and killed the client the moment the player pressed Accept.
+        if (BlockedTradeTeardown.InProgress)
+        {
+            __result = true;
+            return false;
+        }
+
         //if (PlayerPartyTradeContext.IsActive)
         //{
         //    PlayerPartyTradeContext.PublishAccept(true);
@@ -86,7 +96,18 @@ internal class InventoryLogicPatches
             PartyBase.MainParty.MemberRoster
         );
 
-        MessageBroker.Instance.Publish(__instance, message);
+        // Subscribers run synchronously on this thread, and the blocked-trade subscriber closes the
+        // screen, which re-enters DoneLogic. Hold the teardown marker across the dispatch so that
+        // nested call is answered by the guard above.
+        BlockedTradeTeardown.Enter();
+        try
+        {
+            MessageBroker.Instance.Publish(__instance, message);
+        }
+        finally
+        {
+            BlockedTradeTeardown.Exit();
+        }
 
         // Reset rosters so they are set on the server side
         using (new AllowedThread())

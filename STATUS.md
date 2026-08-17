@@ -4,6 +4,26 @@ Living board for the modded co-op productization. Update at each milestone.
 Companion docs: `doc/COOP-MOD-INTEGRATION.md` (how the port works),
 `doc/COOP-OPS-WORKFLOW.md` (ops rules + checklist).
 
+> **2026-08-17 test-parallelism races fixed — SHIPPED from source `327d6b874`.**
+> Random CI failures on tests unrelated to the change being built traced to one root cause:
+> `GameInterface.Tests` and `Coop.Tests` drive production code that reads process-wide state
+> (`ModInformation`'s role, `Campaign.Current`, `MBObjectManager.Instance`, the global Harmony set,
+> `MessageBroker.Instance`) and several classes assign it for a test's duration, while xUnit runs each
+> class's collection in parallel. Running the three role-assigning classes beside the client-side
+> authority tests failed five runs in eight, sixteen failures each, all reading "Authority route <x>
+> cannot submit a client request on the server". Per-collection `DisableParallelization` never fixed
+> this — five such collections had accumulated trying to, and it only serializes classes *inside* a
+> collection, which is why `AuthorityRequestRouterTests` kept failing from inside
+> `ModInformationRoleCollection`. Both suites now carry
+> `[assembly: CollectionBehavior(DisableTestParallelization = true)]`, matching `Coop.IntegrationTests`
+> and `E2E.Tests`. Cost 83s->118s and 11s->22s; the CI unit command is unchanged at ~2 min. The
+> reproducing scenario is 12/12 clean, the CI command passes three times, and the full suite six more.
+> Ops rules 16-18 record this, the process-seeded `StableHash` trap, and the asset-verification rule
+> below. Client stable `2026.08.17.1532` and launcher stable `2026.8.17.50` published and byte-verified
+> against their manifests. No server redeploy: everything since the `cb2252c08` pairing is test and
+> docs only. A GitHub API outage truncated the first launcher publish (`2026.8.17.48`) to a 9-byte exe
+> behind a valid-looking manifest; it was caught by verifying the asset and repaired by republishing.
+
 > **2026-08-17 review-findings fixes — SHIPPED from source `cb2252c08`, server paired and live.**
 > A review of the 2026-08-15/16 update (188 commits) found four defects, all fixed and locked by
 > tests that fail without them. The authority router cancelled every pending ticket while holding its

@@ -156,6 +156,16 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
     hex characters, so a non-hex filler is rejected as a malformed manifest instead of as the
     mismatch the test intends.
 
+18. **A published version string is not proof the payload uploaded — verify the asset against its
+    own manifest.** During a GitHub API outage the stable launcher publish uploaded `launcher.json`
+    and then 503'd on the binary, leaving a **9-byte** `CalradiaCoop.exe` behind a manifest quoting a
+    real digest. The run showed as failed but the feed *looked* updated, and the previous good exe
+    had already been clobbered by `--clobber`, so there was nothing to roll back to. The launcher's
+    SHA gate fails closed, so every player is blocked from joining until it is republished. After any
+    stable publish, download the asset and compare its SHA-256 to the manifest before calling it
+    shipped — and check `githubstatus.com` before promoting during flaky API behaviour.
+    *(Earned: `launcher-app` 2026.8.17.48 shipped a truncated exe; 2026.8.17.50 repaired it.)*
+
 ---
 
 ## Checklist: making a handshake-affecting change

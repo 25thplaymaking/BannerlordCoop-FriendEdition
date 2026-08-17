@@ -1,3 +1,5 @@
+using Common.Logging;
+using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -57,6 +59,7 @@ public interface IWorkshopManifestProvider : IGameAbstraction
 /// </summary>
 public sealed class WorkshopManifestProvider : IWorkshopManifestProvider
 {
+    private static readonly ILogger Logger = LogManager.GetLogger<WorkshopManifestProvider>();
     private static readonly TimeSpan ConcurrentBuildWaitTimeout = TimeSpan.FromMinutes(2);
 
     private readonly IWorkshopModuleDiscovery discovery;
@@ -158,6 +161,23 @@ public sealed class WorkshopManifestProvider : IWorkshopManifestProvider
                     hashes.SubModuleOnly &&
                     !string.IsNullOrEmpty(module.PinnedContentSha256) &&
                     !string.IsNullOrEmpty(module.PinnedConfigurationSha256);
+
+                // Discovery already warns when a component fails its receipt/path/version checks,
+                // but a component that passes all of those and then fails only on the live hash
+                // used to publish itself as unmanaged in complete silence — the peer refusing
+                // every join had no idea why, and the diagnosis lived entirely on the joiner's
+                // screen. Name the module and which half diverged.
+                if (!pinsMatch && !serverStubAttestation && module.ManagedDistributionComponent)
+                {
+                    Logger.Warning(
+                        "'{ModuleId}' no longer matches its receipt pins and will be advertised as an " +
+                        "unmanaged copy: content={ContentMatches} configuration={ConfigurationMatches} " +
+                        "(root '{RootPath}'). Every peer will refuse to join until the package is restored.",
+                        module.Expectation.ModuleId,
+                        string.Equals(module.PinnedContentSha256, hashes.ContentSha256, StringComparison.OrdinalIgnoreCase),
+                        string.Equals(module.PinnedConfigurationSha256, hashes.ConfigurationSha256, StringComparison.OrdinalIgnoreCase),
+                        module.RootPath);
+                }
 
                 entries.Add(new WorkshopCompatibilityManifestEntry(
                     module.Expectation.ModuleId,

@@ -1452,7 +1452,10 @@ function Get-ManagedModuleDigests {
 
     $ignoredExtensions = @('.log', '.pdb', '.md', '.bak', '.tmp')
     $configurationExtensions = @('.xml', '.json', '.config', '.ini', '.yaml', '.yml', '.csv', '.txt')
-    $mutableNames = @('mod-config.json', 'coop-options.json', 'server-config.json')
+    # Keep this list identical to WorkshopModuleFileHasher.MutableFileNames. 'errorlog.xml' is the
+    # runtime error log Improved Garrisons appends inside its own ModuleData folder; a pinned hash
+    # that covered it could never be reproduced by a host that had actually run the module.
+    $mutableNames = @('mod-config.json', 'coop-options.json', 'server-config.json', 'errorlog.xml')
     $contentLines = New-Object System.Collections.Generic.List[string]
     $configurationLines = New-Object System.Collections.Generic.List[string]
     foreach ($file in $Files) {

@@ -101,13 +101,21 @@ public sealed class WorkshopManifestValidator : IWorkshopManifestValidator
             if (!clientPresent)
                 diagnostics.Add($"Client package is missing '{expected.ModuleId}' {expected.Version}.");
 
-            if (serverPresent) ValidateIdentity("Server", server, expected, diagnostics);
+            if (serverPresent) ValidateIdentity("Server", server, expected, diagnostics, isServer: true);
             if (clientPresent) ValidateIdentity("Client", client, expected, diagnostics);
             if (serverPresent)
                 ValidateActivation("Server", server, expected.FeatureActiveExpectedOnServer, diagnostics);
             if (clientPresent)
                 ValidateActivation("Client", client, expected.FeatureActiveExpectedOnClient, diagnostics);
             if (!serverPresent || !clientPresent) continue;
+
+            // An unmanaged peer advertises its LIVE hashes instead of its receipt pins, so any
+            // hash difference against the other peer is a restatement of the unmanaged finding,
+            // not an independent fault — and its remedy ("use the server package defaults")
+            // contradicts the one the unmanaged line just gave. The join is already refused;
+            // report the cause once. Two managed peers still get the full comparison below,
+            // because there the hashes are the only thing that can disagree.
+            if (!server.ManagedDistributionComponent || !client.ManagedDistributionComponent) continue;
 
             if (!EqualHash(server.ContentSha256, client.ContentSha256))
                 diagnostics.Add($"Content mismatch for '{expected.ModuleId}'. Reinstall the Friend Edition package.");
@@ -160,7 +168,8 @@ public sealed class WorkshopManifestValidator : IWorkshopManifestValidator
         string source,
         WorkshopCompatibilityManifestEntry actual,
         WorkshopModuleExpectation expected,
-        ICollection<string> diagnostics)
+        ICollection<string> diagnostics,
+        bool isServer = false)
     {
         if (!string.Equals(actual.WorkshopId, expected.WorkshopId, StringComparison.Ordinal))
             diagnostics.Add($"{source} has the wrong Workshop item for '{expected.ModuleId}'.");
@@ -171,7 +180,14 @@ public sealed class WorkshopManifestValidator : IWorkshopManifestValidator
         if (actual.LoadOrder != expected.LoadOrder)
             diagnostics.Add($"{source} has load order {actual.LoadOrder} for '{expected.ModuleId}'; expected {expected.LoadOrder}.");
         if (!actual.ManagedDistributionComponent)
-            diagnostics.Add($"{source} loads an unmanaged copy of '{expected.ModuleId}'. Reinstall it from the Friend Edition private suite.");
+        {
+            // Address the peer that can actually act. A joining player cannot repair the host's
+            // package, so telling them to reinstall their own (verified) copy sends them in
+            // circles — which is exactly what the Improved Garrisons runtime-log drift did.
+            diagnostics.Add(isServer
+                ? $"{source} loads an unmanaged copy of '{expected.ModuleId}'. The host must restore it from the Friend Edition private suite; this is not a fault in your installation."
+                : $"{source} loads an unmanaged copy of '{expected.ModuleId}'. Reinstall it from the Friend Edition private suite.");
+        }
         if (!actual.ActivationOrderValid)
             diagnostics.Add($"{source} has the Friend Edition Workshop modules in the wrong load order.");
     }

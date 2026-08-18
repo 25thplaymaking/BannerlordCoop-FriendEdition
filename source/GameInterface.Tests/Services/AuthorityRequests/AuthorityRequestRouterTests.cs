@@ -438,7 +438,9 @@ public sealed class AuthorityRequestRouterTests
 
             broker.Publish(peer, new BootstrapTestRequest(new AuthorityRequestHeader(1, "session", 1, 2), "query"));
 
-            Assert.True(route.Lifecycle.TryGetSnapshot("1", out var snapshot));
+            // The server keys tracking by peer as well as id, because request ids are a
+            // per-client sequence and concurrent joiners all start at 1.
+            Assert.True(route.Lifecycle.TryGetSnapshot($"{peer.Id}:1", out var snapshot));
             Assert.Equal(AuthorityRequestPhase.ReplySent, snapshot.Phase);
             Assert.Equal(AuthorityResultStatus.Accepted.ToString(), snapshot.Outcome);
         });

@@ -437,6 +437,17 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             request.ApplyDeadline = DateTime.UtcNow + route.TimeoutPolicy.ApplyTimeout;
         }
 
+        /// <summary>
+        /// Identifies an inbound request by peer as well as id. Request ids are a per-client
+        /// sequence, so peers that join together all start at 1. The server tracks every request
+        /// for a route in one map; keying that map on the id alone made a second peer's request
+        /// look like a replay of the first, so it was never tracked and its reply was discarded
+        /// as "after terminal state" instead of being sent. The client then waited out its
+        /// response timeout - which stalled character creation for everyone joining at once.
+        /// </summary>
+        private static string ServerKey(NetPeer peer, AuthorityRequestHeader header) =>
+            peer.Id + ":" + header.RequestId;
+
         private void HandleRequest(MessagePayload<TRequest> payload)
         {
             if (disposed || ModInformation.IsClient) return;
@@ -447,7 +458,7 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             }
 
             AuthorityRequestHeader header = route.ReadRequestHeader(payload.What);
-            lifecycle.BeginServer(header.RequestId.ToString());
+            lifecycle.BeginServer(ServerKey(peer, header));
             if (!header.TryValidate(out var failure))
             {
                 SendTerminal(peer, header, route.CreateTerminalResult(header, AuthorityResultStatus.InvalidRequest, failure));
@@ -497,7 +508,7 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
                 return;
             }
 
-            lifecycle.ServerAdmitted(header.RequestId.ToString());
+            lifecycle.ServerAdmitted(ServerKey(peer, header));
             try
             {
                 GameThread.Run(() => ExecuteServer(peer, player, header, payload.What), blocking: true,
@@ -506,7 +517,7 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             catch (Exception exception)
             {
                 Logger.Error(exception, "Authority route {Route} could not execute request {RequestId}", route.RouteId, header.RequestId);
-                lifecycle.ExecutionFailed(header.RequestId.ToString(), "game-thread-failure");
+                lifecycle.ExecutionFailed(ServerKey(peer, header), "game-thread-failure");
                 SendTerminal(peer, header, route.CreateTerminalResult(header, AuthorityResultStatus.ExecutionFailed, "game-thread-failure"));
             }
         }
@@ -527,25 +538,25 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
 
                 if (resultHeader.Status == AuthorityResultStatus.Accepted && !reply.StatePublished)
                 {
-                    lifecycle.PublicationFailed(header.RequestId.ToString(), "accepted-without-publication");
+                    lifecycle.PublicationFailed(ServerKey(peer, header), "accepted-without-publication");
                     result = route.CreateTerminalResult(header, AuthorityResultStatus.ExecutionFailed, "publication-failed");
                 }
                 else if (resultHeader.Status == AuthorityResultStatus.Accepted && route.Kind == AuthorityRouteKind.Command)
                 {
-                    lifecycle.MutationCommitted(header.RequestId.ToString(), "accepted");
-                    lifecycle.StatePublished(header.RequestId.ToString(), resultHeader.CommittedRevision.ToString());
+                    lifecycle.MutationCommitted(ServerKey(peer, header), "accepted");
+                    lifecycle.StatePublished(ServerKey(peer, header), resultHeader.CommittedRevision.ToString());
                 }
                 else
                 {
                     if (resultHeader.Status != AuthorityResultStatus.Accepted)
-                        lifecycle.ServerRejected(header.RequestId.ToString(), resultHeader.ReasonCode);
+                        lifecycle.ServerRejected(ServerKey(peer, header), resultHeader.ReasonCode);
                 }
             }
             catch (Exception exception)
             {
                 Logger.Error(exception, "Authority route {Route} threw before it could resolve request {RequestId}",
                     route.RouteId, header.RequestId);
-                lifecycle.ExecutionFailed(header.RequestId.ToString(), "executor-threw");
+                lifecycle.ExecutionFailed(ServerKey(peer, header), "executor-threw");
                 result = route.CreateTerminalResult(header, AuthorityResultStatus.ExecutionFailed, "executor-threw");
             }
 
@@ -556,7 +567,7 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
         private void SendTerminal(NetPeer peer, AuthorityRequestHeader header, TResult result)
         {
             AuthorityResultHeader resultHeader = route.ReadResultHeader(result);
-            lifecycle.ServerRejected(header.RequestId.ToString(), resultHeader.ReasonCode);
+            lifecycle.ServerRejected(ServerKey(peer, header), resultHeader.ReasonCode);
             replayLedger.Complete(peer, header.SessionId, route.RouteId, header.RequestId, result);
             SendCached(peer, header, result);
         }
@@ -566,12 +577,12 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             try
             {
                 network.Send(peer, result);
-                lifecycle.ReplySent(header.RequestId.ToString(), route.ReadResultHeader(result).Status.ToString());
+                lifecycle.ReplySent(ServerKey(peer, header), route.ReadResultHeader(result).Status.ToString());
             }
             catch (Exception exception)
             {
                 Logger.Error(exception, "Authority route {Route} could not send result {RequestId}", route.RouteId, header.RequestId);
-                lifecycle.ReplySendFailed(header.RequestId.ToString(), "send-failed");
+                lifecycle.ReplySendFailed(ServerKey(peer, header), "send-failed");
             }
         }
 

@@ -1,4 +1,5 @@
 using Common;
+using Common.Logging;
 using Common.Messaging;
 using Common.Network.Messages;
 using Common.Util;
@@ -12,6 +13,7 @@ using GameInterface.Services.MobileParties.Messages.Behavior;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Settlements.Interfaces;
 using System;
+using Serilog;
 using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.Party;
@@ -22,6 +24,7 @@ namespace Coop.Core.Client.Services.MobileParties.Handlers;
 /// <summary>Routes local settlement encounter intent through the authenticated authority handshake.</summary>
 public class ClientSettlementExitEnterHandler : IHandler
 {
+    private static readonly ILogger Logger = LogManager.GetLogger<ClientSettlementExitEnterHandler>();
     private readonly IMessageBroker messageBroker;
     private readonly IObjectManager objectManager;
     private readonly ISettlementInterface settlementInterface;
@@ -184,20 +187,50 @@ public class ClientSettlementExitEnterHandler : IHandler
     private AuthorityCommitProbeResult ProbeStartCommit(NetworkStartSettlementEncounter result)
     {
         if (!MatchesPendingStart(result)) return AuthorityCommitProbeResult.Invalid;
-        if (!pendingStart.ProofObserved || pendingLeave != null) return AuthorityCommitProbeResult.Pending;
+        if (!pendingStart.ProofObserved || pendingLeave != null)
+            return TraceStart("awaiting-proof", "proofObserved=" + pendingStart.ProofObserved +
+                " pendingLeave=" + (pendingLeave != null), AuthorityCommitProbeResult.Pending);
         ApplyPendingStart(result.Mode);
         if (!pendingStart.AppliedLocally ||
             !objectManager.TryGetObject(pendingStart.PartyId, out MobileParty party) ||
             !objectManager.TryGetObject(pendingStart.SettlementId, out Settlement settlement))
-            return AuthorityCommitProbeResult.Pending;
+            return TraceStart("awaiting-local-apply", "appliedLocally=" + pendingStart.AppliedLocally +
+                " partyId=" + pendingStart.PartyId + " settlementId=" + pendingStart.SettlementId,
+                AuthorityCommitProbeResult.Pending);
 
         bool membershipMatches = result.Mode == SettlementEncounterStartMode.EnteredSettlement
             ? ReferenceEquals(party.CurrentSettlement, settlement)
             : party.CurrentSettlement == null;
         bool encounterMatches = ReferenceEquals(PlayerEncounter.Current?.EncounterSettlementAux, settlement);
-        return membershipMatches && encounterMatches
-            ? AuthorityCommitProbeResult.Applied
-            : AuthorityCommitProbeResult.Pending;
+        if (membershipMatches && encounterMatches)
+            return TraceStart("applied", "mode=" + result.Mode, AuthorityCommitProbeResult.Applied);
+
+        var encounter = PlayerEncounter.Current;
+        return TraceStart("membership-or-encounter-mismatch",
+            "mode=" + result.Mode +
+            " membershipMatches=" + membershipMatches +
+            " encounterMatches=" + encounterMatches +
+            " target=" + settlement.StringId +
+            " isVillage=" + settlement.IsVillage +
+            " party.CurrentSettlement=" + (party.CurrentSettlement?.StringId ?? "<null>") +
+            " encounterNull=" + (encounter == null) +
+            " EncounterSettlementAux=" + (encounter?.EncounterSettlementAux?.StringId ?? "<null>") +
+            " EncounterSettlement=" + (PlayerEncounter.EncounterSettlement?.StringId ?? "<null>"),
+            AuthorityCommitProbeResult.Pending);
+    }
+
+    // Probe runs every tick while a request is outstanding; only report when the reason changes.
+    private string lastStartTrace;
+
+    private AuthorityCommitProbeResult TraceStart(string reason, string detail, AuthorityCommitProbeResult probe)
+    {
+        string line = reason + " " + detail;
+        if (!string.Equals(lastStartTrace, line, StringComparison.Ordinal))
+        {
+            lastStartTrace = line;
+            Logger.Warning("[ENC-DIAG] settlement.encounter.start probe: {Reason} {Detail}", reason, detail);
+        }
+        return probe;
     }
 
     private AuthorityCommitProbeResult ProbeEndCommit(NetworkSettlementEncounterLeaveResult result)

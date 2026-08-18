@@ -1,3 +1,4 @@
+using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
 using CoopLauncher.Services;
@@ -6,9 +7,26 @@ namespace CoopLauncher;
 
 public partial class App : Application
 {
+    private static Mutex? _singleInstance;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Two launchers racing the same install directory is what left players with a
+        // half-replaced module: one held the module files open while the other tried to
+        // replace them. Only one may run at a time.
+        _singleInstance = new Mutex(initiallyOwned: true, @"Local\CalradiaCoop.Launcher", out bool isOnly);
+        if (!isOnly && e.Args.FirstOrDefault() != LauncherUpdateCommand.ApplySwitch)
+        {
+            MessageBox.Show(
+                "The Calradia Co-op launcher is already running. Use that window instead.",
+                "Calradia Co-op",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            Shutdown();
+            return;
+        }
 
         // A render/layout throw (e.g. an unresolved resource) used to leave a painted-but-dead
         // window, so a friend's click just "did nothing". Surface the real cause, but fail fast:

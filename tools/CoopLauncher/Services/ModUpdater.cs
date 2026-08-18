@@ -429,6 +429,10 @@ public sealed class ModUpdater : IModUpdateService
         string modulesFull = Path.GetFullPath(modulesDir);
         Directory.CreateDirectory(modulesFull);
 
+        // Workspaces from earlier interrupted updates accumulate under Modules and are pure debris
+        // once their backup has been restored.
+        SweepStaleWorkspaces(modulesFull);
+
         string workspace = Path.Combine(modulesFull, $".coop-update-{Guid.NewGuid():N}");
         string stageRoot = Path.Combine(workspace, "stage");
         string backupRoot = Path.Combine(workspace, "backup");
@@ -436,6 +440,7 @@ public sealed class ModUpdater : IModUpdateService
         byte[]? previousVersion = null;
         bool versionExisted = false;
         bool committed = false;
+        bool restoreFailed = false;
 
         try
         {
@@ -478,10 +483,47 @@ public sealed class ModUpdater : IModUpdateService
                 for (int i = replacements.Count - 1; i >= 0; i--)
                 {
                     var replacement = replacements[i];
-                    if (Directory.Exists(replacement.Destination))
-                        Directory.Delete(replacement.Destination, recursive: true);
-                    if (replacement.HadExisting && Directory.Exists(replacement.Backup))
-                        Directory.Move(replacement.Backup, replacement.Destination);
+
+                    // Nothing in here may throw. A recursive delete fails whenever any file under
+                    // the destination is held open - a running game, or a second launcher racing
+                    // this one - and an exception escaping the rollback skips the restore below.
+                    // That is what bricked installs: the module was gone, its backup stranded in
+                    // the workspace, the version stamp cleared, and every retry failed the same
+                    // way because the destination was still locked.
+                    try
+                    {
+                        if (Directory.Exists(replacement.Destination) &&
+                            !TryDeleteDirectoryReporting(replacement.Destination))
+                        {
+                            // Renaming a directory succeeds where deleting its contents does not,
+                            // so the destination can still be freed for the backup to move back.
+                            string quarantine = Path.Combine(workspace,
+                                $"failed-{Path.GetFileName(replacement.Destination)}-{Guid.NewGuid():N}");
+                            Directory.Move(replacement.Destination, quarantine);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Write($"update rollback could not clear {replacement.Destination}: {ex.Message}");
+                    }
+
+                    try
+                    {
+                        if (replacement.HadExisting && Directory.Exists(replacement.Backup) &&
+                            !Directory.Exists(replacement.Destination))
+                        {
+                            Directory.Move(replacement.Backup, replacement.Destination);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        restoreFailed = true;
+                        Log.Write($"update rollback could not restore {replacement.Destination} " +
+                            $"from {replacement.Backup}: {ex.Message}");
+                    }
+
+                    if (replacement.HadExisting && !Directory.Exists(replacement.Destination))
+                        restoreFailed = true;
                 }
 
                 string versionFull = Path.GetFullPath(versionFile);
@@ -501,7 +543,16 @@ public sealed class ModUpdater : IModUpdateService
                 }
             }
 
-            TryDeleteDirectory(workspace);
+            if (restoreFailed)
+            {
+                // The backup is the only surviving copy of the player's module; deleting the
+                // workspace here would turn a recoverable failure into a reinstall.
+                Log.Write($"update rollback incomplete; the previous module is preserved in {workspace}");
+            }
+            else
+            {
+                TryDeleteDirectory(workspace);
+            }
         }
     }
 
@@ -556,6 +607,44 @@ public sealed class ModUpdater : IModUpdateService
         int win32Error = ex.HResult & 0xffff;
         return ex is UnauthorizedAccessException ||
                ex is IOException && win32Error is 5 or 32 or 33;
+    }
+
+    /// <summary>Deletes a directory, reporting whether it actually went away.</summary>
+    private static bool TryDeleteDirectoryReporting(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+            return !Directory.Exists(path);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Removes leftover staging workspaces that no longer hold an unrestored backup.</summary>
+    private static void SweepStaleWorkspaces(string modulesFull)
+    {
+        try
+        {
+            foreach (string workspace in Directory.GetDirectories(modulesFull, ".coop-update-*"))
+            {
+                string backup = Path.Combine(workspace, "backup");
+                bool holdsBackup = Directory.Exists(backup) &&
+                    Directory.GetDirectories(backup).Length > 0;
+                if (holdsBackup)
+                {
+                    Log.Write($"keeping {workspace}: it still holds an unrestored module backup");
+                    continue;
+                }
+                TryDeleteDirectory(workspace);
+            }
+        }
+        catch
+        {
+            // Debris is cosmetic; never fail an install over it.
+        }
     }
 
     private static void TryDeleteDirectory(string path)

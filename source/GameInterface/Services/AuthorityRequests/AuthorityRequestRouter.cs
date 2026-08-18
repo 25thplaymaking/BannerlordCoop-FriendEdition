@@ -584,8 +584,27 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
             lock (sync) pending.Remove(request.Header.RequestId);
             var outcome = Complete(request.Ticket, request.Completion,
                 new AuthorityClientOutcome<TResult>(completion, result, reasonCode));
+            // Only a route that declared itself fail-closed may end the session over a replica that
+            // did not apply. Disconnecting unconditionally ignored that flag entirely and turned
+            // recoverable, often stale, failures into a kick to the main menu: a bootstrap query
+            // issued before the save transfer can have its reply arrive 25-90s later, blow its apply
+            // deadline, and eject the player even though a newer request on the same route has
+            // already applied successfully. Routes that genuinely cannot tolerate a missed replica
+            // opt in with failClosedOnApplyFailure: true.
             if (outcome.Completion == AuthorityClientCompletion.ReplicaApplyFailed)
-                request.ServerPeer?.Disconnect();
+            {
+                if (route.FailClosedOnApplyFailure)
+                {
+                    request.ServerPeer?.Disconnect();
+                }
+                else
+                {
+                    Logger.Warning(
+                        "Replica did not apply but the route is not fail-closed; keeping the session. " +
+                        "Route={Route} RequestId={RequestId} Reason={Reason}",
+                        route.RouteId, request.Header.RequestId, reasonCode);
+                }
+            }
         }
 
         private AuthorityClientOutcome<TResult> Complete(

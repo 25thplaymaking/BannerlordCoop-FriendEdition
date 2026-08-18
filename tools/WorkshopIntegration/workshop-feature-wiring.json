@@ -76,7 +76,7 @@
           "status": "VerifiedWired",
           "owner": "FriendEditionWorkshopModuleCatalog",
           "routes": ["exact active module order", "content-only SubModule descriptor"],
-          "tests": ["WorkshopModuleCatalogTests.AssertActiveAllPeersExactGearModule"]
+          "tests": ["WorkshopModuleCatalogTests.AssertHeldAllPeersExactGearModule"]
         }
       ]
     },
@@ -91,7 +91,7 @@
           "status": "VerifiedWired",
           "owner": "FriendEditionWorkshopModuleCatalog",
           "routes": ["exact active module order", "content-only SubModule descriptor"],
-          "tests": ["WorkshopModuleCatalogTests.AssertActiveAllPeersExactGearModule"]
+          "tests": ["WorkshopModuleCatalogTests.AssertHeldAllPeersExactGearModule"]
         }
       ]
     },
@@ -106,7 +106,7 @@
           "status": "VerifiedWired",
           "owner": "FriendEditionWorkshopModuleCatalog",
           "routes": ["exact active module order", "content-only SubModule descriptor"],
-          "tests": ["WorkshopModuleCatalogTests.AssertActiveAllPeersExactGearModule"]
+          "tests": ["WorkshopModuleCatalogTests.AssertHeldAllPeersExactGearModule"]
         }
       ]
     },

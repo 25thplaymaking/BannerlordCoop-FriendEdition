@@ -1,4 +1,4 @@
-using System.Threading;
+﻿using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
 using CoopLauncher.Services;
@@ -20,8 +20,8 @@ public partial class App : Application
         if (!isOnly && e.Args.FirstOrDefault() != LauncherUpdateCommand.ApplySwitch)
         {
             MessageBox.Show(
-                "The Calradia Co-op launcher is already running. Use that window instead.",
-                "Calradia Co-op",
+                "The Europe 1100 Co-op launcher is already running. Use that window instead.",
+                "Europe 1100 Co-op",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
             Shutdown();

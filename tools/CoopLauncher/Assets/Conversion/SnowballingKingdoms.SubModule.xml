@@ -1,0 +1,52 @@
+<Module>
+	<Name value="Snowballing Kingdoms - EOE 1100"/>
+	<Id value="SnowballingKingdoms - EOE 1100"/>
+	<Version value="v1.0.21"/>
+	<DefaultModule value="false"/>
+	<ModuleCategory value="Singleplayer"/>
+	<Official value="false"/>
+	<DependedModules>
+		<DependedModule Id="Native" DependentVersion="v1.4.8"/>
+		<DependedModule Id="SandBoxCore" DependentVersion="v1.4.8"/>
+		<DependedModule Id="Sandbox" DependentVersion="v1.4.8"/>
+		<DependedModule Id="StoryMode" DependentVersion="v1.4.8"/>
+		<DependedModule Id="Europe1100" DependentVersion="v1.4.7.3"/>
+	</DependedModules>
+
+    <SubModules>
+        <SubModule>
+            <Name value="SnowballingKingdoms"/>
+            <DLLName value="SnowballingKingdoms.dll"/>
+            <SubModuleClassType value="SnowballingKingdoms.MySubModule"/>
+            <Tags>
+                <Tag key="DedicatedServerType" value="none" />
+                <Tag key="IsNoRenderModeElement" value="false" />
+            </Tags>
+        </SubModule>
+    </SubModules>
+
+	<Xmls>
+          
+		<XmlNode>
+			<XmlName id="Snowballs" path="snowballs_in_use" />
+			<IncludedGameTypes>
+				<GameType value="Campaign" />
+				<GameType value="CampaignStoryMode" />
+                <GameType value = "CustomGame"/>
+                <GameType value = "EditorGame"/>                
+			</IncludedGameTypes>
+		</XmlNode>
+
+		<XmlNode>
+			<XmlName id="SnowConfigs" path="config_in_use" />
+			<IncludedGameTypes>
+				<GameType value="Campaign" />
+				<GameType value="CampaignStoryMode" />
+                <GameType value = "CustomGame"/>
+                <GameType value = "EditorGame"/>                
+			</IncludedGameTypes>
+		</XmlNode>
+
+	</Xmls>
+</Module>
+

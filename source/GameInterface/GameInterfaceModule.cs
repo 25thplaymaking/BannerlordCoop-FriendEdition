@@ -33,6 +33,7 @@ using GameInterface.Services.TroopRosters.Logging;
 using GameInterface.Services.Time;
 using GameInterface.Services.WorkshopMods.Core;
 using GameInterface.Services.WorkshopMods.Diplomacy;
+using GameInterface.Services.WorkshopMods.Europe1100;
 using GameInterface.Services.WorkshopMods.Fourberie;
 using GameInterface.Services.WorkshopMods.ImprovedGarrisons;
 using GameInterface.Services.WorkshopMods.PlayerSettlement;
@@ -147,6 +148,12 @@ public class GameInterfaceModule : Module
         builder.RegisterType<MainPartyBattleRewardsCache>().As<IMainPartyBattleRewardsCache>().InstancePerLifetimeScope();
         builder.RegisterType<PacketManager>().As<IPacketManager>().InstancePerLifetimeScope();
         builder.RegisterType<MapEventInitializationBarrierBinding>().InstancePerLifetimeScope().AutoActivate();
+
+        // Confines the Empires of Europe 1100 conversion's third-party campaign behaviours to the
+        // host. The EoE modules are uncatalogued by design, so the join handshake never sees them
+        // and this is the only place their authority is enforced. It resolves nothing — and patches
+        // nothing — when the conversion is not installed.
+        builder.RegisterType<Europe1100CampaignAuthorityGate>().AsSelf().InstancePerLifetimeScope().AutoActivate();
 
         RegisterWorkshopModules(builder);
 

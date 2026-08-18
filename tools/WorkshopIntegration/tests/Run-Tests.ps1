@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -78,21 +78,41 @@ $approvedWorkshopIds = @(
     'ImprovedGarrisons', 'DismembermentPlus', 'Fourberie', 'Bannerlord.Diplomacy',
     'UnblockableThrust', 'PlayerSettlement', 'RebellionsAndDemographics'
 )
-$approvedActiveOrder = @(
+# The exact order is every catalogued module the client stages, active or not. The active
+# order drops PlayerSettlement: it is held inactive for the Empires of Europe 1100 conversion
+# (it builds settlement prefabs from the native culture set, which EoE replaces, and it faulted
+# the dedicated host with exit 84 during that load). It stays staged and hash-verified, so the
+# suite receipt still validates 1:1 against the catalog.
+$approvedExactOrder = @(
     'Bannerlord.Harmony', 'Bannerlord.ButterLib', 'Bannerlord.UIExtenderEx',
     'Bannerlord.MBOptionScreen', 'Native', 'SandBoxCore', 'CustomBattle', 'Sandbox',
     'StoryMode', 'OpenSourceSaddlery', 'OpenSourceWeaponry', 'OpenSourceArmory',
     'PlayerSettlement', 'Coop', 'ImprovedGarrisons', 'DismembermentPlus',
-    'Fourberie', 'Bannerlord.Diplomacy', 'UnblockableThrust'
+    'Fourberie', 'Bannerlord.Diplomacy', 'UnblockableThrust', 'RebellionsAndDemographics'
 )
-$approvedActiveOrder = @($approvedActiveOrder + 'RebellionsAndDemographics')
-$approvedExactOrder = $approvedActiveOrder
+# Only the four frameworks and the base game stay active for the Europe 1100 conversion. The rest
+# remain staged and hash-verified so the suite receipt still validates 1:1 against the catalog.
+$approvedStagedInactive = @(
+    'OpenSourceSaddlery', 'OpenSourceWeaponry', 'OpenSourceArmory', 'PlayerSettlement',
+    'ImprovedGarrisons', 'DismembermentPlus', 'Fourberie', 'Bannerlord.Diplomacy',
+    'UnblockableThrust', 'RebellionsAndDemographics'
+)
+$approvedActiveOrder = @($approvedExactOrder | Where-Object { $_ -notin $approvedStagedInactive })
+
+# The conversion tail is deliberately UNCATALOGUED — WorkshopSuiteReceipt.TryValidate locks the
+# catalog and the packaging receipt 1:1, so catalogued conversion modules would add eight fatal
+# join gates each and force a 4.9 GB suite payload. The launcher activates them; the handshake
+# never sees them. gfrontsEOENamesMod is excluded: it declares SPCultures XmlNames but ships only
+# .xslt and no .xml.
+$approvedConversionTail = @(
+    'Europe1100', 'Europe1100Expanded', 'SnowballingKingdoms - EOE 1100'
+)
 $productionIds = @($productionManifest.modules | ForEach-Object { [string]$_.moduleId })
 Assert-True ([int]$productionManifest.suite.expectedModuleCount -eq 14) 'production suite must require the exact fourteen-module package'
 Assert-True (($productionIds -join ',') -ceq ($approvedWorkshopIds -join ',')) 'production suite must contain the exact approved package without RBM'
 Assert-True ((@($productionManifest.activationPolicy.client.exactModuleOrder) -join ',') -ceq ($approvedExactOrder -join ',')) 'client exact order must include active R&D after Coop'
 Assert-True ((@($productionManifest.activationPolicy.client.activeModuleOrder) -join ',') -ceq ($approvedActiveOrder -join ',')) 'client active order must include R&D'
-Assert-True (@($productionManifest.activationPolicy.client.stagedInactiveModuleIds).Count -eq 0) 'client has no unsupported R&D hold'
+Assert-True ((@($productionManifest.activationPolicy.client.stagedInactiveModuleIds) -join ',') -ceq ($approvedStagedInactive -join ',')) 'every non-framework component is staged-inactive for Europe 1100'
 Assert-True ((@($productionManifest.activationPolicy.server.exactActiveModuleOrder) -join ',') -ceq ($approvedActiveOrder -join ',')) 'server active order must include R&D'
 Assert-True (@($productionManifest.activationPolicy.server.guardedModuleIds).Count -eq 0) 'server has no unsupported R&D hold'
 Assert-True ((@($productionManifest.activationPolicy.server.neverActivateModuleIds) -join ',') -ceq 'BirthAndDeath') 'only optional TaleWorlds BirthAndDeath remains excluded'
@@ -132,10 +152,10 @@ Assert-True (-not $invalidWithinCohort) 'numeric Workshop order must still be pr
 $launcherConfig = Read-JsonWithFullLineComments (Join-Path $repoRoot 'tools\CoopLauncher\launcher-config.json')
 $authorityPolicy = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\WorkshopIntegration\authority-dispositions.json') -Raw | ConvertFrom-Json
 $launcherOrder = @(([string]$launcherConfig.moduleToken).Split('*') | Where-Object { $_ -and $_ -notin @('_MODULES_') })
-Assert-True (($launcherOrder -join ',') -ceq ($approvedActiveOrder -join ',')) 'launcher token must match the approved active loadout'
+Assert-True (($launcherOrder -join ',') -ceq (($approvedActiveOrder + $approvedConversionTail) -join ',')) 'launcher token must match the approved active loadout plus the conversion tail'
 Assert-True (@($launcherConfig.blockedModuleIds).Count -eq 0) 'launcher must advertise the approved R&D adapter'
 Assert-True (@($authorityPolicy.inactiveModuleHolds).Count -eq 0) 'authority policy must retain no blanket R&D hold'
-Write-Host 'PASS: production catalog inputs agree on exact active OSA content, active R&D, and retired RBM'
+Write-Host 'PASS: production catalog inputs agree on the Europe 1100 loadout - four active frameworks, ten staged-inactive components, no RBM, and the conversion tail last'
 
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('friend-edition-workshop-tests-' + [guid]::NewGuid().ToString('N'))
 try {

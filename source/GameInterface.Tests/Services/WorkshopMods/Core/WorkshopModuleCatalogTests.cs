@@ -1,4 +1,4 @@
-using GameInterface.Services.WorkshopMods.Core;
+﻿using GameInterface.Services.WorkshopMods.Core;
 using System.Linq;
 using Xunit;
 
@@ -50,21 +50,31 @@ public class WorkshopModuleCatalogTests
                 .Where(module => module.Profile == WorkshopCompatibilityProfile.ServerAuthoritativeCampaign)
                 .Select(module => module.ModuleId));
 
+        // RBM is not in the package at all — different from the holds below, which stay packaged
+        // and receipt-verified so the suite receipt keeps validating 1:1 against this catalog.
         Assert.DoesNotContain(modules, module => module.ModuleId == "RBM");
         WorkshopModuleExpectation held = Assert.Single(modules.Where(module =>
             module.ModuleId == "RebellionsAndDemographics"));
-        Assert.True(held.FeatureActiveExpectedOnServer);
-        Assert.True(held.FeatureActiveExpectedOnClient);
+        Assert.False(held.FeatureActiveExpectedOnServer);
+        Assert.False(held.FeatureActiveExpectedOnClient);
 
         Assert.Collection(
             modules.Where(module => module.ModuleId.StartsWith("OpenSource")),
-            module => AssertActiveAllPeersExactGearModule(module, "OpenSourceSaddlery"),
-            module => AssertActiveAllPeersExactGearModule(module, "OpenSourceWeaponry"),
-            module => AssertActiveAllPeersExactGearModule(module, "OpenSourceArmory"));
+            module => AssertHeldAllPeersExactGearModule(module, "OpenSourceSaddlery"),
+            module => AssertHeldAllPeersExactGearModule(module, "OpenSourceWeaponry"),
+            module => AssertHeldAllPeersExactGearModule(module, "OpenSourceArmory"));
 
         // PlayerSettlement and the asset-only Open Source modules must load before Coop. The
         // former re-guards load-time patches; the latter supply the canonical item definitions.
         Assert.True(Assert.Single(modules.Where(m => m.ModuleId == "PlayerSettlement")).LoadsBeforeCoop);
+
+        // Held inactive for the Europe 1100 conversion: still packaged and hash-verified, but not
+        // launched. FeatureActiveExpected* is an equality policy, so both roles must read false or
+        // the join is refused for a module nobody activates.
+        WorkshopModuleExpectation playerSettlement =
+            Assert.Single(modules.Where(m => m.ModuleId == "PlayerSettlement"));
+        Assert.False(playerSettlement.FeatureActiveExpectedOnServer);
+        Assert.False(playerSettlement.FeatureActiveExpectedOnClient);
         Assert.All(modules.Where(module => module.ModuleId.StartsWith("OpenSource")), module =>
             Assert.True(module.LoadsBeforeCoop));
         Assert.All(
@@ -95,15 +105,20 @@ public class WorkshopModuleCatalogTests
         Assert.Equal(version, module.Version);
     }
 
-    private static void AssertActiveAllPeersExactGearModule(
+    /// <summary>
+    /// The gear modules keep their identity, profile and pre-Coop slot so re-enabling one is a
+    /// two-flag change, but they are held inactive for the Europe 1100 conversion, which supplies
+    /// its own item set.
+    /// </summary>
+    private static void AssertHeldAllPeersExactGearModule(
         WorkshopModuleExpectation module,
         string moduleId)
     {
         Assert.Equal(moduleId, module.ModuleId);
         Assert.Equal(WorkshopModuleRole.Presentation, module.Role);
         Assert.Equal(WorkshopCompatibilityProfile.AllPeersExact, module.Profile);
-        Assert.True(module.FeatureActiveExpectedOnServer);
-        Assert.True(module.FeatureActiveExpectedOnClient);
+        Assert.False(module.FeatureActiveExpectedOnServer);
+        Assert.False(module.FeatureActiveExpectedOnClient);
         Assert.True(module.LoadsBeforeCoop);
     }
 }

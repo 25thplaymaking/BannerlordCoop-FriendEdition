@@ -187,6 +187,27 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
     `0xc0000005` in `TaleWorlds.Native.dll` was assumed to be a just-shipped client build; the WER
     report showed 125 loaded modules and not one mod assembly.)*
 
+21. **A total conversion must have ITS settlement distance cache at SandBox's path, or the
+    dedicated host dies in campaign load with no managed exception.** The engine reads
+    `Modules/SandBox/ModuleData/DistanceCaches/settlements_distance_cache_Default.bin` — it does
+    NOT resolve the file from the conversion that owns the map. Europe 1100 ships its own 31 MB
+    cache under `Modules/Europe1100/ModuleData/DistanceCaches/`, and while Native's 2.6 MB cache
+    sat at the path the engine actually reads, every EoE boot died ~110s in with `exit 5` during
+    campaign load. The tell is a long silence in BOTH logs — the engine's last line is
+    `Reading SettlementsDistanceCacheFilePath: ...SandBox...`, then nothing for ~55s, then the
+    watchdog kills the process. Nothing is written to `rgl_log_errors`, no managed exception is
+    raised, and the durable Coop log simply stops, because the fault is native and the watchdog
+    behaves as an attached debugger.
+
+    Install the conversion's cache over SandBox's (keep the original as
+    `.native-backup`) before launching the conversion loadout. This is a per-loadout swap, not an
+    additive one: the Native/Calradia loadout needs its own cache back, so the two loadouts cannot
+    share one `Modules/` tree without the launch script asserting which cache is in place.
+    `settlements_distance_cache_Default.bin` lives under `Modules/SandBox`, which is a base-game
+    module and not part of the managed Workshop suite, so swapping it does not affect any receipt
+    hash. *(Earned: three days of "EoE cannot host headlessly" — recorded as an unfixable data
+    fault after the whole gameplay-submodule set had been bisected away. It was one file.)*
+
 ---
 
 ## Checklist: making a handshake-affecting change

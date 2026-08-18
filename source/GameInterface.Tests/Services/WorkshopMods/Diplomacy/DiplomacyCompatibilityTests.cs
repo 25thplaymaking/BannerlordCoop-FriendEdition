@@ -8,6 +8,7 @@ using GameInterface.Services.CampaignService.Messages;
 using GameInterface.Services.AuthorityRequests;
 using GameInterface.Services.GameState.Messages;
 using GameInterface.Services.Players;
+using GameInterface.Services.WorkshopMods.Core;
 using GameInterface.Services.WorkshopMods.Diplomacy;
 using HarmonyLib;
 using Moq;
@@ -1069,12 +1070,24 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
     public void MissingDiplomacyRuntime_AbortsCampaignStartupInsteadOfServingWithoutTheAdvertisedMod()
     {
         ModInformation.IsServer = true;
-        var handler = CreateHandler(new UnavailableRuntime());
+        var handler = CreateHandler(new UnavailableRuntime(), catalog: DiplomacyExpectedActive);
 
         var exception = Assert.Throws<InvalidOperationException>(() => handler.HandleCampaignReady(
             new MessagePayload<CampaignReady>(this, new CampaignReady())));
 
         Assert.Contains("Diplomacy runtime is unavailable", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MissingDiplomacyRuntime_IsDormantWhenTheLoadoutHoldsTheComponentInactive()
+    {
+        // Europe 1100 replaces the campaign wholesale and holds every catalogued gameplay
+        // component inactive, so an absent Diplomacy runtime is the expected state on both peers
+        // and must not abort the campaign the way a genuinely missing advertised mod does.
+        ModInformation.IsServer = true;
+        var handler = CreateHandler(new UnavailableRuntime(), catalog: DiplomacyHeldInactive);
+
+        handler.HandleCampaignReady(new MessagePayload<CampaignReady>(this, new CampaignReady()));
     }
 
     [Fact]
@@ -1270,7 +1283,8 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
         IDiplomacyRuntime runtime,
         INetwork network = null,
         IModConfigAuthority configAuthority = null,
-        IDiplomacyClientUiLifecycle lifecycle = null)
+        IDiplomacyClientUiLifecycle lifecycle = null,
+        IWorkshopModuleCatalog catalog = null)
     {
         var broker = new Mock<IMessageBroker>().Object;
         var resolvedNetwork = network ?? new Mock<INetwork>().Object;
@@ -1280,7 +1294,37 @@ public sealed class DiplomacyCompatibilityTests : IDisposable
             runtime,
             configAuthority ?? new TestConfigAuthority(CurrentConfigSnapshot()),
             lifecycle ?? new RecordingUiLifecycle(),
-            new AuthorityRequestRouter(broker, resolvedNetwork, new Mock<IPlayerManager>().Object));
+            new AuthorityRequestRouter(broker, resolvedNetwork, new Mock<IPlayerManager>().Object),
+            catalog ?? DiplomacyExpectedActive);
+    }
+
+    /// <summary>A catalog that activates Diplomacy on both peers, as the Calradia loadout does.</summary>
+    private static IWorkshopModuleCatalog DiplomacyExpectedActive =>
+        new StubCatalog(featureActive: true);
+
+    /// <summary>A catalog that holds Diplomacy inactive, as the Europe 1100 loadout does.</summary>
+    private static IWorkshopModuleCatalog DiplomacyHeldInactive =>
+        new StubCatalog(featureActive: false);
+
+    private sealed class StubCatalog : IWorkshopModuleCatalog
+    {
+        private readonly WorkshopModuleExpectation expectation;
+
+        internal StubCatalog(bool featureActive) => expectation = new WorkshopModuleExpectation(
+            DiplomacyCapabilitySource.ModuleId, "2881380744", "3938505074920035905", "v1.4.7", 240,
+            WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign,
+            featureActiveExpectedOnServer: featureActive,
+            featureActiveExpectedOnClient: featureActive);
+
+        public IReadOnlyList<WorkshopModuleExpectation> Modules => new[] { expectation };
+
+        public bool TryGet(string moduleId, out WorkshopModuleExpectation result)
+        {
+            result = string.Equals(moduleId, expectation.ModuleId, StringComparison.Ordinal)
+                ? expectation
+                : null;
+            return result != null;
+        }
     }
 
     private static ModConfigSnapshot CurrentConfigSnapshot() => new(

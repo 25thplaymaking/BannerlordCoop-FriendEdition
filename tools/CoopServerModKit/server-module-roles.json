@@ -6,7 +6,9 @@
     "Fourberie",
     "Bannerlord.Diplomacy",
     "UnblockableThrust",
-    "RebellionsAndDemographics"
+    "RebellionsAndDemographics",
+    "Europe1100",
+    "SnowballingKingdoms - EOE 1100"
   ],
   "clientPresentationModules": [
     "Bannerlord.UIExtenderEx",

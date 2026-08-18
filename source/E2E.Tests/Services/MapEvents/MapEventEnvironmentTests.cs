@@ -9,6 +9,7 @@ using GameInterface.Services.MapEvents.Handlers;
 using GameInterface.Services.MapEventParties.Messages;
 using GameInterface.Services.MobileParties.Extensions;
 using GameInterface.Services.MobilePartyAIs.Patches;
+using GameInterface.Services.PlayerCaptivityService.Handlers;
 using GameInterface.Services.PlayerCaptivityService.Messages;
 using HarmonyLib;
 using TaleWorlds.CampaignSystem;
@@ -533,16 +534,23 @@ public class MapEventEnvironmentTests : MapEventTestBase
         var disabledMethods = MapEventDisabledMethods
             .Append(AccessTools.Method(typeof(MobileParty), nameof(MobileParty.TeleportPartyToOutSideOfEncounterRadius)))
             .ToList();
+        // The server priced this captivity when it recorded the capture, off a RandomFloat roll the
+        // test cannot predict and the client is never allowed to choose. Read its record and assert
+        // against that figure rather than a number picked here.
+        string offerId = null;
+        int ransomAmount = 0;
+        Server.Call(() =>
+        {
+            Assert.True(
+                PlayerCaptivityServerHandler.Instance.TryGetReleaseOffer(heroId, out offerId, out ransomAmount),
+                "the server must have issued release terms when it recorded the capture");
+            Assert.InRange(ransomAmount, 1, 1000);
+        });
+
         client.Call(() =>
         {
-            Assert.True(client.ObjectManager.TryGetObject<MobileParty>(partyId, out var playerParty));
-            client.Resolve<INetwork>().SendAll(new NetworkEndPlayerCaptivityAttempted(
-                heroId,
-                partyId,
-                playerParty.Position,
-                EndCaptivityDetail.Ransom,
-                facilitatorId: null,
-                ransomAmount: 250));
+            client.Resolve<INetwork>().SendAll(new NetworkPlayerCaptivityReleaseRequest(
+                offerId, EndCaptivityDetail.Ransom));
         }, disabledMethods);
 
         Server.Call(() =>
@@ -552,7 +560,7 @@ public class MapEventEnvironmentTests : MapEventTestBase
             Assert.True(Server.ObjectManager.TryGetObject<MobileParty>(captorPartyId, out var captorParty));
             Assert.True(Server.ObjectManager.TryGetObject<Clan>(captorClanId, out var captorClan));
 
-            Assert.Equal(750, playerHero.Gold);
+            Assert.Equal(1000 - ransomAmount, playerHero.Gold);
             Assert.Null(playerHero.PartyBelongedToAsPrisoner);
 
             var outgoing = Assert.Single(

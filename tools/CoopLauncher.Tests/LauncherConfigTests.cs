@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 using Xunit;
 
@@ -29,7 +29,11 @@ public sealed class LauncherConfigTests
             config.LauncherManifestUrl);
         Assert.Equal("1.4.8", config.RequiredGameVersion);
         Assert.Empty(config.BlockedModuleIds);
-        Assert.Contains("RebellionsAndDemographics", config.ModuleToken);
+        Assert.DoesNotContain("RebellionsAndDemographics", config.ModuleToken);
+        Assert.DoesNotContain("RBM", config.ModuleToken);
+        Assert.DoesNotContain("PlayerSettlement", config.ModuleToken);
+        Assert.EndsWith("*Europe1100*Europe1100Expanded*SnowballingKingdoms - EOE 1100*_MODULES_", config.ModuleToken);
+        Assert.DoesNotContain("gfrontsEOENamesMod", config.ModuleToken);
     }
 
     [Fact]
@@ -87,10 +91,36 @@ public sealed class LauncherConfigTests
 
             Assert.Equal("private-local-token", config.ServerPassword);
             Assert.Equal(LauncherConfig.CurrentModuleToken, config.ModuleToken);
-            Assert.Contains("OpenSourceSaddlery", config.ModuleToken);
-            Assert.Contains("OpenSourceWeaponry", config.ModuleToken);
-            Assert.Contains("OpenSourceArmory", config.ModuleToken);
-            Assert.Contains("RebellionsAndDemographics", config.ModuleToken);
+            // The migration target is now the Europe 1100 loadout: the frameworks and the base
+            // game stay active, everything else is staged-inactive, and the conversion is last.
+            Assert.EndsWith("*Europe1100*Europe1100Expanded*SnowballingKingdoms - EOE 1100*_MODULES_",
+                config.ModuleToken);
+            Assert.DoesNotContain("OpenSource", config.ModuleToken);
+            Assert.DoesNotContain("RebellionsAndDemographics", config.ModuleToken);
+        }
+        finally
+        {
+            File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
+    public void PreEuropeConversionToken_MigratesToTheEmpiresOfEuropeOrder()
+    {
+        string tempPath = Path.Combine(Path.GetTempPath(), $"launcher-config-{Guid.NewGuid():N}.json");
+        try
+        {
+            File.WriteAllText(tempPath, JsonSerializer.Serialize(new
+            {
+                serverPassword = "private-local-token",
+                moduleToken = LauncherConfig.LegacyModuleTokenBeforeEuropeConversion,
+            }));
+
+            LauncherConfig config = LauncherConfig.Load(tempPath);
+
+            Assert.Equal("private-local-token", config.ServerPassword);
+            Assert.Equal(LauncherConfig.CurrentModuleToken, config.ModuleToken);
+            Assert.EndsWith("*Europe1100*Europe1100Expanded*SnowballingKingdoms - EOE 1100*_MODULES_", config.ModuleToken);
         }
         finally
         {

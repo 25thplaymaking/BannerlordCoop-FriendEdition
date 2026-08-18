@@ -1,3 +1,4 @@
+﻿using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Windows;
@@ -1235,6 +1236,58 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Reconciles the Europe 1100 conversion against the player's Steam Workshop subscriptions.
+    /// </summary>
+    /// <returns>
+    /// False only when a required Workshop item is not subscribed — the one case where launching
+    /// anyway would drop the player onto the wrong map and fail the join for a reason the game
+    /// cannot explain. Every other outcome, including an outright failure, still launches: these
+    /// modules are uncatalogued, so a stale copy is a desync risk rather than a refused session,
+    /// and a launcher bug must never be the thing that stops a friend from playing.
+    /// </returns>
+    private async Task<bool> EnsureConversionAsync()
+    {
+        if (_modulesDir is null) return true;
+
+        UpdateText.Foreground = Steel;
+        UpdateText.Text = "Checking Europe 1100 modules…";
+
+        ConversionResult result = await Task.Run(() => new ConversionBootstrap().Ensure(_modulesDir));
+        Log.Write($"Conversion bootstrap: {result.Outcome} — {result.Message}");
+
+        if (result.Outcome == ConversionOutcome.MissingSubscription)
+        {
+            UpdateText.Text = result.Message;
+            OptionsStatusText.Text = result.Message;
+            OptionsTab.IsChecked = true;
+            _operationActive = false;
+            JoinButton.IsEnabled = true;
+            JoinButton.Content = "MARCH TO WAR";
+            foreach (string workshopId in result.MissingWorkshopIds)
+                OpenWorkshopPage(workshopId);
+            return false;
+        }
+
+        if (result.Outcome == ConversionOutcome.Failed) UpdateText.Text = result.Message;
+        return true;
+    }
+
+    private static void OpenWorkshopPage(string workshopId)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(
+                $"https://steamcommunity.com/sharedfiles/filedetails/?id={workshopId}")
+            { UseShellExecute = true });
+        }
+        catch (Exception error)
+        {
+            // The message already carries the links; failing to open a browser is not fatal.
+            Log.Write($"Could not open Workshop page {workshopId}: {error.Message}");
+        }
+    }
+
     private async Task LaunchGameAsync()
     {
         if (_bannerlordExe is null || _snapshot?.PrimaryAction != ArmoryPrimaryAction.Launch)
@@ -1263,6 +1316,11 @@ public partial class MainWindow : Window
 
             bool steamUp = GameLauncher.IsSteamRunning();
             if (!steamUp) Log.Write("WARNING: Steam client does not appear to be running");
+
+            // Europe 1100 rides in from the player's own Workshop subscriptions rather than the
+            // release feed, so it is reconciled here, immediately before launch. It never blocks:
+            // an unsubscribed friend is told which items to subscribe to and the game still starts.
+            if (!await EnsureConversionAsync()) return;
 
             var process = GameLauncher.Launch(
                 _bannerlordExe, _config, ServerPasswordBox.Password);

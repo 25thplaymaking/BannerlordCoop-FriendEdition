@@ -1,5 +1,6 @@
 ﻿// Ignore Spelling: Finalizer
 
+using Common.Logging;
 using Common.Messaging;
 using Common.Network;
 using Coop.Core.Client.Messages;
@@ -13,6 +14,8 @@ using GameInterface.Services.GameState.Messages;
 using GameInterface.Services.Heroes.Interfaces;
 using GameInterface.Services.Players;
 using GameInterface.Services.UI.Interfaces;
+using Serilog;
+using System.Diagnostics;
 
 namespace Coop.Core.Client.States;
 
@@ -21,6 +24,8 @@ namespace Coop.Core.Client.States;
 /// </summary>
 public class CharacterCreationState : ClientStateBase
 {
+    private static readonly ILogger Logger = LogManager.GetLogger<CharacterCreationState>();
+
     private readonly IMessageBroker messageBroker;
     private readonly INetwork network;
     private readonly IHeroInterface heroInterface;
@@ -71,23 +76,43 @@ public class CharacterCreationState : ClientStateBase
     {
         // Cover the client's own (character-creation) world with a loading screen until the
         // server campaign is ready, so the local world isn't briefly visible while we join.
+        Logger.Information("[CC-DIAG] Character creation finished; beginning host handoff");
         loadingInterface.ShowLoadingScreen(
             "Joining Coop Campaign",
             "Sending your character to the host...");
 
+        // This runs on the game thread with a loading screen up and nothing else logging, so a
+        // slow step here is indistinguishable from a hang. Time each one.
+        var handoff = Stopwatch.StartNew();
+
+        var stepTimer = Stopwatch.StartNew();
         registryManager.RegisterAllGameObjects();
+        long registerMs = stepTimer.ElapsedMilliseconds;
 
         var playerId = controllerIdProvider.ControllerId;
+        stepTimer.Restart();
         var data = heroInterface.PackageMainHero();
+        long packageMs = stepTimer.ElapsedMilliseconds;
 
         // Clear all registries so next time the game is loaded, it re-registers loaded save objects
+        stepTimer.Restart();
         registryManager.ClearAllRegistries();
+        long clearMs = stepTimer.ElapsedMilliseconds;
 
+        stepTimer.Restart();
         network.SendAll(new NetworkTransferNewHero(playerId, data));
+        long sendMs = stepTimer.ElapsedMilliseconds;
+
+        Logger.Information(
+            "[CC-DIAG] Character creation handoff sent. registerAllMs={RegisterMs} packageHeroMs={PackageMs} " +
+            "clearRegistriesMs={ClearMs} sendMs={SendMs} totalMs={TotalMs}",
+            registerMs, packageMs, clearMs, sendMs, handoff.ElapsedMilliseconds);
     }
 
     internal void Handle_NetworkHeroRecieved(MessagePayload<NetworkHeroRecieved> obj)
     {
+        Logger.Information("[CC-DIAG] Host acknowledged the hero; requesting the saved campaign");
+
         Logic.Player = obj.What.Player;
 
         Logic.LoadSavedData();

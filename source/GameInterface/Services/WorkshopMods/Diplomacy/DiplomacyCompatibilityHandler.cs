@@ -26,6 +26,7 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
     private readonly IModConfigAuthority configAuthority;
     private readonly IDiplomacyClientUiLifecycle uiLifecycle;
     private readonly IAuthorityRouteHandle<DiplomacySnapshotIntent, NetworkDiplomacySnapshotQueryResult> snapshotRoute;
+    private readonly IWorkshopModuleCatalog catalog;
     private readonly object snapshotApplyGate = new();
     private readonly DiplomacyRevisionGate revisionGate = new();
     private NetworkDiplomacySnapshot pendingSnapshot;
@@ -35,6 +36,7 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
     private bool campaignReady;
     private bool hostConfigLoaded;
     private bool loggedClientUiReadiness;
+    private bool loggedDormantRuntime;
 
     internal DiplomacySnapshotApplyResult LastApplyResult { get; private set; }
     internal WorkshopSnapshotReadiness SnapshotReadiness { get; private set; }
@@ -50,7 +52,25 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
         IModConfigAuthority configAuthority,
         IDiplomacyClientUiLifecycle uiLifecycle,
         IAuthorityRequestRouter authorityRequestRouter)
+        : this(messageBroker, network, runtime, configAuthority, uiLifecycle, authorityRequestRouter,
+               new FriendEditionWorkshopModuleCatalog())
     {
+    }
+
+    /// <summary>
+    /// Test seam: the catalog decides whether this peer is meant to be running Diplomacy at all.
+    /// Container resolution always goes through the public constructor and the pinned catalog.
+    /// </summary>
+    internal DiplomacyCompatibilityHandler(
+        IMessageBroker messageBroker,
+        INetwork network,
+        IDiplomacyRuntime runtime,
+        IModConfigAuthority configAuthority,
+        IDiplomacyClientUiLifecycle uiLifecycle,
+        IAuthorityRequestRouter authorityRequestRouter,
+        IWorkshopModuleCatalog catalog)
+    {
+        this.catalog = catalog ?? new FriendEditionWorkshopModuleCatalog();
         this.messageBroker = messageBroker;
         this.network = network;
         this.runtime = runtime;
@@ -91,6 +111,23 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
         snapshotRoute.Dispose();
     }
 
+    /// <summary>
+    /// True when the pinned catalog says this peer is meant to be running Diplomacy. The catalog is
+    /// the same source the join handshake's activation gate reads, so the adapter and the handshake
+    /// cannot disagree about whether the component is supposed to be live on this side.
+    /// </summary>
+    private bool IsExpectedActiveOnThisPeer()
+    {
+        if (!catalog.TryGet(DiplomacyCapabilitySource.ModuleId, out var expectation))
+        {
+            return false;
+        }
+
+        return ModInformation.IsServer
+            ? expectation.FeatureActiveExpectedOnServer
+            : expectation.FeatureActiveExpectedOnClient;
+    }
+
     internal void HandleCampaignReady(MessagePayload<CampaignReady> _)
     {
         revisionGate.Reset();
@@ -106,9 +143,25 @@ internal sealed class DiplomacyCompatibilityHandler : IHandler
         campaignReady = false;
         if (!runtime.IsAvailable)
         {
-            throw new System.InvalidOperationException(
-                "Diplomacy runtime is unavailable for an enabled Friend Edition campaign. " +
-                DiplomacyCompatibilityPolicy.DescribeResolutionFailure());
+            // Whether Diplomacy runs at all is the loadout's decision, not this adapter's. The
+            // Empires of Europe 1100 loadout holds every catalogued gameplay component INACTIVE,
+            // so an absent runtime is the expected state there and must not fail the campaign.
+            // The original guard is kept for the loadouts that DO activate Diplomacy, where a
+            // missing runtime is a real misconfiguration that would otherwise desync silently.
+            if (IsExpectedActiveOnThisPeer())
+            {
+                throw new System.InvalidOperationException(
+                    "Diplomacy runtime is unavailable for an enabled Friend Edition campaign. " +
+                    DiplomacyCompatibilityPolicy.DescribeResolutionFailure());
+            }
+
+            if (!loggedDormantRuntime)
+            {
+                loggedDormantRuntime = true;
+                Logger.Information(
+                    "Diplomacy is held inactive by this loadout; its co-op adapter stays dormant.");
+            }
+            return;
         }
         if (ModInformation.IsServer) runtime.ResetSnapshotRevision();
         uiLifecycle.ResetForCampaign();

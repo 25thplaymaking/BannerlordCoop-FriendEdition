@@ -281,11 +281,13 @@
         "CustomBattle",
         "Sandbox",
         "StoryMode",
+        "Coop"
+      ],
+      "stagedInactiveModuleIds": [
         "OpenSourceSaddlery",
         "OpenSourceWeaponry",
         "OpenSourceArmory",
         "PlayerSettlement",
-        "Coop",
         "ImprovedGarrisons",
         "DismembermentPlus",
         "Fourberie",
@@ -293,11 +295,10 @@
         "UnblockableThrust",
         "RebellionsAndDemographics"
       ],
-      "stagedInactiveModuleIds": [],
       "disabledModuleIds": [
         "BirthAndDeath"
       ],
-      "note": "All three rendered clients install and activate the exact approved gear-inclusive Friend Edition loadout. Open Source Saddlery, Weaponry, and Armory are byte-exact content modules with no executable submodules. RebellionsAndDemographics v3.0.1 is active through the pinned 1.4.8 host-authoritative lifecycle adapter; clients receive its canonical readiness receipt and never run upstream campaign behaviors. RBM is retired after its native campaign-initialization crash. The optional TaleWorlds BirthAndDeath module stays disabled."
+      "note": "Empires of Europe 1100 loadout. Only the four frameworks are active; every gameplay and content component is staged and hash-verified but held INACTIVE, because EoE 1100 replaces the map, cultures, settlements and troop trees and the dedicated host would not boot with the previous loadout layered on top. They stay in the package so the suite receipt still validates 1:1 against the catalog and re-enabling one is a catalog and token edit rather than a repackage. RBM is not part of the package at all: its combat-parameter initialization faults the dedicated host natively. The optional TaleWorlds BirthAndDeath module stays disabled."
     },
     "server": {
       "stageAllManagedModules": true,
@@ -311,17 +312,7 @@
         "CustomBattle",
         "Sandbox",
         "StoryMode",
-        "OpenSourceSaddlery",
-        "OpenSourceWeaponry",
-        "OpenSourceArmory",
-        "PlayerSettlement",
-        "Coop",
-        "ImprovedGarrisons",
-        "DismembermentPlus",
-        "Fourberie",
-        "Bannerlord.Diplomacy",
-        "UnblockableThrust",
-        "RebellionsAndDemographics"
+        "Coop"
       ],
       "canonicalHarmonyPolicy": "Activate the pinned Bannerlord.Harmony v2.4.2.248 Workshop module before Native and Coop. Its Win64 0Harmony and wrapper hashes are proven by the selected nightly's live dedicated-server topology. Coop's embedded 0Harmony is excluded, and no bootstrap is provided or implied.",
       "harmonyPreflight": {
@@ -341,17 +332,7 @@
           "CustomBattle",
           "Sandbox",
           "StoryMode",
-          "OpenSourceSaddlery",
-          "OpenSourceWeaponry",
-          "OpenSourceArmory",
-          "PlayerSettlement",
-          "Coop",
-          "ImprovedGarrisons",
-          "DismembermentPlus",
-          "Fourberie",
-          "Bannerlord.Diplomacy",
-          "UnblockableThrust",
-          "RebellionsAndDemographics"
+          "Coop"
         ],
         "harmonyMustPrecede": [
           "Native",

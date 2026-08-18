@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -93,11 +93,34 @@ public interface IWorkshopModuleCatalog
 /// </summary>
 public sealed class FriendEditionWorkshopModuleCatalog : IWorkshopModuleCatalog
 {
-    // The live Friend Edition loadout runs the exact same active content and gameplay modules on
-    // both roles. RebellionsAndDemographics is lifecycle-isolated and host-authoritative.
-    // RBM is intentionally absent: its combat-parameter initialization caused a native access
-    // violation during co-op campaign startup and the project owner retired it from the loadout.
-    // Retaining an RBM catalog entry would make the handshake and pack disagree with the launcher.
+    // EMPIRES OF EUROPE 1100 LOADOUT.
+    //
+    // Only the four frameworks are active. Every gameplay and content component below is staged,
+    // receipt-verified and hash-checked, but held INACTIVE: EoE 1100 replaces the map, cultures,
+    // settlements and troop trees wholesale, and the dedicated host would not boot with the
+    // previous loadout layered on top of it.
+    //
+    // Holding a component here rather than deleting it is deliberate. WorkshopSuiteReceipt
+    // .TryValidate requires ModuleCount == catalog.Modules.Count and every receipt entry to resolve
+    // through this catalog, so removing entries would invalidate the receipt, make every module
+    // read as unmanaged, and refuse every join. Keeping them staged also means flipping one back on
+    // is a catalog and token edit, with no repackaging and no multi-gigabyte re-upload.
+    //
+    // FeatureActiveExpected* is an EQUALITY policy, not a minimum: a component that is active when
+    // false is rejected exactly as one that is inactive when true. Both roles must therefore agree,
+    // which is why these are flipped in pairs alongside the launcher and server module tokens.
+    //
+    // Dormancy is safe by construction, and was audited before this change. Every adapter resolves
+    // its module through AppDomain.CurrentDomain.GetAssemblies(), so an unactivated module reports
+    // not-installed; WorkshopModuleRegistrar.ResolveInstalledModules then drops it, and neither its
+    // Harmony patch category nor its AutoSync registration is ever applied. Each compatibility
+    // handler's TryInstall() returns false rather than throwing, and every snapshot bootstrap is
+    // gated on that result.
+    //
+    // RBM has no entry at all, which is different from the holds below: it is not part of the
+    // package. Its combat-parameter initialization faults the dedicated host natively (exit 84),
+    // and shipping it data-only does not help, because the engine applies that XML whether or not
+    // its submodule loads.
     private static readonly WorkshopModuleExpectation[] ExpectedModules =
     {
         new("Bannerlord.Harmony", "2859188632", "5023964903723709557", "v2.4.2.248", 0,
@@ -120,51 +143,64 @@ public sealed class FriendEditionWorkshopModuleCatalog : IWorkshopModuleCatalog
         // but there is no executable campaign authority to adapt.
         new("OpenSourceSaddlery", "3010990914", "5590992806248040986", "v2.0.0", 100,
             WorkshopModuleRole.Presentation, WorkshopCompatibilityProfile.AllPeersExact,
-            featureActiveExpectedOnServer: true,
-            featureActiveExpectedOnClient: true,
+            featureActiveExpectedOnServer: false,
+            featureActiveExpectedOnClient: false,
             loadsBeforeCoop: true),
         new("OpenSourceWeaponry", "3010984416", "228880600705709326", "v2.0.1", 110,
             WorkshopModuleRole.Presentation, WorkshopCompatibilityProfile.AllPeersExact,
-            featureActiveExpectedOnServer: true,
-            featureActiveExpectedOnClient: true,
+            featureActiveExpectedOnServer: false,
+            featureActiveExpectedOnClient: false,
             loadsBeforeCoop: true),
         new("OpenSourceArmory", "3011479883", "6047321499764171194", "v2.0.0", 120,
             WorkshopModuleRole.Presentation, WorkshopCompatibilityProfile.AllPeersExact,
-            featureActiveExpectedOnServer: true,
-            featureActiveExpectedOnClient: true,
+            featureActiveExpectedOnServer: false,
+            featureActiveExpectedOnClient: false,
             loadsBeforeCoop: true),
         new("ImprovedGarrisons", "2859265386", "5143458534246082850", "v4.2.0.7", 210,
             WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign,
-            featureActiveExpectedOnServer: true,
-            featureActiveExpectedOnClient: true),
+            featureActiveExpectedOnServer: false,
+            featureActiveExpectedOnClient: false),
         new("DismembermentPlus", "2875093027", "751945004455697202", "v2.0.8.8", 220,
             WorkshopModuleRole.Presentation, WorkshopCompatibilityProfile.ClientPresentation,
-            featureActiveExpectedOnServer: true,
-            featureActiveExpectedOnClient: true),
+            featureActiveExpectedOnServer: false,
+            featureActiveExpectedOnClient: false),
         new("Fourberie", "2875710877", "1598945672157391038", "v1.4.7.6", 230,
             WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign,
-            featureActiveExpectedOnServer: true,
-            featureActiveExpectedOnClient: true),
+            featureActiveExpectedOnServer: false,
+            featureActiveExpectedOnClient: false),
         new("Bannerlord.Diplomacy", "2881380744", "3938505074920035905", "v1.4.7", 240,
             WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign,
-            featureActiveExpectedOnServer: true,
-            featureActiveExpectedOnClient: true),
+            featureActiveExpectedOnServer: false,
+            featureActiveExpectedOnClient: false),
         new("UnblockableThrust", "3614435151", "3108412629025003964", "v1.1.3.1", 250,
             WorkshopModuleRole.Mission, WorkshopCompatibilityProfile.DeterministicMission,
-            featureActiveExpectedOnServer: true,
-            featureActiveExpectedOnClient: true),
-        // PlayerSettlement must load BEFORE Coop: its co-op adapter purges and re-guards the
-        // module's load-time Harmony patches, so those patches have to exist by the time Coop's
-        // container is built. Activating it after Coop deadlocks or crashes client startup.
+            featureActiveExpectedOnServer: false,
+            featureActiveExpectedOnClient: false),
+        // PlayerSettlement is HELD INACTIVE for the Empires of Europe 1100 conversion. It
+        // builds its settlement prefabs per culture from the native culture set, and EoE replaces
+        // that set wholesale; the dedicated host died with a native fault (exit 84) part-way
+        // through PlayerSettlement's per-culture prefab XML load on the first EoE boot.
+        //
+        // It stays in the catalog, the packaging manifest and the receipt so its bytes are still
+        // verified and the suite receipt still validates 1:1 against this catalog. Only its
+        // activation changes, which is exactly the "staged but inactive" case
+        // RuntimeWorkshopModuleDiscovery and WorkshopManifestValidator already handle. Note that
+        // FeatureActiveExpected* is an EQUALITY policy: leaving these true while the module is
+        // absent from the launch token refuses every join with "must activate 'PlayerSettlement'".
+        //
+        // LoadsBeforeCoop is retained: it records that, whenever this module IS activated again,
+        // its co-op adapter purges and re-guards the module's load-time Harmony patches, so those
+        // patches must already exist when Coop's container is built. Activating it after Coop
+        // deadlocks or crashes client startup.
         new("PlayerSettlement", "3720376888", "6398100776119441137", "v7.5.0", 160,
             WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign,
-            featureActiveExpectedOnServer: true,
-            featureActiveExpectedOnClient: true,
+            featureActiveExpectedOnServer: false,
+            featureActiveExpectedOnClient: false,
             loadsBeforeCoop: true),
         new("RebellionsAndDemographics", "3644127631", "5679238579592221906", "v3.0.1", 260,
             WorkshopModuleRole.Campaign, WorkshopCompatibilityProfile.ServerAuthoritativeCampaign,
-            featureActiveExpectedOnServer: true,
-            featureActiveExpectedOnClient: true),
+            featureActiveExpectedOnServer: false,
+            featureActiveExpectedOnClient: false),
     };
 
     private readonly IReadOnlyDictionary<string, WorkshopModuleExpectation> modulesById =

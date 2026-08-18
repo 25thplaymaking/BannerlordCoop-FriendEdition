@@ -1,4 +1,4 @@
-using GameInterface.Services.WorkshopMods.Core;
+﻿using GameInterface.Services.WorkshopMods.Core;
 using System;
 using System.Linq;
 using Xunit;
@@ -214,8 +214,17 @@ public class WorkshopManifestValidatorTests
         }
         Assert.Equal(14, client.Entries.Length);
         Assert.DoesNotContain(client.Entries, entry => entry.ModuleId == "RBM");
-        Assert.All(server.Entries, entry => Assert.True(entry.Active));
-        Assert.All(client.Entries, entry => Assert.True(entry.Active));
+        // Under the Europe 1100 loadout only the four frameworks are active; every gameplay and
+        // content component is packaged and hash-verified but held inactive on both roles.
+        string[] activeModuleIds =
+        {
+            "Bannerlord.Harmony", "Bannerlord.ButterLib",
+            "Bannerlord.UIExtenderEx", "Bannerlord.MBOptionScreen",
+        };
+        Assert.All(server.Entries, entry =>
+            Assert.Equal(activeModuleIds.Contains(entry.ModuleId), entry.Active));
+        Assert.All(client.Entries, entry =>
+            Assert.Equal(activeModuleIds.Contains(entry.ModuleId), entry.Active));
     }
 
     /// <summary>
@@ -227,7 +236,7 @@ public class WorkshopManifestValidatorTests
     {
         WorkshopCompatibilityManifest server = ManifestFactory.Create(
             WorkshopPeerRole.Server,
-            module => Copy(module, active: module.ModuleId == "Fourberie"
+            module => Copy(module, active: module.ModuleId == "Bannerlord.ButterLib"
                 ? false
                 : module.FeatureActiveExpectedOnServer));
         WorkshopCompatibilityManifest client = ManifestFactory.Create(WorkshopPeerRole.Client);
@@ -236,7 +245,7 @@ public class WorkshopManifestValidatorTests
 
         Assert.False(result.Matches);
         Assert.Contains(result.Diagnostics, diagnostic =>
-            diagnostic.Contains("Server must activate 'Fourberie'", StringComparison.Ordinal));
+            diagnostic.Contains("Server must activate 'Bannerlord.ButterLib'", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -245,13 +254,35 @@ public class WorkshopManifestValidatorTests
         WorkshopCompatibilityManifest server = ManifestFactory.Create(WorkshopPeerRole.Server);
         WorkshopCompatibilityManifest client = ManifestFactory.Create(
             WorkshopPeerRole.Client,
-            module => Copy(module, forClient: true, active: module.ModuleId != "UnblockableThrust"));
+            module => Copy(module, forClient: true, active: module.ModuleId != "Bannerlord.UIExtenderEx"));
 
         WorkshopManifestValidationResult result = validator.Validate(server, client);
 
         Assert.False(result.Matches);
         Assert.Contains(result.Diagnostics, diagnostic =>
-            diagnostic.Contains("Client must activate 'UnblockableThrust'", StringComparison.Ordinal));
+            diagnostic.Contains("Client must activate 'Bannerlord.UIExtenderEx'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AHeldComponentThatAPeerReactivates_IsRejected()
+    {
+        // FeatureActiveExpected* is an equality policy, not a minimum. Under the Europe 1100
+        // loadout ten components are staged but held inactive, so the failure that actually
+        // matters is a peer switching one back ON — its campaign behaviours would run against a
+        // map that no longer has the cultures, settlements or troops they expect.
+        WorkshopCompatibilityManifest server = ManifestFactory.Create(WorkshopPeerRole.Server);
+        WorkshopCompatibilityManifest client = ManifestFactory.Create(
+            WorkshopPeerRole.Client,
+            module => Copy(module, forClient: true,
+                active: module.ModuleId == "RebellionsAndDemographics"
+                    || module.FeatureActiveExpectedOnClient));
+
+        WorkshopManifestValidationResult result = validator.Validate(server, client);
+
+        Assert.False(result.Matches);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Contains("Client must keep 'RebellionsAndDemographics' inactive",
+                StringComparison.Ordinal));
     }
 
     [Fact]

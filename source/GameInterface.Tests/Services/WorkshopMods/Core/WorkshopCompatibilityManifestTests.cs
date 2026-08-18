@@ -1,4 +1,4 @@
-using GameInterface.Services.WorkshopMods.Core;
+﻿using GameInterface.Services.WorkshopMods.Core;
 using ProtoBuf;
 using System;
 using System.IO;
@@ -36,10 +36,14 @@ public class WorkshopCompatibilityManifestTests
             Assert.True(catalog.TryGet(entry.ModuleId, out WorkshopModuleExpectation expectation));
             Assert.Equal(expectation.FeatureActiveExpectedOnClient, entry.Active);
         });
+        // A true and a false must each be proven to have crossed the wire: an all-false bug would
+        // otherwise pass vacuously against the Europe 1100 catalog, where only the four frameworks
+        // are active.
         Assert.True(roundTrip.Entries.Single(entry => entry.ModuleId == "Bannerlord.Harmony").Active);
+        Assert.True(roundTrip.Entries.Single(entry => entry.ModuleId == "Bannerlord.ButterLib").Active);
         Assert.All(roundTrip.Entries.Where(entry => entry.ModuleId.StartsWith("OpenSource")), entry =>
-            Assert.True(entry.Active));
-        Assert.True(roundTrip.Entries.Single(entry =>
+            Assert.False(entry.Active));
+        Assert.False(roundTrip.Entries.Single(entry =>
             entry.ModuleId == "RebellionsAndDemographics").Active);
     }
 

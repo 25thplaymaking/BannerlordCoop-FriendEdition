@@ -1,4 +1,4 @@
-using Common;
+﻿using Common;
 using Common.Logging;
 using Common.Messaging;
 using Common.Network;
@@ -197,6 +197,11 @@ internal sealed class RebellionsAndDemographicsCompatibilityHandler : IHandler
         if (!compatible) return;
         RebellionsAndDemographicsRuntime.Current = this;
         AppDomain.CurrentDomain.AssemblyLoad -= HandleAssemblyLoad;
+
+        // The bootstrap gate above rejects an incompatible handler, and CampaignReady may already
+        // have fired by the time the assembly arrives. Retry here so a late load still bootstraps
+        // instead of silently never asking for a snapshot.
+        StartSnapshotBootstrap();
     }
 
     internal void StartAuthoritativeCampaign(object starterObject)
@@ -457,6 +462,14 @@ internal sealed class RebellionsAndDemographicsCompatibilityHandler : IHandler
     private void StartSnapshotBootstrap()
     {
         if (!ModInformation.IsClient || !configAuthority.TryGetCurrent(out _)) return;
+
+        // Nothing to bootstrap when the module is not loaded on this peer. Without this the
+        // client queried a dormant route on every join: the host answers promptly with
+        // Unavailable/"rd-authority-unavailable" rather than going silent, so it never hung, but
+        // it cost a needless round-trip and a warning per join. All four sibling workshop handlers
+        // gate their bootstrap on compatible; this one did not. See HandleAssemblyLoad for the
+        // late-load case this gate has to stay honest about.
+        if (!compatible) return;
 
         // Wait for the campaign. HostModConfigAccepted is published from the module-validation
         // barrier, which runs before the save transfer has even been requested, and a

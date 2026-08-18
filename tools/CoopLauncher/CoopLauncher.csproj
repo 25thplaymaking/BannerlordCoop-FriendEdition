@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -36,6 +36,11 @@
     <Resource Include="Frontir.ico" />
     <!-- Original Calradia Co-op backdrop; embedded so visual identity is available offline. -->
     <Resource Include="Assets\calradia-muster-backdrop.png" />
+    <!-- Europe 1100 bootstrap payload. The three EoE modules are ~4.6 GB of public Workshop
+         content, so only their re-pinned SubModule.xml rides here and Steam carries the bytes. -->
+    <EmbeddedResource Include="Assets\Conversion\Europe1100.SubModule.xml" />
+    <EmbeddedResource Include="Assets\Conversion\Europe1100Expanded.SubModule.xml" />
+    <EmbeddedResource Include="Assets\Conversion\SnowballingKingdoms.SubModule.xml" />
   </ItemGroup>
 
 </Project>

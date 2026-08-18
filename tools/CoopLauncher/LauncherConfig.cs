@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -14,6 +14,32 @@ public sealed class LauncherConfig
 {
     internal const string CurrentModuleToken =
         "_MODULES_*Bannerlord.Harmony*Bannerlord.ButterLib*Bannerlord.UIExtenderEx*Bannerlord.MBOptionScreen" +
+        "*Native*SandBoxCore*CustomBattle*Sandbox*StoryMode*Coop" +
+        "*Europe1100*Europe1100Expanded*SnowballingKingdoms - EOE 1100*_MODULES_";
+
+    // PlayerSettlement is absent on purpose: it generates settlement prefabs from the native
+    // culture set, which EoE 1100 replaces, and it took the dedicated host down with a native
+    // fault on the first EoE boot. Its catalog entry is held inactive to match.
+
+    // The Empires of Europe 1100 conversion follows the load order its author publishes: Harmony,
+    // the TaleWorlds modules, everything else, then EoE 1100 last so its map, cultures, settlements
+    // and troop trees win every XML merge.
+    //
+    // RBM is NOT here, and shipping it data-only does not work either. Its combat-parameter XML is
+    // applied by the engine whether or not RBM.SubModule loads, and that is the exact native path
+    // it was retired for on 2026-08-11: the dedicated host died with exit 84 immediately after
+    // "Combat parameter overriden: 40 -> dagger_right_leftstance". Denying its submodule on the
+    // headless allowlist does not protect the host, because the data alone reaches the fault.
+    // EoE 1100 carries its own armour/troop rebalance and RF_BattleAI for the 1100 setting.
+    //
+    // gfrontsEOENamesMod is deliberately excluded: its SubModule.xml declares SPCultures XmlNames
+    // under ModuleData/gfront55_names, but the package ships only .xslt transforms and no .xml, so
+    // it contributes nothing and only risks an XML-load fault.
+
+    // The production token shipped before the Empires of Europe 1100 conversion was added. Migrate
+    // it the same way as the pre-gear token below so an existing install picks up the new order.
+    internal const string LegacyModuleTokenBeforeEuropeConversion =
+        "_MODULES_*Bannerlord.Harmony*Bannerlord.ButterLib*Bannerlord.UIExtenderEx*Bannerlord.MBOptionScreen" +
         "*Native*SandBoxCore*CustomBattle*Sandbox*StoryMode*OpenSourceSaddlery*OpenSourceWeaponry" +
         "*OpenSourceArmory*PlayerSettlement*Coop*ImprovedGarrisons" +
         "*DismembermentPlus*Fourberie*Bannerlord.Diplomacy*UnblockableThrust*RebellionsAndDemographics*_MODULES_";
@@ -27,7 +53,7 @@ public sealed class LauncherConfig
         "*DismembermentPlus*Fourberie*Bannerlord.Diplomacy*UnblockableThrust*_MODULES_";
 
     /// <summary>Shown as the launcher's display title.</summary>
-    public string GroupName { get; set; } = "Calradia Co-op";
+    public string GroupName { get; set; } = "Europe 1100 Co-op";
 
     /// <summary>Co-op host the launcher joins and probes for the online banner.</summary>
     public string ServerHost { get; set; } = "205.209.116.114";
@@ -40,8 +66,8 @@ public sealed class LauncherConfig
     public string ServerPassword { get; set; } = "";
 
     /// <summary>
-    /// The launch order token passed to <c>Bannerlord.exe /singleplayer</c>. The full mod set,
-    /// minus RBM. Kept here so a mod-list change is a config edit, not a launcher rebuild.
+    /// The launch order token passed to <c>Bannerlord.exe /singleplayer</c>. The full mod set.
+    /// Kept here so a mod-list change is a config edit, not a launcher rebuild.
     /// </summary>
     public string ModuleToken { get; set; } = CurrentModuleToken;
 
@@ -133,6 +159,10 @@ public sealed class LauncherConfig
                 if (string.Equals(
                         config.ModuleToken,
                         LegacyModuleTokenBeforeGearAndDemographics,
+                        StringComparison.Ordinal) ||
+                    string.Equals(
+                        config.ModuleToken,
+                        LegacyModuleTokenBeforeEuropeConversion,
                         StringComparison.Ordinal))
                 {
                     config.ModuleToken = CurrentModuleToken;

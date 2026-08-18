@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 
 if (args.Length != 1)
     throw new ArgumentException("Usage: StartupHookPolicyProbe <coophook.dll>");
@@ -74,6 +74,9 @@ string[] dedicatedWorkshopSubModules =
     "Fourberie.Main",
     "UnblockableThrust.UnblockableThrustSubmodule",
     "RebellionsAndDemographics.SubModule",
+    "SnowballingKingdoms.MySubModule",
+    "ClansResourceAdder.MySubModule",
+    "CustomizableClanTier.SubModule",
 ];
 foreach (string classType in dedicatedWorkshopSubModules)
 {
@@ -83,6 +86,7 @@ foreach (string classType in dedicatedWorkshopSubModules)
 foreach (string? classType in new string?[]
          {
              "DismembermentPlus.Main",
+             "RBM.SubModule",
              "Unrelated.Mod.Entry",
              "SandBox.View.SandBoxViewSubModule",
              null,
@@ -115,4 +119,4 @@ if (!(bool)saveDefinitionPolicy.Invoke(null, [false])!)
 if ((bool)saveDefinitionPolicy.Invoke(null, [true])!)
     throw new InvalidOperationException("A duplicate save-container definition would reach the v1.4.8 fatal assert.");
 
-Console.WriteLine("PASS: startup hook preserves assembly ownership, enables four gameplay submodules, blocks four presentation submodules, and suppresses only duplicate save-container registrations");
+Console.WriteLine("PASS: startup hook preserves assembly ownership, enables seven gameplay submodules, blocks four presentation submodules, and suppresses only duplicate save-container registrations");

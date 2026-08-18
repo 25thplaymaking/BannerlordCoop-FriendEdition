@@ -1,4 +1,5 @@
 using Common;
+using Common.Logging;
 using Common.Messaging;
 using Common.Network;
 using GameInterface.Configuration;
@@ -11,6 +12,7 @@ using GameInterface.Services.WorkshopMods.Core;
 using HarmonyLib;
 using LiteNetLib;
 using ProtoBuf;
+using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Collections;
@@ -59,6 +61,7 @@ internal sealed class RebellionsAndDemographicsCompatibilityHandler : IHandler
     private readonly IAuthorityRouteHandle<RdInterventionIntent, NetworkRebellionsAndDemographicsInterventionResult> interventionRoute;
     private readonly IAuthorityRouteHandle<RdChoiceIntent, NetworkRebellionsAndDemographicsChoiceResult> choiceRoute;
 
+    private static readonly ILogger Logger = LogManager.GetLogger<RebellionsAndDemographicsCompatibilityHandler>();
     private Assembly assembly;
     private Type rebellionCoreType;
     private bool compatible;
@@ -716,13 +719,18 @@ internal sealed class RebellionsAndDemographicsCompatibilityHandler : IHandler
 
     private void ApplyState(RebellionsAndDemographicsState state)
     {
-        if (state == null || !configAuthority.TryGetCurrent(out var config) ||
-            !string.Equals(state.SessionId, config.SessionId, StringComparison.Ordinal) || state.Revision < SnapshotRevision ||
-            state.Fingerprint?.Length != 64 || !IsValidState(state))
-            return;
-        if (state.Revision == SnapshotRevision && !string.Equals(state.Fingerprint, SnapshotFingerprint, StringComparison.Ordinal))
+        string reject = DescribeRejection(state);
+        if (reject != null)
         {
-            SnapshotReadiness = WorkshopSnapshotReadiness.Unavailable;
+            Logger.Warning("[RD-DIAG] Rejected snapshot: {Reason}. readiness={Readiness} localRevision={LocalRevision} " +
+                "localFingerprint={LocalFingerprint} stateRevision={StateRevision} stateFingerprint={StateFingerprint} " +
+                "settlements={Settlements} prompts={Prompts} tombstones={Tombstones} watermarks={Watermarks}",
+                reject, SnapshotReadiness, SnapshotRevision, Truncate(SnapshotFingerprint),
+                state?.Revision, Truncate(state?.Fingerprint), state?.Settlements?.Length,
+                state?.ActivePrompts?.Length, state?.PromptTombstones?.Length, state?.InterventionWatermarks?.Length);
+            if (state != null && state.Revision == SnapshotRevision &&
+                !string.Equals(state.Fingerprint, SnapshotFingerprint, StringComparison.Ordinal))
+                SnapshotReadiness = WorkshopSnapshotReadiness.Unavailable;
             return;
         }
         SnapshotSessionId = state.SessionId;
@@ -730,23 +738,93 @@ internal sealed class RebellionsAndDemographicsCompatibilityHandler : IHandler
         SnapshotFingerprint = state.Fingerprint;
         CurrentState = state;
         SnapshotReadiness = WorkshopSnapshotReadiness.Ready;
+        Logger.Information("[RD-DIAG] Applied snapshot revision {Revision} fingerprint {Fingerprint} settlements {Settlements}",
+            state.Revision, Truncate(state.Fingerprint), state.Settlements.Length);
     }
 
-    private static bool IsValidState(RebellionsAndDemographicsState state) => state.Settlements != null && state.Settlements.Length <= 2048 &&
-        state.Settlements.All(settlement => settlement != null && settlement.SettlementId?.Length is > 0 and <= 96 &&
-            settlement.TotalPopulation >= 0 && settlement.Manpower >= 0 && settlement.StarvationDays >= 0 &&
-            settlement.Cultures != null && settlement.Cultures.Length <= 128 && settlement.Cultures.All(culture => culture != null &&
-                culture.CultureId?.Length is > 0 and <= 96 && culture.Population >= 0)) &&
-        state.ActivePrompts != null && state.ActivePrompts.Length <= 32 && state.ActivePrompts.All(prompt => prompt != null &&
-            prompt.LeaseId?.Length is > 0 and <= 64 && prompt.OwnerHeroId?.Length is > 0 and <= 128 &&
-            prompt.SessionId?.Length is > 0 and <= 96 && prompt.ClanIds != null && prompt.ClanIds.Length is > 0 and <= 16 &&
-            prompt.ClanIds.All(id => id?.Length is > 0 and <= 128) && prompt.GoldCost >= 0 && prompt.ExpiresAtDays >= 0 &&
-            (prompt.Kind == RdPromptKind.Defeat || prompt.Kind == RdPromptKind.Ultimatum)) &&
-        state.PromptTombstones != null && state.PromptTombstones.Length <= 128 && state.PromptTombstones.All(tombstone => tombstone != null &&
-            tombstone.LeaseId?.Length is > 0 and <= 64 && (tombstone.Kind == RdPromptKind.Defeat || tombstone.Kind == RdPromptKind.Ultimatum)) &&
-        state.InterventionWatermarks != null && state.InterventionWatermarks.Length <= 128 && state.InterventionWatermarks.All(watermark => watermark != null &&
-            watermark.AuthorityRequestId > 0 && watermark.ActorHeroId?.Length is > 0 and <= 128 && watermark.TargetHeroId?.Length is > 0 and <= 128 &&
-            watermark.NewKingdomId?.Length is > 0 and <= 128 && watermark.AllyCount is >= 1 and <= 5);
+    private static string Truncate(string value) =>
+        string.IsNullOrEmpty(value) ? "<none>" : value.Substring(0, Math.Min(12, value.Length));
+
+    /// <summary>Diagnostic mirror of the ApplyState guards: names the first failing one, or null when acceptable.</summary>
+    private string DescribeRejection(RebellionsAndDemographicsState state)
+    {
+        if (state == null) return "state-null";
+        state.EnsureCollections();
+        if (!configAuthority.TryGetCurrent(out var config)) return "config-unavailable";
+        if (!string.Equals(state.SessionId, config.SessionId, StringComparison.Ordinal))
+            return "session-mismatch(state=" + state.SessionId + " config=" + config.SessionId + ")";
+        if (state.Revision < SnapshotRevision) return "stale-revision";
+        if (state.Fingerprint?.Length != 64) return "fingerprint-length=" + (state.Fingerprint?.Length.ToString() ?? "null");
+        string invalid = DescribeInvalidState(state);
+        if (invalid != null) return "invalid-state:" + invalid;
+        if (state.Revision == SnapshotRevision && !string.Equals(state.Fingerprint, SnapshotFingerprint, StringComparison.Ordinal))
+            return "same-revision-different-fingerprint";
+        return null;
+    }
+
+    /// <summary>Names the first field that fails validation, so a live rejection identifies the exact record.</summary>
+    private static string DescribeInvalidState(RebellionsAndDemographicsState state)
+    {
+        if (state.Settlements == null) return "settlements-null";
+        if (state.Settlements.Length > 2048) return "settlements-count=" + state.Settlements.Length;
+        foreach (var settlement in state.Settlements)
+        {
+            if (settlement == null) return "settlement-null";
+            if (settlement.SettlementId?.Length is not (> 0 and <= 96))
+                return "settlementId-length id=" + (settlement.SettlementId ?? "<null>");
+            if (settlement.TotalPopulation < 0)
+                return "negative TotalPopulation=" + settlement.TotalPopulation + " at " + settlement.SettlementId;
+            if (settlement.Manpower < 0)
+                return "negative Manpower=" + settlement.Manpower + " at " + settlement.SettlementId;
+            if (settlement.StarvationDays < 0)
+                return "negative StarvationDays=" + settlement.StarvationDays + " at " + settlement.SettlementId;
+            if (settlement.Cultures == null) return "cultures-null at " + settlement.SettlementId;
+            if (settlement.Cultures.Length > 128)
+                return "cultures-count=" + settlement.Cultures.Length + " at " + settlement.SettlementId;
+            foreach (var culture in settlement.Cultures)
+            {
+                if (culture == null) return "culture-null at " + settlement.SettlementId;
+                if (culture.CultureId?.Length is not (> 0 and <= 96))
+                    return "cultureId-length at " + settlement.SettlementId;
+                if (culture.Population < 0)
+                    return "negative culture Population=" + culture.Population + " at " + settlement.SettlementId;
+            }
+        }
+        if (state.ActivePrompts == null) return "prompts-null";
+        if (state.ActivePrompts.Length > 32) return "prompts-count=" + state.ActivePrompts.Length;
+        foreach (var prompt in state.ActivePrompts)
+        {
+            if (prompt == null) return "prompt-null";
+            if (prompt.LeaseId?.Length is not (> 0 and <= 64)) return "prompt-leaseId";
+            if (prompt.OwnerHeroId?.Length is not (> 0 and <= 128)) return "prompt-ownerHeroId";
+            if (prompt.SessionId?.Length is not (> 0 and <= 96)) return "prompt-sessionId";
+            if (prompt.ClanIds == null || prompt.ClanIds.Length is not (> 0 and <= 16)) return "prompt-clanIds";
+            if (prompt.ClanIds.Any(id => id?.Length is not (> 0 and <= 128))) return "prompt-clanId-length";
+            if (prompt.GoldCost < 0) return "prompt-goldCost=" + prompt.GoldCost;
+            if (prompt.ExpiresAtDays < 0) return "prompt-expiresAtDays=" + prompt.ExpiresAtDays;
+            if (prompt.Kind != RdPromptKind.Defeat && prompt.Kind != RdPromptKind.Ultimatum) return "prompt-kind";
+        }
+        if (state.PromptTombstones == null) return "tombstones-null";
+        if (state.PromptTombstones.Length > 128) return "tombstones-count=" + state.PromptTombstones.Length;
+        foreach (var tombstone in state.PromptTombstones)
+        {
+            if (tombstone == null) return "tombstone-null";
+            if (tombstone.LeaseId?.Length is not (> 0 and <= 64)) return "tombstone-leaseId";
+            if (tombstone.Kind != RdPromptKind.Defeat && tombstone.Kind != RdPromptKind.Ultimatum) return "tombstone-kind";
+        }
+        if (state.InterventionWatermarks == null) return "watermarks-null";
+        if (state.InterventionWatermarks.Length > 128) return "watermarks-count=" + state.InterventionWatermarks.Length;
+        foreach (var watermark in state.InterventionWatermarks)
+        {
+            if (watermark == null) return "watermark-null";
+            if (watermark.AuthorityRequestId <= 0) return "watermark-requestId=" + watermark.AuthorityRequestId;
+            if (watermark.ActorHeroId?.Length is not (> 0 and <= 128)) return "watermark-actorHeroId";
+            if (watermark.TargetHeroId?.Length is not (> 0 and <= 128)) return "watermark-targetHeroId";
+            if (watermark.NewKingdomId?.Length is not (> 0 and <= 128)) return "watermark-newKingdomId";
+            if (watermark.AllyCount is not (>= 1 and <= 5)) return "watermark-allyCount=" + watermark.AllyCount;
+        }
+        return null;
+    }
 
     private RebellionsAndDemographicsState CaptureState(string sessionId) =>
         new(sessionId, revision, ServerBehaviorTypes, CapturePopulation(), CapturePlague(), promptLeases.Values,
@@ -923,6 +1001,23 @@ internal sealed class RebellionsAndDemographicsState
         Fingerprint = ComputeFingerprint(Settlements, Plague, ActivePrompts, PromptTombstones, InterventionWatermarks);
     }
 
+    /// <summary>
+    /// protobuf-net writes nothing for an empty repeated field, and SkipConstructor means the
+    /// private constructor never runs, so a peer with no prompts, tombstones, or watermarks
+    /// deserializes those as null rather than empty.  Restore the sender-side invariant before
+    /// anything reads the state.
+    /// </summary>
+    internal void EnsureCollections()
+    {
+        ServerBehaviorTypes ??= Array.Empty<string>();
+        Settlements ??= Array.Empty<RdSettlementPopulationState>();
+        ActivePrompts ??= Array.Empty<RdPromptLeaseState>();
+        PromptTombstones ??= Array.Empty<RdPromptTombstone>();
+        InterventionWatermarks ??= Array.Empty<RdInterventionWatermark>();
+        Plague ??= new RdPlagueState(string.Empty, 0, string.Empty);
+        foreach (var settlement in Settlements) settlement?.EnsureCollections();
+    }
+
     private static string ComputeFingerprint(IEnumerable<RdSettlementPopulationState> settlements, RdPlagueState plague,
         IEnumerable<RdPromptLeaseState> activePrompts, IEnumerable<RdPromptTombstone> promptTombstones,
         IEnumerable<RdInterventionWatermark> interventionWatermarks)
@@ -951,6 +1046,8 @@ internal sealed class RdSettlementPopulationState
         SettlementId = settlementId ?? string.Empty; TotalPopulation = totalPopulation; Manpower = manpower;
         StarvationDays = starvationDays; LastDailyMigration = lastDailyMigration; Cultures = cultures?.ToArray() ?? Array.Empty<RdCulturePopulationState>();
     }
+    internal void EnsureCollections() => Cultures ??= Array.Empty<RdCulturePopulationState>();
+
     internal string Fingerprint => SettlementId + ":" + TotalPopulation + ":" + Manpower + ":" + StarvationDays + ":" +
         LastDailyMigration + ":" + string.Join(",", Cultures.Select(culture => culture.Fingerprint));
 }

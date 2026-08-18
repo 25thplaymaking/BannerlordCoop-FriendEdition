@@ -273,6 +273,49 @@ public sealed class RebellionsAndDemographicsProtocolTests
         Assert.Null(handler.CurrentState);
     }
 
+
+    [Fact]
+    public void EmptyCollectionsSurviveTheWire_AndTheSnapshotStillApplies()
+    {
+        var accepted = new ModConfigSnapshot(new string('c', ModConfigSnapshot.SessionIdLength), revision: 1,
+            ModConfigProvider.ModOptions, birthAndDeathEnabled: true);
+        var authority = new TestConfigAuthority(accepted);
+        using var broker = new MessageBroker();
+        using var network = new TestNetwork();
+        var server = network.CreatePeer();
+        Assert.True(authority.TryBindTrustedServer(server, out _));
+        using var router = new AuthorityRequestRouter(broker, network, new Mock<IPlayerManager>().Object);
+        using var handler = new RebellionsAndDemographicsCompatibilityHandler(broker, network, authority,
+            new Mock<IObjectManager>().Object, new Mock<IPlayerManager>().Object,
+            new Mock<IWorkshopCapabilityRegistry>().Object, router);
+
+        // A quiet world: population, but no prompts, tombstones, or intervention watermarks.
+        var state = new RebellionsAndDemographicsState(accepted.SessionId, 4, new[] { "PopulationBehavior" },
+            new[] { new RdSettlementPopulationState("town_A", 4200, 1200, 0, 24,
+                new[] { new RdCulturePopulationState("empire", 4200) }) },
+            new RdPlagueState(string.Empty, 0, string.Empty), Array.Empty<RdPromptLease>(),
+            Array.Empty<RdPromptTombstone>(), Array.Empty<RdInterventionWatermark>());
+
+        // protobuf-net writes nothing for an empty repeated field, so the peer never sees those
+        // members at all. Constructing the state in-process hides that; only a real round trip
+        // reproduces what a joining client actually receives.
+        using var buffer = new MemoryStream();
+        ProtoBuf.Serializer.Serialize(buffer, state);
+        buffer.Position = 0;
+        var overTheWire = ProtoBuf.Serializer.Deserialize<RebellionsAndDemographicsState>(buffer);
+
+        broker.Publish(server, new NetworkRebellionsAndDemographicsStateQueryResult(
+            new AuthorityRequestHeader(accepted.ProtocolVersion, accepted.SessionId, 3, accepted.Revision),
+            AuthorityResultStatus.Accepted, overTheWire, null));
+
+        Assert.Equal(WorkshopSnapshotReadiness.Ready, handler.SnapshotReadiness);
+        Assert.Equal(4, handler.SnapshotRevision);
+        Assert.NotNull(handler.CurrentState.ActivePrompts);
+        Assert.NotNull(handler.CurrentState.PromptTombstones);
+        Assert.NotNull(handler.CurrentState.InterventionWatermarks);
+        Assert.Equal("town_A", Assert.Single(handler.CurrentState.Settlements).SettlementId);
+    }
+
     private sealed class TestConfigAuthority : IModConfigAuthority
     {
         private object trustedServer;

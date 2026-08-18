@@ -90,7 +90,19 @@ internal class SettlementInterface : ISettlementInterface
             return;
         }
 
-        if (PlayerEncounter.Current != null) return;
+        if (PlayerEncounter.Current != null)
+        {
+            // A native encounter can already be running when the authoritative start arrives: the
+            // server answers EncounterOnly for a besieged settlement or a raided village, and the
+            // local raid/siege encounter has usually started before that reply lands. Init is what
+            // stamps the settlement, so returning here left EncounterSettlementAux unset and the
+            // requester's commit probe could never observe the encounter - the route then failed
+            // closed on apply-timeout and disconnected the client to the main menu. Stamp the
+            // settlement the way Init would have, without disturbing an encounter that already
+            // names a different one.
+            PlayerEncounter.Current.EncounterSettlementAux ??= settlement;
+            return;
+        }
 
         PlayerEncounter.Start();
         PlayerEncounter.Current.Init(party.Party, settlementParty, settlement);

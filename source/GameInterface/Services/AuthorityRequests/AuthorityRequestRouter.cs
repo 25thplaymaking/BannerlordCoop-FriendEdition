@@ -438,12 +438,15 @@ public sealed class AuthorityRequestRouter : IAuthorityRequestRouter
         }
 
         /// <summary>
-        /// Identifies an inbound request by peer as well as id. Request ids are a per-client
-        /// sequence, so peers that join together all start at 1. The server tracks every request
-        /// for a route in one map; keying that map on the id alone made a second peer's request
-        /// look like a replay of the first, so it was never tracked and its reply was discarded
-        /// as "after terminal state" instead of being sent. The client then waited out its
-        /// response timeout - which stalled character creation for everyone joining at once.
+        /// Identifies an inbound request by peer as well as id, so the lifecycle log attributes
+        /// concurrent peers correctly. Request ids are a per-client sequence, so peers joining
+        /// together all start at 1 and previously shared one entry per route.
+        ///
+        /// This is diagnostics only and changes no behaviour. Replay/dedup is owned by
+        /// AuthorityReplayLedger, whose key already carried the peer. A lifecycle refusal cannot
+        /// suppress a reply either: SendCached and SendTerminal call network.Send before the
+        /// ReplySent phase is recorded, so a retry is answered even when the log line for it is
+        /// dropped as "after terminal state".
         /// </summary>
         private static string ServerKey(NetPeer peer, AuthorityRequestHeader header) =>
             peer.Id + ":" + header.RequestId;

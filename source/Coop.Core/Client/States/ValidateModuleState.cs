@@ -11,6 +11,7 @@ using GameInterface.Services.Entity;
 using GameInterface.Services.GameDebug.Messages;
 using GameInterface.Services.GameState.Interfaces;
 using GameInterface.Services.Modules;
+using GameInterface.Services.UI.Interfaces;
 using GameInterface.Services.WorkshopMods.Core;
 using Serilog;
 using System;
@@ -43,6 +44,7 @@ public class ValidateModuleState : ClientStateBase
     private readonly IControllerIdProvider controllerIdProvider;
     private readonly ICoopFinalizer coopFinalizer;
     private readonly IGameStateInterface gameStateInterface;
+    private readonly ILoadingInterface loadingInterface;
     private readonly IWorkshopManifestProvider workshopManifestProvider;
     private readonly IWorkshopManifestValidator workshopManifestValidator;
     private readonly IModConfigAuthority modConfigAuthority;
@@ -77,6 +79,7 @@ public class ValidateModuleState : ClientStateBase
         IControllerIdProvider controllerIdProvider,
         ICoopFinalizer coopFinalizer,
         IGameStateInterface gameStateInterface,
+        ILoadingInterface loadingInterface,
         IModuleInfoProvider moduleInfoProvider,
         IWorkshopManifestProvider workshopManifestProvider,
         IModConfigAuthority modConfigAuthority) : base(logic)
@@ -86,6 +89,7 @@ public class ValidateModuleState : ClientStateBase
         this.controllerIdProvider = controllerIdProvider;
         this.coopFinalizer = coopFinalizer;
         this.gameStateInterface = gameStateInterface;
+        this.loadingInterface = loadingInterface;
         this.moduleInfoProvider = moduleInfoProvider ?? throw new ArgumentNullException(nameof(moduleInfoProvider));
         this.workshopManifestProvider = workshopManifestProvider ?? throw new ArgumentNullException(nameof(workshopManifestProvider));
         this.modConfigAuthority = modConfigAuthority ?? throw new ArgumentNullException(nameof(modConfigAuthority));
@@ -363,6 +367,13 @@ public class ValidateModuleState : ClientStateBase
         }
         else
         {
+            // Validation is over, so stop saying otherwise. Character creation opens with the
+            // conversion's intro video (VideoPlaybackState), which is NOT CharacterCreationState —
+            // so CharacterCreationStarted, and with it CharacterCreationState's own
+            // HideLoadingScreen, does not arrive until the video ends. Europe 1100's intro runs
+            // over two minutes, and for all of it the player was left staring at a stale
+            // "Validating modules..." overlay they had to press Esc to clear.
+            loadingInterface.HideLoadingScreen();
             Logic.StartCharacterCreation();
         }
     }

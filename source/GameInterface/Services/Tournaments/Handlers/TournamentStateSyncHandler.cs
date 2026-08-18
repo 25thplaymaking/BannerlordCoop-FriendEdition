@@ -37,6 +37,7 @@ internal sealed class TournamentStateSyncHandler : IHandler
     private long nextStateEpoch;
     private long appliedStateEpoch = -1;
     private string appliedConfigSessionId;
+    private bool campaignReady;
 
     public TournamentStateSyncHandler(
         IMessageBroker messageBroker,
@@ -74,11 +75,21 @@ internal sealed class TournamentStateSyncHandler : IHandler
                 presentTerminalOutcome: PresentStateTerminal,
                 isTrustedResultSource: configAuthority.IsTrustedServer,
                 timeoutPolicy: AuthorityTimeoutPolicy.BootstrapQuery,
+                // No result-shape predicate. The router has already matched the reply to this
+                // request by id, and there is nothing about the payload left to validate here.
+                //
+                // The previous predicate required Snapshot.NativeTournaments to be non-null, which
+                // a correct reply cannot guarantee: NetworkTournamentStateSnapshot is
+                // [ProtoContract(SkipConstructor = true)], protobuf-net writes nothing for an empty
+                // repeated field, and the skipped constructor never runs its Array.Empty
+                // initialisation - so a host with no active tournaments deserializes to null. That
+                // is the normal wire shape for "none", which is exactly why ApplyStateSnapshot
+                // null-coalesces the same three arrays. Treating it as an unexpected result failed
+                // the request as invalid-replica before the commit probe ever ran, and because this
+                // route is fail-closed that disconnected the client - deterministically, for every
+                // player joining a campaign that happened to have no tournaments running.
                 requireAuthenticatedPlayer: true,
-                failClosedOnApplyFailure: true,
-                isExpectedClientResult: (request, result) =>
-                    result.Status != AuthorityResultStatus.Accepted ||
-                    result.Snapshot.NativeTournaments != null));
+                failClosedOnApplyFailure: true));
 
         messageBroker.Subscribe<CampaignReady>(Handle_CampaignReady);
         messageBroker.Subscribe<NetworkTournamentStateSnapshot>(Handle_StateSnapshot);
@@ -102,6 +113,7 @@ internal sealed class TournamentStateSyncHandler : IHandler
 
     private void Handle_CampaignReady(MessagePayload<CampaignReady> payload)
     {
+        campaignReady = true;
         if (ModInformation.IsClient)
             StartStateBootstrap();
     }
@@ -121,6 +133,17 @@ internal sealed class TournamentStateSyncHandler : IHandler
     private void StartStateBootstrap()
     {
         if (!ModInformation.IsClient || !configAuthority.TryGetCurrent(out _)) return;
+
+        // Wait for the campaign before asking for its state. HostModConfigAccepted is published
+        // from the module-validation barrier, which runs before the save has even been requested,
+        // and MessageBroker.Publish is synchronous - so without this the query went out while the
+        // client still had 30-90s of manifest hashing, save transfer, and campaign load ahead of
+        // it. A BootstrapQuery only allows 30s of wall-clock across its retries, so the reply
+        // could not be serviced in time and the route failed on a deadline it was never able to
+        // meet. Fourberie, Improved Garrisons, Player Settlement and the capability handler all
+        // gate their bootstrap the same way; this route and romance were the outliers.
+        if (!campaignReady) return;
+
         stateRoute.Submit(default);
     }
 

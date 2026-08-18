@@ -66,6 +66,7 @@ internal sealed class RebellionsAndDemographicsCompatibilityHandler : IHandler
     private Type rebellionCoreType;
     private bool compatible;
     private bool campaignStarted;
+    private bool clientCampaignReady;
     private long revision;
     private string lastStateFingerprint = string.Empty;
     private readonly Dictionary<long, RdInterventionWatermark> interventionWatermarks = new();
@@ -439,8 +440,31 @@ internal sealed class RebellionsAndDemographicsCompatibilityHandler : IHandler
 
     private void HandleCampaignReady(MessagePayload<CampaignReady> _)
     {
+        if (ModInformation.IsClient)
+        {
+            // campaignStarted is a server-only flag, so the client had nothing to gate on and
+            // queried during module validation instead - long before the campaign existed.
+            clientCampaignReady = true;
+            StartSnapshotBootstrap();
+            return;
+        }
+
         if (!ModInformation.IsServer || !compatible || !campaignStarted || !configAuthority.TryGetCurrent(out var config)) return;
         network.SendAll(new NetworkRebellionsAndDemographicsState(CaptureState(config.SessionId)));
+    }
+
+    private void StartSnapshotBootstrap()
+    {
+        if (!ModInformation.IsClient || !configAuthority.TryGetCurrent(out _)) return;
+
+        // Wait for the campaign. HostModConfigAccepted is published from the module-validation
+        // barrier, which runs before the save transfer has even been requested, and a
+        // BootstrapQuery only allows 30s of wall-clock across its retries - less than the manifest
+        // hash plus save load that still has to happen. Every sibling workshop handler already
+        // gates its bootstrap this way.
+        if (!clientCampaignReady) return;
+
+        snapshotRoute.Submit(default);
     }
 
     private void HandleHostModConfigAccepted(MessagePayload<HostModConfigAccepted> payload)
@@ -460,7 +484,7 @@ internal sealed class RebellionsAndDemographicsCompatibilityHandler : IHandler
             SnapshotFingerprint = string.Empty;
             CurrentState = null;
         }
-        snapshotRoute.Submit(default);
+        StartSnapshotBootstrap();
     }
 
     private void HandleState(MessagePayload<NetworkRebellionsAndDemographicsState> payload)

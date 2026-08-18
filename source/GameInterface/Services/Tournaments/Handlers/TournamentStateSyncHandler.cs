@@ -33,6 +33,7 @@ internal sealed class TournamentStateSyncHandler : IHandler
     private readonly ITournamentSessionRegistry sessionRegistry;
     private readonly IRelayNetwork[] relayNetworks;
     private readonly IModConfigAuthority configAuthority;
+    private AuthorityRequestTicket<NetworkTournamentStateQueryResult> pendingBootstrap;
     private readonly IAuthorityRouteHandle<TournamentStateIntent, NetworkTournamentStateQueryResult> stateRoute;
     private long nextStateEpoch;
     private long appliedStateEpoch = -1;
@@ -144,7 +145,16 @@ internal sealed class TournamentStateSyncHandler : IHandler
         // gate their bootstrap the same way; this route and romance were the outliers.
         if (!campaignReady) return;
 
-        stateRoute.Submit(default);
+
+        // One bootstrap at a time. This is reached from both CampaignReady and
+        // HostModConfigAccepted, and the latter is republished several times per join, so the
+        // route ended up with four concurrent requests. Only the newest can satisfy its commit
+        // probe; the rest go stale the moment it applies and then sit until their apply
+        // deadline expires. On a fail-closed route each of those stale requests disconnects
+        // the player, so a successful bootstrap still ended the session.
+        if (pendingBootstrap != null && !pendingBootstrap.IsCompleted) return;
+
+        pendingBootstrap = stateRoute.Submit(default);
     }
 
     internal static void RequestCanonicalResync()

@@ -57,6 +57,7 @@ internal sealed class RebellionsAndDemographicsCompatibilityHandler : IHandler
     private readonly IWorkshopCapabilityRegistry capabilityRegistry;
     private readonly IAuthorityRequestRouter authorityRequestRouter;
     private readonly Harmony harmony = new(RebellionsAndDemographicsHarmonyIsolation.AdapterOwner);
+    private AuthorityRequestTicket<NetworkRebellionsAndDemographicsStateQueryResult> pendingBootstrap;
     private readonly IAuthorityRouteHandle<RdSnapshotIntent, NetworkRebellionsAndDemographicsStateQueryResult> snapshotRoute;
     private readonly IAuthorityRouteHandle<RdInterventionIntent, NetworkRebellionsAndDemographicsInterventionResult> interventionRoute;
     private readonly IAuthorityRouteHandle<RdChoiceIntent, NetworkRebellionsAndDemographicsChoiceResult> choiceRoute;
@@ -464,7 +465,16 @@ internal sealed class RebellionsAndDemographicsCompatibilityHandler : IHandler
         // gates its bootstrap this way.
         if (!clientCampaignReady) return;
 
-        snapshotRoute.Submit(default);
+
+        // One bootstrap at a time. This is reached from both CampaignReady and
+        // HostModConfigAccepted, and the latter is republished several times per join, so the
+        // route ended up with four concurrent requests. Only the newest can satisfy its commit
+        // probe; the rest go stale the moment it applies and then sit until their apply
+        // deadline expires. On a fail-closed route each of those stale requests disconnects
+        // the player, so a successful bootstrap still ended the session.
+        if (pendingBootstrap != null && !pendingBootstrap.IsCompleted) return;
+
+        pendingBootstrap = snapshotRoute.Submit(default);
     }
 
     private void HandleHostModConfigAccepted(MessagePayload<HostModConfigAccepted> payload)

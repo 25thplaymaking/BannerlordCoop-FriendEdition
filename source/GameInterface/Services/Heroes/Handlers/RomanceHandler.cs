@@ -30,6 +30,8 @@ internal class RomanceHandler : IHandler
 {
     private static readonly ILogger Logger = LogManager.GetLogger<RomanceHandler>();
 
+    private bool objectsRegistered;
+
     private readonly IMessageBroker messageBroker;
     private readonly INetwork network;
     private readonly IObjectManager objectManager;
@@ -131,6 +133,7 @@ internal class RomanceHandler : IHandler
     {
         if (ModInformation.IsServer) return;
 
+        objectsRegistered = true;
         StartSnapshotBootstrap();
     }
 
@@ -227,6 +230,15 @@ internal class RomanceHandler : IHandler
     private void StartSnapshotBootstrap()
     {
         if (!ModInformation.IsClient || !configAuthority.TryGetCurrent(out _)) return;
+
+        // The snapshot resolves heroes through the object registry, so asking before
+        // AllGameObjectsRegistered cannot succeed. HostModConfigAccepted fires at the
+        // module-validation barrier - before the save is even requested - and a BootstrapQuery
+        // only has 30s of wall-clock across its retries, far less than the manifest hash, save
+        // transfer and campaign load that still have to happen. The reply then arrives against a
+        // world that no longer exists, and this route is fail-closed, so the client is ejected.
+        if (!objectsRegistered) return;
+
         snapshotRoute.Submit(default);
     }
 

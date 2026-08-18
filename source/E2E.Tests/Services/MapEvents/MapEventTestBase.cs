@@ -7,6 +7,7 @@ using E2E.Tests.Util;
 using GameInterface.Services.MapEventParties;
 using GameInterface.Services.Party.Data;
 using GameInterface.Services.Party.Messages;
+using GameInterface.Services.PlayerCaptivityService.Handlers;
 using GameInterface.Services.PlayerCaptivityService.Messages;
 using GameInterface.Services.Players;
 using GameInterface.Services.Players.Data;
@@ -567,12 +568,17 @@ public abstract class MapEventTestBase : IDisposable
     /// <summary>
     /// Frees the captive player hero the way the live escape pop-up ("you were able to get away")
     /// does: the owning client's <see cref="EndCaptivityAction"/> is intercepted locally and forwarded
-    /// as a <c>NetworkEndPlayerCaptivityAttempted</c> request, which the server applies
-    /// authoritatively (<c>PlayerCaptivityServerHandler</c>) and replicates back. The wire message is
-    /// sent directly from <paramref name="client"/> because the client-side intercept path resolves
-    /// the test hero against <see cref="Hero.MainHero"/> and reads <see cref="MobileParty.MainParty"/>
-    /// — the harness's main hero (E2ETestEnvironment.SetupMainHero) is a separate bootstrap hero, and
-    /// no main party exists headlessly — so the local handler chain cannot fire for a test hero.
+    /// as a <c>NetworkPlayerCaptivityReleaseRequest</c>, which the server applies authoritatively
+    /// (<c>PlayerCaptivityServerHandler</c>) and replicates back. The wire message is sent directly
+    /// from <paramref name="client"/> because the client-side intercept path resolves the test hero
+    /// against <see cref="Hero.MainHero"/> and reads <see cref="MobileParty.MainParty"/> — the
+    /// harness's main hero (E2ETestEnvironment.SetupMainHero) is a separate bootstrap hero, and no
+    /// main party exists headlessly — so the local handler chain cannot fire for a test hero.
+    /// <para>
+    /// The request carries only the id of the offer the server issued when it recorded the capture.
+    /// A client cannot name its own price or its own reappearance position any more, so the test
+    /// reads the id from the server rather than fabricating a release.
+    /// </para>
     /// </summary>
     protected void ReleasePlayerByEscapeRequest(EnvironmentInstance client, string heroId, string partyId)
     {
@@ -583,12 +589,18 @@ public abstract class MapEventTestBase : IDisposable
             .Append(AccessTools.Method(typeof(MobileParty), nameof(MobileParty.TeleportPartyToOutSideOfEncounterRadius)))
             .ToList();
 
+        string offerId = null;
+        Server.Call(() =>
+        {
+            Assert.True(
+                PlayerCaptivityServerHandler.Instance.TryGetReleaseOffer(heroId, out offerId, out _),
+                "the server must have issued release terms when it recorded the capture");
+        });
+
         client.Call(() =>
         {
-            Assert.True(client.ObjectManager.TryGetObject<MobileParty>(partyId, out var party));
-
-            client.Resolve<INetwork>().SendAll(new NetworkEndPlayerCaptivityAttempted(
-                heroId, partyId, party.Position, EndCaptivityDetail.ReleasedAfterEscape, null, 0));
+            client.Resolve<INetwork>().SendAll(new NetworkPlayerCaptivityReleaseRequest(
+                offerId, EndCaptivityDetail.ReleasedAfterEscape));
         }, disabledMethods);
     }
 

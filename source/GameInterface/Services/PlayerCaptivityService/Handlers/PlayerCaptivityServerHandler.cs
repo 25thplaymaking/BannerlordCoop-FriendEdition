@@ -813,6 +813,31 @@ internal class PlayerCaptivityServerHandler : IHandler
     }
 
     /// <summary>Terms the server issued for one captivity. Priced once, spent once.</summary>
+    /// <summary>
+    /// Test seam: the live release terms outstanding for a captive, if any. Tests cannot predict the
+    /// figure — <see cref="PlayerCaptivityRansom.ForCaptive"/> rolls <c>MBRandom.RandomFloat</c> — and
+    /// the client is never told anything it could compute, so reading the server's own record is the
+    /// only honest way to assert what a release should cost.
+    /// </summary>
+    internal bool TryGetReleaseOffer(string heroId, out string offerId, out int ransomAmount)
+    {
+        lock (releaseOffers)
+        {
+            foreach (var entry in releaseOffers)
+            {
+                if (!string.Equals(entry.Value.HeroId, heroId, StringComparison.Ordinal)) continue;
+
+                offerId = entry.Key;
+                ransomAmount = entry.Value.RansomAmount;
+                return true;
+            }
+        }
+
+        offerId = null;
+        ransomAmount = 0;
+        return false;
+    }
+
     private readonly struct ReleaseOffer
     {
         public ReleaseOffer(string offerId, string heroId, string captorPartyId, int ransomAmount)

@@ -38,6 +38,7 @@ internal class RomanceHandler : IHandler
     private readonly IPlayerManager playerManager;
     private readonly IRomanceAuthority romanceAuthority;
     private readonly IModConfigAuthority configAuthority;
+    private AuthorityRequestTicket<NetworkRomanceStateSyncResult> pendingBootstrap;
     private readonly IAuthorityRouteHandle<NetworkRequestRomanceStateChange, NetworkRomanceStateChangeResult> transitionRoute;
     private readonly IAuthorityRouteHandle<object, NetworkRomanceStateSyncResult> snapshotRoute;
 
@@ -239,7 +240,16 @@ internal class RomanceHandler : IHandler
         // world that no longer exists, and this route is fail-closed, so the client is ejected.
         if (!objectsRegistered) return;
 
-        snapshotRoute.Submit(default);
+
+        // One bootstrap at a time. This is reached from both CampaignReady and
+        // HostModConfigAccepted, and the latter is republished several times per join, so the
+        // route ended up with four concurrent requests. Only the newest can satisfy its commit
+        // probe; the rest go stale the moment it applies and then sit until their apply
+        // deadline expires. On a fail-closed route each of those stale requests disconnects
+        // the player, so a successful bootstrap still ended the session.
+        if (pendingBootstrap != null && !pendingBootstrap.IsCompleted) return;
+
+        pendingBootstrap = snapshotRoute.Submit(default);
     }
 
     private AuthorityRequestHeader CreateHeader(long requestId)

@@ -1,4 +1,4 @@
-using Common;
+﻿using Common;
 using Common.Logging;
 using HarmonyLib;
 using Serilog;
@@ -55,15 +55,24 @@ internal sealed class Europe1100CampaignAuthorityGate
     /// SnowballingKingdoms v1.0.21 packages.
     /// </summary>
     /// <remarks>
-    /// <c>EOE.CustomBattlePatch.SinglePlayer.EoeCustomBattleCampaignBehavior</c> is intentionally
-    /// absent: it belongs to the Custom Battle flow, which is outside the co-op campaign, and its
-    /// submodule is tagged <c>DedicatedServerType="none"</c> and is not on the dedicated allowlist,
-    /// so it never registers on the host at all.
+    /// Re-verified against the shipped SubModule.xml and binaries on 2026-08-19, which corrected two
+    /// earlier assumptions:
+    /// <list type="bullet">
+    /// <item><c>WhileThyCome</c> IS declared as a submodule — an earlier note claimed it was not and
+    /// that its behaviours were listed only defensively. It loads. Listing them was not optional.</item>
+    /// <item><c>EOE.CustomBattlePatch</c> is now gated too. It was excluded on the grounds that its
+    /// submodule is tagged <c>DedicatedServerType="none"</c> and kept off a dedicated allowlist —
+    /// but the SubModule.xml carries no <c>DedicatedServerType</c> attribute on any of its nine
+    /// submodules, and no such allowlist exists. Its <c>EoeCustomBattleCampaignBehavior</c> derives
+    /// from <c>CampaignBehaviorBase</c> like the rest, so it is confined to the host like the rest.
+    /// If it really is inert in a campaign then gating it costs nothing; the exclusion rested on an
+    /// assumption that turned out not to hold.</item>
+    /// </list>
     /// <para>
-    /// <c>WhileThyCome</c> ships inside the Europe1100 runtime but is NOT declared as a submodule in
-    /// its SubModule.xml, so it should never load. Its six behaviours — which spawn parties and
-    /// drive party AI — are listed anyway, because a reflective load from another EoE submodule
-    /// would otherwise put unsynchronised party spawning on every client.
+    /// The four assemblies here are exactly those that reference <c>CampaignBehaviorBase</c> across the
+    /// Europe1100 and SnowballingKingdoms runtimes, and every assembly referencing
+    /// <c>CampaignEvents</c> also declares one — so no behaviour subscribes to campaign events outside
+    /// this list.
     /// </para>
     /// </remarks>
     internal static readonly IReadOnlyDictionary<string, string[]> HostOnlyCampaignBehaviors =
@@ -81,6 +90,10 @@ internal sealed class Europe1100CampaignAuthorityGate
             ["BattleArtilleryReworked"] = new[]
             {
                 "BattleArtilleryReworked.BACampaignBehavior",
+            },
+            ["EOE.CustomBattlePatch"] = new[]
+            {
+                "EOE.CustomBattlePatch.SinglePlayer.EoeCustomBattleCampaignBehavior",
             },
             ["WhileThyCome"] = new[]
             {

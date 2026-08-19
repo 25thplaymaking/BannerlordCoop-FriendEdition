@@ -392,7 +392,29 @@ grid indices from `MapSceneWrapper.GetTerrainSize()` without bounds-checking, so
 The fix belongs in the dedicated-server map scene, whose source is not in this repo — same blocker
 as §3. Worth auditing every `GetTerrainSize()` consumer once that source is available.
 
-## 9. EoE data: malformed settlement entries
+## 9. EoE data: malformed settlement entries — RESOLVED, benign
+
+**Characterised 2026-08-19: nothing is missing.** The errors come from `Europe1100Expanded`, not
+`Europe1100`, and they are partial override nodes rather than broken definitions:
+
+| file | `<Settlement>` nodes | with `posX` |
+|---|---|---|
+| `Europe1100/ModuleData/settlements.xml` | 1,628 | **1,628** |
+| `Europe1100Expanded/ModuleData/settlements.xml` | 95 | 0 |
+| `Europe1100Expanded/ModuleData/settlements_to_eoe_1100/settlements.xml` | 73 | 0 |
+
+95 + 73 accounts for the ~166 `posX`/`posY` errors. Those nodes look like:
+
+```xml
+<Settlement id="town_bordeaux" owner="Faction.clan_french_4" ></Settlement>
+```
+
+They patch only `owner` on settlements Europe1100 already defines, merged by `id` — which is exactly
+what "Expanded" does, reassigning fiefs to its own clans. The engine's XSD marks `name`, `posX`,
+`posY`, `culture` and `tier` required, so validating a partial override reports them missing. Every
+settlement keeps the position Europe1100 gave it. No content is lost and no action is needed.
+
+## 9a. Superseded settlement entries (original note)
 
 Both peers log, in the hundreds:
 
@@ -474,3 +496,52 @@ until the player agrees.
 One safety rule is worth stating because a test caught it being wrong: a receipt that exists but
 cannot be read aborts the scan entirely. Treating an unreadable receipt as "nothing installed" would
 have offered the whole co-op loadout for deletion.
+
+## 14. Wiring sweep, 2026-08-19
+
+A pass over what the co-op work had NOT touched, looking for anything of Europe 1100's that our code
+drops.
+
+**Module and handshake wiring is correct.** Client and server launch tokens are identical apart from
+the server-only `DedicatedServer.Windows`, activation order satisfies ops rule 5 (frameworks, base
+game, `Coop`, then gameplay), and the catalog's expectations match the live loadout — the four
+frameworks expected active on both roles and every catalogued gameplay mod expected inactive on both,
+which is what the running loadout is. Since `FeatureActiveExpected*` is an equality policy, a
+mismatch here would refuse every join; there is none.
+
+**Handler registration cannot silently rot.** Handlers are discovered by namespace scan
+(`InterfaceCollector`), not hand-registered, so an added handler is wired by construction.
+`Europe1100CampaignAuthorityGate` is `AutoActivate`d, so it installs when the container is built
+rather than on first resolve.
+
+**`Europe1100Expanded` is data-only** — no `bin/`, so it declares no behaviours and correctly does not
+appear in the authority gate.
+
+**The authority gate was re-audited against the binaries rather than its own comments**, which found
+two things (see §14a).
+
+**854 "subscribed but never published" message types is a measurement artifact**, not dead wiring: the
+transport publishes network messages reflectively on receipt, and the codebase uses target-typed
+`new()` widely. Correcting for both leaves ~41, and the ones checked (`CreateKingdom`,
+`HeroLevelChanged`, hero appearance fields) are legacy paths superseded by AutoSync or by
+`AuthorityRoute` — e.g. kingdom creation now runs through
+`AuthorityRoute<CreateKingdomIntent, NetworkRequestCreateKingdom, NetworkCreateKingdomResult>`, and
+hero level replicates as `Hero_Level_SetNetworkMessage`. Dead code to remove, not behaviour to fix.
+
+### 14a. Two corrections to the Europe 1100 authority gate
+
+Both came from checking the shipped `SubModule.xml` and DLLs instead of trusting the comments:
+
+- `WhileThyCome` **is** a declared submodule. The gate's note claimed it was not and that its six
+  behaviours were listed only defensively against a reflective load. It loads; listing them was not
+  optional, and had they been omitted every client would have been running unsynchronised party
+  spawning.
+- `EOE.CustomBattlePatch` is **now gated**. It had been excluded because its submodule was
+  "tagged `DedicatedServerType="none"` and not on the dedicated allowlist" — but no submodule in that
+  file carries a `DedicatedServerType` attribute and no such allowlist exists. Its
+  `EoeCustomBattleCampaignBehavior` derives from `CampaignBehaviorBase` like the others, so it is
+  confined to the host like the others.
+
+Coverage is now provably complete: exactly four of the eleven Europe1100 assemblies plus
+SnowballingKingdoms reference `CampaignBehaviorBase`, and every assembly referencing `CampaignEvents`
+also declares one — so no EoE code subscribes to campaign events outside the gated set.

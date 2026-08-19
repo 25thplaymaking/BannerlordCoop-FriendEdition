@@ -603,7 +603,9 @@
                     </Grid>
 
                     <!-- ══ OPTIONS ══ -->
-                    <Grid x:Name="OptionsPanel" Margin="330,34,60,34" MaxWidth="760"
+                    <!-- Matches RosterPanel's budget: Options carries the densest content of any panel,
+                         and at 760 it was the narrowest column in the app. -->
+                    <Grid x:Name="OptionsPanel" Margin="330,34,44,34" MaxWidth="900"
                           Visibility="Collapsed">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
@@ -667,27 +669,32 @@
 
                                 <!-- Update channels -->
                                 <TextBlock Style="{StaticResource SectionHeader}" Text="THE ROYAL SCROLLS" />
-                                <Grid Margin="0,0,0,8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="130" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="24" />
-                                        <ColumnDefinition Width="130" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="24" />
-                                        <ColumnDefinition Width="130" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Style="{StaticResource OptionLabel}" Text="LAUNCHER" />
-                                    <ToggleButton x:Name="LauncherChannelToggle" Grid.Column="1"
-                                                  Style="{StaticResource ChannelToggle}" />
-                                    <TextBlock Grid.Column="3" Style="{StaticResource OptionLabel}" Text="MOD SUITE" />
-                                    <ToggleButton x:Name="SuiteChannelToggle" Grid.Column="4"
-                                                  Style="{StaticResource ChannelToggle}" />
-                                    <TextBlock Grid.Column="6" Style="{StaticResource OptionLabel}" Text="CO-OP CLIENT" />
-                                    <ToggleButton x:Name="ClientChannelToggle" Grid.Column="7"
-                                                  Style="{StaticResource ChannelToggle}" />
-                                </Grid>
+                                <!-- Three label+toggle pairs in a WrapPanel rather than one fixed
+                                     eight-column Grid. The Grid needed about 770px and the content column
+                                     is only ~726px at the window's minimum width, so the third toggle was
+                                     clipped to a stub against the right edge. These now flow onto a second
+                                     line instead. Each pair is kept together in its own StackPanel so a
+                                     label can never wrap away from the control it names. -->
+                                <WrapPanel Margin="0,0,0,4">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,24,8">
+                                        <TextBlock Style="{StaticResource OptionLabel}" Width="120"
+                                                   VerticalAlignment="Center" Text="LAUNCHER" />
+                                        <ToggleButton x:Name="LauncherChannelToggle"
+                                                      Style="{StaticResource ChannelToggle}" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,24,8">
+                                        <TextBlock Style="{StaticResource OptionLabel}" Width="120"
+                                                   VerticalAlignment="Center" Text="MOD SUITE" />
+                                        <ToggleButton x:Name="SuiteChannelToggle"
+                                                      Style="{StaticResource ChannelToggle}" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                        <TextBlock Style="{StaticResource OptionLabel}" Width="120"
+                                                   VerticalAlignment="Center" Text="CO-OP CLIENT" />
+                                        <ToggleButton x:Name="ClientChannelToggle"
+                                                      Style="{StaticResource ChannelToggle}" />
+                                    </StackPanel>
+                                </WrapPanel>
                                 <TextBlock x:Name="NightlyWarning" Margin="0,0,0,22" FontSize="11"
                                            Foreground="{StaticResource BloodBright}" TextWrapping="Wrap"
                                            Visibility="Collapsed"
@@ -707,18 +714,21 @@
                                 <CheckBox x:Name="VerboseLoggingCheck" Style="{StaticResource WarCheck}"
                                           Margin="0,0,0,16"
                                           Content="Verbose launcher log (more detail for troubleshooting)" />
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <!-- WrapPanel, not StackPanel: four buttons do not fit the content column at
+                                     the window's minimum width, and a horizontal StackPanel does not wrap,
+                                     so they ran off the edge instead of flowing onto a second line. -->
+                                <WrapPanel Margin="0,0,0,4">
                                     <Button x:Name="GatherLogsButton" Style="{StaticResource GhostButton}"
-                                            Content="&#x2709;  EXPORT FULL LOG ZIP"
+                                            Margin="0,0,10,8" Content="&#x2709;  EXPORT FULL LOG ZIP"
                                             ToolTip="Package full launcher and game logs locally for advanced diagnostics" />
                                     <Button x:Name="OpenLogsFolderButton" Style="{StaticResource GhostButton}"
-                                            Margin="10,0,0,0" Content="OPEN LOG FOLDER" />
+                                            Margin="0,0,10,8" Content="OPEN LOG FOLDER" />
                                     <Button x:Name="GithubButton" Style="{StaticResource GhostButton}"
-                                            Margin="10,0,0,0" Content="PROJECT ON GITHUB" />
+                                            Margin="0,0,10,8" Content="PROJECT ON GITHUB" />
                                     <Button x:Name="ReclaimSpaceButton" Style="{StaticResource GhostButton}"
-                                            Margin="10,0,0,0" Content="RECLAIM DISK SPACE"
+                                            Margin="0,0,10,8" Content="RECLAIM DISK SPACE"
                                             ToolTip="Find module folders the co-op loadout no longer uses and offer to remove them" />
-                                </StackPanel>
+                                </WrapPanel>
                                 <TextBlock Style="{StaticResource SectionHeader}" Text="REPORT TO THE STEWARDS"
                                            Margin="0,10,0,8" />
                                 <Grid Margin="0,0,0,8">
@@ -751,15 +761,16 @@
                                          Background="{StaticResource Leather}" Foreground="{StaticResource Parchment}"
                                          BorderBrush="#66C9A24B" Padding="8,6"
                                          ToolTip="What happened, what you expected, and how to reproduce it" />
-                                <StackPanel Orientation="Horizontal" Margin="0,8,0,8">
+                                <WrapPanel Margin="0,8,0,2">
                                     <CheckBox x:Name="AttachLogsCheck" Style="{StaticResource WarCheck}"
+                                              Margin="0,0,14,6" VerticalAlignment="Center"
                                               IsChecked="True" Content="Attach a redacted excerpt of launcher and game logs" />
                                     <Button x:Name="AttachImagesButton" Style="{StaticResource GhostButton}"
-                                            Margin="14,0,0,0" Content="ADD IMAGES"
+                                            Margin="0,0,14,6" Content="ADD IMAGES"
                                             ToolTip="Add up to four PNG, JPEG, or WebP images (8 MB each)" />
                                     <Button x:Name="SubmitReportButton" Style="{StaticResource GhostButton}"
-                                            Margin="14,0,0,0" Content="SEND REPORT" />
-                                </StackPanel>
+                                            Margin="0,0,0,6" Content="SEND REPORT" />
+                                </WrapPanel>
                                 <TextBlock x:Name="ReportAttachmentsText" Margin="0,0,0,8"
                                            FontFamily="{StaticResource Dispatch}" FontSize="10.5"
                                            Foreground="{StaticResource Steel}"

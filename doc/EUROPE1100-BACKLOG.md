@@ -144,10 +144,28 @@ with sustained samples at 3.3 MB/s and 1.1 MB/s. The dominant senders in a singl
 | `NetworkUpdateTradeActionLogsForParty` | 842 | 999,694 |
 | `NetworkUpdatePartyBehavior` | 6,818 | 797,962 |
 
-EoE's ~2711 parties and its far larger settlement/market set multiply every per-party and
-per-settlement replication route. This is a strong candidate for client-side stutter that is
-*independent* of the autosave stall in §5, and it scales with player count — worth profiling before
-more friends join.
+EoE's parties and its far larger settlement/market set multiply every per-party and per-settlement
+replication route. This is independent of the autosave stall in §7 and scales with player count.
+
+**The problem is packet COUNT, not volume.** 34,548 troop-roster packets in ten seconds is ~3,455/s
+averaging 68 bytes each; item-roster updates average 38 bytes. Roughly 6,500 tiny datagrams a second
+to ONE client, where per-packet overhead dominates the payload entirely. That is the shape of the
+"constant stutter" players report.
+
+Coalescing already exists and is already wired: `TroopRosterDeltaHandler` takes an `ISendCoalescer`
+keyed `CoalesceKey(ElementBatchChannel, rosterId, characterId)`. That merges repeated updates for
+the SAME roster and character — which is not where the volume is. The volume is tens of thousands of
+DISTINCT (roster, character) pairs across 4292 parties, and a per-key coalescer cannot reduce that
+by design.
+
+**Proposed change.** Aggregate ACROSS keys, not just within them. `AggregateMessagePacket` and its
+handler already exist and were observed carrying 9,394 packets in the same window, so the transport
+is there — the roster and item routes simply do not use it. Batch a tick's worth of coalesced
+payloads into aggregate packets, then re-read the same counters.
+
+**Do not attempt this blind.** It is the hottest replication path in the project, a mistake desyncs
+rosters rather than merely slowing them, and the counters above make verification cheap. Profile
+first, change second.
 
 ## 7. Host: ~4.5 s game-thread stall every 5 minutes (autosave)
 

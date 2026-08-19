@@ -221,6 +221,33 @@ stutter", and the same mechanism as the freeze in §7. The drain budget in `Game
 a backlog landing in one frame; it does not reduce the work, so the message rate is still worth
 attacking at the source.
 
+**It is world growth, not a leak.** Measured across the 00:00-03:40 session on 2026-08-19 (2-5
+players): parties grew **2,711 to 4,291 (+58%)** as the campaign filled toward its own equilibrium,
+outbound went **36 KB/s to ~500 KB/s sustained** with a 5.97 MB/s peak, and one 10 s window carried
+**1,031,168 messages**. Normalising by parties x players gives 5.8 -> 3.3 messages per party per
+player per 10 s over the session: flat to declining. Nothing leaks. The rate is
+`world size x rate of change x player count`, because **there is no relevance filtering anywhere** —
+511 `SendAll` call sites broadcast every world change to every client whether or not that client can
+observe it.
+
+**What that does to the link.** LiteNetLib's reliable channel keeps a fixed **64 packets** in flight,
+so per-peer throughput is bounded by window / RTT, not bandwidth — roughly 4.5 MB/s at 17 ms and
+**1.2 MB/s at 66 ms**. Peaks exceed both. Per-peer queue depths in that session reached **69,037 /
+47,328 / 38,281**, and the 66 ms peer carried 4x the average backlog of the 17 ms peers on identical
+traffic. `OverloadedPeerManager` then correctly forced campaign time to Pause **20 times** (it resumes
+only once *every* peer is under 5,000), so the campaign was **fully stopped 42% of the session**,
+worst hour 53%. That is the "we could barely play" report: the world refusing to advance.
+
+**First reduction, shipped.** The four `Settlement.Nearby*Intensity` properties are no longer
+replicated (`SettlementSync`). They measured ~8,900 messages per 10 s — about **12% of all traffic** —
+and every reader is AI scoring or save serialisation; the names appear in no UI assembly. See that
+file for the full argument. This is the template for the next pass: find AutoSync'd members that only
+the authority reads.
+
+**The structural fix is relevance filtering** — replicating a party's detail only to clients that can
+observe it. That is the order-of-magnitude win and it is a large piece of work across 511 broadcast
+sites; it wants its own design pass, not an incremental patch.
+
 **Where to look next.** Why one connected player generates tens of thousands of roster and market
 messages in ten seconds. Suspect full-state rather than on-change replication: `NetworkItemRosterUpdate`
 averages 38 bytes and `TownMarketData__itemDict_Upsert` 53, which is the shape of "send every entry"

@@ -1253,7 +1253,7 @@ public partial class MainWindow : Window
         UpdateText.Foreground = Steel;
         UpdateText.Text = "Checking Europe 1100 modules…";
 
-        ConversionResult result = await Task.Run(() => new ConversionBootstrap().Ensure(_modulesDir));
+        ConversionResult result = await Task.Run(() => new ConversionBootstrap().Ensure(_modulesDir, _config.NeutralizeConversionShaderCache));
         Log.Write($"Conversion bootstrap: {result.Outcome} — {result.Message}");
 
         if (result.Outcome == ConversionOutcome.MissingSubscription)

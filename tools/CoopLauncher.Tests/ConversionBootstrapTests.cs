@@ -49,6 +49,35 @@ public sealed class ConversionBootstrapTests : IDisposable
     }
 
     [Fact]
+    public void ShaderCacheNeutralisation_MovesTheSackAsideAndIsIdempotent()
+    {
+        // Europe 1100's sack is incomplete for the deferred render path, so the engine compiles the
+        // missing variants mid-frame as a garment comes into view. Moving it aside makes the engine
+        // use the base game's complete sources instead.
+        string moduleDir = Path.Combine(_modules, "Europe1100", "Shaders", "D3D11");
+        Directory.CreateDirectory(moduleDir);
+        string sack = Path.Combine(moduleDir, "compressed_shader_cache.sack");
+        File.WriteAllText(sack, "shaders");
+
+        Assert.True(ConversionBootstrap.NeutralizeShaderCache(Path.Combine(_modules, "Europe1100")));
+        Assert.False(File.Exists(sack));
+        Assert.True(File.Exists(sack + ".disabled"));
+
+        // A second launch must not fail, and must not clobber the preserved copy.
+        Assert.False(ConversionBootstrap.NeutralizeShaderCache(Path.Combine(_modules, "Europe1100")));
+        Assert.Equal("shaders", File.ReadAllText(sack + ".disabled"));
+    }
+
+    [Fact]
+    public void ShaderCacheNeutralisation_IsAQuietNoOpWhenTheModuleShipsNoShaders()
+    {
+        Directory.CreateDirectory(Path.Combine(_modules, "Europe1100Expanded"));
+
+        Assert.False(ConversionBootstrap.NeutralizeShaderCache(
+            Path.Combine(_modules, "Europe1100Expanded")));
+    }
+
+    [Fact]
     public void AMissingModulesFolderFailsWithoutThrowing()
     {
         ConversionResult result = new ConversionBootstrap().Ensure(Path.Combine(_root, "nope"));

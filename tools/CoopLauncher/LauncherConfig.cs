@@ -79,6 +79,31 @@ public sealed class LauncherConfig
     /// <summary>Optional explanation for an explicitly blocked local module.</summary>
     public string CompatibilityHoldNotice { get; set; } = "";
 
+    /// <summary>
+    /// Move the conversion's precompiled shader cache aside so the base game's complete shader
+    /// pipeline is used instead.
+    /// </summary>
+    /// <remarks>
+    /// Europe 1100 ships a 979 MB <c>compressed_shader_cache.sack</c> that is INCOMPLETE for the
+    /// deferred render path: its own compile report carries 411 <c>pbr_metallic</c> references and
+    /// no <c>pbr_metallic_gbuffer</c>, no <c>pbr_terrain</c> and no <c>pbr_cloth</c> variants. The
+    /// engine misses the sack and compiles the variant at runtime, mid-frame, exactly as a garment
+    /// comes into view — which is what players see as clothing snapping or tearing at a certain
+    /// distance, with a hitch attached.
+    /// <para>
+    /// The sack is renamed, never deleted, so this is reversible by hand. It is also a config flag
+    /// rather than a hard-coded behaviour specifically so it can be switched off through the
+    /// published launcher config WITHOUT a launcher rebuild if it turns out to cost more in
+    /// first-load shader compilation than it saves in hitching.
+    /// </para>
+    /// <para>
+    /// Safe with respect to the join handshake: the conversion modules are deliberately
+    /// uncatalogued, so no receipt content or configuration hash covers their <c>Shaders</c>
+    /// directory.
+    /// </para>
+    /// </remarks>
+    public bool NeutralizeConversionShaderCache { get; set; } = true;
+
     internal string? GetBlockedModuleInToken()
     {
         string[] tokenModules = (ModuleToken ?? string.Empty)

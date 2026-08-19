@@ -208,6 +208,23 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
     hash. *(Earned: three days of "EoE cannot host headlessly" — recorded as an unfixable data
     fault after the whole gameplay-submodule set had been bisected away. It was one file.)*
 
+22. **Never Harmony-patch `DedicatedServer.CoopServerHost`'s autosave tick, and treat any exception
+    escaping `CoopServerHost.Tick` as a hard outage.** `Tick` wraps the host's whole per-frame work
+    in a `try/catch` whose handler calls `Environment.Exit(3)`. There is no degraded mode: one throw
+    ends the process, systemd restarts it from the last save, and the campaign silently replays the
+    same stretch forever. A prefix that skipped the autosave tick while the campaign was running
+    made the tick's own re-arm (`DateTime.UtcNow + interval`, over two obfuscated statics that both
+    decompile to `m_A`) throw `ArgumentOutOfRangeException` on release, which killed the host **29
+    times in 11 hours on a 22 min 39 s cycle** and pinned the world at Spring 12-13 1101 with nothing
+    saved. Change `autosaveMinutes` in `server-config.json` instead — it is the only supported lever
+    on host save timing.
+    **How to spot this class of failure fast:** `systemctl --user show <unit> -p NRestarts` — it is
+    reset by `reset-failed` at each deploy, so a non-zero value means crashes SINCE that deploy. An
+    exactly periodic restart interval means a deterministic fault on a timer, not load. The
+    exception text is in the journal as `[DedicatedServer] FATAL during`.
+    *(Earned: shipped the deferral as a stutter optimisation, verified it installed, and did not
+    check NRestarts afterwards. It had been crash-looping for eleven hours.)*
+
 ---
 
 ## Checklist: making a handshake-affecting change

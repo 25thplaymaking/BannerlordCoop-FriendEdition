@@ -151,7 +151,41 @@ main agent goes down, whatever troops remain. Co-op substitutes its own controll
 the hideout rule, so the outcome falls through to ordinary map-event resolution — which counts
 surviving roster troops, sees the squad the player brought, and calls it a win.
 
-**What fixing it takes.** Both halves, in order:
+**FIXED 2026-08-19 — `HideoutHeroOutcome`.** The rule is restored on the authority, which is the only
+side entitled to decide an outcome. `MapEventPatches.Prefix_OnBattleWon` is the hook: it is server-only
+and runs before any result is calculated, which matters because the winner is what every downstream
+reward, loot roll and client notification derives from.
+
+When a hideout battle resolves and a player-led attacking party's leader is wounded, the server calls
+`MapEvent.SetOverrideWinner(BattleSideEnum.Defender)`. Everything else then follows on its own: the
+server sends each client the corrected `WinningSide`, the client's existing reward gate
+(`battle.WinningSide == encounter.PlayerSide`) does not fire, no loot is committed, and the hideout
+keeps its bandits and must be raided again.
+
+Details that make it safe:
+- **Wounded really does mean "went down here."** The base game refuses to start a hideout mission with
+  a wounded hero — `HideoutCampaignBehavior` blocks both the send-troops and direct-assault options on
+  `Hero.MainHero.IsWounded` — so a hero wounded at resolution was healthy at the start.
+- **AI raids are untouched.** The rule applies only to player-led attacking parties; an AI hideout raid
+  is resolved by simulation with no hero standing in a mission, and a lord who arrived wounded must not
+  hand the bandits a win.
+- **Only hideouts.** Every other battle stays decided by troops, which is correct for it.
+- **No recursion.** Forcing the winner re-enters `OnBattleWon` through the `BattleState` setter, so
+  each map event is settled once via a `ConditionalWeakTable` and the second pass runs the ordinary
+  result path.
+- **Fails open.** Any exception leaves the outcome exactly as it was; a battle resolved the old way
+  beats one that never resolves.
+
+The decision itself is a pure function over `(isHideoutBattle, defendersAlreadyWon, attackers)` so it
+is pinned by tests without a campaign — including that it stops at the first downed hero, since the
+attacker sequence is built lazily from live map-event parties.
+
+**Not done, and not needed for this.** The consequence enum still has no defeat member. It turned out
+not to be on the path: `GrantClearRewards` is already refused server-side
+(`hideout-clear-receipt-unavailable`), so the rewards were never coming through that route — they came
+from map-event resolution, which is what this corrects.
+
+**Original plan, kept for context.** Both halves, in order:
 - add a defeat consequence to the enum and handler that sets the hideout's next-attack cooldown and
   grants nothing, alongside the existing `SetAttackCooldown` plumbing that already exists for the
   send-troops failure path;

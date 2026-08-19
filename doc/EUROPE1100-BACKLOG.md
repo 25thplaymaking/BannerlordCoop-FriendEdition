@@ -10,7 +10,41 @@ weather-node bounds guard (`MapWeatherNodeBoundsGuardPatch`, PR #30).
 
 ---
 
-## 1. Clothing snaps/tears as units come into view — incomplete EoE shader sack
+## 1. Clothing snaps/tears as units come into view — CAUSE STILL UNKNOWN
+
+**Correction, 2026-08-19. The shader-sack explanation below is wrong for the TEARING.** It explains a
+hitch when a garment first comes into view — the engine compiling a missing variant mid-frame — and
+that is a real effect. It does not explain geometry stretching down through the terrain, which is a
+skinning or mesh-deformation artifact, not a shading one. Two symptoms were conflated.
+
+What the re-read of the client logs actually establishes:
+
+- **The neutraliser did not cause it.** `Missing shader from sack` entries appear at 19:15, 21:25,
+  21:52, 22:39 and 22:49 on 08-18; the cache was not renamed aside until **22:56**. The artifact
+  predates the change by hours.
+- **The bulk misses are harmless.** `pbr_terrain` misses 2,112 times and compiles **zero** times,
+  because the base game ships its own `compressed_shader_cache.sack` that satisfies it (and
+  `pbr_terrain.rs` exists in `$BASE/Shaders/Sources`). Only `pbr_metallic_*` both misses and compiles
+  — 60/40/21/10 misses against 60/40/21/10 compiles, an exact match. Those are the hitch.
+- **The item-dependency errors are not it.** `plated_leather_armor_*`, `burlap_sack_dress*`,
+  `sturgian_lamellar_*` and their `_slim` / `_converted` variants fail during **Native** asset-package
+  registration, name no module's ModuleData (they live in binary asset packages), and appear on the
+  headless host too. Pre-existing native noise, as originally judged.
+- **`Render Requested: black_cape` is the item-thumbnail renderer**, not in-world cloth, so the
+  partial-read warnings that cluster around it are not a cape-simulation fault.
+
+**The logs cannot diagnose this.** `rgl_log` records no skinning, skeleton or deformation faults, and
+EoE ships neither `skeleton_scales.xml` nor `bone_body_types.xml`, so both come from Native. Diagnosis
+needs the artifact itself — a screenshot, or the item and unit it happens on — not another pass over
+these logs.
+
+**Consequence: the neutraliser now defaults OFF** (`NeutralizeConversionShaderCache`), and
+`ConversionBootstrap.RestoreShaderCache` puts back a cache an earlier launcher renamed aside. It
+modified a 979 MB game file to fix something it demonstrably does not fix, and it trades 72,024
+precompiled conversion variants for runtime compilation — which causes hitching rather than curing it.
+The flag remains for A/B from the published config.
+
+## 1a. Shader sack detail (accurate for the HITCH, not the tearing)
 
 **Symptom.** Garments visibly snap or tear on all units once they get within a certain distance,
 accompanied by a hitch.

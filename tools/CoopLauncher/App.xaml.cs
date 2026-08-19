@@ -80,6 +80,19 @@ public partial class App : Application
         if (shootIdx >= 0 && shootIdx + 1 < e.Args.Length)
         {
             var window = new MainWindow(shootMode: true);
+
+            // Optional size, so a review can render the window at its MINIMUM as well as its default.
+            // Layout faults show up at the small end — a row of buttons that fits at 1280 can run off
+            // the edge at 1100 — and reviewing only the default size hides exactly those.
+            if (shootIdx + 3 < e.Args.Length &&
+                double.TryParse(e.Args[shootIdx + 2], out double shootWidth) &&
+                double.TryParse(e.Args[shootIdx + 3], out double shootHeight) &&
+                shootWidth > 0 && shootHeight > 0)
+            {
+                window.Width = shootWidth;
+                window.Height = shootHeight;
+            }
+
             window.RenderAllPanels(e.Args[shootIdx + 1]);
             Shutdown();
             return;

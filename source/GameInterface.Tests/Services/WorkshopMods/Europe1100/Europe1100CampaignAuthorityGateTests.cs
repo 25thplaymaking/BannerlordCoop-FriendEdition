@@ -1,4 +1,4 @@
-using GameInterface.Services.WorkshopMods.Europe1100;
+﻿using GameInterface.Services.WorkshopMods.Europe1100;
 using HarmonyLib;
 using System;
 using System.Collections.Generic;
@@ -62,10 +62,18 @@ public class Europe1100CampaignAuthorityGateTests
 
     /// <summary>
     /// These are the campaign behaviours read out of the shipped Europe1100 v1.4.7.3 and
-    /// SnowballingKingdoms v1.0.21 CLI metadata. Coop references none of those assemblies, so the
-    /// list is the only record of what was audited; a conversion update that adds a behaviour must
-    /// update this test in the same change.
+    /// SnowballingKingdoms v1.0.21 binaries. Coop references none of those assemblies, so the list is
+    /// the only record of what was audited; a conversion update that adds a behaviour must update this
+    /// test in the same change.
     /// </summary>
+    /// <remarks>
+    /// Re-audited 2026-08-19 directly against the shipped assemblies: exactly four of the eleven
+    /// Europe1100 DLLs plus SnowballingKingdoms reference <c>CampaignBehaviorBase</c>, and every
+    /// assembly referencing <c>CampaignEvents</c> also declares one — so nothing subscribes to campaign
+    /// events outside this set. That audit added <c>EoeCustomBattleCampaignBehavior</c>, which had been
+    /// excluded on the grounds of a <c>DedicatedServerType="none"</c> tag that does not exist in the
+    /// SubModule.xml.
+    /// </remarks>
     [Fact]
     public void TheAuditedConversionBehaviourSetIsPinned()
     {
@@ -73,6 +81,7 @@ public class Europe1100CampaignAuthorityGateTests
         {
             "BattleArtilleryReworked.BACampaignBehavior",
             "ClansResourceAdder.ResourcesAdderEvents",
+            "EOE.CustomBattlePatch.SinglePlayer.EoeCustomBattleCampaignBehavior",
             "SnowballingKingdoms.SnowballEvents",
             "SnowballingKingdoms.SnowballFixesBehavior",
             "WhileThyCome.BehaviorBase.AggresiveBehaviour",

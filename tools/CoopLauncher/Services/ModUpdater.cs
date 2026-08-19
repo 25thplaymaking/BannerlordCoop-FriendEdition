@@ -474,6 +474,15 @@ public sealed class ModUpdater : IModUpdateService
             }
 
             WriteText(versionFull, version);
+
+            // Record what this tier owns, then remove what it used to own and no longer ships.
+            string[] installedModules = stagedModules
+                .Select(Path.GetFileName)
+                .Where(name => !string.IsNullOrEmpty(name))
+                .Select(name => name!)
+                .ToArray();
+            PruneRetiredModules(modulesFull, versionFull, installedModules);
+
             committed = true;
         }
         finally
@@ -553,6 +562,83 @@ public sealed class ModUpdater : IModUpdateService
             {
                 TryDeleteDirectory(workspace);
             }
+        }
+    }
+
+
+    /// <summary>Where a tier records the module directories it installed, beside its version stamp.</summary>
+    internal static string ModuleReceiptPath(string versionFile)
+    {
+        string directory = Path.GetDirectoryName(Path.GetFullPath(versionFile))!;
+        string stem = Path.GetFileNameWithoutExtension(versionFile);
+        return Path.Combine(directory, stem + "-modules.txt");
+    }
+
+    /// <summary>
+    /// Base-game modules, which must never be removed however a receipt reads.
+    /// </summary>
+    private static readonly HashSet<string> ProtectedModules = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Native", "SandBox", "SandBoxCore", "StoryMode", "CustomBattle", "Multiplayer", "BirthAndDeath",
+    };
+
+    /// <summary>
+    /// Deletes module directories this tier installed previously and no longer ships, then records the
+    /// current set.
+    /// </summary>
+    /// <remarks>
+    /// Installing was exact per module but never pruned: a module dropped from a later suite stayed on
+    /// disk for good. Across revisions that accumulated whole conversions worth gigabytes, and left the
+    /// stock Bannerlord launcher listing modules nobody could account for.
+    /// <para>
+    /// Only names the previous receipt claims are removed, so a player's own mods — which were never in
+    /// it — cannot be touched. The first install after this change has no receipt to read, so it prunes
+    /// nothing and simply records the current set; cleanup begins with the following update.
+    /// </para>
+    /// </remarks>
+    private static void PruneRetiredModules(string modulesFull, string versionFile, string[] installedModules)
+    {
+        string receiptPath = ModuleReceiptPath(versionFile);
+
+        try
+        {
+            if (File.Exists(receiptPath))
+            {
+                var current = new HashSet<string>(installedModules, StringComparer.OrdinalIgnoreCase);
+
+                foreach (string previous in File.ReadAllLines(receiptPath))
+                {
+                    string name = previous.Trim();
+                    if (name.Length == 0 || current.Contains(name) || ProtectedModules.Contains(name)) continue;
+
+                    // Refuse anything that is not a plain child directory name: a receipt is written by
+                    // this code, but it sits in a directory players can edit.
+                    if (name.IndexOfAny(new[] { '/', '\\', ':' }) >= 0 || name == "." || name == "..") continue;
+
+                    string retired = Path.Combine(modulesFull, name);
+                    if (!IsWithin(retired, modulesFull) || !Directory.Exists(retired)) continue;
+
+                    if (TryDeleteDirectoryReporting(retired))
+                        Log.Write($"Removed retired module {name} (no longer shipped by this feed)");
+                    else
+                        Log.Write($"Could not remove retired module {name}; it will be retried next update");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Pruning is housekeeping. A failure here must not fail an otherwise good install.
+            Log.Write($"Retired-module prune failed: {ex.Message}");
+        }
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+            File.WriteAllLines(receiptPath, installedModules.OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"Could not record installed modules: {ex.Message}");
         }
     }
 

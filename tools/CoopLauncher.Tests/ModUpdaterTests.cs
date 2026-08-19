@@ -1,4 +1,4 @@
-using CoopLauncher.Services;
+﻿using CoopLauncher.Services;
 using System;
 using System.IO;
 using System.IO.Compression;
@@ -611,5 +611,87 @@ public sealed class ModUpdaterTests
             if (disposing) inner.Dispose();
             base.Dispose(disposing);
         }
+    }
+
+    [Fact]
+    public void RetiredModules_AreRemovedOnTheNextInstall()
+    {
+        // A module dropped from a later feed used to stay on disk for good. Across revisions that
+        // accumulated whole conversions worth gigabytes and left the stock Bannerlord launcher listing
+        // modules nobody could account for.
+        using var fixture = new UpdateFixture();
+        string versionFile = Path.Combine(fixture.Modules, "coop-suite-version.txt");
+
+        ModUpdater.InstallExact(
+            fixture.CreateZip(("Keep/a.dll", "1"), ("Retire/b.dll", "1")), fixture.Modules, versionFile, "1");
+        Assert.True(Directory.Exists(Path.Combine(fixture.Modules, "Retire")));
+
+        ModUpdater.InstallExact(
+            fixture.CreateZip(("Keep/a.dll", "2")), fixture.Modules, versionFile, "2");
+
+        Assert.False(Directory.Exists(Path.Combine(fixture.Modules, "Retire")));
+        Assert.Equal("2", File.ReadAllText(Path.Combine(fixture.Modules, "Keep", "a.dll")));
+    }
+
+    [Fact]
+    public void ModulesThisFeedNeverInstalled_AreLeftAlone()
+    {
+        // The safety property: pruning may only ever remove what a previous receipt claims, so a
+        // player's own mods — which were never in one — cannot be touched.
+        using var fixture = new UpdateFixture();
+        string versionFile = Path.Combine(fixture.Modules, "coop-suite-version.txt");
+        fixture.WriteInstalled("SomeonesFavouriteMod", "theirs.dll", "mine");
+
+        ModUpdater.InstallExact(fixture.CreateZip(("Keep/a.dll", "1")), fixture.Modules, versionFile, "1");
+        ModUpdater.InstallExact(fixture.CreateZip(("Keep/a.dll", "2")), fixture.Modules, versionFile, "2");
+
+        Assert.Equal("mine", File.ReadAllText(
+            Path.Combine(fixture.Modules, "SomeonesFavouriteMod", "theirs.dll")));
+    }
+
+    [Fact]
+    public void TheFirstInstallPrunesNothingAndRecordsWhatItOwns()
+    {
+        // There is no receipt to read on the first install after this change, so nothing is removed —
+        // cleanup starts with the following update.
+        using var fixture = new UpdateFixture();
+        string versionFile = Path.Combine(fixture.Modules, "coop-suite-version.txt");
+        fixture.WriteInstalled("PreExisting", "x.dll", "kept");
+
+        ModUpdater.InstallExact(fixture.CreateZip(("Keep/a.dll", "1")), fixture.Modules, versionFile, "1");
+
+        Assert.True(Directory.Exists(Path.Combine(fixture.Modules, "PreExisting")));
+        Assert.Equal(
+            new[] { "Keep" },
+            File.ReadAllLines(ModUpdater.ModuleReceiptPath(versionFile)));
+    }
+
+    [Fact]
+    public void BaseGameModulesAreNeverPruned()
+    {
+        // Belt and braces: a hand-edited or corrupted receipt must not be able to delete the game.
+        using var fixture = new UpdateFixture();
+        string versionFile = Path.Combine(fixture.Modules, "coop-suite-version.txt");
+        fixture.WriteInstalled("Native", "native.dll", "base");
+        File.WriteAllLines(ModUpdater.ModuleReceiptPath(versionFile), new[] { "Native" });
+
+        ModUpdater.InstallExact(fixture.CreateZip(("Keep/a.dll", "1")), fixture.Modules, versionFile, "1");
+
+        Assert.True(Directory.Exists(Path.Combine(fixture.Modules, "Native")));
+    }
+
+    [Fact]
+    public void AReceiptEntryThatEscapesTheModulesDirectoryIsIgnored()
+    {
+        using var fixture = new UpdateFixture();
+        string versionFile = Path.Combine(fixture.Modules, "coop-suite-version.txt");
+        string outside = Path.Combine(fixture.Modules, "..", "outside-victim");
+        Directory.CreateDirectory(outside);
+        File.WriteAllLines(ModUpdater.ModuleReceiptPath(versionFile),
+            new[] { @"..\outside-victim", "../outside-victim", ".." });
+
+        ModUpdater.InstallExact(fixture.CreateZip(("Keep/a.dll", "1")), fixture.Modules, versionFile, "1");
+
+        Assert.True(Directory.Exists(outside));
     }
 }

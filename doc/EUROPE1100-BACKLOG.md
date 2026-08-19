@@ -128,7 +128,41 @@ for "Validating modules..."). Then measure the real load time before deciding wh
 itself needs work — 219 MB per join, per player, is also worth weighing against §4's replication
 volume.
 
-## 4. Player death in a hideout resolves as a win
+## 4. Player death in a hideout resolves as a win — DIAGNOSED
+
+**Native behaviour.** Go down in a hideout and your men drag you out wounded. The hideout is
+untouched and has to be raided again once the hero heals.
+
+**Co-op behaviour.** You can enter, die, and still be paid for clearing it.
+
+**Diagnosed 2026-08-19. Two independent gaps, either of which alone causes it.**
+
+*1. The consequence protocol has no defeat outcome.* `HideoutCampaignConsequence` has exactly four
+values — `PrepareMission`, `SetAttackCooldown`, `GrantClearRewards`, `PrepareDirectAssaultMission`.
+There is no "the attackers were beaten off" case, so even a correctly detected defeat has no way to be
+expressed to the authority or applied to the hideout.
+
+*2. The hideout defeat rule never runs.* The reward request IS gated —
+`HideoutCampaignBehavior.GameMenuHideoutPlaceOnInit` only publishes `GrantClearRewards` when
+`battle.WinningSide == encounter.PlayerSide`. The problem is what sets `WinningSide`. In native, a
+hideout is decided by the hero: `HideoutMissionController` ends the mission as a player defeat when the
+main agent goes down, whatever troops remain. Co-op substitutes its own controllers
+(`CoopBattlesController`, `CoopBattleDeploymentMissionController`) and there is no co-op equivalent of
+the hideout rule, so the outcome falls through to ordinary map-event resolution — which counts
+surviving roster troops, sees the squad the player brought, and calls it a win.
+
+**What fixing it takes.** Both halves, in order:
+- add a defeat consequence to the enum and handler that sets the hideout's next-attack cooldown and
+  grants nothing, alongside the existing `SetAttackCooldown` plumbing that already exists for the
+  send-troops failure path;
+- reinstate the hero-down rule for hideout missions in the co-op battle controller, so
+  `WinningSide` reflects the hero rather than the roster before the menu reads it;
+- wound the hero and return the party to the map, which is the visible half players expect.
+
+The `SetAttackCooldown` path already proves the authority route can leave a hideout intact after a
+failed attempt, so this is filling in a missing case rather than new machinery.
+
+## 4a. Original note
 
 Dying in a hideout fight cleared the hideout and reported a victory. Native runs a distinct defeat
 path here — the player is knocked out and companions pull them clear — and that flow is not
@@ -579,3 +613,70 @@ Both came from checking the shipped `SubModule.xml` and DLLs instead of trusting
 Coverage is now provably complete: exactly four of the eleven Europe1100 assemblies plus
 SnowballingKingdoms reference `CampaignBehaviorBase`, and every assembly referencing `CampaignEvents`
 also declares one — so no EoE code subscribes to campaign events outside the gated set.
+
+## 15. Incidents (choice popups) never appear — deliberately suppressed, undocumented
+
+**Symptom.** The influence/relation/morale choice popups Bannerlord offers on leaving a settlement,
+ending a battle or finishing a conversation — "Rooster theft", bury the dead, let the men hunt — never
+occur in co-op.
+
+**Cause, exactly.** `GameInterface/Services/UI/Patches/IncidentDisable.cs` prefixes
+`IncidentsCampaignBehaviour.InvokeIncident` with an unconditional `return false`. It was added in
+`84aeb90af` with the whole commit message "Incidents (random events) disabled" and no rationale, and
+unlike the ~145 other disable patches it carries no `ModInformation` gate — so it kills them on both
+peers. `InvokeIncident` does nothing but `mapState.NextIncident = incident`, i.e. queue the popup for
+the map UI, so blocking it means nothing is ever presented, no option is chosen and no consequence
+runs.
+
+**Why it cannot simply be deleted.**
+
+*The host can never raise one.* Every trigger is gated on `MobileParty.MainParty` —
+`OnSettlementEntered`, `OnSettlementLeft`, `OnMapEventEnded` (`evt.IsPlayerMapEvent`),
+`ConversationEnded`, the siege check, plus `TryInvokeIncident`'s `Hero.MainHero.IsPrisoner` guard. On a
+dedicated host MainParty is a placeholder that never enters a settlement or fights. Incidents are a
+client-side feature by construction.
+
+*Their consequences are authoritative writes on a replica.* Options resolve through
+`GiveGoldAction`, `ChangeRelationAction.ApplyPlayerRelation` and `SiegeAftermathAction`, and
+`IncidentEffect.Consequence` gates each on `MBRandom.RandomFloat`. A client presenting the popup and
+running the consequence locally would roll its own outcome and mutate gold, relations and crime rating
+on a replica — the same divergence class as the stranded-health bug.
+
+**What enabling them takes.** Route the RESOLUTION, not the presentation: the client shows the popup
+and submits the chosen option id, the server runs the consequence, and the resulting gold, relation and
+morale changes replicate as they already do — the `AuthorityRoute` shape kingdom creation uses. That is
+a feature with real desync surface across five action types, not a patch deletion, so it is not being
+enabled as a pre-deploy change. The patch now documents all of this in place.
+
+## 16. Conversion interactions cannot stall the host
+
+Audited which Europe 1100 assemblies can raise a player-facing interaction, and what happens when one
+does on a machine with no screen.
+
+| assembly | interaction API |
+|---|---|
+| `EOE.CustomBattlePatch` | `ShowInquiry`, **`ShowTextInquiry`**, `GameMenu`, `AddGameMenuOption` |
+| `BattleArtilleryReworked` | `AddQuickInformation` (non-blocking toast) |
+| `Europe1100` | `GameMenu` |
+| `BannerColorPersistence`, `Bannerlord.EOEPatches`, `ItemCategoryAddons`, `RF_BattleAI`, `WhileThyCome`, `SnowballingKingdoms` | `InformationManager` display only |
+
+Only one raises a **blocking** dialog, and only one dialog kind was unguarded.
+
+`DedicatedServer.Core.InquiryAutoAcceptPatch` covers `InformationManager.ShowInquiry`: it logs title
+and text to the console, invokes the affirmative action and skips the UI. That is sound for a yes/no.
+It covers **only that method** — `ShowTextInquiry`, which asks for typed input, was guarded neither by
+the host runtime nor by us.
+
+That is a real hole rather than a theoretical one: `EOE.CustomBattlePatch` calls it, and
+`Europe1100CampaignAuthorityGate` deliberately confines that behaviour to the host — so the one place
+a conversion text prompt could be raised was the one place nothing could answer it.
+
+`HostTextInquiryGuardPatch` closes it. On a server it logs the title and body at **Warning** — reaching
+it means something tried to hold a conversation with a machine — takes the NEGATIVE action and
+suppresses the dialog. Declining rather than affirming is deliberate: affirming would have to invent
+the typed string and commit the caller to a value nobody chose.
+
+It is server-only, and the ordering makes that safe: `ModInformation.IsServer` is set inside the
+start-server path, *after* `CoopLoadUI` has collected visibility and password, so the listen-host setup
+prompt and the client join-password prompt both run with `IsServer == false` and are untouched. Player
+prompts still reach players; only the host declines them, and every decline is logged.

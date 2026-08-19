@@ -235,6 +235,13 @@ internal class MapEventPatches
         if (ModInformation.IsClient)
             return false;
 
+        // A hideout is decided by the hero who went in, not by who still has bodies on the roster.
+        // This must run BEFORE any result is calculated, because the winner it corrects is what every
+        // downstream reward, loot roll and client notification is derived from. Forcing the winner
+        // re-enters here through the BattleState setter, and that second pass does the real work.
+        if (HideoutHeroOutcome.TryForceDefenderVictory(__instance))
+            return false;
+
         // Vanilla calculates plunder from each defeated participant's Party reference.
         RemovePartiesWithoutParty(__instance);
         __instance.CalculateMapEventResults();

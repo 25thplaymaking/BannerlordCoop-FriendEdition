@@ -1,5 +1,6 @@
 ﻿using GameInterface.AutoSync;
 using GameInterface.Utils;
+using GameInterface.Services.Save.Patches;
 using HarmonyLib;
 using System;
 using System.Collections.Generic;
@@ -64,6 +65,10 @@ public class GameInterface : IGameInterface
         // only for tiny "fragile no-op" methods whose detour would corrupt their inline x64 unwind info and
         // deadlock the GC.
         FragileDetourGuard.Apply(harmony);
+
+        // Optional, host-only, and resolved by name against a third-party assembly, so it installs
+        // itself rather than going through PatchAll (see the type for why).
+        DeferAutosaveWhileCampaignRunningPatch.Apply(harmony);
 
         harmony.PatchCategory(assembly, HARMONY_STATIC_FIXES_CATEGORY);
         harmony.PatchAllUncategorized(assembly);

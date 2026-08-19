@@ -82,9 +82,15 @@ namespace Coop.Tests.Client.States
             loadingInterfaceMock.Verify(x => x.SetLoadingMessage(
                 "Joining Coop Campaign",
                 "Preparing host save data..."), Times.Once);
+            // The message now names the payload size and warns the game will stop responding: a
+            // conversation-sized world blocks the game thread for a minute while it loads, and that
+            // silence has already been reported as a softlock.
             loadingInterfaceMock.Verify(x => x.SetLoadingMessage(
                 "Loading Host Campaign",
-                "Loading host save data..."), Times.Once);
+                It.Is<string>(text =>
+                    text.Contains("Loading the host's world") &&
+                    text.Contains("MB") &&
+                    text.Contains("will not respond"))), Times.Once);
         }
 
         [Fact]

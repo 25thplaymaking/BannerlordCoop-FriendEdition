@@ -5,6 +5,7 @@ using Common.Util;
 using Common.Network;
 using GameInterface.Configuration;
 using GameInterface.Services.AuthorityRequests;
+using GameInterface.Services.Heroes.Extensions;
 using GameInterface.Services.Heroes.Messages;
 using GameInterface.Services.ObjectManager;
 using GameInterface.Services.Players;
@@ -122,7 +123,7 @@ public class HeroHitPointsHandler : IHandler
         // request back therefore left a refused client stranded on its own number with nothing that
         // would ever correct it. Live: a player sat at 1% and wounded, unable to fight, while the
         // server had them at full health.
-        if (!string.Equals(hero.StringId, context.Player.HeroId, StringComparison.Ordinal))
+        if (!IsReportableBy(hero, party, context))
             return Reply(context.Header, AuthorityResultStatus.Unauthorized, hero.StringId, hero.HitPoints, "hero-not-owned");
         if (party.Party.MapEvent == null || !objectManager.TryGetId(party.Party.MapEvent, out var mapEventId) ||
             !string.Equals(mapEventId, request.MapEventId, StringComparison.Ordinal))
@@ -134,6 +135,30 @@ public class HeroHitPointsHandler : IHandler
         if (hero.HitPoints != request.HitPoints)
             return Reply(context.Header, AuthorityResultStatus.ExecutionFailed, hero.StringId, hero.HitPoints, "hit-points-not-applied");
         return Reply(context.Header, AuthorityResultStatus.Accepted, hero.StringId, hero.HitPoints, null, statePublished: true);
+    }
+
+    /// <summary>
+    /// Whether this player may report health for <paramref name="hero"/>: their own hero, or a
+    /// companion or family member travelling in their party.
+    /// </summary>
+    /// <remarks>
+    /// This deliberately mirrors the client's <c>HeroExtensions.IsHealthControlledByThisInstance</c>,
+    /// which forwards health for the player's own hero AND for non-player heroes in the party they
+    /// control. The host previously authorised only the first, so every companion damage report was
+    /// refused as "hero-not-owned" by construction — the client cannot help sending them, and the
+    /// host could never accept them. A refusal used to strand the reporting client on its own value;
+    /// that is fixed separately, but the asymmetry itself was the reason refusals happened at all.
+    /// <para>
+    /// Another player's hero stays out of scope even when it stands in this party: that hero's own
+    /// client is the only peer allowed to report for it.
+    /// </para>
+    /// </remarks>
+    private static bool IsReportableBy(Hero hero, MobileParty party, AuthorityServerContext context)
+    {
+        if (string.Equals(hero.StringId, context.Player.HeroId, StringComparison.Ordinal)) return true;
+        if (hero.IsPlayerHero()) return false;
+
+        return ReferenceEquals(hero.PartyBelongedTo, party);
     }
 
     private AuthorityCommitProbeResult ProbeClientCommit(NetworkHeroHitPointsChangeResult result)

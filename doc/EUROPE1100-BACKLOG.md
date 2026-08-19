@@ -256,12 +256,30 @@ the game thread because the graph is the campaign. Lock contention was considere
 `SaveContext.AddOrGetStringId` does take a single global lock, but `Saving Objects` takes the same
 lock through `GetStringId` and costs only 0.201 s, so the lock is not where the seconds are.
 
-**What was done instead — move it, and stop hiding it.**
-- `DeferAutosaveWhileCampaignRunningPatch` holds the host's autosave tick until
-  `TimeControlMode.Stop`, capped at 10 minutes. The campaign is paused roughly half the wall clock,
-  and a stall taken while paused costs nothing.
-- `autosaveMinutes` raised to 20 in `CoopData/DedicatedServer/server-config.json` (read at boot; a
-  change needs a restart).
+**Deferring the host's autosave tick does NOT work. It crash-loops the host.**
+`DeferAutosaveWhileCampaignRunningPatch` (shipped 2026-08-19 04:11, removed 2026-08-19 15:30) held
+`DedicatedServer.CoopServerHost`'s autosave tick until `TimeControlMode.Stop`. Skipping and later
+releasing that tick made its own re-arm throw:
+
+```
+System.ArgumentOutOfRangeException: The added or subtracted value results in an un-representable DateTime. (Parameter 't')
+   at System.DateTime.op_Addition(DateTime d, TimeSpan t)
+   at DedicatedServer.CoopServerHost.c_Patch1()
+   at DedicatedServer.CoopServerHost.A(Single )
+   at DedicatedServer.CoopServerHost.Tick(Single dt)
+```
+
+`CoopServerHost.Tick` treats any exception as fatal and calls `Environment.Exit(3)`, so the host died
+and systemd restarted it — **29 times in 11 hours, on a near-exact 22 min 39 s cycle**. Each process
+loaded the same save, ran until the autosave fired, and died, so **the campaign never advanced past
+Spring 12-13 1101 and nothing players did was ever saved.** The tick holds two obfuscated statics
+that both decompile to `m_A` (one `DateTime` next-due, one `TimeSpan` interval); the release path
+recomputes the due time from them and overflows. Do not patch this method. Treat the dedicated
+host's autosave scheduler as off-limits and change `autosaveMinutes` instead.
+
+**What is done instead.**
+- `autosaveMinutes` is 20 in `CoopData/DedicatedServer/server-config.json` (read at boot; a change
+  needs a restart). That is the only supported lever on when the host saves.
 - `SavePatches` now raises `GameSaveStateChanged` around `Game.Save`, so clients show the native
   saving indicator for the whole stall. **This was the "no UI on screen" complaint, and the cause is
   worth recording:** the notification pipeline was complete end to end, and simply never fired,
@@ -269,7 +287,8 @@ lock through `GetStringId` and costs only 0.201 s, so the lock is not where the 
   and calls `Game.Current.Save(metaData, name, new AsyncFileSaveDriver(), callback)` directly, so
   the existing patches on `SaveHandler.OnSaveStarted` / `OnSaveEnded` were never reached.
 - `GameThread.Update` no longer applies a whole arrival backlog in one frame (see §6), so the burst
-  that follows the stall no longer freezes the client for about as long as the host froze.
+  that follows the stall no longer freezes the client for about as long as the host froze. This is
+  now the whole of the client-side mitigation, since the stall can no longer be rescheduled.
 
 **Still open.** The stall itself. The only real reductions left are saving less (fewer parties, or
 excluding data from the graph, which changes the save format) or moving the collect off the game

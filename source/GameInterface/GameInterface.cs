@@ -66,9 +66,11 @@ public class GameInterface : IGameInterface
         // deadlock the GC.
         FragileDetourGuard.Apply(harmony);
 
-        // Optional, host-only, and resolved by name against a third-party assembly, so it installs
-        // itself rather than going through PatchAll (see the type for why).
-        DeferAutosaveWhileCampaignRunningPatch.Apply(harmony);
+        // NOTE: do not patch DedicatedServer.CoopServerHost's autosave tick to defer saves. Holding
+        // that tick and releasing it later made its own re-arm — DateTime.UtcNow + interval — throw
+        // ArgumentOutOfRangeException ("un-representable DateTime"), which CoopServerHost.Tick treats
+        // as fatal and exits on. The host then crash-looped every ~22 minutes and the campaign could
+        // never advance past the day it was on. See doc/EUROPE1100-BACKLOG.md section 7.
 
         harmony.PatchCategory(assembly, HARMONY_STATIC_FIXES_CATEGORY);
         harmony.PatchAllUncategorized(assembly);

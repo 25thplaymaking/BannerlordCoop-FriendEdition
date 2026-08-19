@@ -46,6 +46,7 @@ public class CoopServer : CoopNetworkBase, ICoopServer
     private readonly ServerInboundPayloadProcessor<NetPeer> inboundPayloadProcessor;
     // Buffers per-change sends and merges them into one send per key. Drained each tick in Update.
     private readonly ISendCoalescer coalescer;
+    private readonly ICoalesceGate sendGate;
     // Lazy breaks the construction cycle: the manager depends on ITimeControlInterface, which depends
     // on INetwork (this server). It is only needed each Update, so deferring construction is fine.
     private readonly Lazy<IOverloadedPeerManager> overloadedPeerManager;
@@ -64,6 +65,7 @@ public class CoopServer : CoopNetworkBase, ICoopServer
         IMissionManager missionManager,
         Lazy<IOverloadedPeerManager> overloadedPeerManager,
         ISendCoalescer coalescer,
+        ICoalesceGate sendGate,
         ICommonSerializer serializer,
         CancellationTokenSource sessionCancellation) : base(configuration, serializer, sessionCancellation)
     {
@@ -80,6 +82,7 @@ public class CoopServer : CoopNetworkBase, ICoopServer
         this.missionManager = missionManager;
         this.overloadedPeerManager = overloadedPeerManager;
         this.coalescer = coalescer;
+        this.sendGate = sendGate;
 
         // Netmanager initialization
         netManager.NatPunchEnabled = true;
@@ -234,7 +237,9 @@ public class CoopServer : CoopNetworkBase, ICoopServer
         // path. Inert until a send path enqueues, so the guard avoids queueing an empty flush every tick.
         if (coalescer.HasPending)
         {
-            GameThread.RunSafe(() => coalescer.Flush(this));
+            // The gate holds updates about parties no player is near; held keys keep merging, so what
+            // eventually goes out is still the correct end state. See ReplicationRelevanceGate.
+            GameThread.RunSafe(() => coalescer.Flush(this, sendGate));
         }
 
         // Send any sub-budget aggregated messages so nothing waits longer than one poll interval.

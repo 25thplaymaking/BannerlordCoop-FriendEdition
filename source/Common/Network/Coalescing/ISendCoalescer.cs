@@ -33,6 +33,14 @@ public interface ISendCoalescer
     void Flush(INetwork network);
 
     /// <summary>
+    /// As <see cref="Flush(INetwork)"/>, but lets <paramref name="sendGate"/> hold back updates about
+    /// things no player can observe yet. Held keys keep merging and keep their relative order, and are
+    /// released once the gate allows them or <see cref="ICoalesceGate.MaximumHold"/> elapses, whichever
+    /// comes first. A null gate flushes everything, exactly as <see cref="Flush(INetwork)"/> does.
+    /// </summary>
+    void Flush(INetwork network, ICoalesceGate sendGate);
+
+    /// <summary>
     /// Broadcasts and clears the pending updates for one instance only. Call before sending that
     /// instance's destroy so its final state reaches clients ahead of the destroy.
     /// </summary>

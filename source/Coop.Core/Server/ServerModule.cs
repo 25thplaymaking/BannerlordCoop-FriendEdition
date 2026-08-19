@@ -20,6 +20,7 @@ using Coop.Core.Server.States;
 using Coop.Steam;
 using GameInterface.Policies;
 using GameInterface.Services.Missions;
+using GameInterface.Services.Replication;
 using LiteNetLib;
 using Missions;
 using System.Runtime.CompilerServices;
@@ -47,6 +48,10 @@ public class ServerModule : CommonModule
         builder.RegisterType<ServerLogic>().As<IServerLogic>().As<ILogic>().InstancePerLifetimeScope();
         builder.RegisterType<CoopServer>().As<ICoopServer>().As<INetwork>().As<INetEventListener>().InstancePerLifetimeScope();
         builder.RegisterType<SendCoalescer>().As<ISendCoalescer>().InstancePerLifetimeScope();
+
+        // Holds coalesced roster updates for parties no player is near. Server-only: it is the
+        // authority that decides what is worth sending, and a client coalescer has no peers to filter for.
+        builder.RegisterType<ReplicationRelevanceGate>().As<ICoalesceGate>().InstancePerLifetimeScope();
         builder.RegisterType<CoopSaveManager>().As<ICoopSaveManager>().InstancePerLifetimeScope();
         builder.RegisterType<JoinCampaignBaselineSender>()
             .As<IJoinCampaignBaselineSender>()

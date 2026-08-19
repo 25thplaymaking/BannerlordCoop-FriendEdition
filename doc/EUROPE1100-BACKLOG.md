@@ -244,9 +244,29 @@ and every reader is AI scoring or save serialisation; the names appear in no UI 
 file for the full argument. This is the template for the next pass: find AutoSync'd members that only
 the authority reads.
 
-**The structural fix is relevance filtering** — replicating a party's detail only to clients that can
-observe it. That is the order-of-magnitude win and it is a large piece of work across 511 broadcast
-sites; it wants its own design pass, not an incremental patch.
+**Relevance filtering, first cut, shipped.** `ReplicationRelevanceGate` holds coalesced roster
+updates for parties and settlements no player is within 100 map units of. It reaches the traffic
+without touching 511 broadcast sites because the two largest routes —
+`NetworkTroopRosterElementBatch` and `NetworkItemRosterUpdate`, together about **55% of all
+messages** — both already flow through `ISendCoalescer`, so gating that single flush covers them.
+
+It **holds, it does not drop**. Coalesced payloads merge (counts sum, sets take the latest), so an
+update held across many changes still carries the correct end state; a distant party whose roster
+churns costs one message instead of many. `MaximumHold` (5 s) bounds staleness, `FlushInstance`
+(the destroy path) bypasses the gate entirely, and every failure path sends — a wrongly held update
+is a desync, a wrongly sent one is a packet.
+
+The radius is generous on purpose: Bannerlord's party spotting range is single-digit map units, so
+100 is over ten times what a client could see, while Europe 1100 spans roughly 1,405 x 894 units, so
+one player's circle is ~2.5% of the map area. Effect is logged every 60 s as
+`[Relevance] held X of Y (Z%)`, and `ReplicationRelevanceGate.Enabled` turns it off for A/B against
+the packet profile.
+
+**Still to do.** `NetworkUpdatePartyBehavior` is the largest route by BYTES (14,157 messages /
+1.58 MB per 10 s) and is not gated: it carries party movement, which is what a client draws on the
+map, so holding it risks distant party icons visibly jumping. It does not use the coalescer either,
+so it needs its own path. That is the next reduction, and it needs a decision about how stale a
+distant party's position may be.
 
 **Where to look next.** Why one connected player generates tens of thousands of roster and market
 messages in ten seconds. Suspect full-state rather than on-change replication: `NetworkItemRosterUpdate`

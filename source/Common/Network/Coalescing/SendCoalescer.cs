@@ -10,6 +10,10 @@ public sealed class SendCoalescer : ISendCoalescer
     private readonly List<CoalesceKey> order = new();
     private readonly object gate = new();
 
+    // When each still-pending key was first enqueued, so a gated flush can bound how long it holds
+    // an update. Kept alongside `order` and cleared with it.
+    private readonly Dictionary<CoalesceKey, DateTime> firstEnqueuedUtc = new();
+
     public bool HasPending
     {
         get
@@ -35,31 +39,82 @@ public sealed class SendCoalescer : ISendCoalescer
 
             pending.Add(key, payload);
             order.Add(key);
+            firstEnqueuedUtc[key] = DateTime.UtcNow;
         }
     }
 
-    public void Flush(INetwork network)
+    public void Flush(INetwork network) => Flush(network, null);
+
+    public void Flush(INetwork network, ICoalesceGate sendGate)
     {
         if (network == null) throw new ArgumentNullException(nameof(network));
 
-        ICoalescedPayload[] toSend;
+        List<ICoalescedPayload> toSend;
         lock (gate)
         {
             if (pending.Count == 0) return;
 
-            toSend = new ICoalescedPayload[pending.Count];
-            for (int i = 0; i < order.Count; i++)
+            if (sendGate == null)
             {
-                toSend[i] = pending[order[i]];
-            }
+                toSend = new List<ICoalescedPayload>(pending.Count);
+                for (int i = 0; i < order.Count; i++) toSend.Add(pending[order[i]]);
 
-            pending.Clear();
-            order.Clear();
+                pending.Clear();
+                order.Clear();
+                firstEnqueuedUtc.Clear();
+            }
+            else
+            {
+                // Held keys stay in `order` in their original relative position, so what does go out
+                // this flush keeps the enqueue order the reliable stream depends on.
+                DateTime now = DateTime.UtcNow;
+                TimeSpan maximumHold = sendGate.MaximumHold;
+
+                toSend = new List<ICoalescedPayload>(order.Count);
+                List<CoalesceKey> held = new List<CoalesceKey>();
+
+                for (int i = 0; i < order.Count; i++)
+                {
+                    CoalesceKey key = order[i];
+
+                    bool expired = firstEnqueuedUtc.TryGetValue(key, out DateTime since) &&
+                        now - since >= maximumHold;
+
+                    if (!expired && !SendNowSafely(sendGate, key))
+                    {
+                        held.Add(key);
+                        continue;
+                    }
+
+                    toSend.Add(pending[key]);
+                    pending.Remove(key);
+                    firstEnqueuedUtc.Remove(key);
+                }
+
+                order.Clear();
+                order.AddRange(held);
+            }
         }
 
         foreach (var payload in toSend)
         {
             network.SendAll(payload.ToMessage());
+        }
+    }
+
+    /// <summary>
+    /// Asks the gate, treating any failure as "send it". A gate is an optimisation; a throwing gate
+    /// must not be able to strand an update and desync a client.
+    /// </summary>
+    private static bool SendNowSafely(ICoalesceGate sendGate, CoalesceKey key)
+    {
+        try
+        {
+            return sendGate.ShouldSendNow(key);
+        }
+        catch
+        {
+            return true;
         }
     }
 
@@ -95,6 +150,7 @@ public sealed class SendCoalescer : ISendCoalescer
                 {
                     (payloads ??= new List<ICoalescedPayload>()).Add(pending[key]);
                     pending.Remove(key);
+                    firstEnqueuedUtc.Remove(key);
                     order.RemoveAt(i);
                     continue;
                 }

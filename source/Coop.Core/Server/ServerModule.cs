@@ -3,6 +3,7 @@ using Common.LogicStates;
 using Common.Messaging;
 using Common.Network;
 using Common.Network.Coalescing;
+using Coop.Core.Server.Services.Replication;
 using Common.Network.Session;
 using Common.PacketHandlers;
 using Coop.Core.Common;
@@ -52,6 +53,10 @@ public class ServerModule : CommonModule
         // Holds coalesced roster updates for parties no player is near. Server-only: it is the
         // authority that decides what is worth sending, and a client coalescer has no peers to filter for.
         builder.RegisterType<ReplicationRelevanceGate>().As<ICoalesceGate>().InstancePerLifetimeScope();
+
+        // Holds any idempotent state message about an object no player is near, at the single point
+        // every broadcast passes through. Server-only: the authority decides what is worth sending.
+        builder.RegisterType<ReplicationRelevanceFilter>().As<ISendRelevanceFilter>().InstancePerLifetimeScope();
         builder.RegisterType<CoopSaveManager>().As<ICoopSaveManager>().InstancePerLifetimeScope();
         builder.RegisterType<JoinCampaignBaselineSender>()
             .As<IJoinCampaignBaselineSender>()

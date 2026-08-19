@@ -319,9 +319,51 @@ public abstract class CoopNetworkBase : INetwork, INetEventListener
         Send(netPeer, MessagePacket.Create(message, serializer));
     }
 
+    /// <summary>
+    /// Optional relevance filter. Set by the server container; null on a client, which has one peer and
+    /// nothing to filter for.
+    /// </summary>
+    public ISendRelevanceFilter RelevanceFilter { get; set; }
+
     public void SendAll(IMessage message)
     {
+        // The single point every broadcast passes through, and therefore the only place a relevance
+        // decision has to be made rather than repeated across 500-odd send sites. A filter that returns
+        // false has taken the message and will send it from FlushDue once it matters.
+        if (RelevanceFilter != null && !ShouldSendNowSafely(message)) return;
+
         SendAll(MessagePacket.Create(message, serializer));
+    }
+
+    /// <summary>
+    /// Asks the filter, treating any failure as "send it". A relevance filter is an optimisation; a
+    /// throwing one must not be able to swallow world state.
+    /// </summary>
+    private bool ShouldSendNowSafely(IMessage message)
+    {
+        try
+        {
+            return RelevanceFilter.ShouldSendNow(message);
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    /// <summary>Releases held messages that have become relevant. Safe to call when no filter is set.</summary>
+    protected void FlushRelevanceFilter()
+    {
+        if (RelevanceFilter == null) return;
+
+        try
+        {
+            RelevanceFilter.FlushDue(this);
+        }
+        catch
+        {
+            // Never let the release path take down the network update; the next poll retries.
+        }
     }
 
     public void SendAllBut(NetPeer excludedPeer, IMessage message)

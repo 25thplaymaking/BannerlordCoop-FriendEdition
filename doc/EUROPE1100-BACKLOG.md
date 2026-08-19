@@ -262,11 +262,34 @@ one player's circle is ~2.5% of the map area. Effect is logged every 60 s as
 `[Relevance] held X of Y (Z%)`, and `ReplicationRelevanceGate.Enabled` turns it off for A/B against
 the packet profile.
 
-**Still to do.** `NetworkUpdatePartyBehavior` is the largest route by BYTES (14,157 messages /
-1.58 MB per 10 s) and is not gated: it carries party movement, which is what a client draws on the
-map, so holding it risks distant party icons visibly jumping. It does not use the coalescer either,
-so it needs its own path. That is the next reduction, and it needs a decision about how stale a
-distant party's position may be.
+**Second cut: the whole send path.** `ReplicationRelevanceFilter` sits on
+`CoopNetworkBase.SendAll(IMessage)` — the single point every broadcast passes through — so it covers
+the entire replication surface, not just what happens to use the coalescer. It holds any message about
+an object no player is within 100 map units of, keeping only the latest per object per message type,
+and releases on relevance or after 10 s.
+
+Held only where holding is lossless:
+- every generated `*_SetNetworkMessage` (whole-member state set), which is what
+  `IInstanceScopedNetworkEvent` on `GenericNetworkEvent` exists to expose
+- `NetworkUpdatePartyBehavior` — the largest route by BYTES (14,157 messages / 1.58 MB per 10 s); it
+  carries its own position, so it needs no lookup, and it is a full behaviour snapshot
+- `NetworkUpdateTradeActionLogsForParty` — 842 messages but ~1 MB per 10 s, and it resends the whole
+  log list every time
+
+**Never** held: adds, removes, index changes, clears and dictionary upserts. Those describe a step
+rather than a state, and collapsing them would lose the steps in between — an add followed by a remove
+would arrive as only the remove. `ReplicationRelevanceFilterTests` pins that rule so a future message
+cannot quietly opt into being dropped.
+
+Positions resolve for `MobileParty`, `Settlement`, `PartyBase`, `MobilePartyAi`, `TroopRoster`,
+`Hero`, `Town` and `Village`. Anything unresolvable, unclassifiable, or that throws is sent
+immediately.
+
+**Remaining volume** is dictionary upserts, chiefly `TownMarketData__itemDict_Upsert` (9,747 per
+10 s). Those cannot be collapsed by keeping the latest, because each carries a different dictionary
+key. Reducing them means either keying the hold by dictionary key or not replicating distant town
+markets at all, and the second is the better answer once the effect of the current filters is
+measured.
 
 **Where to look next.** Why one connected player generates tens of thousands of roster and market
 messages in ten seconds. Suspect full-state rather than on-change replication: `NetworkItemRosterUpdate`

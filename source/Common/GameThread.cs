@@ -80,8 +80,85 @@ public class GameThread : IUpdateable
     private long m_WorstFrameTicks;
     private int m_WorstFrameActions;
     private int m_WorstBacklog;
+    private int m_WorstDeferred;
 
     private static double ToMs(long ticks) => 1000.0 * ticks / Stopwatch.Frequency;
+
+    #endregion
+
+    #region Drain budget
+
+    /// <summary>
+    /// Caps how long <see cref="Update"/> may spend running queued actions in one frame, so a burst
+    /// of marshaled work is spread across several frames instead of stopping the game inside one.
+    /// </summary>
+    /// <remarks>
+    /// Without this the pump takes the whole queue every frame and runs all of it, so the client's
+    /// frame time is whatever the server happened to send since the last one. That is survivable at
+    /// a steady rate and not survivable after a host-side stall: the dedicated host's autosave blocks
+    /// its game thread for over four seconds, and everything it could not send during that window
+    /// arrives at once. The client then executes the entire backlog in a single frame and stops dead
+    /// for about as long as the host did — the freeze players report, with no save indicator on screen
+    /// to explain it.
+    /// <para>
+    /// The queue is drained in order and whatever does not fit is simply left for the next frame, so
+    /// nothing is reordered and nothing is dropped — work is only deferred. Two rules bound how long a
+    /// deferral can last. The budget scales with the backlog, so a flood is cleared far faster than a
+    /// trickle. And an action a caller is blocked on is always run, budget or not: blocking callers
+    /// wait on a <see cref="BlockingTimeout"/> deadline, and because the queue is drained in order such
+    /// an action can only be at the head when it is reached.
+    /// </para>
+    /// <para>
+    /// Client-only, deliberately. This protects frame rendering, and the headless host has no frames to
+    /// protect; deferring work there would only delay the authority replies clients are timing out
+    /// against. <see cref="BudgetedDrain"/> turns it off for A/B measurement against the same
+    /// instrumentation that identified the problem.
+    /// </para>
+    /// </remarks>
+    public static bool BudgetedDrain = true;
+
+    /// <summary>Budget for a frame with a shallow queue: small enough to disappear into a 16 ms frame.</summary>
+    private static readonly TimeSpan MinimumDrainBudget = TimeSpan.FromMilliseconds(6);
+
+    /// <summary>
+    /// Ceiling for a frame with a deep queue. Deliberately well above the frame budget: once the client
+    /// is this far behind, clearing the backlog quickly matters more than a smooth frame, and a visibly
+    /// slow second beats a four-second freeze. It still yields often enough for the game to keep drawing.
+    /// </summary>
+    private static readonly TimeSpan MaximumDrainBudget = TimeSpan.FromMilliseconds(50);
+
+    /// <summary>Backlog at which the budget reaches <see cref="MaximumDrainBudget"/>, ramping linearly.</summary>
+    private const int BacklogAtMaximumBudget = 2000;
+
+    /// <summary>
+    /// How long a frame may spend draining at the given backlog, or null for "no limit" — the host, and
+    /// any client that has turned the budget off, drain exactly as they always did.
+    /// </summary>
+    /// <remarks>
+    /// The ramp is what keeps a deferral bounded. A shallow queue gets a budget small enough to vanish
+    /// into a frame; a queue deep enough to represent a host stall gets one large enough to clear it in
+    /// a second or so rather than trickling it out over a minute, which is what would actually put a
+    /// blocking caller past its <see cref="BlockingTimeout"/>.
+    /// </remarks>
+    public static TimeSpan? GetDrainBudget(int backlog)
+    {
+        if (!BudgetedDrain || ModInformation.IsServer) return null;
+
+        double ramp = Math.Min(1.0, (double)Math.Max(0, backlog) / BacklogAtMaximumBudget);
+        double milliseconds = MinimumDrainBudget.TotalMilliseconds +
+            ramp * (MaximumDrainBudget.TotalMilliseconds - MinimumDrainBudget.TotalMilliseconds);
+
+        return TimeSpan.FromMilliseconds(milliseconds);
+    }
+
+    /// <summary>Ticks this frame may spend, or -1 for "no limit".</summary>
+    private static long GetDrainBudgetTicks(int backlog)
+    {
+        TimeSpan? budget = GetDrainBudget(backlog);
+        if (!budget.HasValue) return -1;
+
+        return (long)(budget.Value.TotalMilliseconds * Stopwatch.Frequency / 1000.0);
+    }
 
     #endregion
 
@@ -92,68 +169,77 @@ public class GameThread : IUpdateable
             throw new ArgumentException("Wrong thread!");
         }
 
-        List<(Action Act, EventWaitHandle Wait, string Label, CancellationToken Cancellation)> toBeRun =
-            new List<(Action, EventWaitHandle, string, CancellationToken)>();
-
         int backlog;
         lock (Instance.m_QueueLock)
         {
             backlog = m_Queue.Count;
-            while (m_Queue.Count > 0)
-            {
-                toBeRun.Add(m_Queue.Dequeue());
-            }
         }
 
-        if (!Instrument)
+        long budgetTicks = GetDrainBudgetTicks(backlog);
+        long frameStart = Stopwatch.GetTimestamp();
+        int ranThisFrame = 0;
+
+        while (true)
         {
-            foreach ((Action Act, EventWaitHandle Wait, string Label, CancellationToken Cancellation) task in toBeRun)
+            (Action Act, EventWaitHandle Wait, string Label, CancellationToken Cancellation) task;
+
+            lock (Instance.m_QueueLock)
+            {
+                if (m_Queue.Count == 0) break;
+
+                // Decided on the head, before it is taken, so the action stays queued in order when
+                // it is deferred. Two exemptions keep the queue moving: the first action of a frame
+                // always runs, so a single expensive action can never stall the pump forever, and an
+                // action with a waiter always runs, because a caller is blocked on it against a
+                // deadline and it can only be seen here once everything ahead of it has run.
+                if (ranThisFrame > 0 &&
+                    budgetTicks >= 0 &&
+                    m_Queue.Peek().Wait == null &&
+                    Stopwatch.GetTimestamp() - frameStart >= budgetTicks)
+                {
+                    break;
+                }
+
+                task = m_Queue.Dequeue();
+            }
+
+            if (!Instrument)
             {
                 RunQueuedTask(task);
-            }
-            return;
-        }
-
-        long frameStart = Stopwatch.GetTimestamp();
-        foreach ((Action Act, EventWaitHandle Wait, string Label, CancellationToken Cancellation) task in toBeRun)
-        {
-            if (task.Cancellation.IsCancellationRequested)
-            {
-                task.Wait?.Set();
+                ranThisFrame++;
                 continue;
             }
 
             long actionStart = Stopwatch.GetTimestamp();
-            try
-            {
-                using (ActivateCancellation(task.Cancellation))
-                {
-                    task.Act?.Invoke();
-                }
-            }
-            finally
-            {
-                task.Wait?.Set();
-            }
+            RunQueuedTask(task);
             long actionTicks = Stopwatch.GetTimestamp() - actionStart;
+            ranThisFrame++;
 
             string label = task.Label ?? "(unlabeled)";
             m_PerLabel.TryGetValue(label, out (long Ticks, int Count) agg);
             m_PerLabel[label] = (agg.Ticks + actionTicks, agg.Count + 1);
         }
+
+        if (!Instrument) return;
+
         long frameTicks = Stopwatch.GetTimestamp() - frameStart;
 
         m_WindowFrames++;
-        m_WindowActions += toBeRun.Count;
+        m_WindowActions += ranThisFrame;
         m_WindowTicks += frameTicks;
         if (frameTicks > m_WorstFrameTicks)
         {
             m_WorstFrameTicks = frameTicks;
-            m_WorstFrameActions = toBeRun.Count;
+            m_WorstFrameActions = ranThisFrame;
         }
         if (backlog > m_WorstBacklog)
         {
             m_WorstBacklog = backlog;
+        }
+        int deferred = backlog - ranThisFrame;
+        if (deferred > m_WorstDeferred)
+        {
+            m_WorstDeferred = deferred;
         }
 
         if (m_ReportTimer.Elapsed >= ReportInterval)
@@ -177,7 +263,7 @@ public class GameThread : IUpdateable
             Logger.Information(
                 "[GameThread] {Frames} frames | {Actions} actions ({Rate:0}/s) | drain {Drain:0.0}ms " +
                 "({PerFrame:0.00}ms/frame) | worst frame {Worst:0.0}ms/{WorstActions} actions | " +
-                "max backlog {Backlog} | top: {Top}",
+                "max backlog {Backlog} | max deferred {Deferred} | top: {Top}",
                 m_WindowFrames,
                 m_WindowActions,
                 m_WindowActions / seconds,
@@ -186,6 +272,7 @@ public class GameThread : IUpdateable
                 ToMs(m_WorstFrameTicks),
                 m_WorstFrameActions,
                 m_WorstBacklog,
+                m_WorstDeferred,
                 top);
         }
 
@@ -196,6 +283,7 @@ public class GameThread : IUpdateable
         m_WorstFrameTicks = 0;
         m_WorstFrameActions = 0;
         m_WorstBacklog = 0;
+        m_WorstDeferred = 0;
         m_ReportTimer.Restart();
     }
 

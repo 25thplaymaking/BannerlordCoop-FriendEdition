@@ -1,5 +1,6 @@
 ﻿using Common;
 using GameInterface.Services.MapEvents;
+using GameInterface.Services.MobileParties.Extensions;
 using HarmonyLib;
 using System.Collections.Generic;
 using System.Linq;
@@ -189,20 +190,43 @@ internal class DefaultMobilePartyAIModelPatches
         MobileParty targetParty,
         ref bool __result)
     {
+        // Each branch below only ever clears __result, so returning at the first refusal is equivalent
+        // to the original run-them-all form, and it lets the diagnostics name WHICH rule refused.
         if (!__result)
+        {
+            PlayerAggressionDiagnostics.Record(party, targetParty, PlayerAggressionDiagnostics.NativeDeclined);
             return;
+        }
 
-        // TODO test with player parties
+        // Native applies ShouldBeIgnored only to MobileParty.MainParty. Applying it to every target is
+        // a coop addition, and on a dedicated host — where a player's party is an ordinary party rather
+        // than the main one — it is the only rule here that treats players differently from how native
+        // would. That makes it the prime suspect for "hostile AI never initiates"; see
+        // PlayerAggressionDiagnostics for why this is measured before it is changed.
         if (targetParty.ShouldBeIgnored)
+        {
             __result = false;
+            PlayerAggressionDiagnostics.Record(party, targetParty, PlayerAggressionDiagnostics.TargetIgnored);
+            return;
+        }
 
         if (!CanAttackTargetParty(party, targetParty))
+        {
             __result = false;
+            PlayerAggressionDiagnostics.Record(party, targetParty, PlayerAggressionDiagnostics.AttackPrevented);
+            return;
+        }
 
         // Don't consider attacking a party that is held in a conversation with a player; the interaction guard
         // would block the attack anyway, and this keeps the AI from chasing an unattackable target.
         if (ConversationPartyHold.IsInPlayerConversation(targetParty))
+        {
             __result = false;
+            PlayerAggressionDiagnostics.Record(party, targetParty, PlayerAggressionDiagnostics.InConversation);
+            return;
+        }
+
+        PlayerAggressionDiagnostics.Record(party, targetParty, PlayerAggressionDiagnostics.Allowed);
     }
     [HarmonyPatch(typeof(DefaultMobilePartyAIModel))]
     internal class FixGarrisonFleePatch

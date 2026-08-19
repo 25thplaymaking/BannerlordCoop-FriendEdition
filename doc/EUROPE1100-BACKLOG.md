@@ -126,10 +126,65 @@ Ruled out along the way:
 - Coop's attack-protection (`DefaultMobilePartyAIModelPatches.PreventFactionAttacksUntil`) is **not**
   a blanket block — it is applied only on safe-passage barter and captivity release.
 
-**Where to look next.** Whether AI parties ever select a client-controlled party as a target at all
-(native targeting leans on `MainParty`/`IsPlayerParty` in several models), and whether
-`HandleEncounterForMobileParty` is reaching the collision test for them. Note the design intent:
-any suppression of hostility should apply **only during battle**, never on the campaign map.
+**Confirmed still true on 2026-08-19, and narrowed.** Over 26 hours the host published
+`ConversationRequested` **zero** times while **625** `MapEventInitialized` and 341 map-event
+conversations occurred between AI parties. So AI parties fight each other perfectly well; what never
+happens is an AI party choosing a *player* party. Players describe exactly that shape: bandits will
+join a battle already running, but walk past a lone player on the map.
+
+**The decision path, traced.** For an AI party to attack a player on a dedicated host:
+
+1. `DefaultMobilePartyAIModel.CalculateInitiativeScoresForEnemy` scores each nearby enemy, gated by
+   `ShouldConsiderAttacking(party, target)`.
+2. A positive score sets `ShortTermBehavior = EngageParty` with the player's `PartyBase`.
+3. `EncounterManager.HandleEncounterForMobileParty` sees `IsCurrentlyEngagingParty` and calls
+   `PartyBase.CanPartyInteract`, then `OnPartyInteraction` → `StartPartyEncounter`.
+4. `EncounterManagerPatches.TryRequestServerPlayerConversation` publishes `ConversationRequested` —
+   the only bridge, since the host has no `MainParty`.
+
+**Prime suspect: our own postfix on `ShouldConsiderAttacking`.** Native consults `ShouldBeIgnored`
+only for `MobileParty.MainParty`:
+
+```csharp
+bool num = targetParty != MobileParty.MainParty || !MobileParty.MainParty.ShouldBeIgnored;
+```
+
+`DefaultMobilePartyAIModelPatches.ShouldConsiderAttacking_Postfix` applies it to **every** target,
+and carried a literal `// TODO test with player parties`. On a dedicated host a player's party is an
+ordinary party, not the main one, so this is the one rule in the chain that treats players
+differently from how native would. `ShouldBeIgnored` is `_ignoredUntilTime.IsFuture || IsInRaftState`,
+and `MobileParty._ignoredUntilTime` **is an AutoSync'd field** (`MobilePartySync`), so a window set
+by a client's local native flow replicates to the host and suppresses AI there. The same flag gates
+step 3 independently: `PartyBase.CanPartyInteract` requires `mobileParty.IsMainParty || !target.ShouldBeIgnored`,
+and on the host no engaging party is ever the main party.
+
+**Ruled out this pass:**
+- **War status.** `IsEnemy` is `FactionManager.IsAtWarAgainstFaction`, and
+  `DefaultDiplomacyModel.GetShallowDiplomaticStance` returns `War` whenever
+  `faction1.IsBanditFaction != faction2.IsBanditFaction`. Bandits are at constant war with every
+  non-bandit faction including a freshly created coop clan, so this passes.
+- **`AiEngagePartyBehavior`.** Not the bandit path at all — it returns early unless the thinking
+  party is in a kingdom faction and has a `LeaderHero`.
+- **`AiPatrollingBehavior`.** Explicitly excludes `IsBandit`.
+- **The locator dropping distant parties.** `LocatorGrid` is a fixed 32×32 grid of 5-unit nodes whose
+  `MapCoordinates` wraps modulo, so positions beyond the map scene's terrain size are folded back
+  rather than lost. Unlike the weather grid in §8, proximity search is not a terrain-size victim.
+
+**Shipped this pass: measurement, not a behaviour change.** `PlayerAggressionDiagnostics` counts, per
+reason, why AI parties do or do not attack a player, in two stages — was the AI *allowed* to consider
+the player (`native-declined` / `target-should-be-ignored` / `attack-protection` /
+`player-in-conversation` / `allowed`), and did it then actually commit (`engage-party-set`). Enable
+on the host with:
+
+```
+coop.debug.mobileparty.player_aggression true
+```
+
+then walk a player past hostile parties; a summary logs every 30 s. A dominant
+`target-should-be-ignored` confirms the suspect above. `allowed` with no `engage-party-set` moves the
+search to scoring or `CanPartyInteract`. Deliberately not fixed blind: guessing wrong here either
+leaves the world passive or has every bandit on the map converge on one player, and one live sample
+settles it.
 
 ## 6. Replication traffic peaks at ~6 MB/s to a single client
 
@@ -147,51 +202,78 @@ with sustained samples at 3.3 MB/s and 1.1 MB/s. The dominant senders in a singl
 EoE's parties and its far larger settlement/market set multiply every per-party and per-settlement
 replication route. This is independent of the autosave stall in §7 and scales with player count.
 
-**The problem is packet COUNT, not volume.** 34,548 troop-roster packets in ten seconds is ~3,455/s
-averaging 68 bytes each; item-roster updates average 38 bytes. Roughly 6,500 tiny datagrams a second
-to ONE client, where per-packet overhead dominates the payload entirely. That is the shape of the
-"constant stutter" players report.
+**CORRECTION (2026-08-19): this is message volume, not packet count.** The earlier reading of this
+table — "~6,500 tiny datagrams a second" — was wrong, and the fix it proposed was already shipped.
 
-Coalescing already exists and is already wired: `TroopRosterDeltaHandler` takes an `ISendCoalescer`
-keyed `CoalesceKey(ElementBatchChannel, rosterId, characterId)`. That merges repeated updates for
-the SAME roster and character — which is not where the volume is. The volume is tens of thousands of
-DISTINCT (roster, character) pairs across 4292 parties, and a per-key coalescer cannot reduce that
-by design.
+`PacketProfiler` records at the **logical** send, not at the wire. `CoopNetworkBase.Send` profiles
+each `MessagePacket` and then calls `EnqueueMessage`, which buffers per peer and emits an
+`AggregateMessagePacket` once the batch reaches `AggregationBudgetBytes` (1200 B, sized against
+LiteNetLib's MTU and its 64-*packet* reliable window). So the 34,548 troop-roster entries above are
+34,548 **messages**, which left as roughly `2,356,248 / 1200` ≈ 2,000 datagrams. Cross-key
+aggregation is not missing — it is general, it is already applied to every message route, and
+`AggregateMessagePacket` appearing in the profile with only framing bytes is that batching working
+rather than an unused transport.
 
-**Proposed change.** Aggregate ACROSS keys, not just within them. `AggregateMessagePacket` and its
-handler already exist and were observed carrying 9,394 packets in the same window, so the transport
-is there — the roster and item routes simply do not use it. Batch a tick's worth of coalesced
-payloads into aggregate packets, then re-read the same counters.
+**What is actually expensive** is producing ~17,800 replication messages a second in the first
+place. Every one is deserialized and then applied as a separate action on the client's game thread,
+and the pump used to run the entire arrival backlog inside a single frame — which is the "constant
+stutter", and the same mechanism as the freeze in §7. The drain budget in `GameThread.Update` stops
+a backlog landing in one frame; it does not reduce the work, so the message rate is still worth
+attacking at the source.
 
-**Do not attempt this blind.** It is the hottest replication path in the project, a mistake desyncs
-rosters rather than merely slowing them, and the counters above make verification cheap. Profile
-first, change second.
+**Where to look next.** Why one connected player generates tens of thousands of roster and market
+messages in ten seconds. Suspect full-state rather than on-change replication: `NetworkItemRosterUpdate`
+averages 38 bytes and `TownMarketData__itemDict_Upsert` 53, which is the shape of "send every entry"
+rather than "send what changed". The peak sample here (5.97 MB/s) was taken during a join baseline,
+not steady state — an idle campaign now profiles at 108 bytes/sec — so measure during real play
+before sizing the problem.
 
-## 7. Host: ~4.5 s game-thread stall every 5 minutes (autosave)
+**Do not chase per-packet framing.** It is already handled, and the 1200-byte budget has a written
+rationale tied to MTU discovery. The remaining win is fewer messages, not better packing.
 
-Not a bug — a big world meeting a synchronous save.
+## 7. Host: ~4.5 s game-thread stall on every autosave
 
-| autosave (UTC) | stall |
+Not a bug — a big world meeting a save that cannot be made asynchronous. Measured breakdown of one
+real host save (`SaveContext` emits these blocks itself, they land in the journal):
+
+| block | time |
 |---|---|
-| 23:59:16 | 3826 ms |
-| 00:09:16 | 3995 ms |
-| 00:24:16 | 4096 ms |
-| 00:34:17 | 4564 ms |
-| 00:39:17 | 4544 ms |
+| `SaveContext::CollectObjects` (serial graph walk) | 0.285 s |
+| `SaveContext::CollectSaveDataForObject::Objects` | 1.474 s |
+| `SaveContext::CollectSaveDataForObject::Containers` | 2.361 s |
+| `SaveContext::Saving Objects` + `Saving Containers` | 0.379 s |
+| **`SaveContext::Save`** | **4.618 s** |
+| `Save Process` (adds compression and the file write) | 6.043 s |
 
-Save payload is **204.9 MB** uncompressed (ObjectData 112 MB + ContainerData 87 MB, ~2711
-parties), against roughly 19 MB for the old Calradia world. It **plateaus** rather than growing
-without bound — object data went flat at 112.4 MB and container data settled at 87.3 MB as the
-world filled in — so the stall stabilises around 4.5 s rather than climbing all session.
+Payload: header 14.0 MB, strings 1.0 MB, objects 111.3 MB, containers 91.0 MB. It **plateaus** as
+the world fills in rather than growing without bound.
 
-**Levers.**
-- `autosaveMinutes` in `CoopData/DedicatedServer/server-config.json` (currently `5`). Read at boot,
-  no config watcher, so a change needs a restart. Trades spike frequency against progress lost on a
-  host death.
-- Proper fix: the save should not block the game thread. `DedicatedServer.Core` already owns
-  autosave — it has `NativeAutoSaveSuppressPatch` and an `AutosaveMinutes` setter — so the hook to
-  make it asynchronous, or to defer it to a natural pause, exists. **That module's source is not in
-  this repo**, which is the blocker.
+**Why it cannot simply be made faster.** Both dominant blocks are *already* parallel — TaleWorlds
+runs them through `TWParallel.ForWithoutRenderThread`, and the host confirms the width it gets:
+`Max Dexree of Parallelism is set to: 30` on its 32-thread Ryzen. The file write is already async
+(`AsyncFileSaveDriver`). What is left is reading a live 205 MB object graph, which has to happen on
+the game thread because the graph is the campaign. Lock contention was considered and rejected:
+`SaveContext.AddOrGetStringId` does take a single global lock, but `Saving Objects` takes the same
+lock through `GetStringId` and costs only 0.201 s, so the lock is not where the seconds are.
+
+**What was done instead — move it, and stop hiding it.**
+- `DeferAutosaveWhileCampaignRunningPatch` holds the host's autosave tick until
+  `TimeControlMode.Stop`, capped at 10 minutes. The campaign is paused roughly half the wall clock,
+  and a stall taken while paused costs nothing.
+- `autosaveMinutes` raised to 20 in `CoopData/DedicatedServer/server-config.json` (read at boot; a
+  change needs a restart).
+- `SavePatches` now raises `GameSaveStateChanged` around `Game.Save`, so clients show the native
+  saving indicator for the whole stall. **This was the "no UI on screen" complaint, and the cause is
+  worth recording:** the notification pipeline was complete end to end, and simply never fired,
+  because the dedicated host does not autosave through `SaveHandler`. It builds the metadata itself
+  and calls `Game.Current.Save(metaData, name, new AsyncFileSaveDriver(), callback)` directly, so
+  the existing patches on `SaveHandler.OnSaveStarted` / `OnSaveEnded` were never reached.
+- `GameThread.Update` no longer applies a whole arrival backlog in one frame (see §6), so the burst
+  that follows the stall no longer freezes the client for about as long as the host froze.
+
+**Still open.** The stall itself. The only real reductions left are saving less (fewer parties, or
+excluding data from the graph, which changes the save format) or moving the collect off the game
+thread (which the engine's design forbids). Both are large. Scheduling it is the right trade for now.
 
 ## 8. Host: the headless map scene reports the wrong terrain size
 

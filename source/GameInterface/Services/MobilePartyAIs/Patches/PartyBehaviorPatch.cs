@@ -53,6 +53,18 @@ public static class PartyBehaviorPatch
 
         RepairInvalidSettlementTarget(__instance, newAiBehavior, interactablePoint, ref bestTargetPoint);
 
+        // Stage two of the aggression trace: the AI was allowed to consider a player and has now
+        // actually committed to closing on them. Allowed-with-no-commits means the block is further
+        // down, in scoring or CanPartyInteract, rather than in the permission checks.
+        if (PlayerAggressionDiagnostics.Enabled &&
+            newAiBehavior == AiBehavior.EngageParty &&
+            interactablePoint is PartyBase engageTarget &&
+            engageTarget.IsMobile)
+        {
+            PlayerAggressionDiagnostics.Record(
+                __instance._mobileParty, engageTarget.MobileParty, PlayerAggressionDiagnostics.Engaged);
+        }
+
         __state = !BehaviorIsSame(__instance, newAiBehavior, interactablePoint, bestTargetPoint) &&
             __instance._mobileParty.IsControlledByThisInstance();
         if (!__state)

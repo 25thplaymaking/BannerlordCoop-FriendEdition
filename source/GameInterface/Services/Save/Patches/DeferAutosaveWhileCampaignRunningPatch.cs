@@ -50,6 +50,13 @@ internal static class DeferAutosaveWhileCampaignRunningPatch
     /// <summary>How long the save may be held back before it is taken regardless.</summary>
     internal static readonly TimeSpan MaximumDeferral = TimeSpan.FromMinutes(10);
 
+    /// <summary>
+    /// Shortest hold worth reporting. The tick is called far more often than a save is actually due —
+    /// <c>c()</c> makes its own due check after this prefix runs — so most holds end almost at once and
+    /// mean nothing happened.
+    /// </summary>
+    private static readonly TimeSpan NotableHold = TimeSpan.FromSeconds(30);
+
     private static DateTime? deferringSince;
     private static bool loggedDeferral;
 
@@ -118,9 +125,16 @@ internal static class DeferAutosaveWhileCampaignRunningPatch
             {
                 if (deferringSince.HasValue)
                 {
-                    Logger.Information(
-                        "Autosave released after {HeldSeconds:N0}s; the campaign is paused.",
-                        (DateTime.UtcNow - deferringSince.Value).TotalSeconds);
+                    // Only a hold long enough to have moved a save is worth a line. The tick runs
+                    // constantly and most holds end within a second, so logging every one of them
+                    // buries the saves themselves; SavePatches records those, with their real cost.
+                    double heldSeconds = (DateTime.UtcNow - deferringSince.Value).TotalSeconds;
+                    if (heldSeconds >= NotableHold.TotalSeconds)
+                    {
+                        Logger.Information(
+                            "Released the host autosave tick after {HeldSeconds:N0}s; the campaign is paused.",
+                            heldSeconds);
+                    }
                 }
 
                 deferringSince = null;
@@ -133,7 +147,8 @@ internal static class DeferAutosaveWhileCampaignRunningPatch
             if (DateTime.UtcNow - deferringSince.Value >= MaximumDeferral)
             {
                 Logger.Warning(
-                    "Autosave held for {HeldMinutes:N0} min without the campaign pausing; taking it now.",
+                    "The host autosave tick has been held for {HeldMinutes:N0} min without the campaign " +
+                    "pausing; releasing it so a save cannot be starved.",
                     MaximumDeferral.TotalMinutes);
                 deferringSince = null;
                 loggedDeferral = false;
@@ -143,7 +158,7 @@ internal static class DeferAutosaveWhileCampaignRunningPatch
             if (!loggedDeferral)
             {
                 loggedDeferral = true;
-                Logger.Information("Autosave is due; holding it until the campaign pauses.");
+                Logger.Debug("Holding the host autosave tick while the campaign is running.");
             }
 
             return false;

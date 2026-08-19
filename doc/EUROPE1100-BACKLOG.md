@@ -579,3 +579,37 @@ Both came from checking the shipped `SubModule.xml` and DLLs instead of trusting
 Coverage is now provably complete: exactly four of the eleven Europe1100 assemblies plus
 SnowballingKingdoms reference `CampaignBehaviorBase`, and every assembly referencing `CampaignEvents`
 also declares one — so no EoE code subscribes to campaign events outside the gated set.
+
+## 15. Incidents (choice popups) never appear — deliberately suppressed, undocumented
+
+**Symptom.** The influence/relation/morale choice popups Bannerlord offers on leaving a settlement,
+ending a battle or finishing a conversation — "Rooster theft", bury the dead, let the men hunt — never
+occur in co-op.
+
+**Cause, exactly.** `GameInterface/Services/UI/Patches/IncidentDisable.cs` prefixes
+`IncidentsCampaignBehaviour.InvokeIncident` with an unconditional `return false`. It was added in
+`84aeb90af` with the whole commit message "Incidents (random events) disabled" and no rationale, and
+unlike the ~145 other disable patches it carries no `ModInformation` gate — so it kills them on both
+peers. `InvokeIncident` does nothing but `mapState.NextIncident = incident`, i.e. queue the popup for
+the map UI, so blocking it means nothing is ever presented, no option is chosen and no consequence
+runs.
+
+**Why it cannot simply be deleted.**
+
+*The host can never raise one.* Every trigger is gated on `MobileParty.MainParty` —
+`OnSettlementEntered`, `OnSettlementLeft`, `OnMapEventEnded` (`evt.IsPlayerMapEvent`),
+`ConversationEnded`, the siege check, plus `TryInvokeIncident`'s `Hero.MainHero.IsPrisoner` guard. On a
+dedicated host MainParty is a placeholder that never enters a settlement or fights. Incidents are a
+client-side feature by construction.
+
+*Their consequences are authoritative writes on a replica.* Options resolve through
+`GiveGoldAction`, `ChangeRelationAction.ApplyPlayerRelation` and `SiegeAftermathAction`, and
+`IncidentEffect.Consequence` gates each on `MBRandom.RandomFloat`. A client presenting the popup and
+running the consequence locally would roll its own outcome and mutate gold, relations and crime rating
+on a replica — the same divergence class as the stranded-health bug.
+
+**What enabling them takes.** Route the RESOLUTION, not the presentation: the client shows the popup
+and submits the chosen option id, the server runs the consequence, and the resulting gold, relation and
+morale changes replicate as they already do — the `AuthorityRoute` shape kingdom creation uses. That is
+a feature with real desync surface across five action types, not a patch deletion, so it is not being
+enabled as a pre-deploy change. The patch now documents all of this in place.

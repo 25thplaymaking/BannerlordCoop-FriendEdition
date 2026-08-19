@@ -87,7 +87,7 @@ public sealed class ConversionBootstrap
     /// Brings every conversion module up to its pinned version. Never throws.
     /// </summary>
     /// <param name="modulesDir">The resolved install's <c>Modules</c> folder.</param>
-    public ConversionResult Ensure(string modulesDir)
+    public ConversionResult Ensure(string modulesDir, bool neutralizeShaderCache = false)
     {
         if (string.IsNullOrWhiteSpace(modulesDir) || !Directory.Exists(modulesDir))
             return new ConversionResult(ConversionOutcome.Failed, "The Bannerlord Modules folder could not be found.");
@@ -134,6 +134,24 @@ public sealed class ConversionBootstrap
             }
         }
 
+        if (neutralizeShaderCache)
+        {
+            foreach (ConversionModule module in Conversion)
+            {
+                try
+                {
+                    if (NeutralizeShaderCache(Path.Combine(modulesDir, module.ModuleId)))
+                        installed.Add(module.ModuleId + " (shader cache)");
+                }
+                catch (Exception error)
+                {
+                    // Never fail a launch over this: the incomplete sack costs frame hitches, a
+                    // missing module costs the session.
+                    failures.Add($"{module.ModuleId} shader cache: {error.Message}");
+                }
+            }
+        }
+
         if (failures.Count > 0)
             return new ConversionResult(ConversionOutcome.Failed,
                 "Some Europe 1100 modules could not be installed — " + string.Join("; ", failures), missing);
@@ -158,6 +176,33 @@ public sealed class ConversionBootstrap
     /// Workshop copy declares the very same Id and Version as the patched one and would read as
     /// current while still demanding v1.4.7.x natives.
     /// </remarks>
+    /// <summary>
+    /// Renames a conversion module's precompiled shader caches aside so the engine falls back to the
+    /// base game's complete shader sources. Returns true when it moved something.
+    /// </summary>
+    /// <remarks>
+    /// See <c>LauncherConfig.NeutralizeConversionShaderCache</c> for why. Renamed rather than
+    /// deleted so it can be put straight back, and idempotent so repeated launches do nothing once
+    /// it has moved.
+    /// </remarks>
+    internal static bool NeutralizeShaderCache(string moduleDir)
+    {
+        string shaders = Path.Combine(moduleDir, "Shaders");
+        if (!Directory.Exists(shaders)) return false;
+
+        bool moved = false;
+        foreach (string sack in Directory.GetFiles(shaders, "*.sack", SearchOption.AllDirectories))
+        {
+            string disabled = sack + ".disabled";
+            if (File.Exists(disabled)) continue;
+
+            File.Move(sack, disabled);
+            moved = true;
+        }
+
+        return moved;
+    }
+
     internal static bool ManifestMatches(string moduleDir, byte[] expected)
     {
         string manifest = Path.Combine(moduleDir, "SubModule.xml");

@@ -66,6 +66,7 @@ public class CoopServer : CoopNetworkBase, ICoopServer
         Lazy<IOverloadedPeerManager> overloadedPeerManager,
         ISendCoalescer coalescer,
         ICoalesceGate sendGate,
+        ISendRelevanceFilter relevanceFilter,
         ICommonSerializer serializer,
         CancellationTokenSource sessionCancellation) : base(configuration, serializer, sessionCancellation)
     {
@@ -83,6 +84,10 @@ public class CoopServer : CoopNetworkBase, ICoopServer
         this.overloadedPeerManager = overloadedPeerManager;
         this.coalescer = coalescer;
         this.sendGate = sendGate;
+
+        // Assigned rather than injected into the base: CoopNetworkBase is shared with the client, which
+        // has one peer and nothing to filter for.
+        RelevanceFilter = relevanceFilter;
 
         // Netmanager initialization
         netManager.NatPunchEnabled = true;
@@ -241,6 +246,9 @@ public class CoopServer : CoopNetworkBase, ICoopServer
             // eventually goes out is still the correct end state. See ReplicationRelevanceGate.
             GameThread.RunSafe(() => coalescer.Flush(this, sendGate));
         }
+
+        // Release anything the relevance filter was holding that a player has now come near.
+        FlushRelevanceFilter();
 
         // Send any sub-budget aggregated messages so nothing waits longer than one poll interval.
         FlushPendingMessages();

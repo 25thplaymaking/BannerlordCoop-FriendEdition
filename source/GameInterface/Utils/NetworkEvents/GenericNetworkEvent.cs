@@ -3,9 +3,14 @@ using GameInterface.Services.ObjectManager;
 
 namespace GameInterface.Utils.NetworkEvents
 {
-    public abstract record GenericNetworkEvent<TInstance, TValue> : IEvent
+    public abstract record GenericNetworkEvent<TInstance, TValue> : IEvent, IInstanceScopedNetworkEvent
     {
         public abstract string InstanceId { get; set; }
+
+        /// <summary>Exposes the generic parameter so a non-generic filter can resolve the instance.</summary>
+        public System.Type InstanceType => typeof(TInstance);
+
+        string IInstanceScopedNetworkEvent.InstanceId => InstanceId;
 
         public GenericNetworkEvent()
         {

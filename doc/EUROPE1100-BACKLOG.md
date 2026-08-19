@@ -128,7 +128,41 @@ for "Validating modules..."). Then measure the real load time before deciding wh
 itself needs work — 219 MB per join, per player, is also worth weighing against §4's replication
 volume.
 
-## 4. Player death in a hideout resolves as a win
+## 4. Player death in a hideout resolves as a win — DIAGNOSED
+
+**Native behaviour.** Go down in a hideout and your men drag you out wounded. The hideout is
+untouched and has to be raided again once the hero heals.
+
+**Co-op behaviour.** You can enter, die, and still be paid for clearing it.
+
+**Diagnosed 2026-08-19. Two independent gaps, either of which alone causes it.**
+
+*1. The consequence protocol has no defeat outcome.* `HideoutCampaignConsequence` has exactly four
+values — `PrepareMission`, `SetAttackCooldown`, `GrantClearRewards`, `PrepareDirectAssaultMission`.
+There is no "the attackers were beaten off" case, so even a correctly detected defeat has no way to be
+expressed to the authority or applied to the hideout.
+
+*2. The hideout defeat rule never runs.* The reward request IS gated —
+`HideoutCampaignBehavior.GameMenuHideoutPlaceOnInit` only publishes `GrantClearRewards` when
+`battle.WinningSide == encounter.PlayerSide`. The problem is what sets `WinningSide`. In native, a
+hideout is decided by the hero: `HideoutMissionController` ends the mission as a player defeat when the
+main agent goes down, whatever troops remain. Co-op substitutes its own controllers
+(`CoopBattlesController`, `CoopBattleDeploymentMissionController`) and there is no co-op equivalent of
+the hideout rule, so the outcome falls through to ordinary map-event resolution — which counts
+surviving roster troops, sees the squad the player brought, and calls it a win.
+
+**What fixing it takes.** Both halves, in order:
+- add a defeat consequence to the enum and handler that sets the hideout's next-attack cooldown and
+  grants nothing, alongside the existing `SetAttackCooldown` plumbing that already exists for the
+  send-troops failure path;
+- reinstate the hero-down rule for hideout missions in the co-op battle controller, so
+  `WinningSide` reflects the hero rather than the roster before the menu reads it;
+- wound the hero and return the party to the map, which is the visible half players expect.
+
+The `SetAttackCooldown` path already proves the authority route can leave a hideout intact after a
+failed attempt, so this is filling in a missing case rather than new machinery.
+
+## 4a. Original note
 
 Dying in a hideout fight cleared the hideout and reported a victory. Native runs a distinct defeat
 path here — the player is knocked out and companions pull them clear — and that flow is not

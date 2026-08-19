@@ -101,8 +101,25 @@ public sealed class LauncherConfig
     /// uncatalogued, so no receipt content or configuration hash covers their <c>Shaders</c>
     /// directory.
     /// </para>
+    /// <para>
+    /// DEFAULT CHANGED TO FALSE, 2026-08-19. This shipped to fix models tearing through the ground,
+    /// and re-reading the client logs shows it cannot have been the cause: the missing-variant
+    /// entries appear hours BEFORE the cache was ever renamed aside, so the artifact predates it.
+    /// The one variant family that misses in bulk — <c>pbr_terrain</c>, 2,112 times — never compiles
+    /// at runtime either, because the BASE game ships its own <c>compressed_shader_cache.sack</c>
+    /// that satisfies it; those misses are the conversion's cache being consulted first and are
+    /// harmless. What the conversion's cache genuinely provides is 72,024 precompiled variants for
+    /// its own materials, and renaming it aside throws those away in exchange for runtime
+    /// compilation — which is a CAUSE of hitching, not a cure.
+    /// </para>
+    /// <para>
+    /// So this is off by default: it modifies a 979 MB game file on a player's disk to fix something
+    /// it demonstrably does not fix. The flag stays so it can still be A/B'd from the published
+    /// config without a rebuild, and <c>ConversionBootstrap</c> still restores a cache it renamed
+    /// previously when the flag is off.
+    /// </para>
     /// </remarks>
-    public bool NeutralizeConversionShaderCache { get; set; } = true;
+    public bool NeutralizeConversionShaderCache { get; set; } = false;
 
     internal string? GetBlockedModuleInToken()
     {

@@ -134,21 +134,31 @@ public sealed class ConversionBootstrap
             }
         }
 
-        if (neutralizeShaderCache)
+        foreach (ConversionModule module in Conversion)
         {
-            foreach (ConversionModule module in Conversion)
+            try
             {
-                try
+                string moduleDir = Path.Combine(modulesDir, module.ModuleId);
+
+                // Restoring is not merely "do nothing" when the flag is off. A player who ran an
+                // earlier launcher already has the cache renamed aside on disk, and leaving it there
+                // would keep 979 MB of precompiled variants dead forever while they compile at
+                // runtime instead. Turning the option off has to actually put it back.
+                if (neutralizeShaderCache)
                 {
-                    if (NeutralizeShaderCache(Path.Combine(modulesDir, module.ModuleId)))
-                        installed.Add(module.ModuleId + " (shader cache)");
+                    if (NeutralizeShaderCache(moduleDir))
+                        installed.Add(module.ModuleId + " (shader cache disabled)");
                 }
-                catch (Exception error)
+                else if (RestoreShaderCache(moduleDir))
                 {
-                    // Never fail a launch over this: the incomplete sack costs frame hitches, a
-                    // missing module costs the session.
-                    failures.Add($"{module.ModuleId} shader cache: {error.Message}");
+                    installed.Add(module.ModuleId + " (shader cache restored)");
                 }
+            }
+            catch (Exception error)
+            {
+                // Never fail a launch over this: a shader cache in the wrong state costs frame
+                // hitches, a missing module costs the session.
+                failures.Add($"{module.ModuleId} shader cache: {error.Message}");
             }
         }
 
@@ -201,6 +211,38 @@ public sealed class ConversionBootstrap
         }
 
         return moved;
+    }
+
+    /// <summary>
+    /// Puts back a shader cache an earlier launcher renamed aside, and reports whether anything moved.
+    /// </summary>
+    /// <remarks>
+    /// The inverse of <see cref="NeutralizeShaderCache"/>. A live <c>.sack</c> already sitting beside
+    /// the disabled one wins — the disabled copy is then stale debris from a partially applied run,
+    /// and it is removed rather than restored over a good file.
+    /// </remarks>
+    internal static bool RestoreShaderCache(string moduleDir)
+    {
+        string shaders = Path.Combine(moduleDir, "Shaders");
+        if (!Directory.Exists(shaders)) return false;
+
+        bool changed = false;
+        foreach (string disabled in Directory.GetFiles(shaders, "*.sack.disabled", SearchOption.AllDirectories))
+        {
+            string sack = disabled.Substring(0, disabled.Length - ".disabled".Length);
+
+            if (File.Exists(sack))
+            {
+                File.Delete(disabled);
+                changed = true;
+                continue;
+            }
+
+            File.Move(disabled, sack);
+            changed = true;
+        }
+
+        return changed;
     }
 
     internal static bool ManifestMatches(string moduleDir, byte[] expected)

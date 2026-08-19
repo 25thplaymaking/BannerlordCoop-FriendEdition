@@ -1,5 +1,7 @@
 ﻿using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Reflection;
@@ -103,6 +105,7 @@ public partial class MainWindow : Window
         CloseButton.Click += (_, _) => Close();
         JoinButton.Click += OnPrimaryClicked;
         GatherLogsButton.Click += OnGatherLogsClicked;
+        ReclaimSpaceButton.Click += OnReclaimSpaceClicked;
         _statusTimer.Tick += async (_, _) => await OnStatusTickAsync();
 
         MusterTab.Checked += (_, _) => ShowPanel(MusterPanel);
@@ -1477,5 +1480,93 @@ public partial class MainWindow : Window
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Offers to remove module folders nothing in the co-op loadout uses.
+    /// </summary>
+    /// <remarks>
+    /// Updates used to leave a module behind whenever a later suite stopped shipping it, so long-running
+    /// installs carry copies — sometimes whole conversions — that nothing loads. Automatic pruning now
+    /// handles that going forward, but only for installs made after it shipped; this recovers what has
+    /// already accumulated.
+    /// <para>
+    /// Nothing is deleted without the player saying so. The scan identifies unused folders by
+    /// elimination, which also catches mods they installed themselves for single-player, and the
+    /// launcher has no business removing those on its own. The prompt therefore names every folder and
+    /// says which ones a feed receipt proves the launcher installed.
+    /// </para>
+    /// </remarks>
+    private async void OnReclaimSpaceClicked(object sender, RoutedEventArgs e)
+    {
+        if (_operationActive) return;
+
+        ReclaimSpaceButton.IsEnabled = false;
+        try
+        {
+            string modulesDir = Path.Combine(Path.GetDirectoryName(_bannerlordExe ?? "") ?? "", "..", "..", "Modules");
+            modulesDir = Path.GetFullPath(modulesDir);
+
+            UpdateText.Foreground = Steel;
+            UpdateText.Text = "Measuring module folders…";
+
+            IReadOnlyList<UnusedModule> unused =
+                await Task.Run(() => ModuleReclaim.Scan(modulesDir, _config));
+
+            if (unused.Count == 0)
+            {
+                UpdateText.Text = "Nothing to reclaim — every module folder is part of the loadout.";
+                return;
+            }
+
+            long total = unused.Sum(module => module.Bytes);
+            var lines = new List<string>();
+            foreach (UnusedModule module in unused.Take(25))
+            {
+                lines.Add($"  • {module.Name} — {module.Bytes / 1_048_576.0:N0} MB" +
+                    (module.InstalledByLauncher ? "  (installed by this launcher)" : ""));
+            }
+            if (unused.Count > 25) lines.Add($"  and {unused.Count - 25} more");
+
+            string nl = Environment.NewLine;
+            string list = string.Join(nl, lines);
+            string quoted = '"' + "installed by this launcher" + '"';
+
+            var answer = MessageBox.Show(
+                $"These {unused.Count} module folders are not used by the co-op loadout, " +
+                $"totalling {total / 1_048_576.0:N0} MB:" + nl + nl +
+                list + nl + nl +
+                $"Folders marked {quoted} are left over from earlier updates and are " +
+                "safe to remove. Any others are mods you installed yourself — removing them will not " +
+                "affect co-op, but you would need to reinstall them for single-player." + nl + nl +
+                "Remove all of them now?",
+                "Reclaim disk space",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (answer != MessageBoxResult.Yes)
+            {
+                UpdateText.Text = "Nothing removed.";
+                return;
+            }
+
+            UpdateText.Text = "Removing unused module folders…";
+            var (removed, freed, failed) = await Task.Run(() => ModuleReclaim.Remove(unused));
+
+            UpdateText.Text = failed.Count == 0
+                ? $"Reclaimed {freed / 1_048_576.0:N0} MB from {removed} module folders."
+                : $"Reclaimed {freed / 1_048_576.0:N0} MB from {removed} folders; " +
+                  $"{failed.Count} could not be removed (close Bannerlord and retry).";
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"Reclaim failed: {ex}");
+            UpdateText.Foreground = Steel;
+            UpdateText.Text = $"Could not reclaim space — {ex.Message}. Log: {Log.Path}";
+        }
+        finally
+        {
+            ReclaimSpaceButton.IsEnabled = true;
+        }
     }
 }

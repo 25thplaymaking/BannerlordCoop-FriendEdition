@@ -456,3 +456,21 @@ polling briefly for the collector's bundle so the crash prompt appears on its ow
 later start. And a second launcher start no longer complains: it signals the running instance to
 raise its window and exits silently, which is the right behaviour for the two cases that actually
 cause it — the collector's relaunch, and a launcher left invisible behind a full-screen game.
+
+### 13a. Reclaiming what has already accumulated
+
+Receipt-based pruning only helps installs made after it shipped: an existing install has no receipt,
+so the first update records the current set and removes nothing. Everything already orphaned stays.
+
+`ModuleReclaim` plus **Options -> RECLAIM DISK SPACE** recovers those. It finds unused module folders
+by elimination — not a base-game module, not named in a feed receipt, not in the launch token — and
+reports them with sizes, largest first.
+
+It reports rather than deletes, because elimination is honest but not proof of provenance: the same
+scan also catches mods a player installed themselves for single-player, which the launcher never put
+there. The prompt names every folder, marks the ones a receipt proves are ours, and removes nothing
+until the player agrees.
+
+One safety rule is worth stating because a test caught it being wrong: a receipt that exists but
+cannot be read aborts the scan entirely. Treating an unreadable receipt as "nothing installed" would
+have offered the whole co-op loadout for deletion.

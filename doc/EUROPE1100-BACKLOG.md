@@ -613,3 +613,36 @@ and submits the chosen option id, the server runs the consequence, and the resul
 morale changes replicate as they already do — the `AuthorityRoute` shape kingdom creation uses. That is
 a feature with real desync surface across five action types, not a patch deletion, so it is not being
 enabled as a pre-deploy change. The patch now documents all of this in place.
+
+## 16. Conversion interactions cannot stall the host
+
+Audited which Europe 1100 assemblies can raise a player-facing interaction, and what happens when one
+does on a machine with no screen.
+
+| assembly | interaction API |
+|---|---|
+| `EOE.CustomBattlePatch` | `ShowInquiry`, **`ShowTextInquiry`**, `GameMenu`, `AddGameMenuOption` |
+| `BattleArtilleryReworked` | `AddQuickInformation` (non-blocking toast) |
+| `Europe1100` | `GameMenu` |
+| `BannerColorPersistence`, `Bannerlord.EOEPatches`, `ItemCategoryAddons`, `RF_BattleAI`, `WhileThyCome`, `SnowballingKingdoms` | `InformationManager` display only |
+
+Only one raises a **blocking** dialog, and only one dialog kind was unguarded.
+
+`DedicatedServer.Core.InquiryAutoAcceptPatch` covers `InformationManager.ShowInquiry`: it logs title
+and text to the console, invokes the affirmative action and skips the UI. That is sound for a yes/no.
+It covers **only that method** — `ShowTextInquiry`, which asks for typed input, was guarded neither by
+the host runtime nor by us.
+
+That is a real hole rather than a theoretical one: `EOE.CustomBattlePatch` calls it, and
+`Europe1100CampaignAuthorityGate` deliberately confines that behaviour to the host — so the one place
+a conversion text prompt could be raised was the one place nothing could answer it.
+
+`HostTextInquiryGuardPatch` closes it. On a server it logs the title and body at **Warning** — reaching
+it means something tried to hold a conversation with a machine — takes the NEGATIVE action and
+suppresses the dialog. Declining rather than affirming is deliberate: affirming would have to invent
+the typed string and commit the caller to a value nobody chose.
+
+It is server-only, and the ordering makes that safe: `ModInformation.IsServer` is set inside the
+start-server path, *after* `CoopLoadUI` has collected visibility and password, so the listen-host setup
+prompt and the client join-password prompt both run with `IsServer == false` and are untouched. Player
+prompts still reach players; only the host declines them, and every decline is logged.

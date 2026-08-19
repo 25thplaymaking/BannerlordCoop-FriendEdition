@@ -8,6 +8,7 @@ namespace CoopLauncher;
 public partial class App : Application
 {
     private static Mutex? _singleInstance;
+    private static SingleInstanceSignal? _activationSignal;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -19,14 +20,17 @@ public partial class App : Application
         _singleInstance = new Mutex(initiallyOwned: true, @"Local\CalradiaCoop.Launcher", out bool isOnly);
         if (!isOnly && e.Args.FirstOrDefault() != LauncherUpdateCommand.ApplySwitch)
         {
-            MessageBox.Show(
-                "The Europe 1100 Co-op launcher is already running. Use that window instead.",
-                "Europe 1100 Co-op",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+            // Hand the player the launcher they already have instead of an error box. The commonest
+            // second start is not carelessness: the co-op crash collector relaunches through
+            // COOP_LAUNCHER_PATH after a crash, usually well after the player has reopened it
+            // themselves, and a launcher left open behind the game is invisible. Either way what they
+            // want is the window in front of them.
+            SingleInstanceSignal.TryRequestActivation();
             Shutdown();
             return;
         }
+
+        _activationSignal = SingleInstanceSignal.CreateOwner();
 
         // A render/layout throw (e.g. an unresolved resource) used to leave a painted-but-dead
         // window, so a friend's click just "did nothing". Surface the real cause, but fail fast:
@@ -83,8 +87,20 @@ public partial class App : Application
 
         bool continuePreparation = completion?.ContinuePreparation == true &&
                                    !LauncherUpdateApplier.ShouldSkipSelfUpdate(e.Args);
-        new MainWindow(shootMode: false, continuePreparation).Show();
+        var mainWindow = new MainWindow(shootMode: false, continuePreparation);
+        mainWindow.Show();
+
+        // A later launcher — the player's or the crash collector's — now raises this window rather
+        // than failing to start.
+        _activationSignal?.ListenForActivation(() => mainWindow.Dispatcher.Invoke(mainWindow.BringToFront));
+
         if (completion is not null)
             _ = Task.Run(() => LauncherUpdateApplier.CleanupAfterStartup(completion));
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        _activationSignal?.Dispose();
+        base.OnExit(e);
     }
 }

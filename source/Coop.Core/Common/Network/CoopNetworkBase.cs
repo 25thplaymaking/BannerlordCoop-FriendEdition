@@ -366,6 +366,12 @@ public abstract class CoopNetworkBase : INetwork, INetEventListener
         }
     }
 
+    /// <summary>
+    /// Deliberately NOT relevance-filtered. Holding a message here and releasing it later would send it
+    /// through <see cref="SendAll(IMessage)"/>, reaching the very peer this call excluded — normally the
+    /// one that originated the change. These are echo paths, none of them appear in the measured hot
+    /// routes, so the exclusion is worth more than the saving.
+    /// </summary>
     public void SendAllBut(NetPeer excludedPeer, IMessage message)
     {
         SendAllBut(excludedPeer, MessagePacket.Create(message, serializer));

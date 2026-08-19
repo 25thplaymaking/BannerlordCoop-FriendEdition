@@ -428,3 +428,31 @@ same class. Pre-existing and unrelated to the 1100 loadout.
 MapEvents and SiegeEvents. These were invisible while the solution did not compile (see PR #29) and
 are unchanged by PRs #29 and #30 — the failing set is byte-identical before and after both. They
 predate all Europe 1100 work and want their own pass.
+
+## 13. Launcher: retired modules were never removed, and a crash left the launcher looking busy
+
+**Duplicate storage and an unreadable module list.** `ModUpdater.InstallExact` replaced each module
+the feed ships, exactly — but it recorded only a version string, never *which* modules it had
+installed. A module dropped from a later suite therefore stayed on disk permanently. Across revisions
+that accumulated whole conversions worth of gigabytes, and left the stock Bannerlord launcher listing
+modules nobody could account for.
+
+Each tier now writes a receipt beside its version stamp (`coop-suite-modules.txt`,
+`Coop/installed-modules.txt`) naming what it installed, and on the next install removes what the
+previous receipt claims and the new payload no longer ships. Pruning can only ever touch names a
+previous receipt claims, so a player's own mods cannot be removed; base-game modules are refused
+outright and receipt entries that are not plain child directory names are ignored. The first install
+after this change has no receipt, so it prunes nothing and records the current set — cleanup begins
+with the update after it.
+
+**A crash left the launcher believing a session was still running.** After handing off, the launcher
+watched nothing. A crash was surfaced only when the co-op collector eventually relaunched the
+launcher through `COOP_LAUNCHER_PATH`, long after the game had gone, so players sat looking at
+"Bannerlord has taken the field" and started another launcher to get back in — which the
+single-instance mutex refused with an error box.
+
+Both halves are fixed. The launcher now watches the game process and reacts the moment it exits,
+polling briefly for the collector's bundle so the crash prompt appears on its own rather than at some
+later start. And a second launcher start no longer complains: it signals the running instance to
+raise its window and exits silently, which is the right behaviour for the two cases that actually
+cause it — the collector's relaunch, and a launcher left invisible behind a full-screen game.

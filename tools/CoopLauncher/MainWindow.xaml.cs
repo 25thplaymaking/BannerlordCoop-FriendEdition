@@ -1,5 +1,7 @@
 ﻿using System.Diagnostics;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
@@ -864,6 +866,31 @@ public partial class MainWindow : Window
 
     // ─────────────────────────── Roster / reports ───────────────────────────
 
+    /// <summary>
+    /// Raises and focuses this window, for when a second launcher start defers to this one.
+    /// </summary>
+    /// <remarks>
+    /// Restores first: a launcher left open behind the game is usually minimised, and Activate alone
+    /// does not un-minimise. Topmost is toggled rather than left on, which is what actually pulls a
+    /// window above a full-screen game without pinning it there afterwards.
+    /// </remarks>
+    public void BringToFront()
+    {
+        try
+        {
+            if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+            Show();
+            Topmost = true;
+            Activate();
+            Focus();
+            Topmost = false;
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"Could not bring the launcher to the front: {ex.Message}");
+        }
+    }
+
     private void PromptForPendingCrashReport()
     {
         // Existing installations can have a long archive of diagnostics produced before this
@@ -1355,6 +1382,8 @@ public partial class MainWindow : Window
             JoinButton.Content = "MARCH TO WAR";
             UpdateText.Foreground = Steel;
             UpdateText.Text = "Bannerlord has taken the field. The launcher stays open (Options → The Camp).";
+
+            WatchForGameExit(process);
         }
         catch (Exception ex)
         {
@@ -1365,5 +1394,88 @@ public partial class MainWindow : Window
             UpdateText.Foreground = Steel;
             UpdateText.Text = $"Couldn't launch — {ex.Message}. Log: {Log.Path}";
         }
+    }
+
+    /// <summary>
+    /// Notices the game ending and says so straight away, instead of leaving the launcher looking as
+    /// though a session is still in progress.
+    /// </summary>
+    /// <remarks>
+    /// Without this the launcher learned nothing after handing off. A crash was only surfaced when the
+    /// co-op crash collector eventually relaunched the launcher — long after the game had gone — so
+    /// players sat looking at "Bannerlord has taken the field" and started another launcher to get back
+    /// in. Watching the process directly registers the end of the run immediately, and the crash bundle
+    /// is offered as soon as the collector has written it rather than whenever the launcher next starts.
+    /// </remarks>
+    private void WatchForGameExit(Process process)
+    {
+        _ = Task.Run(async () =>
+        {
+            int exitCode;
+            try
+            {
+                await process.WaitForExitAsync();
+                exitCode = process.ExitCode;
+            }
+            catch (Exception ex)
+            {
+                Log.Write($"Could not watch Bannerlord for exit: {ex.Message}");
+                return;
+            }
+
+            Log.Write($"Bannerlord exited (code 0x{exitCode:X})");
+
+            // The collector writes its bundle after the game process is already gone, so a single check
+            // on exit would usually miss it. Poll briefly instead of guessing a delay.
+            CrashReportCandidate? candidate = await Task.Run(() => AwaitCrashBundle(TimeSpan.FromSeconds(20)));
+
+            await Dispatcher.InvokeAsync(() =>
+            {
+                _operationActive = false;
+                JoinButton.IsEnabled = true;
+                JoinButton.Content = "MARCH TO WAR";
+                UpdateText.Foreground = Steel;
+
+                if (candidate is not null)
+                {
+                    PromptForPendingCrashReport();
+                    UpdateText.Text = "Bannerlord ended unexpectedly — a crash report is ready to review.";
+                    BringToFront();
+                    return;
+                }
+
+                UpdateText.Text = exitCode == 0
+                    ? "Bannerlord has closed. Ready to ride out again."
+                    : $"Bannerlord closed (code 0x{exitCode:X}). Ready to ride out again.";
+            });
+        });
+    }
+
+    /// <summary>
+    /// Waits a short while for the crash collector to finish writing a bundle, returning null if none
+    /// appears. A clean exit simply never produces one, so this timing out is the normal case.
+    /// </summary>
+    private CrashReportCandidate? AwaitCrashBundle(TimeSpan window)
+    {
+        var deadline = DateTime.UtcNow + window;
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                CrashReportCandidate? candidate = CrashReportLocator.FindPending(
+                    _settings.LastSubmittedCrashReport,
+                    _settings.CrashReportWatermarkUtcTicks);
+                if (candidate is not null) return candidate;
+            }
+            catch (Exception ex)
+            {
+                Log.Write($"Crash bundle scan failed: {ex.Message}");
+                return null;
+            }
+
+            Thread.Sleep(1000);
+        }
+
+        return null;
     }
 }

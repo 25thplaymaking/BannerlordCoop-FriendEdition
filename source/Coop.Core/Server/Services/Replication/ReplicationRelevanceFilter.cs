@@ -11,6 +11,7 @@ using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Threading;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.CharacterDevelopment;
 using TaleWorlds.CampaignSystem.MapEvents;
@@ -121,7 +122,13 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
     private readonly IPlayerManager playerManager;
 
     private readonly Dictionary<string, HeldObject> held = new Dictionary<string, HeldObject>(StringComparer.Ordinal);
-    private readonly List<Vec2> playerPositions = new List<Vec2>();
+    // An immutable snapshot, swapped in wholesale. ShouldSendNow runs on whichever thread happens to be
+    // sending — the game thread, the poll thread, a handler thread — while FlushDue runs on the poll
+    // thread, so a shared mutable list here was a genuine data race. Readers take the reference once and
+    // never see a half-rebuilt list.
+    private volatile Vec2[] playerPositions = Array.Empty<Vec2>();
+    private long playerPositionsStamp;
+    private static readonly TimeSpan PlayerPositionsLifetime = TimeSpan.FromMilliseconds(200);
 
     // Messages released mid-send, drained by the next FlushDue. Filling this instead of sending inline
     // keeps SendAll from re-entering itself while a caller is still inside it.
@@ -208,8 +215,8 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
             return true;
         }
 
-        RefreshPlayerPositions();
-        if (playerPositions.Count == 0)
+        Vec2[] positions = GetPlayerPositions();
+        if (positions.Length == 0)
         {
             ReleaseInstance(subjectKey);
             return true;
@@ -221,10 +228,10 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
             return true;
         }
 
-        if (IsNearAnyPlayer(knownPosition))
+        if (IsNearAnyPlayer(positions, knownPosition))
         {
             ReleaseInstance(subjectKey);
-            sentCount++;
+            Interlocked.Increment(ref sentCount);
             return true;
         }
 
@@ -244,7 +251,7 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
             entry.Put(slot, message);
         }
 
-        heldCount++;
+        Interlocked.Increment(ref heldCount);
         return false;
     }
 
@@ -279,7 +286,7 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
         }
         nextEvaluateUtc = now + EvaluateInterval;
 
-        RefreshPlayerPositions();
+        Vec2[] positions = GetPlayerPositions();
 
         List<IMessage> toSend = null;
         lock (gate)
@@ -302,9 +309,9 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
                 {
                     // No players means nobody to be far from; release rather than accumulate a backlog
                     // that would land on whoever joins next.
-                    relevant = playerPositions.Count == 0 ||
+                    relevant = positions.Length == 0 ||
                         (TryGetPosition(entry.InstanceType, entry.InstanceId, out Vec2 position)
-                            ? IsNearAnyPlayer(position)
+                            ? IsNearAnyPlayer(positions, position)
                             : true);
                 }
 
@@ -322,7 +329,7 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
 
         if (toSend != null)
         {
-            releasedCount += toSend.Count;
+            Interlocked.Add(ref releasedCount, toSend.Count);
 
             // Sent outside the lock: SendAll re-enters this filter, which would deadlock on a held lock.
             // Re-entry is harmless now — these objects are relevant, so ShouldSendNow lets them straight
@@ -343,7 +350,7 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
             pendingRelease.Clear();
         }
 
-        releasedCount += batch.Length;
+        Interlocked.Add(ref releasedCount, batch.Length);
         foreach (IMessage message in batch) network.SendAll(message);
     }
 
@@ -373,28 +380,44 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
         releasedCount = 0;
     }
 
-    private bool IsNearAnyPlayer(Vec2 position)
+    private static bool IsNearAnyPlayer(Vec2[] positions, Vec2 position)
     {
         float radiusSquared = RelevanceRadius * RelevanceRadius;
-        for (int i = 0; i < playerPositions.Count; i++)
+        for (int i = 0; i < positions.Length; i++)
         {
-            if (playerPositions[i].DistanceSquared(position) <= radiusSquared) return true;
+            if (positions[i].DistanceSquared(position) <= radiusSquared) return true;
         }
         return false;
     }
 
-    private void RefreshPlayerPositions()
+    /// <summary>
+    /// Rebuilds the player-position snapshot if it is stale, and returns it. Rate-limited because it is
+    /// on the send path: players move at riding pace, so a fifth of a second is far finer than relevance
+    /// can change, and it keeps a per-message registry walk off the hot path.
+    /// </summary>
+    private Vec2[] GetPlayerPositions()
     {
-        playerPositions.Clear();
+        long now = DateTime.UtcNow.Ticks;
+        long stamp = Interlocked.Read(ref playerPositionsStamp);
 
+        if (now - stamp < PlayerPositionsLifetime.Ticks) return playerPositions;
+
+        // One thread rebuilds; the rest keep using the previous snapshot for a moment longer, which is
+        // harmless — it is already an approximation of where people are.
+        if (Interlocked.CompareExchange(ref playerPositionsStamp, now, stamp) != stamp) return playerPositions;
+
+        var rebuilt = new List<Vec2>();
         foreach (var player in playerManager.Players)
         {
             if (string.IsNullOrEmpty(player?.MobilePartyId)) continue;
             if (!objectManager.TryGetObject<MobileParty>(player.MobilePartyId, out var party)) continue;
             if (party == null || !party.IsActive) continue;
 
-            playerPositions.Add(party.Position.ToVec2());
+            rebuilt.Add(party.Position.ToVec2());
         }
+
+        playerPositions = rebuilt.ToArray();
+        return playerPositions;
     }
 
     /// <summary>

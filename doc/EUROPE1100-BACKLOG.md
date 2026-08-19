@@ -285,11 +285,25 @@ Positions resolve for `MobileParty`, `Settlement`, `PartyBase`, `MobilePartyAi`,
 `Hero`, `Town` and `Village`. Anything unresolvable, unclassifiable, or that throws is sent
 immediately.
 
-**Remaining volume** is dictionary upserts, chiefly `TownMarketData__itemDict_Upsert` (9,747 per
-10 s). Those cannot be collapsed by keeping the latest, because each carries a different dictionary
-key. Reducing them means either keying the hold by dictionary key or not replicating distant town
-markets at all, and the second is the better answer once the effect of the current filters is
-measured.
+**Dictionary upserts are covered too, keyed.** A generated upsert carries its own `Key`, so it is
+held in a slot of `messageType|Key` — latest-wins *per key*, which is precisely what an upsert means
+and is therefore lossless. That collapses `TownMarketData__itemDict_Upsert` (9,747 per 10 s) from one
+message per reprice to one per item, and only for markets nobody is standing in.
+
+Keying the hold that way exposed an ordering hazard, which is closed: a held upsert must never land
+after a later remove or clear for the same object, or it resurrects the entry. So **any message that
+is not holdable releases everything pending for its object first**, in order. That is checked before
+relevance, before position, before anything — an unheld message can never overtake held state.
+Releases are queued and drained on the next poll rather than sent inline, because the caller is
+already inside `SendAll`.
+
+**Position resolution** covers `MobileParty`, `Settlement`, `PartyBase`, `MobilePartyAi`,
+`TroopRoster`, `Hero`, `HeroDeveloper` (via its hero — XP and skill churn was ~7,000 per 10 s),
+`MapEventSide` (via its map event), `Town`, `TownMarketData` (via its town) and `Village`. Anything
+outside that list is sent immediately.
+
+Between the coalescer gate and the send-path filter, every route in the measured top ten is now
+either relevance-filtered or deleted.
 
 **Where to look next.** Why one connected player generates tens of thousands of roster and market
 messages in ten seconds. Suspect full-state rather than on-change replication: `NetworkItemRosterUpdate`

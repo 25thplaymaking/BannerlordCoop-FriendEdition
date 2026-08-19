@@ -715,6 +715,9 @@
                                             Margin="10,0,0,0" Content="OPEN LOG FOLDER" />
                                     <Button x:Name="GithubButton" Style="{StaticResource GhostButton}"
                                             Margin="10,0,0,0" Content="PROJECT ON GITHUB" />
+                                    <Button x:Name="ReclaimSpaceButton" Style="{StaticResource GhostButton}"
+                                            Margin="10,0,0,0" Content="RECLAIM DISK SPACE"
+                                            ToolTip="Find module folders the co-op loadout no longer uses and offer to remove them" />
                                 </StackPanel>
                                 <TextBlock Style="{StaticResource SectionHeader}" Text="REPORT TO THE STEWARDS"
                                            Margin="0,10,0,8" />

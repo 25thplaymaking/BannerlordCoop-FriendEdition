@@ -55,36 +55,76 @@ internal class MapWeatherNodeBoundsGuardPatch
             new[] { typeof(Vec2) });
 
     static bool Prefix(DefaultMapWeatherModel __instance, Vec2 pos, ref MapWeatherModel.WeatherEvent __result)
+        => !TryAnswerOutOfBounds(__instance, pos, ref __result);
+
+    /// <summary>
+    /// True when <paramref name="pos"/> falls outside the weather grid and <paramref name="result"/>
+    /// has been filled from the nearest valid node instead.
+    /// </summary>
+    internal static bool TryAnswerOutOfBounds(
+        DefaultMapWeatherModel instance, Vec2 pos, ref MapWeatherModel.WeatherEvent result)
     {
         Campaign campaign = Campaign.Current;
         var mapScene = campaign?.MapSceneWrapper;
-        if (mapScene == null) return true;
+        if (mapScene == null) return false;
 
         int dimension = campaign.DefaultWeatherNodeDimension;
-        if (dimension <= 0) return true;
+        if (dimension <= 0) return false;
 
         Vec2 terrainSize = mapScene.GetTerrainSize();
-        if (terrainSize.X <= 0f || terrainSize.Y <= 0f) return true;
+        if (terrainSize.X <= 0f || terrainSize.Y <= 0f) return false;
 
         int xIndex = (int)(pos.x / (terrainSize.X / dimension));
         int yIndex = (int)(pos.y / (terrainSize.Y / dimension));
 
         // In range: the original is correct and cheaper than anything done here.
-        if (xIndex >= 0 && xIndex < dimension && yIndex >= 0 && yIndex < dimension) return true;
+        if (xIndex >= 0 && xIndex < dimension && yIndex >= 0 && yIndex < dimension) return false;
 
-        if (WeatherDataCacheField?.GetValue(__instance) is not MapWeatherModel.WeatherEvent[] cache || cache.Length == 0)
+        if (WeatherDataCacheField?.GetValue(instance) is not MapWeatherModel.WeatherEvent[] cache || cache.Length == 0)
         {
             // Reached before InitializeWeatherData, or the field moved in a game update. Answering
             // Clear is still better than the alternative, which is the exception this exists to stop.
-            __result = MapWeatherModel.WeatherEvent.Clear;
-            return false;
+            result = MapWeatherModel.WeatherEvent.Clear;
+            return true;
         }
 
         int clampedX = MathF.Max(0, MathF.Min(dimension - 1, xIndex));
         int clampedY = MathF.Max(0, MathF.Min(dimension - 1, yIndex));
 
         int index = clampedY * dimension + clampedX;
-        __result = (index >= 0 && index < cache.Length) ? cache[index] : MapWeatherModel.WeatherEvent.Clear;
+        result = (index >= 0 && index < cache.Length) ? cache[index] : MapWeatherModel.WeatherEvent.Clear;
+        return true;
+    }
+}
+
+/// <summary>
+/// The same bounds problem on the WRITE path.
+/// </summary>
+/// <remarks>
+/// <c>UpdateWeatherForPosition</c> routes into <c>SetIsRainingOrWetFromFunction</c> /
+/// <c>SetIsBlizzardOrSnowFromFunction</c>, which assign <c>_weatherDataCache[yIndex * dim + xIndex]</c>
+/// with the same unchecked indices as the read path. Guarding only the read left this reachable, and
+/// it is: <c>BattleMissionStartHandler.GetAtmosphereOnCampaign</c> calls
+/// <c>GetAtmosphereModel</c> -> <c>UpdateWeatherForPosition</c> when a battle starts, so a fight far
+/// enough out on a conversion's map throws on the map-event.battle-start route.
+/// </remarks>
+[HarmonyPatch]
+internal class MapWeatherUpdateBoundsGuardPatch
+{
+    static MethodBase TargetMethod()
+        => AccessTools.Method(
+            typeof(DefaultMapWeatherModel),
+            nameof(DefaultMapWeatherModel.UpdateWeatherForPosition));
+
+    static bool Prefix(
+        DefaultMapWeatherModel __instance, CampaignVec2 position, ref MapWeatherModel.WeatherEvent __result)
+    {
+        var result = default(MapWeatherModel.WeatherEvent);
+        if (!MapWeatherNodeBoundsGuardPatch.TryAnswerOutOfBounds(__instance, position.ToVec2(), ref result))
+            return true;
+
+        // Out of grid: answer from the nearest valid node and skip the unchecked write entirely.
+        __result = result;
         return false;
     }
 }

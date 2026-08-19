@@ -92,6 +92,7 @@ namespace IntroServer.Config
         public TimeSpan AuditTimeout => DisconnectTimeout;
 
         public TimeSpan ObjectCreationTimeout => DisconnectTimeout;
+        public TimeSpan MissionEntryTimeout => TimeSpan.FromSeconds(60);
 
         public TimeSpan NetworkPollInterval => UpdateTime;
         #endregion

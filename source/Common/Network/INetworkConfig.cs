@@ -21,6 +21,21 @@ public interface INetworkConfig
     int ResumePacketsInQueue { get; }
     TimeSpan AuditTimeout { get; }
     TimeSpan ObjectCreationTimeout { get; }
+
+    /// <summary>
+    /// How long a client may take to confirm it applied an authoritative decision that requires
+    /// ENTERING A MISSION, as opposed to merely creating an object.
+    /// </summary>
+    /// <remarks>
+    /// Mission entry loads a scene: terrain, agents, voice banks, coop battle behaviours and the
+    /// P2P battle instance. That is seconds of work before the client can possibly confirm, and it
+    /// scales with the map a conversion ships. Budgeting it with <see cref="ObjectCreationTimeout"/>
+    /// made every battle entry a race against a 5s deadline that the load itself nearly exhausted —
+    /// measured live at 5618 ms for a load that started 4 s earlier. Losing that race trips
+    /// failClosedOnApplyFailure, which cancels the co-op session, disposes the container and leaves
+    /// every Harmony patch unable to resolve ISyncPolicy: the client dies in a log flood.
+    /// </remarks>
+    TimeSpan MissionEntryTimeout { get; }
     TimeSpan NetworkPollInterval { get; }
     IPAddress LanAddress { get; }
     int LanPort { get; }

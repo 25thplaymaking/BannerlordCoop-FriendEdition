@@ -9,14 +9,14 @@ using TaleWorlds.CampaignSystem.Settlements;
 namespace Coop.Tests.Server.Services.Replication;
 
 /// <summary>
-/// Covers which messages the relevance filter is willing to hold.
+/// Covers which messages the relevance filter is willing to hold, and how it slots them.
 /// </summary>
 /// <remarks>
-/// This is the correctness-critical half of the filter. Holding is only safe for messages where the
-/// newest one fully describes the state, because the filter keeps just the latest per object per
-/// message type. A message describing a STEP — an add, a remove, a change at an index, a clear, a
-/// dictionary upsert — must never be held, or the steps in between are lost. These pin that rule so a
-/// future template or message cannot quietly opt into being dropped.
+/// This is the correctness-critical half of the filter. Holding keeps only the newest message per
+/// slot, so a shape may only be held when the newest one genuinely supersedes the previous one for
+/// that slot. A message describing a STEP — an add, a remove, a change at an index, a clear — must
+/// never be held, or the steps in between are lost. These pin that rule so a future template cannot
+/// quietly opt into being dropped.
 /// </remarks>
 public class ReplicationRelevanceFilterTests
 {
@@ -32,18 +32,22 @@ public class ReplicationRelevanceFilterTests
     private sealed record Settlement_Parties_RemoveNetworkMessage : ScopedEvent;
     private sealed record Settlement_Items_ChangeNetworkMessage : ScopedEvent;
     private sealed record Settlement_Items_ClearNetworkMessage : ScopedEvent;
-    private sealed record TownMarketData_itemDict_UpsertNetworkMessage : ScopedEvent;
+
+    private sealed record TownMarketData_itemDict_UpsertNetworkMessage : ScopedEvent
+    {
+        public string Key { get; init; } = "grain";
+    }
 
     private sealed record PlainMessage : IEvent;
 
     private static bool IsHoldable(IMessage message) =>
-        ReplicationRelevanceFilter.TryGetSubject(message, out _, out _, out _, out _);
+        ReplicationRelevanceFilter.TryGetHoldSlot(message) != null;
 
     [Fact]
     public void AWholeMemberSetCanBeHeld()
     {
         // The newest set fully describes the member, so keeping only the latest loses nothing.
-        Assert.True(IsHoldable(new Settlement_Prosperity_SetNetworkMessage()));
+        Assert.NotNull(ReplicationRelevanceFilter.TryGetHoldSlot(new Settlement_Prosperity_SetNetworkMessage()));
     }
 
     [Theory]
@@ -51,12 +55,10 @@ public class ReplicationRelevanceFilterTests
     [InlineData(typeof(Settlement_Parties_RemoveNetworkMessage))]
     [InlineData(typeof(Settlement_Items_ChangeNetworkMessage))]
     [InlineData(typeof(Settlement_Items_ClearNetworkMessage))]
-    [InlineData(typeof(TownMarketData_itemDict_UpsertNetworkMessage))]
     public void StepwiseMessagesAreNeverHeld(Type messageType)
     {
         // Each of these describes a change rather than a state. Collapsing them to "the latest" would
-        // silently discard the others — an add followed by a remove would arrive as just the remove,
-        // and two upserts of different dictionary keys would arrive as only the second.
+        // silently discard the others — an add followed by a remove would arrive as just the remove.
         var message = (IMessage)Activator.CreateInstance(messageType);
 
         Assert.False(IsHoldable(message));
@@ -65,34 +67,85 @@ public class ReplicationRelevanceFilterTests
     [Fact]
     public void AMessageWithNoInstanceScopeIsNeverHeld()
     {
-        // Nothing to locate means nothing to reason about; it goes out.
         Assert.False(IsHoldable(new PlainMessage()));
     }
 
     [Fact]
-    public void ASetWithNoInstanceIdIsNeverHeld()
+    public void UpsertsForDifferentKeysGetDifferentSlots()
     {
-        Assert.False(IsHoldable(new Settlement_Prosperity_SetNetworkMessage { InstanceId = "" }));
+        // The whole point of keying by the dictionary key: two upserts for different items must both
+        // survive. Sharing a slot would silently drop one of them.
+        string grain = ReplicationRelevanceFilter.TryGetHoldSlot(
+            new TownMarketData_itemDict_UpsertNetworkMessage { Key = "grain" });
+        string iron = ReplicationRelevanceFilter.TryGetHoldSlot(
+            new TownMarketData_itemDict_UpsertNetworkMessage { Key = "iron" });
+
+        Assert.NotNull(grain);
+        Assert.NotNull(iron);
+        Assert.NotEqual(grain, iron);
     }
 
     [Fact]
-    public void ASetWithNoInstanceTypeIsNeverHeld()
+    public void UpsertsForTheSameKeyShareASlot()
     {
-        Assert.False(IsHoldable(new Settlement_Prosperity_SetNetworkMessage { InstanceType = null }));
+        // And this is where the saving comes from: a market repricing the same item repeatedly
+        // collapses to one message, which is exactly what an upsert means.
+        string first = ReplicationRelevanceFilter.TryGetHoldSlot(
+            new TownMarketData_itemDict_UpsertNetworkMessage { Key = "grain" });
+        string second = ReplicationRelevanceFilter.TryGetHoldSlot(
+            new TownMarketData_itemDict_UpsertNetworkMessage { Key = "grain" });
+
+        Assert.Equal(first, second);
     }
 
     [Fact]
-    public void TheSubjectIsReportedFromTheMessage()
+    public void ASetAndAnUpsertNeverShareASlot()
     {
-        bool holdable = ReplicationRelevanceFilter.TryGetSubject(
-            new Settlement_Prosperity_SetNetworkMessage { InstanceId = "party7", InstanceType = typeof(Settlement) },
-            out Type instanceType, out string instanceId, out _, out bool positionKnown);
+        string set = ReplicationRelevanceFilter.TryGetHoldSlot(new Settlement_Prosperity_SetNetworkMessage());
+        string upsert = ReplicationRelevanceFilter.TryGetHoldSlot(new TownMarketData_itemDict_UpsertNetworkMessage());
 
-        Assert.True(holdable);
-        Assert.Equal(typeof(Settlement), instanceType);
-        Assert.Equal("party7", instanceId);
+        Assert.NotEqual(set, upsert);
+    }
 
-        // A generated set carries no position, so the filter has to resolve the object to place it.
+    [Fact]
+    public void TheSubjectIsReportedForHeldAndUnheldMessagesAlike()
+    {
+        // The subject is needed even for messages that are never held: the filter releases whatever it
+        // is holding for that object before letting an unheld message past, so a held update can never
+        // land after a later one.
+        bool addHasSubject = ReplicationRelevanceFilter.TryGetSubject(
+            new Settlement_Parties_AddNetworkMessage { InstanceId = "s1", InstanceType = typeof(Settlement) },
+            out Type addType, out string addId, out _, out _);
+
+        Assert.True(addHasSubject);
+        Assert.Equal(typeof(Settlement), addType);
+        Assert.Equal("s1", addId);
+        Assert.False(IsHoldable(new Settlement_Parties_AddNetworkMessage()));
+    }
+
+    [Fact]
+    public void ASetWithNoInstanceIdHasNoSubject()
+    {
+        Assert.False(ReplicationRelevanceFilter.TryGetSubject(
+            new Settlement_Prosperity_SetNetworkMessage { InstanceId = "" }, out _, out _, out _, out _));
+    }
+
+    [Fact]
+    public void ASetWithNoInstanceTypeHasNoSubject()
+    {
+        Assert.False(ReplicationRelevanceFilter.TryGetSubject(
+            new Settlement_Prosperity_SetNetworkMessage { InstanceType = null }, out _, out _, out _, out _));
+    }
+
+    [Fact]
+    public void AGeneratedSetCarriesNoPositionOfItsOwn()
+    {
+        ReplicationRelevanceFilter.TryGetSubject(
+            new Settlement_Prosperity_SetNetworkMessage { InstanceType = typeof(Settlement) },
+            out _, out _, out _, out bool positionKnown);
+
+        // So the filter has to resolve the object to place it; only the party-behaviour snapshot
+        // carries its own position.
         Assert.False(positionKnown);
     }
 }

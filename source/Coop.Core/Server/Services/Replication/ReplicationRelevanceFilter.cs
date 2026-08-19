@@ -12,6 +12,8 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.CharacterDevelopment;
+using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Settlements;
@@ -71,9 +73,48 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
         public string InstanceId;
         public DateTime FirstHeldUtc;
 
-        // Latest message per message type. Every message that reaches here is idempotent, so an older
-        // one of the same type is genuinely superseded rather than merely newer.
-        public readonly Dictionary<Type, IMessage> Latest = new Dictionary<Type, IMessage>();
+        // Latest message per hold slot, in first-seen order so a release replays them as they were
+        // produced. A slot is the message type for a whole-member set, and the message type plus the
+        // dictionary key for an upsert — an upsert only supersedes another for the SAME key.
+        public readonly Dictionary<string, IMessage> Latest = new Dictionary<string, IMessage>(StringComparer.Ordinal);
+        public readonly List<string> SlotOrder = new List<string>();
+
+        public void Put(string slot, IMessage message)
+        {
+            if (!Latest.ContainsKey(slot)) SlotOrder.Add(slot);
+            Latest[slot] = message;
+        }
+
+        public IEnumerable<IMessage> InOrder()
+        {
+            foreach (string slot in SlotOrder) yield return Latest[slot];
+        }
+    }
+
+    /// <summary>Reads the <c>Key</c> of a generated dictionary upsert, cached per message type.</summary>
+    private static class UpsertKey
+    {
+        private static readonly Dictionary<Type, PropertyInfo> Cache = new Dictionary<Type, PropertyInfo>();
+        private static readonly object Gate = new object();
+
+        public static string Of(IMessage message)
+        {
+            Type type = message.GetType();
+            PropertyInfo property;
+            lock (Gate)
+            {
+                if (!Cache.TryGetValue(type, out property))
+                {
+                    property = AccessTools.Property(type, "Key");
+                    Cache[type] = property;
+                }
+            }
+
+            // No readable key means the upsert cannot be superseded safely; give it its own slot so it
+            // is held but never overwrites another.
+            object key = property?.GetValue(message);
+            return key?.ToString() ?? Guid.NewGuid().ToString("N");
+        }
     }
 
     private readonly IObjectManager objectManager;
@@ -81,6 +122,10 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
 
     private readonly Dictionary<string, HeldObject> held = new Dictionary<string, HeldObject>(StringComparer.Ordinal);
     private readonly List<Vec2> playerPositions = new List<Vec2>();
+
+    // Messages released mid-send, drained by the next FlushDue. Filling this instead of sending inline
+    // keeps SendAll from re-entering itself while a caller is still inside it.
+    private readonly List<IMessage> pendingRelease = new List<IMessage>();
     private readonly object gate = new object();
 
     private DateTime nextEvaluateUtc = DateTime.MinValue;
@@ -96,6 +141,11 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
     // where the AI's back-reference to its party is not public.
     private static readonly FieldInfo MobilePartyAiOwner =
         AccessTools.Field(typeof(MobilePartyAi), "_mobileParty");
+
+    // A town's market is only worth replicating to someone who could trade in it, and the market data
+    // itself only knows its town through a private field.
+    private static readonly FieldInfo TownMarketDataOwner =
+        AccessTools.Field(typeof(TownMarketData), "_town");
 
     /// <summary>
     /// Hand-written messages that carry a FULL snapshot scoped to one party, mapped to the field naming
@@ -146,18 +196,38 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
             return true;
         }
 
-        RefreshPlayerPositions();
-        if (playerPositions.Count == 0) return true;
+        string subjectKey = instanceType.Name + ":" + instanceId;
 
-        if (!positionKnown && !TryGetPosition(instanceType, instanceId, out knownPosition)) return true;
+        // Not holdable: an add, remove, change, clear or anything unclassified. It describes a step, so
+        // it must not overtake state this filter is already holding for the same object — a held upsert
+        // arriving after a remove would resurrect the entry. Release that object first, in order.
+        string slot = TryGetHoldSlot(message);
+        if (slot == null)
+        {
+            ReleaseInstance(subjectKey);
+            return true;
+        }
+
+        RefreshPlayerPositions();
+        if (playerPositions.Count == 0)
+        {
+            ReleaseInstance(subjectKey);
+            return true;
+        }
+
+        if (!positionKnown && !TryGetPosition(instanceType, instanceId, out knownPosition))
+        {
+            ReleaseInstance(subjectKey);
+            return true;
+        }
 
         if (IsNearAnyPlayer(knownPosition))
         {
+            ReleaseInstance(subjectKey);
             sentCount++;
             return true;
         }
 
-        string subjectKey = instanceType.Name + ":" + instanceId;
         lock (gate)
         {
             if (!held.TryGetValue(subjectKey, out HeldObject entry))
@@ -171,16 +241,35 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
                 held[subjectKey] = entry;
             }
 
-            entry.Latest[message.GetType()] = message;
+            entry.Put(slot, message);
         }
 
         heldCount++;
         return false;
     }
 
+    /// <summary>
+    /// Sends anything held for one object immediately, so nothing this filter is sitting on can arrive
+    /// after a later message about the same object. Queued rather than sent inline: the caller is inside
+    /// SendAll, and re-entering it here would nest the send path.
+    /// </summary>
+    private void ReleaseInstance(string subjectKey)
+    {
+        lock (gate)
+        {
+            if (!held.TryGetValue(subjectKey, out HeldObject entry)) return;
+            held.Remove(subjectKey);
+            pendingRelease.AddRange(entry.InOrder());
+        }
+    }
+
     public void FlushDue(INetwork network)
     {
         if (network == null) return;
+
+        // Released-on-write messages go out every poll, not on the evaluation cadence: they are waiting
+        // behind a message that has already been sent.
+        DrainPendingRelease(network);
 
         DateTime now = DateTime.UtcNow;
         if (now < nextEvaluateUtc)
@@ -221,7 +310,7 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
 
                 if (!expired && !relevant) continue;
 
-                (toSend ??= new List<IMessage>()).AddRange(entry.Latest.Values);
+                (toSend ??= new List<IMessage>()).AddRange(entry.InOrder());
                 (released ??= new List<string>()).Add(pair.Key);
             }
 
@@ -242,6 +331,20 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
         }
 
         Report(now);
+    }
+
+    private void DrainPendingRelease(INetwork network)
+    {
+        IMessage[] batch;
+        lock (gate)
+        {
+            if (pendingRelease.Count == 0) return;
+            batch = pendingRelease.ToArray();
+            pendingRelease.Clear();
+        }
+
+        releasedCount += batch.Length;
+        foreach (IMessage message in batch) network.SendAll(message);
     }
 
     private void Report(DateTime now)
@@ -330,15 +433,45 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
 
         if (message is not IInstanceScopedNetworkEvent scoped) return false;
 
-        // Only whole-member sets. Add/Remove/Change/Clear/Upsert describe a step rather than a state, so
-        // keeping "the latest" would throw away the steps in between.
-        if (!message.GetType().Name.EndsWith("_SetNetworkMessage", StringComparison.Ordinal)) return false;
-
         if (string.IsNullOrEmpty(scoped.InstanceId) || scoped.InstanceType == null) return false;
 
         instanceType = scoped.InstanceType;
         instanceId = scoped.InstanceId;
         return true;
+    }
+
+    /// <summary>
+    /// The slot a message may be held in, or null if it must never be held.
+    /// </summary>
+    /// <remarks>
+    /// Holding keeps only the newest message per slot, so a shape may only be held when the newest one
+    /// fully supersedes the previous one for that slot.
+    /// <list type="bullet">
+    /// <item>A whole-member set supersedes the member: one slot per message type.</item>
+    /// <item>A dictionary upsert supersedes only the SAME key, so the key is part of the slot. That is
+    /// exactly the semantics of an upsert, and it is what collapses a churning town market from
+    /// thousands of messages to one per item.</item>
+    /// <item>A full snapshot scoped to a party supersedes the whole thing: one slot.</item>
+    /// </list>
+    /// Adds, removes, index changes and clears describe a STEP. Nothing supersedes them, so they are
+    /// never held — and because they are not held, the caller releases anything pending for the same
+    /// object before letting them past, so a held upsert can never land after a remove.
+    /// </remarks>
+    public static string TryGetHoldSlot(IMessage message)
+    {
+        Type messageType = message.GetType();
+
+        if (message is NetworkUpdatePartyBehavior) return messageType.FullName;
+        if (GetPartyIdField(messageType) != null) return messageType.FullName;
+
+        if (message is not IInstanceScopedNetworkEvent) return null;
+
+        string name = messageType.Name;
+        if (name.EndsWith("_SetNetworkMessage", StringComparison.Ordinal)) return messageType.FullName;
+        if (name.EndsWith("_UpsertNetworkMessage", StringComparison.Ordinal))
+            return messageType.FullName + "|" + UpsertKey.Of(message);
+
+        return null;
     }
 
     /// <summary>
@@ -397,6 +530,32 @@ public class ReplicationRelevanceFilter : ISendRelevanceFilter
         {
             if (!objectManager.TryGetObject<Town>(fullId, out var town) || town?.Settlement == null) return false;
             position = town.Settlement.Position.ToVec2();
+            return true;
+        }
+
+        // A hero's XP and skills churn constantly and are only interesting where the hero is.
+        if (instanceType == typeof(HeroDeveloper))
+        {
+            if (!objectManager.TryGetObject<HeroDeveloper>(fullId, out var developer) || developer?.Hero == null)
+                return false;
+            return TryGetHeroPosition(developer.Hero, out position);
+        }
+
+        // Battle bookkeeping belongs where the battle is.
+        if (instanceType == typeof(MapEventSide))
+        {
+            if (!objectManager.TryGetObject<MapEventSide>(fullId, out var side) || side?.MapEvent == null)
+                return false;
+            position = side.MapEvent.Position.ToVec2();
+            return true;
+        }
+
+        if (instanceType == typeof(TownMarketData))
+        {
+            if (!objectManager.TryGetObject<TownMarketData>(fullId, out var market) || market == null) return false;
+            if (!(TownMarketDataOwner?.GetValue(market) is Town owningTown) || owningTown.Settlement == null)
+                return false;
+            position = owningTown.Settlement.Position.ToVec2();
             return true;
         }
 

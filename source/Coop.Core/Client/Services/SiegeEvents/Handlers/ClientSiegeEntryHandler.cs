@@ -133,8 +133,10 @@ internal class ClientSiegeEntryHandler : IHandler
                     request => request.Header, result => result.Header, ValidateAssaultWireShape, BuildAssaultCommandKey,
                     ValidateHeader, (_, __) => throw new InvalidOperationException("Siege assault routes execute only on the server."),
                     CreateAssaultTerminalResult, ProbeAssaultCommit, _ => { }, PresentAssaultOutcome,
+                    // An assault opens a siege mission, so the apply budget bounds a scene load, not
+                    // a round trip. Same reason as map-event.battle-start; see MissionEntryTimeout.
                     configAuthority.IsTrustedServer, new AuthorityTimeoutPolicy(configuration.ObjectCreationTimeout,
-                        configuration.ObjectCreationTimeout, retryCount: 1), failClosedOnApplyFailure: true,
+                        configuration.MissionEntryTimeout, retryCount: 1), failClosedOnApplyFailure: true,
                     isExpectedClientResult: IsExpectedAssaultResult));
             breakInRoute = authorityRequestRouter.Register(
                 AuthorityRoute<SiegeEntryIntent, NetworkRequestBreakInContinuation, NetworkBreakInContinuationApproved>.Define(

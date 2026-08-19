@@ -105,8 +105,10 @@ internal class BattleStartCoordinator : IHandler
                 requestResync: _ => { },
                 presentTerminalOutcome: PresentTerminalOutcome,
                 isTrustedResultSource: configAuthority.IsTrustedServer,
+                // The host answers quickly, so the response budget stays small; the APPLY budget has
+                // to cover the client opening the mission scene, which is seconds of work.
                 timeoutPolicy: new AuthorityTimeoutPolicy(configuration.ObjectCreationTimeout,
-                    configuration.ObjectCreationTimeout, retryCount: 1),
+                    configuration.MissionEntryTimeout, retryCount: 1),
                 failClosedOnApplyFailure: true,
                 isExpectedClientResult: IsExpectedClientResult));
 

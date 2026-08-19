@@ -117,6 +117,9 @@ public sealed class BattleSiegeAuthorityRouteEvidenceTests
         using var broker = new TestMessageBroker();
         var config = new Mock<INetworkConfig>();
         config.SetupGet(value => value.ObjectCreationTimeout).Returns(TimeSpan.FromSeconds(1));
+        // siege.assault budgets its APPLY against mission entry, not object creation: an assault
+        // opens a siege scene, and timing that out fails closed and cancels the session.
+        config.SetupGet(value => value.MissionEntryTimeout).Returns(TimeSpan.FromSeconds(60));
         using var entryHandler = new ClientSiegeEntryHandler(
             broker,
             Mock.Of<INetwork>(),

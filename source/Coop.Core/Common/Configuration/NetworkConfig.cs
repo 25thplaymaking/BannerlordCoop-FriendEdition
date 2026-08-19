@@ -40,6 +40,10 @@ public class NetworkConfig : INetworkConfig
 
     public TimeSpan ObjectCreationTimeout => TimeSpan.FromSeconds(5);
 
+    // Generous on purpose. This bounds a scene load, not a round trip, and the cost of being too
+    // small is a cancelled session rather than a slow one.
+    public TimeSpan MissionEntryTimeout => TimeSpan.FromSeconds(60);
+
     // Bounds three latencies at once: receive-event dispatch, the aggregated-message flush cadence
     // (a sub-budget message waits at most one interval), and the overload check. 25ms keeps all
     // three within a campaign frame or two for negligible poll-thread cost.

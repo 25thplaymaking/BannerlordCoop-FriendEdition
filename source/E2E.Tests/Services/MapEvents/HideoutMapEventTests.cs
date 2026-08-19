@@ -612,6 +612,7 @@ public class HideoutMapEventTests : MapEventTestBase
         {
             var config = new Mock<INetworkConfig>();
             config.SetupGet(x => x.ObjectCreationTimeout).Returns(timeout);
+            config.SetupGet(x => x.MissionEntryTimeout).Returns(timeout);
 
             var coordinator = instance.Resolve<HideoutCampaignConsequencesHandler>();
             var configurationField = AccessTools.Field(

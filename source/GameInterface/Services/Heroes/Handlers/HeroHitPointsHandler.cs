@@ -1,6 +1,7 @@
 using Common;
 using Common.Logging;
 using Common.Messaging;
+using Common.Util;
 using Common.Network;
 using GameInterface.Configuration;
 using GameInterface.Services.AuthorityRequests;
@@ -114,13 +115,20 @@ public class HeroHitPointsHandler : IHandler
             return Reply(context.Header, AuthorityResultStatus.Rejected, request.HeroId, request.HitPoints, "player-party-missing");
         if (!objectManager.TryGetObject<Hero>(request.HeroId, out var hero) || hero == null)
             return Reply(context.Header, AuthorityResultStatus.Rejected, request.HeroId, request.HitPoints, "hero-not-found");
+        // Refusals below answer with the hero's AUTHORITATIVE health, never an echo of what the
+        // client asked for. The client already applied its own value locally - the generated
+        // AutoSync prefix is a void Harmony prefix and cannot skip the setter - and the server only
+        // replicates HitPoints when ITS value changes, which a refusal means it did not. Echoing the
+        // request back therefore left a refused client stranded on its own number with nothing that
+        // would ever correct it. Live: a player sat at 1% and wounded, unable to fight, while the
+        // server had them at full health.
         if (!string.Equals(hero.StringId, context.Player.HeroId, StringComparison.Ordinal))
-            return Reply(context.Header, AuthorityResultStatus.Unauthorized, request.HeroId, request.HitPoints, "hero-not-owned");
+            return Reply(context.Header, AuthorityResultStatus.Unauthorized, hero.StringId, hero.HitPoints, "hero-not-owned");
         if (party.Party.MapEvent == null || !objectManager.TryGetId(party.Party.MapEvent, out var mapEventId) ||
             !string.Equals(mapEventId, request.MapEventId, StringComparison.Ordinal))
-            return Reply(context.Header, AuthorityResultStatus.StaleState, request.HeroId, request.HitPoints, "battle-not-current");
+            return Reply(context.Header, AuthorityResultStatus.StaleState, hero.StringId, hero.HitPoints, "battle-not-current");
         if (hero.HitPoints != request.ExpectedHitPoints)
-            return Reply(context.Header, AuthorityResultStatus.StaleState, request.HeroId, request.HitPoints, "hit-points-stale");
+            return Reply(context.Header, AuthorityResultStatus.StaleState, hero.StringId, hero.HitPoints, "hit-points-stale");
 
         hero.HitPoints = request.HitPoints;
         if (hero.HitPoints != request.HitPoints)
@@ -144,10 +152,30 @@ public class HeroHitPointsHandler : IHandler
 
     private static string HeroId(Hero hero) => hero?.StringId;
 
-    private static void PresentTerminal(AuthorityClientOutcome<NetworkHeroHitPointsChangeResult> outcome)
+    private void PresentTerminal(AuthorityClientOutcome<NetworkHeroHitPointsChangeResult> outcome)
     {
-        if (!outcome.Applied)
-            Logger.Warning("Hero health route did not commit. Completion={Completion} Reason={Reason}",
-                outcome.Completion, outcome.ReasonCode);
+        if (outcome.Applied) return;
+
+        Logger.Warning("Hero health route did not commit. Completion={Completion} Reason={Reason}",
+            outcome.Completion, outcome.ReasonCode);
+
+        // Reconcile rather than just report. Whatever the refusal reason, this client is now holding
+        // a health value the server never accepted, and nothing else will correct it: HitPoints
+        // replicates on server-side CHANGE, and the server did not change. Snap to the authoritative
+        // value the refusal carries. Wrapped in AllowedThread so the write is treated as a
+        // server-approved apply and is not forwarded straight back as a new request.
+        NetworkHeroHitPointsChangeResult result = outcome.Result;
+        if (string.IsNullOrEmpty(result.HeroId)) return;
+        if (!objectManager.TryGetObject<Hero>(result.HeroId, out var hero) || hero == null) return;
+        if (hero.HitPoints == result.HitPoints) return;
+
+        Logger.Information(
+            "Reconciling {HeroId} to the host's health {HitPoints} after a refused report (was {Local})",
+            result.HeroId, result.HitPoints, hero.HitPoints);
+
+        using (new AllowedThread())
+        {
+            hero.HitPoints = result.HitPoints;
+        }
     }
 }

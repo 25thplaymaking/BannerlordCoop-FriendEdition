@@ -227,6 +227,38 @@ Companion: [`COOP-MOD-INTEGRATION.md`](COOP-MOD-INTEGRATION.md) (how the port wo
 
 ---
 
+23. **A session-bound authority consequence needs a sessionless path wherever the flow that produces
+    it never opens a session.** Hideout assault sessions are opened only by `PrepareMission` /
+    `PrepareDirectAssaultMission`. Send-troops opens none, so the `SetAttackCooldown` its FAILURE path
+    publishes carried no session id, `ValidateWireShape` refused it forever, the menu waited on a
+    consequence that could never commit, and every click re-fired it. When you bind a consequence to a
+    session, enumerate every flow that can raise it — not just the one you were looking at. Authorize
+    the sessionless case from live state instead, and keep refusing it while the peer holds a real
+    session so the bound flow cannot use it to skip its own stages.
+    *(Earned: a failed send-troops raid softlocked the hideout menu on 2026-08-19.)*
+
+24. **A route that makes the server hold state must release that hold on ANY non-applied outcome, not
+    only when the result carries the id.** `map-event.conversation.begin` is admitted and published —
+    so the host is already holding the AI party against a granted lease — before the client's commit
+    probe ever runs. The not-applied path released only when `LeaseId` was present, and the common
+    failure is the router's apply-timeout, whose completion never reached the probe and therefore
+    carries no `LeaseId`. Nothing was released, the host kept holding, and the player sat in a started
+    encounter with no menu. Always release, falling back to the request id.
+    *(Earned: a bandit walking into a player softlocked them with no menus on 2026-08-19.)*
+
+25. **Grep game binaries for UTF-16, not ASCII.** .NET string literals are UTF-16LE in the assembly, so
+    `grep -a "Some Message" *.dll` finds nothing and reads as "not from any module." Searching 449
+    module DLLs that way cleared everything falsely; re-running with the needle encoded UTF-16LE found
+    the emitter immediately. An orphaned module FOLDER is also not evidence the code is gone — the
+    assembly can be bundled inside another module's `bin/`.
+    *(Earned: "RF Battle AI" debug text traced to `Modules/Europe1100/bin/.../RF_BattleAI.dll`.)*
+
+26. **Autosave fires on CAMPAIGN time, so it cannot be tested with nobody connected.** With zero players
+    the host sits at `timeMode=Stop`; setting `autosaveMinutes: 1` and waiting proves nothing, because
+    no autosave ever fires. Any change to autosave behaviour needs a connected player to exercise.
+    Also note the join save (`TransferSave`, ~6.0 s) is a BIGGER stall than the autosave (~4.6 s) and
+    fires on every join — do not diagnose "the freeze" as the autosave without checking which one it is.
+
 ## Checklist: making a handshake-affecting change
 
 - [ ] Decide what the change touches: catalog, activation order, a mod's bytes, or Coop assemblies.

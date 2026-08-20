@@ -209,6 +209,7 @@
     <Compile Include="AssemblyHellscape.cs" />
     <Compile Include="BootPatches.cs" />
     <Compile Include="CoopMod.cs" />
+    <Compile Include="ThirdPartyDebugSuppression.cs" />
     <Compile Include="CrashReporting\CrashDiagnostics.cs" />
     <Compile Include="LiveTesting\LiveTestControlServer.cs" />
     <Compile Include="Lib\NoHarmony\NoHarmonyLoader.cs" />

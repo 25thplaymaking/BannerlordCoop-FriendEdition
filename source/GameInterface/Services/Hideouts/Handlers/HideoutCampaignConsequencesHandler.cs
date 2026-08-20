@@ -1,4 +1,4 @@
-using Common;
+﻿using Common;
 using Common.Logging;
 using Common.Messaging;
 using Common.Network;
@@ -197,10 +197,18 @@ internal sealed class HideoutCampaignConsequencesHandler : IHandler
                 ? null
                 : "hideout-prepare-session-invalid";
         if (request.Consequence == HideoutCampaignConsequence.SetAttackCooldown)
-            return !string.IsNullOrWhiteSpace(request.AssaultSessionId) && request.AssaultSessionId.Length <= 96 &&
-                   request.ExpectedHideoutRevision > 0
-                ? null
-                : "hideout-cooldown-session-invalid";
+        {
+            // A cooldown from a MISSION assault is bound to that assault's session. A cooldown from a
+            // FAILED SEND-TROOPS raid has no session by construction: send-troops never prepares a
+            // mission, so no session is ever opened for it. Requiring one there rejected the request
+            // forever, the raid never completed, and the hideout menu could not be left.
+            bool sessionBound = !string.IsNullOrWhiteSpace(request.AssaultSessionId) &&
+                                request.AssaultSessionId.Length <= 96 &&
+                                request.ExpectedHideoutRevision > 0;
+            bool sessionless = string.IsNullOrEmpty(request.AssaultSessionId) &&
+                               request.ExpectedHideoutRevision == 0;
+            return sessionBound || sessionless ? null : "hideout-cooldown-session-invalid";
+        }
         return "hideout-clear-receipt-unavailable";
     }
 
@@ -276,6 +284,31 @@ internal sealed class HideoutCampaignConsequencesHandler : IHandler
             case HideoutCampaignConsequence.SetAttackCooldown:
                 if (!settlement.Hideout.IsInfested || !settlement.Hideout.NextPossibleAttackTime.IsPast)
                     return Reply(context.Header, request, AuthorityResultStatus.Rejected, "hideout-cooldown-unavailable", default);
+
+                // Sessionless: a failed send-troops raid. There is no assault session to bind to, so this
+                // is authorised by live state alone - which the context check above has already made:
+                // this player's active party is inside this hideout settlement. It is refused while the
+                // peer holds a real session, so a mission assault can never take this path to skip its
+                // own stage transitions.
+                if (string.IsNullOrEmpty(request.AssaultSessionId))
+                {
+                    if (assaultSessions.ContainsKey(context.Peer))
+                        return Reply(context.Header, request, AuthorityResultStatus.Rejected,
+                            "hideout-cooldown-stage-invalid", default);
+
+                    try
+                    {
+                        settlement.Hideout.SetNextPossibleAttackTime(
+                            Campaign.Current.Models.HideoutModel.HideoutHiddenDuration);
+                        return Reply(context.Header, request, AuthorityResultStatus.Accepted, null,
+                            new ConsequenceResult(GetHealthyDefenderCount(settlement), expectedCooldownActive: true));
+                    }
+                    catch
+                    {
+                        context.Peer.Disconnect();
+                        throw;
+                    }
+                }
 
                 if (!TryGetOwnedSession(context.Peer, request, HideoutAssaultStage.Prepared, out var prepared))
                     return Reply(context.Header, request, AuthorityResultStatus.Rejected, "hideout-cooldown-stage-invalid", default);
@@ -356,6 +389,16 @@ internal sealed class HideoutCampaignConsequencesHandler : IHandler
             !objectManager.TryGetObject<Settlement>(result.SettlementId, out var settlement) ||
             settlement?.IsHideout != true)
             return AuthorityCommitProbeResult.Pending;
+
+        // A sessionless cooldown (failed send-troops) has no session to compare against, so it is
+        // confirmed by the state it was meant to produce rather than by a stage transition.
+        if (result.Consequence == HideoutCampaignConsequence.SetAttackCooldown &&
+            string.IsNullOrEmpty(result.AssaultSessionId))
+        {
+            return settlement.Hideout != null && !settlement.Hideout.NextPossibleAttackTime.IsPast
+                ? AuthorityCommitProbeResult.Applied
+                : AuthorityCommitProbeResult.Pending;
+        }
 
         var session = replicaSession;
         if (session == null || session.Id != result.AssaultSessionId ||

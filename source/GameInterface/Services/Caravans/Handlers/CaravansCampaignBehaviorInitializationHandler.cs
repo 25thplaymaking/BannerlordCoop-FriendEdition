@@ -98,11 +98,35 @@ internal class CaravansCampaignBehaviorInitializationHandler : IHandler
         // Null and key check for players without existing caravans data
         if (caravansPlayerData?.PlayerTradeRumorTakenCaravans?.ContainsKey(playerHeroId) != true) return tradeRumorTakenCaravans;
 
+        // A caravan the player once took a trade rumour from is ordinary campaign furniture: it gets
+        // destroyed by bandits, disbanded, or replaced, and Bannerlord names each one after the template
+        // it was built from ("caravan_template_sturgia_738"). The rumour record outlives the party, so a
+        // key that no longer resolves is EXPECTED, not a fault - it was being reported through
+        // TryGetObjectWithLogging, which logged an [Error] per stale entry on every join.
+        //
+        // Prune them instead. The record is replicated to each joining client inside the join payload,
+        // so leaving dead keys in it means the list only ever grows and the same errors are re-logged
+        // every session.
+        var stale = new List<string>();
         foreach (KeyValuePair<string, long> tradeRumorTakenCaravan in caravansPlayerData.PlayerTradeRumorTakenCaravans[playerHeroId])
         {
-            if (!objectManager.TryGetObjectWithLogging<MobileParty>(tradeRumorTakenCaravan.Key, out var caravan)) continue;
+            if (!objectManager.TryGetObject<MobileParty>(tradeRumorTakenCaravan.Key, out var caravan) || caravan == null)
+            {
+                stale.Add(tradeRumorTakenCaravan.Key);
+                continue;
+            }
 
             tradeRumorTakenCaravans[caravan] = new CampaignTime(tradeRumorTakenCaravan.Value);
+        }
+
+        if (stale.Count > 0)
+        {
+            foreach (string staleKey in stale)
+                caravansPlayerData.PlayerTradeRumorTakenCaravans[playerHeroId].Remove(staleKey);
+
+            Logger.Debug(
+                "Dropped {Count} trade-rumour caravan records for {HeroId} whose parties no longer exist.",
+                stale.Count, playerHeroId);
         }
 
         return tradeRumorTakenCaravans;

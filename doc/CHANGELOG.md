@@ -1,5 +1,56 @@
 # Friend Edition Changelog
 
+## 2026-08-19/20 — Live-play fixes: hideout, ghost parties, autosave timing, conversations, caravans
+
+- Stop the host repainting Europe 1100 clan heraldry in its own colours. Europe1100 defines NO banner
+  icons and NO icon groups — its `banner_icons.xml` adds 15 COLOURS (ids 37, 40, 117, 124-145) and
+  nothing else — so EoE heraldry is entirely a colour treatment applied at runtime by
+  `BannerColorPersistence`. That module patches `SandBox.View.Map.Visuals.MobilePartyVisual`, a view
+  type absent headless, so it is tagged `DedicatedServerType="none"` and is deliberately not in the
+  dedicated force-load allowlist; the host has no EoE colouring to send. Clan banners are
+  host-authoritative (`ChangeKingdomAction` publishes `PlayerBannerChanged` for ANY clan), and the
+  client assigned `clan.Color`/`Color2` by direct assignment — bypassing the module's own
+  `PreventBannerColorUpdates` guard — then force-rebuilt every party visual and nameplate in the host's
+  colours. SnowballingKingdoms drives frequent kingdom changes, so heraldry never stuck. The banner
+  CODE still always applies; colour is now left alone for AI clans when a banner-colour presentation
+  module is loaded, detected by assembly name. A player's own banner edit stays fully authoritative.
+
+- Accept a hideout `SetAttackCooldown` with no assault session. Sessions are opened only by
+  `PrepareMission`/`PrepareDirectAssaultMission`; send-troops never opens one, so the cooldown its
+  FAILURE path publishes carried no session id and was refused forever with
+  `hideout-cooldown-session-invalid`. The menu waited on a consequence that could never commit and
+  every click re-fired it. A sessionless cooldown is now authorized from live state (the player's
+  active party must be inside that hideout) and is still refused while the peer holds a real session,
+  so a mission assault cannot use it to skip its own stage transitions.
+- Stop a war party whose clan link has not replicated from being left half-removed on the map.
+  `WarPartyComponent.OnFinalize` is one unguarded `Clan.OnWarPartyRemoved(this)` call, where `Clan`
+  resolves through `Party.MobileParty.ActualClan`; on a replica that can be null, and the throw escaped
+  into `MobileParty.RemoveParty` and aborted removal part way. The party kept its entry in
+  `Campaign.MobileParties` — so the map still drew its nameplate and troop count — while its visual and
+  cached tick state were gone, then threw every tick in `ParallelTickMovingParties`. Removal now skips
+  only the clan-side step when there is no clan, which is exactly equivalent.
+- Decline a periodic autosave while a connected player is in a map event. The host's save blocks the
+  game thread for 4-6 s reading a live 205 MB object graph that must be consistent; that cost is not
+  removable, but landing it mid-battle is what got people killed. Declining at `Game.Save`'s prefix
+  leaves the caller's timer to re-arm normally — unlike holding `CoopServerHost`'s tick, which crash
+  looped the host 29 times. Bounded: a join save is never deferred, and after 30 minutes without a
+  completed save the next one proceeds regardless.
+- Always release the host's conversation hold when a conversation begin does not apply. An AI-initiated
+  conversation is admitted and published before the client's commit probe runs, so the host is already
+  holding the AI party against a granted lease. The not-applied path released only when the result
+  carried a `LeaseId`, which an apply-timeout does not, so the hold survived and the player sat in a
+  started encounter with no menu and no way out. It now falls back to the request id, the same key
+  `SubmitCurrentConversationEnd` already submits through that route.
+- Prune trade-rumour caravan records whose parties no longer exist. Bannerlord names caravans after
+  their template (`caravan_template_sturgia_738`) and those parties are destroyed and replaced
+  normally, but the record outlived them and was read through `TryGetObjectWithLogging`, logging an
+  `[Error]` per dead caravan on every join. The list is replicated inside the join payload, so dead
+  keys also made it grow without bound.
+- Silence Realms Forgotten's on-screen battle-AI commentary. Empires of Europe 1100 ships
+  `RF_BattleAI.dll` inside `Modules/Europe1100/bin/`, and its `BattleAIDebug` static constructor
+  enables display. `Show` is gated solely on that flag, so clearing it suppresses the messages using
+  the mod's own switch while its tactic selection and runtime tracer are untouched.
+
 ## 2026-08-16 — v1.4.8 module loading and trade-close hotfix
 
 - Canonicalize Fourberie's never-opened null bandit stash as an empty item roster during the first

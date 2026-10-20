@@ -2,6 +2,8 @@
 using Common.Logging;
 using Common.Messaging;
 using GameInterface.Services.Heroes.Messages;
+using GameInterface.Services.ObjectManager;
+using GameInterface.Services.Players;
 using GameInterface.Services.Save.Commands;
 using GameInterface.Services.Save.Messages;
 using HarmonyLib;
@@ -45,6 +47,14 @@ class SavePatches
         __state = null;
         if (!ModInformation.IsServer) return true;
 
+        // Skip a periodic autosave that would land in the middle of someone's battle. Declining here
+        // leaves the caller's timer untouched, which is what makes this safe - see
+        // AutosaveBattleDeferral. Evaluated before anything is published so a deferred save raises no
+        // saving indicator on the clients.
+        ContainerProvider.TryResolve<IPlayerManager>(out var playerManager);
+        ContainerProvider.TryResolve<IObjectManager>(out var objectManager);
+        if (AutosaveBattleDeferral.ShouldDefer(saveName, playerManager, objectManager)) return false;
+
         __state = Stopwatch.StartNew();
         MessageBroker.Instance.Publish(__instance, new GameSaved(saveName));
         MessageBroker.Instance.Publish(__instance, new GameSaveStateChanged(true));
@@ -61,6 +71,7 @@ class SavePatches
         __state.Stop();
         if (__exception == null)
         {
+            AutosaveBattleDeferral.NoteSaveCompleted();
             Logger.Information(
                 "Saved '{SaveName}'; the game thread was blocked for {ElapsedMs} ms.",
                 saveName, __state.ElapsedMilliseconds);

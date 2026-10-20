@@ -1,4 +1,4 @@
-using Common;
+﻿using Common;
 using Common.Logging;
 using Common.Messaging;
 using Common.Network;
@@ -83,9 +83,32 @@ namespace GameInterface.Services.Banners.Handlers
                         clan.Banner.Deserialize(payload.BannerCode);
                     }
 
-                    clan.Color = payload.Color;
-                    clan.Color2 = payload.Color2;
-                    clan.UpdateBannerColor(payload.Color, payload.Color2);
+                    // Banner CODE is shared state and always applies. Banner COLOUR is not always the
+                    // host's to give: a conversion can own it as presentation. Empires of Europe 1100
+                    // ships BannerColorPersistence, whose whole job is recolouring clan heraldry
+                    // (ChangeBannerColors -> Banner.ChangePrimaryColor, and a PreventBannerColorUpdates
+                    // patch to stop the game undoing it). That module patches
+                    // SandBox.View.Map.Visuals.MobilePartyVisual, so it CANNOT run on the headless host
+                    // and is tagged DedicatedServerType="none" - the host therefore has no EoE colouring
+                    // to send, and assigning Color/Color2 directly here bypasses the module's own guard
+                    // and then forces every party visual and nameplate to rebuild in the host's colours.
+                    // That is why EoE heraldry stopped showing: SnowballingKingdoms drives frequent
+                    // kingdom changes, and each one repainted the clan.
+                    //
+                    // A player's own banner edit is still fully authoritative - that is a real shared
+                    // decision, not presentation - so only AI clans keep their locally-derived colours.
+                    if (BannerColourPresentation.ShouldKeepLocalColours(clan))
+                    {
+                        Logger.Debug(
+                            "Kept local banner colours for {ClanName}; a banner-colour presentation module owns them.",
+                            clan.Name);
+                    }
+                    else
+                    {
+                        clan.Color = payload.Color;
+                        clan.Color2 = payload.Color2;
+                        clan.UpdateBannerColor(payload.Color, payload.Color2);
+                    }
 
                     // The banner is mutated in place, so the cached party map visuals (the flag rendered
                     // on the campaign map) won't rebuild on their own. Mark every party belonging to the

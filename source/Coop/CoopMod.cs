@@ -1,4 +1,4 @@
-using Common;
+﻿using Common;
 using Common.Logging;
 using Common.Messaging;
 using Common.Serialization;
@@ -589,6 +589,11 @@ namespace Coop
             {
                 ManagedOptions.SetConfig(ManagedOptions.ManagedOptionsType.StopGameOnFocusLost, 0f);
             }
+
+            // Bundled third-party modules (RF_BattleAI, shipped inside Europe1100) leave on-screen
+            // debug output enabled. Every module has loaded by now, so their switches are reachable.
+            if (!isServer)
+                ThirdPartyDebugSuppression.Apply();
 
             CrashDiagnostics.SetPhase("main-menu");
             startupModuleWarningReady = true;

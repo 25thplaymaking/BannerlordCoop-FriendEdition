@@ -409,7 +409,27 @@ internal class ConversationRequestHandler : IHandler
     {
         if (!outcome.Applied)
         {
-            if (!string.IsNullOrEmpty(outcome.Result.LeaseId)) endRoute.Submit(outcome.Result.LeaseId);
+            // Release the SERVER's hold, not just this client's bookkeeping. The begin was admitted and
+            // published before it failed here, so the host is holding the AI party against a lease it
+            // granted. Abandoning the request locally leaves that hold in place, and the party sits in a
+            // started encounter with no conversation and no way out of it.
+            //
+            // A lease id is only present when a result carried one. The common failure does not: an
+            // apply-timeout completes from the router's deadline, whose result never reached the commit
+            // probe, so LeaseId is empty and the old code released nothing at all. Fall back to the
+            // request id, which the end route already accepts as a key - SubmitCurrentConversationEnd
+            // submits activeConversationRequestId through this same route.
+            string releaseKey = !string.IsNullOrEmpty(outcome.Result.LeaseId)
+                ? outcome.Result.LeaseId
+                : pendingConversationRequestId;
+            if (!string.IsNullOrEmpty(releaseKey))
+            {
+                Logger.Warning(
+                    "Conversation begin did not apply ({Completion}); releasing the host's hold with {Key}.",
+                    outcome.Completion, releaseKey);
+                endRoute.Submit(releaseKey);
+            }
+
             restartContextTracker.Remove(pendingConversationRequestId);
             ClearPendingConversationRequest(pendingConversationRequestId);
             ConversationPartyHold.ShowInteractionBlockedMessage();
